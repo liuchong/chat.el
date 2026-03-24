@@ -83,15 +83,21 @@ Checks in order:
 ;; ------------------------------------------------------------------
 
 (defun chat-llm--format-messages (messages)
-  "Convert chat MESSAGE structs to API format."
+  "Convert chat MESSAGE structs to API format.
+Filters out empty assistant messages which are not allowed by the API."
   (vconcat
-   (mapcar (lambda (msg)
-             (let ((role (chat-message-role msg)))
-               `((role . ,(if (keywordp role)
-                             (substring (symbol-name role) 1)
-                           (symbol-name role)))
-                 (content . ,(chat-message-content msg)))))
-           messages)))
+   (delq nil
+         (mapcar (lambda (msg)
+                   (let ((role (chat-message-role msg))
+                         (content (chat-message-content msg)))
+                     ;; Skip empty assistant messages
+                     (when (or (not (eq role :assistant))
+                               (and content (not (string-blank-p content))))
+                       `((role . ,(if (keywordp role)
+                                     (substring (symbol-name role) 1)
+                                   (symbol-name role)))
+                         (content . ,(or content ""))))))
+                 messages))))
 
 (defun chat-llm--build-request (provider messages options)
   "Build request payload for PROVIDER with MESSAGES and OPTIONS."
@@ -134,7 +140,10 @@ Returns (BODY . STATUS-CODE) on success, or signals error on failure."
   (chat-log "[LLM] Body length: %d bytes" (length body))
   (let ((url-request-method "POST")
         (url-request-extra-headers headers)
-        (url-request-data body)
+        ;; Ensure body is unibyte for HTTP request (fix multibyte text error)
+        (url-request-data (if (multibyte-string-p body)
+                              (encode-coding-string body 'utf-8)
+                            body))
         ;; Extract User-Agent from headers if present
         (url-user-agent (or (cdr (assoc "User-Agent" headers))
                             "chat.el/1.0"))
@@ -154,9 +163,11 @@ Returns (BODY . STATUS-CODE) on success, or signals error on failure."
                   (when (looking-at "HTTP/[^ ]+ \\([0-9]+\\)")
                     (setq status-code (string-to-number (match-string 1)))
                     (chat-log "[LLM] HTTP status code: %d" status-code))
-                  ;; Extract body
+                  ;; Extract body and decode UTF-8
                   (if (re-search-forward "\n\n" nil t)
-                      (setq response-body (buffer-substring (point) (point-max)))
+                      (let ((raw-body (buffer-substring (point) (point-max))))
+                        ;; Decode UTF-8 response to handle Chinese characters
+                        (setq response-body (decode-coding-string raw-body 'utf-8)))
                     (setq response-body ""))
                   (chat-log "[LLM] Response body length: %d bytes" (length response-body))
                   (cons response-body status-code))

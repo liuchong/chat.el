@@ -149,6 +149,21 @@
 - **单元测试**：纯函数、无副作用的逻辑，使用 `ert` 编写，无外部依赖
 - **集成测试**：端到端流程验证，放在 `tests/integration/` 目录下，可依赖外部 API
 
+### 测试强制要求（与 Bug 修复和数据解析相关）
+
+**规则：每次修复一个 BUG 都需要添加一条单元测试或集成测试**
+- Bug 修复必须伴随回归测试，防止问题再次发生
+- 测试用例应精确复现该 Bug 的场景和输入
+- 测试文件命名：`test-<module>-<scenario>-regression`
+- 示例：`test-chat-llm-json-encoding-regression`
+
+**规则：每一种外部自由结构数据类型解析都需要增加一条单元测试**
+- 外部数据包括：JSON、XML、YAML、CSV、Protocol Buffers 等
+- 测试必须覆盖正常情况和边界/异常情况
+- 对 JSON 等动态结构，测试不同字段组合和缺失字段的处理
+- 测试文件命名：`test-<module>-parses-<format>-<scenario>`
+- 示例：`test-chat-llm-parses-json-nested-plist`
+
 ### Commit 信息
 - 每次修改代码后，提供一行简洁的英语 commit message（仅输出文本，不执行 git 命令）
 - 格式遵循上述文档行文风格，使用 Conventional Commits 前缀

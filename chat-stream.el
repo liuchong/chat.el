@@ -41,12 +41,18 @@
   "Parse a single SSE LINE.
 
 Returns the data payload if this is a data line, nil otherwise.
-Handles format: data: {...}"
-  (when (string-prefix-p "data: " line)
+Handles format: data: {...} or data:{...} (with or without space)"
+  (cond
+   ;; Standard format: "data: {...}"
+   ((string-prefix-p "data: " line)
     (let ((data (substring line 6)))
-      ;; Return nil for [DONE] signal
       (unless (string= data "[DONE]")
-        data))))
+        data)))
+   ;; Non-standard format: "data:{...}" (no space)
+   ((string-prefix-p "data:" line)
+    (let ((data (substring line 5)))
+      (unless (string= data "[DONE]")
+        data)))))
 
 (defun chat-stream--extract-content (json-string provider)
   "Extract content from JSON-STRING based on PROVIDER format."
@@ -110,6 +116,11 @@ Handles format: data: {...}"
 CALLBACK is called with each content chunk as it arrives.
 OPTIONS is an optional plist of request parameters.
 Returns the process object."
+  ;; Check dependencies
+  (unless (fboundp 'chat-llm-get-provider)
+    (error "chat-llm-get-provider not defined - check chat-llm.el is loaded"))
+  (unless (fboundp 'chat-llm--build-request)
+    (error "chat-llm--build-request not defined - check chat-llm.el is loaded"))
   (let* ((config (chat-llm-get-provider provider))
          (base-url (plist-get config :base-url))
          (api-key (chat-llm--get-api-key provider))
@@ -122,12 +133,17 @@ Returns the process object."
                        (if (functionp headers-fn)
                            (cdr (assoc "User-Agent" (funcall headers-fn)))
                          "chat.el/1.0")))
+         ;; Encode body for curl (handle multibyte characters)
+         (body-str (json-encode body))
+         (body-encoded (if (multibyte-string-p body-str)
+                           (encode-coding-string body-str 'utf-8)
+                         body-str))
          ;; Create curl command
          (curl-args (let ((base-args (list "-s" "-N"  ; Silent, no buffer
                                            "-X" "POST"
                                            "-H" "Content-Type: application/json"
                                            "-H" (format "Authorization: Bearer %s" api-key)
-                                           "-d" (json-encode body)))
+                                           "-d" body-encoded))
                           (ua-args (when user-agent
                                      (list "-A" user-agent))))
                       (append base-args ua-args (list url))))
@@ -140,30 +156,54 @@ Returns the process object."
     (with-current-buffer buffer
       (setq-local chat-stream--partial-line ""))
     
-    ;; Start curl process
-    (setq process (make-process
-                  :name "chat-stream"
-                  :buffer buffer
-                  :command (cons "curl" curl-args)
-                  :filter (lambda (proc string)
-                           (chat-stream--handle-output proc string provider callback))
-                  :sentinel (lambda (proc event)
-                             (when (string-match-p "finished" event)
-                               (kill-buffer buffer)))))
+    ;; Check curl is available
+    (unless (executable-find "curl")
+      (error "curl executable not found in PATH"))
     
+    ;; Start curl process
+    (chat-log "[STREAM] Starting curl with args: %S" curl-args)
+    (condition-case err
+        (setq process (make-process
+                      :name "chat-stream"
+                      :buffer buffer
+                      :command (cons "curl" curl-args)
+                      :filter (lambda (proc string)
+                               (chat-stream--handle-output proc string provider callback))
+                      :sentinel (lambda (proc event)
+                                 (chat-log "[STREAM] Process event: %s" event)
+                                 (when (string-match-p "finished\|exited" event)
+                                   (kill-buffer buffer)))
+                      :stderr (get-buffer-create "*chat-stream-err*")))
+      (error
+       (chat-log "[STREAM] make-process FAILED: %s" (error-message-string err))
+       (kill-buffer buffer)
+       (signal (car err) (cdr err))))
+    
+    (chat-log "[STREAM] Process started: %S" process)
     process))
 
 (defun chat-stream--handle-output (proc string provider callback)
   "Handle output STRING from process PROC."
-  (let ((lines (split-string string "\n")))
-    (dolist (line lines)
-      ;; Accumulate partial lines
-      (when (> (length line) 0)
-        (let ((data (chat-stream--parse-sse-line line)))
-          (when data
-            (let ((content (chat-stream--extract-content data provider)))
-              (when content
-                (funcall callback content)))))))))
+  (chat-log "[STREAM] Received %d bytes" (length string))
+  ;; Decode UTF-8 output for Chinese character support
+  (condition-case err
+      (let* ((decoded-str (decode-coding-string string 'utf-8))
+             (lines (split-string decoded-str "\n")))
+        (dolist (line lines)
+          ;; Accumulate partial lines
+          (when (> (length line) 0)
+            ;; (chat-log "[STREAM] Processing line: %s..." (substring line 0 (min 50 (length line))))
+            (let ((data (chat-stream--parse-sse-line line)))
+              (when data
+                ;; (chat-log "[STREAM] SSE data parsed")
+                (let ((content (chat-stream--extract-content data provider)))
+                  (when content
+                    ;; (chat-log "[STREAM] Content extracted: %s..." (substring content 0 (min 30 (length content))))
+                    (condition-case err
+                        (funcall callback content)
+                      (error (chat-log "[STREAM] Callback error: %s" (error-message-string err)))))))))))
+    (error
+     (chat-log "[STREAM] Error in handle-output: %s" (error-message-string err)))))
 
 (provide 'chat-stream)
 ;;; chat-stream.el ends here
