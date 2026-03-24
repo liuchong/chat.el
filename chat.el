@@ -63,6 +63,8 @@
   (load "chat-tool-forge.el" nil t))
 (unless (featurep 'chat-tool-forge-ai)
   (load "chat-tool-forge-ai.el" nil t))
+(unless (featurep 'chat-tool-caller)
+  (load "chat-tool-caller.el" nil t))
 (chat-tool-forge-load-all)
 
 ;; Load local configuration if exists

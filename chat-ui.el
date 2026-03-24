@@ -17,6 +17,7 @@
 (require 'chat-llm)
 (require 'chat-stream)
 (require 'chat-tool-forge-ai)
+(require 'chat-tool-caller)
 (require 'chat-log)
 
 ;; ------------------------------------------------------------------
@@ -99,6 +100,19 @@
           ;; Get AI response
           (chat-ui--get-response))))))
 
+(defun chat-ui--prepare-messages-with-tools (messages)
+  "Prepare message list with tool calling system prompt."
+  (if (not chat-tool-caller-enabled)
+      messages
+    (let ((system-prompt (chat-tool-caller-build-system-prompt
+n                          "You are a helpful AI assistant.")))
+      (cons (make-chat-message
+             :id "system-tools"
+             :role :system
+             :content system-prompt
+             :timestamp (current-time))
+            messages))))
+
 (defun chat-ui--get-response ()
   "Get AI response for current session."
   (message "Getting response from AI...")
@@ -118,58 +132,67 @@
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
       (set-marker chat-ui--messages-end (point)))
     
-    (chat-log "Starting async request using idle timer")
-    
-    ;; Use idle timer instead of make-thread (avoids thread variable visibility issues)
-    (run-with-idle-timer
-     0.1 nil
-     (lambda (sess model-id msgs msg-id ui-buffer)
-       (chat-log "[Async] Started request")
-       (condition-case err
-           (let* ((result (chat-llm-request model-id msgs '(:temperature 0.7)))
-                  (content (plist-get result :content))
-                  (raw-request (plist-get result :raw-request))
-                  (raw-response (plist-get result :raw-response)))
-             (chat-log "[Async] Got response: %s..." 
-                      (substring content 0 (min 50 (length content))))
-             ;; Schedule UI update on main thread
-             (run-at-time 
-              0 nil
-              (lambda (resp req-json resp-json)
-                (chat-log "[UI] Updating buffer")
-                (when (buffer-live-p ui-buffer)
-                  (with-current-buffer ui-buffer
-                    ;; Insert response
-                    (save-excursion
-                      (goto-char chat-ui--messages-end)
-                      (insert resp)
-                      (insert "\n\n")
-                      (set-marker chat-ui--messages-end (point)))
-                    ;; Save to session with raw data
-                    (let ((ai-msg (make-chat-message
-                                  :id msg-id
-                                  :role :assistant
-                                  :content resp
-                                  :timestamp (current-time)
-                                  :raw-request req-json
-                                  :raw-response resp-json)))
-                      (chat-session-add-message sess ai-msg))
-                    (chat-log "[UI] Response saved to session"))))
-              content raw-request raw-response))
-         (error
-          (chat-log "[Async] ERROR: %s" (error-message-string err))
-          (run-at-time 
-           0 nil
-           (lambda (e)
-             (when (buffer-live-p ui-buffer)
-               (with-current-buffer ui-buffer
-                 (save-excursion
-                   (goto-char chat-ui--messages-end)
-                   (insert (format "[Error: %s]" e))
-                   (insert "\n\n")
-                   (set-marker chat-ui--messages-end (point))))))
-           (error-message-string err)))))
-     session model messages msg-id buffer)))
+    ;; Prepare messages with tool calling support
+    (let ((messages-with-tools (chat-ui--prepare-messages-with-tools messages)))
+      
+      (chat-log "Starting async request using idle timer")
+      
+      ;; Use idle timer instead of make-thread (avoids thread variable visibility issues)
+      (run-with-idle-timer
+       0.1 nil
+       (lambda (sess model-id msgs msg-id ui-buffer)
+         (chat-log "[Async] Started request")
+         (condition-case err
+             (let* ((result (chat-llm-request model-id msgs '(:temperature 0.7)))
+                    (content (plist-get result :content))
+                    (raw-request (plist-get result :raw-request))
+                    (raw-response (plist-get result :raw-response)))
+               (chat-log "[Async] Got response: %s..." 
+                        (substring content 0 (min 50 (length content))))
+               ;; Process tool calls if any
+               (chat-tool-caller-process-response
+                content
+                (lambda (user-content tool-results)
+                  ;; Schedule UI update on main thread
+                  (run-at-time 
+                   0 nil
+                   (lambda (resp tool-res req-json resp-json)
+                     (chat-log "[UI] Updating buffer")
+                     (when (buffer-live-p ui-buffer)
+                       (with-current-buffer ui-buffer
+                         ;; Insert response (tool calls removed)
+                         (save-excursion
+                           (goto-char chat-ui--messages-end)
+                           (insert resp)
+                           (when tool-res
+                             (insert (format "\n[Tools used: %s]" tool-res)))
+                           (insert "\n\n")
+                           (set-marker chat-ui--messages-end (point)))
+                         ;; Save to session with raw data
+                         (let ((ai-msg (make-chat-message
+                                       :id msg-id
+                                       :role :assistant
+                                       :content resp
+                                       :timestamp (current-time)
+                                       :raw-request req-json
+                                       :raw-response resp-json)))
+                           (chat-session-add-message sess ai-msg))
+                         (chat-log "[UI] Response saved to session"))))
+                   user-content tool-results raw-request raw-response))))
+           (error
+            (chat-log "[Async] ERROR: %s" (error-message-string err))
+            (run-at-time 
+             0 nil
+             (lambda (e)
+               (when (buffer-live-p ui-buffer)
+                 (with-current-buffer ui-buffer
+                   (save-excursion
+                     (goto-char chat-ui--messages-end)
+                     (insert (format "[Error: %s]" e))
+                     (insert "\n\n")
+                     (set-marker chat-ui--messages-end (point))))))
+             (error-message-string err)))))
+       session model messages-with-tools msg-id buffer))))
 
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
