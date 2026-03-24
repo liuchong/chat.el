@@ -54,6 +54,11 @@
 (unless (featurep 'chat-ui)
   (load "chat-ui.el" nil t))
 
+;; Load tool forge
+(unless (featurep 'chat-tool-forge)
+  (load "chat-tool-forge.el" nil t))
+(chat-tool-forge-load-all)
+
 ;; Load local configuration if exists
 (let ((local-config (expand-file-name "chat-config.local.el"
                                       (file-name-directory load-file-name))))
