@@ -1,0 +1,44 @@
+# Compiled Emacs Lisp
+*.elc
+
+# Packaging
+*.tar
+*.zip
+
+# Backup files
+*~
+\#*\#
+.#*
+
+# Auto-save files
+\#*\#
+
+# Session files
+.session
+
+# User data directory (contains personal configs, memories, sessions)
+/.chat/
+
+# Tool forge generated files (user created tools)
+/tools/
+
+# Documentation build artifacts
+/docs/_build/
+
+# Test artifacts
+/tests/tmp/
+/tests/fixtures/output/
+
+# Dependencies (if vendored)
+/elpa/
+/.cask/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
