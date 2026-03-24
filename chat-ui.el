@@ -16,6 +16,7 @@
 (require 'chat-session)
 (require 'chat-llm)
 (require 'chat-stream)
+(require 'chat-tool-forge-ai)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -79,20 +80,23 @@
       ;; Clear input
       (delete-region input-start input-end)
       (goto-char input-start)
-      ;; Add user message
-      (let ((user-msg (make-chat-message
-                      :id (format "msg-%s" (random 10000))
-                      :role :user
-                      :content (string-trim content)
-                      :timestamp (current-time))))
-        (chat-session-add-message chat--current-session user-msg)
-        ;; Insert in buffer
-        (save-excursion
-          (goto-char chat-ui--messages-end)
-          (chat-ui--insert-message user-msg)
-          (set-marker chat-ui--messages-end (point)))
-        ;; Get AI response
-        (chat-ui--get-response)))))
+      ;; Check for tool creation request
+      (if (chat-tool-forge-ai--tool-request-p content)
+          (chat-ui--handle-tool-creation content)
+        ;; Normal message flow
+        (let ((user-msg (make-chat-message
+                        :id (format "msg-%s" (random 10000))
+                        :role :user
+                        :content (string-trim content)
+                        :timestamp (current-time))))
+          (chat-session-add-message chat--current-session user-msg)
+          ;; Insert in buffer
+          (save-excursion
+            (goto-char chat-ui--messages-end)
+            (chat-ui--insert-message user-msg)
+            (set-marker chat-ui--messages-end (point)))
+          ;; Get AI response
+          (chat-ui--get-response))))))
 
 (defun chat-ui--get-response ()
   "Get AI response for current session with streaming display."
@@ -139,6 +143,45 @@
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
 ;; ------------------------------------------------------------------
+
+(defun chat-ui--handle-tool-creation (content)
+  "Handle tool creation request from CONTENT."
+  ;; Show thinking message
+  (save-excursion
+    (goto-char chat-ui--messages-end)
+    (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+    (insert "🔨 Creating tool from your request...\n\n")
+    (set-marker chat-ui--messages-end (point)))
+  ;; Generate tool asynchronously
+  (run-with-timer
+   0.1 nil
+   (lambda ()
+     (let ((tool (chat-tool-forge-ai-create-and-register
+                  (chat-tool-forge-ai--extract-description content))))
+       (if tool
+           (progn
+             ;; Success message
+             (save-excursion
+               (goto-char chat-ui--messages-end)
+               (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+               (insert (format "✅ Tool '%s' (%s) created and registered!\n\n"
+                              (chat-forged-tool-name tool)
+                              (chat-forged-tool-id tool)))
+               (set-marker chat-ui--messages-end (point)))
+             ;; Add to session messages
+             (chat-session-add-message
+              chat--current-session
+              (make-chat-message
+               :id (format "msg-%s" (random 10000))
+               :role :system
+               :content (format "Created tool: %s" (chat-forged-tool-name tool))
+               :timestamp (current-time))))
+         ;; Failure message
+         (save-excursion
+           (goto-char chat-ui--messages-end)
+           (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+           (insert "❌ Failed to create tool. Please try again with a clearer description.\n\n")
+           (set-marker chat-ui--messages-end (point))))))))
 
 (defun chat-ui-clear-input ()
   "Clear current input."
