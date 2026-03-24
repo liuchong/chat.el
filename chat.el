@@ -178,7 +178,7 @@ SESSION is a chat-session struct."
 
 (defvar chat-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") 'chat-send-message)
+    (define-key map (kbd "RET") 'chat-ui-send-message)
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
     map)
@@ -189,17 +189,6 @@ SESSION is a chat-session struct."
   :group 'chat
   (setq buffer-read-only nil)
   (erase-buffer))
-
-;; ------------------------------------------------------------------
-;; Chat Operations
-;; ------------------------------------------------------------------
-
-(defun chat-send-message ()
-  "Send message in current chat buffer.
-
-This is a placeholder implementation."
-  (interactive)
-  (message "Message sending not yet implemented in MVP"))
 
 (defun chat--refresh-buffer ()
   "Refresh current chat buffer with session content."
