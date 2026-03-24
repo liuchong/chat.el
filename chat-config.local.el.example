@@ -1,0 +1,40 @@
+;;; chat-config.local.el --- Local configuration for chat.el -*- lexical-binding: t -*-
+
+;; Copyright (C) 2026 chat.el contributors
+
+;; Author: chat.el contributors
+;; Keywords: configuration
+
+;;; Commentary:
+
+;; This is an example local configuration file for chat.el.
+;; Copy this to chat-config.local.el and customize with your API keys.
+;; DO NOT commit the .local.el file to version control.
+
+;;; Code:
+
+;; Kimi API Key - Get from https://platform.moonshot.cn/
+(setq chat-llm-kimi-api-key "your-kimi-api-key-here")
+
+;; Alternative: Use a function to retrieve key from secure storage
+;; (setq chat-llm-kimi-api-key-fn
+;;       (lambda ()
+;;         (password-store-get "api/kimi")))
+
+;; Or use auth-source (recommended)
+;; Add to ~/.authinfo.gpg:
+;; machine kimi-api user api-key password YOUR_API_KEY
+
+;; Default model settings
+(setq chat-default-model 'kimi)
+(setq chat-llm-kimi-default-model "moonshot-v1-8k")
+
+;; Session settings
+(setq chat-session-directory "~/.chat/sessions/")
+(setq chat-auto-save t)
+
+;; File operation settings
+(setq chat-files-allowed-directories '("~/" "~/.chat/" "/tmp/"))
+
+(provide 'chat-config.local)
+;;; chat-config.local.el ends here

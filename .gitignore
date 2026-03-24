@@ -19,6 +19,12 @@
 # User data directory (contains personal configs, memories, sessions)
 /.chat/
 
+# API keys and local configuration
+/chat-config.local.el
+/*.local.el
+.env
+.env.*
+
 # Tool forge generated files (user created tools)
 /tools/
 

@@ -43,6 +43,14 @@
   (load "chat-session.el" nil t))
 (unless (featurep 'chat-files)
   (load "chat-files.el" nil t))
+(unless (featurep 'chat-llm)
+  (load "chat-llm.el" nil t))
+
+;; Load local configuration if exists
+(let ((local-config (expand-file-name "chat-config.local.el"
+                                      (file-name-directory load-file-name))))
+  (when (file-exists-p local-config)
+    (load local-config nil t)))
 
 ;; ------------------------------------------------------------------
 ;; Customization

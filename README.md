@@ -17,6 +17,25 @@ Clone this repository and add to your load path:
 (require 'chat)
 ```
 
+## Configuration
+
+### Kimi API Setup
+
+1. Get your API key from https://platform.moonshot.cn/
+
+2. Create `chat-config.local.el` in the chat.el directory:
+
+```elisp
+(setq chat-llm-kimi-api-key "your-api-key-here")
+(setq chat-default-model 'kimi)
+```
+
+3. Or use auth-source (recommended). Add to `~/.authinfo.gpg`:
+
+```
+machine kimi-api user api-key password YOUR_API_KEY
+```
+
 ## Usage
 
 Start a chat session:
