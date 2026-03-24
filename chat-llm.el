@@ -176,31 +176,34 @@ PROVIDER is a symbol identifying the provider.
 MESSAGES is a list of chat-message structs.
 OPTIONS is an optional plist of request parameters.
 
-Returns the response content string."
+Returns a plist with :content, :raw-request and :raw-response."
   (chat-log "[LLM] Starting request to provider: %s" provider)
   (let* ((config (chat-llm-get-provider provider))
          (base-url (plist-get config :base-url))
          (request-body (chat-llm--build-request provider messages options))
          (headers (chat-llm--make-headers provider))
-         (timeout (or (plist-get options :timeout) 60)))
+         (timeout (or (plist-get options :timeout) 60))
+         (raw-request (json-encode request-body)))
     (chat-log "[LLM] Base URL: %s" base-url)
-    (chat-log "[LLM] Request body: %s" (json-encode request-body))
+    (chat-log "[LLM] Request body: %s" raw-request)
     (chat-log "[LLM] Headers present: %s" (if headers "yes" "no"))
     ;; Synchronous request
     (let* ((result (chat-llm--post-sync
                     (concat base-url "/chat/completions")
                     headers
-                    (json-encode request-body)
+                    raw-request
                     timeout))
-           (body (car result))
+           (raw-response (car result))
            (status-code (cdr result))
            (parser (or (plist-get config :response-fn)
                        #'chat-llm--default-parse-response)))
-      (chat-log "[LLM] Got response body: %s..." (substring body 0 (min 100 (length body))))
+      (chat-log "[LLM] Got response body: %s..." (substring raw-response 0 (min 100 (length raw-response))))
       (if (/= status-code 200)
-          (error "HTTP error %d: %s" status-code body)
-        (let ((json-data (json-read-from-string body)))
-          (funcall parser json-data))))))
+          (error "HTTP error %d: %s" status-code raw-response)
+        (let ((json-data (json-read-from-string raw-response)))
+          (list :content (funcall parser json-data)
+                :raw-request raw-request
+                :raw-response raw-response))))))
 
 (defun chat-llm-stream (provider messages callback &optional options)
   "Stream response from PROVIDER with MESSAGES to CALLBACK.

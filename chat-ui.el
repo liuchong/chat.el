@@ -126,13 +126,16 @@
      (lambda (sess model-id msgs msg-id ui-buffer)
        (chat-log "[Async] Started request")
        (condition-case err
-           (let ((response (chat-llm-request model-id msgs '(:temperature 0.7))))
+           (let* ((result (chat-llm-request model-id msgs '(:temperature 0.7)))
+                  (content (plist-get result :content))
+                  (raw-request (plist-get result :raw-request))
+                  (raw-response (plist-get result :raw-response)))
              (chat-log "[Async] Got response: %s..." 
-                      (substring response 0 (min 50 (length response))))
+                      (substring content 0 (min 50 (length content))))
              ;; Schedule UI update on main thread
              (run-at-time 
               0 nil
-              (lambda (resp)
+              (lambda (resp req-json resp-json)
                 (chat-log "[UI] Updating buffer")
                 (when (buffer-live-p ui-buffer)
                   (with-current-buffer ui-buffer
@@ -142,15 +145,17 @@
                       (insert resp)
                       (insert "\n\n")
                       (set-marker chat-ui--messages-end (point)))
-                    ;; Save to session
+                    ;; Save to session with raw data
                     (let ((ai-msg (make-chat-message
                                   :id msg-id
                                   :role :assistant
                                   :content resp
-                                  :timestamp (current-time))))
+                                  :timestamp (current-time)
+                                  :raw-request req-json
+                                  :raw-response resp-json)))
                       (chat-session-add-message sess ai-msg))
                     (chat-log "[UI] Response saved to session"))))
-              response))
+              content raw-request raw-response))
          (error
           (chat-log "[Async] ERROR: %s" (error-message-string err))
           (run-at-time 
@@ -221,6 +226,80 @@
   (interactive)
   ;; Implementation for history navigation
   (message "History navigation not yet implemented"))
+
+;; ------------------------------------------------------------------
+;; View Raw Messages
+;; ------------------------------------------------------------------
+
+(defun chat-ui--get-message-at-point ()
+  "Get the message struct at point."
+  (when (boundp 'chat--current-session)
+    (let* ((pos (point))
+           (session chat--current-session)
+           (messages (chat-session-messages session))
+           (current-pos (point-min))
+           found-msg)
+      (save-excursion
+        (goto-char (point-min))
+        (while (and (not found-msg) (< (point) (point-max)))
+          (when (get-text-property (point) 'chat-message-id)
+            (let ((msg-id (get-text-property (point) 'chat-message-id)))
+              (setq found-msg (cl-find-if (lambda (m) (equal (chat-message-id m) msg-id))
+                                          messages))))
+          (forward-line 1)))
+      found-msg)))
+
+;;;###autoload
+(defun chat-view-raw-message ()
+  "View raw API request/response for message at point."
+  (interactive)
+  (if (and (boundp 'chat--current-session) chat--current-session)
+      (let* ((session chat--current-session)
+             (messages (chat-session-messages session))
+             ;; Find the last assistant message with raw data
+             (msg (cl-find-if (lambda (m)
+                               (and (eq (chat-message-role m) :assistant)
+                                    (or (chat-message-raw-request m)
+                                        (chat-message-raw-response m))))
+                             (reverse messages))))
+        (if msg
+            (chat-ui--display-raw-exchange msg)
+          (message "No raw message data found in current session")))
+    (message "No active chat session")))
+
+(defun chat-ui--display-raw-exchange (msg)
+  "Display raw request/response for MSG in a buffer."
+  (let* ((msg-id (chat-message-id msg))
+         (raw-request (chat-message-raw-request msg))
+         (raw-response (chat-message-raw-response msg))
+         (buf (get-buffer-create (format "*chat-raw:%s*" msg-id))))
+    (with-current-buffer buf
+      (erase-buffer)
+      (insert "========================================\n")
+      (insert (format "Message ID: %s\n" msg-id))
+      (insert "========================================\n\n")
+      
+      (when raw-request
+        (insert "--- REQUEST ---\n")
+        (insert raw-request)
+        (insert "\n\n"))
+      
+      (when raw-response
+        (insert "--- RESPONSE ---\n")
+        (insert raw-response)
+        (insert "\n")))
+    
+    (with-current-buffer buf
+      (json-pretty-print-buffer)
+      (goto-char (point-min))
+      (view-mode)
+      (pop-to-buffer buf))))
+
+;;;###autoload
+(defun chat-view-last-raw-exchange ()
+  "View raw API exchange for the last assistant message."
+  (interactive)
+  (call-interactively 'chat-view-raw-message))
 
 (provide 'chat-ui)
 ;;; chat-ui.el ends here

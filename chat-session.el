@@ -62,7 +62,9 @@
   branch-ids            ; List of branch message IDs
   metadata              ; Additional metadata
   tool-calls            ; Tool call requests
-  tool-results)         ; Tool execution results
+  tool-results          ; Tool execution results
+  raw-request           ; Raw API request JSON (for user messages)
+  raw-response)         ; Raw API response JSON (for assistant messages)
 
 ;; ------------------------------------------------------------------
 ;; Session Lifecycle
