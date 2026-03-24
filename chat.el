@@ -67,6 +67,10 @@
   (load "chat-tool-caller.el" nil t))
 (chat-tool-forge-load-all)
 
+;; Load context management
+(unless (featurep 'chat-context)
+  (load "chat-context.el" nil t))
+
 ;; Load local configuration if exists
 (let ((local-config (expand-file-name "chat-config.local.el"
                                       (file-name-directory load-file-name))))
@@ -187,6 +191,7 @@ SESSION is a chat-session struct."
     (define-key map (kbd "RET") 'chat-ui-send-message)
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
+    (define-key map (kbd "C-g") 'chat-ui-cancel-response)
     map)
   "Keymap for chat mode buffers.")
 

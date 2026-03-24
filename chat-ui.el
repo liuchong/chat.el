@@ -18,6 +18,7 @@
 (require 'chat-stream)
 (require 'chat-tool-forge-ai)
 (require 'chat-tool-caller)
+(require 'chat-context)
 (require 'chat-log)
 
 ;; ------------------------------------------------------------------
@@ -114,7 +115,14 @@ n                          "You are a helpful AI assistant.")))
             messages))))
 
 (defun chat-ui--get-response ()
-  "Get AI response for current session."
+  "Get AI response for current session.
+Uses streaming if `chat-ui-use-streaming' is non-nil."
+  (if chat-ui-use-streaming
+      (chat-ui--get-response-streaming)
+    (chat-ui--get-response-sync)))
+
+(defun chat-ui--get-response-sync ()
+  "Get AI response synchronously (non-streaming)."
   (message "Getting response from AI...")
   (chat-log "=== Starting chat-ui--get-response ===")
   (let* ((session chat--current-session)
@@ -132,10 +140,12 @@ n                          "You are a helpful AI assistant.")))
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
       (set-marker chat-ui--messages-end (point)))
     
-    ;; Prepare messages with tool calling support
-    (let ((messages-with-tools (chat-ui--prepare-messages-with-tools messages)))
+    ;; Prepare messages with context management and tool calling
+    (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
+           (messages-final (chat-context-prepare-messages messages-with-tools)))
       
       (chat-log "Starting async request using idle timer")
+      (chat-log "Context: %d messages after filtering" (length messages-final))
       
       ;; Use idle timer instead of make-thread (avoids thread variable visibility issues)
       (run-with-idle-timer
@@ -323,6 +333,89 @@ n                          "You are a helpful AI assistant.")))
   "View raw API exchange for the last assistant message."
   (interactive)
   (call-interactively 'chat-view-raw-message))
+
+;; ------------------------------------------------------------------
+;; Streaming Response (Phase 2)
+;; ------------------------------------------------------------------
+
+(defcustom chat-ui-use-streaming nil
+  "Use streaming responses for real-time display."
+  :type 'boolean
+  :group 'chat)
+
+(defvar chat-ui--active-stream-process nil
+  "Currently active stream process for cancellation.")
+
+(defun chat-ui--get-response-streaming ()
+  "Get AI response with streaming display."
+  (message "Getting response from AI...")
+  (chat-log "=== Starting streaming response ===")
+  (let* ((session chat--current-session)
+         (model (chat-session-model-id session))
+         (messages (chat-session-messages session))
+         (msg-id (format "msg-%s" (random 10000)))
+         (buffer (current-buffer))
+         (content-acc ""))
+    
+    ;; Insert assistant header
+    (save-excursion
+      (goto-char chat-ui--messages-end)
+      (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
+      (set-marker chat-ui--messages-end (point)))
+    
+    ;; Start stream
+    (run-with-idle-timer
+     0.1 nil
+     (lambda (sess model-id msgs msg-id ui-buffer)
+       (setq chat-ui--active-stream-process
+             (chat-stream-request
+              model-id msgs
+              (lambda (chunk)
+                (when (buffer-live-p ui-buffer)
+                  (with-current-buffer ui-buffer
+                    (setq content-acc (concat content-acc chunk))
+                    (save-excursion
+                      (goto-char chat-ui--messages-end)
+                      (insert chunk)
+                      (set-marker chat-ui--messages-end (point)))
+                    (redisplay t))))
+              '(:temperature 0.7 :stream t)))
+       
+       ;; Set up completion handler
+       (set-process-sentinel
+        chat-ui--active-stream-process
+        (lambda (proc event)
+          (when (string-match-p "finished" event)
+            (setq chat-ui--active-stream-process nil)
+            (when (buffer-live-p ui-buffer)
+              (with-current-buffer ui-buffer
+                (save-excursion
+                  (goto-char chat-ui--messages-end)
+                  (insert "\n\n")
+                  (set-marker chat-ui--messages-end (point)))
+                (let ((ai-msg (make-chat-message
+                              :id msg-id
+                              :role :assistant
+                              :content content-acc
+                              :timestamp (current-time))))
+                  (chat-session-add-message sess ai-msg)))))))
+       
+       ;; Store raw request for message
+       (let ((raw-req (json-encode (chat-llm--build-request model-id msgs '(:stream t)))))
+         ;; TODO: store raw request/response
+         (ignore raw-req)))
+     
+     session model messages msg-id buffer)))
+
+;;;###autoload
+(defun chat-ui-cancel-response ()
+  "Cancel the current streaming response."
+  (interactive)
+  (when (and chat-ui--active-stream-process
+             (process-live-p chat-ui--active-stream-process))
+    (delete-process chat-ui--active-stream-process)
+    (setq chat-ui--active-stream-process nil)
+    (message "Response cancelled")))
 
 (provide 'chat-ui)
 ;;; chat-ui.el ends here

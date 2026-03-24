@@ -117,13 +117,20 @@ Returns the process object."
          ;; Build request body
          (opts (plist-put (copy-tree options) :stream t))
          (body (chat-llm--build-request provider messages opts))
+         ;; Get User-Agent from provider config
+         (user-agent (let ((headers-fn (plist-get config :headers)))
+                       (if (functionp headers-fn)
+                           (cdr (assoc "User-Agent" (funcall headers-fn)))
+                         "chat.el/1.0")))
          ;; Create curl command
-         (curl-args (list "-s" "-N"  ; Silent, no buffer
-                         "-X" "POST"
-                         "-H" "Content-Type: application/json"
-                         "-H" (format "Authorization: Bearer %s" api-key)
-                         "-d" (json-encode body)
-                         url))
+         (curl-args (let ((base-args (list "-s" "-N"  ; Silent, no buffer
+                                           "-X" "POST"
+                                           "-H" "Content-Type: application/json"
+                                           "-H" (format "Authorization: Bearer %s" api-key)
+                                           "-d" (json-encode body)))
+                          (ua-args (when user-agent
+                                     (list "-A" user-agent))))
+                      (append base-args ua-args (list url))))
          ;; Buffer for accumulating partial lines
          (buffer (generate-new-buffer " *chat-stream*"))
          (content-buffer "")
