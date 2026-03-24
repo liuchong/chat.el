@@ -47,6 +47,8 @@
   (load "chat-llm.el" nil t))
 (unless (featurep 'chat-llm-kimi)
   (load "chat-llm-kimi.el" nil t))
+(unless (featurep 'chat-llm-openai)
+  (load "chat-llm-openai.el" nil t))
 
 ;; Load UI
 (unless (featurep 'chat-ui)
