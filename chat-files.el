@@ -155,20 +155,21 @@ Returns a list of plists with :name, :path, :size, :mtime, :type."
          (files '()))
     (if recursive
         (directory-files-recursively safe-dir pattern)
-      (dolist (name (directory-files safe-dir nil pattern))
-        (unless (member name '("." ".."))
-          (let ((full-path (expand-file-name name safe-dir)))
-            (push (list :name name
-                       :path full-path
-                       :size (file-attribute-size
-                              (file-attributes full-path))
-                       :mtime (file-attribute-modification-time
-                               (file-attributes full-path))
-                       :type (if (file-directory-p full-path)
-                                'directory
-                              'file))
-                  files))))
-    (nreverse files)))
+      (progn
+        (dolist (name (directory-files safe-dir nil pattern))
+          (unless (member name '("." ".."))
+            (let ((full-path (expand-file-name name safe-dir)))
+              (push (list :name name
+                         :path full-path
+                         :size (file-attribute-size
+                                (file-attributes full-path))
+                         :mtime (file-attribute-modification-time
+                                 (file-attributes full-path))
+                         :type (if (file-directory-p full-path)
+                                  'directory
+                                'file))
+                    files))))
+        (nreverse files)))))
 
 ;; ------------------------------------------------------------------
 ;; File Movement and Organization
@@ -285,7 +286,7 @@ DIRECTION is 'before or 'after."
         (buffer-substring (point)
                          (save-excursion
                            (forward-line num-lines)
-                           (point))))))))
+                           (point)))))))
 
 ;;;###autoload
 (defun chat-files-find (directory pattern &optional file-pattern)

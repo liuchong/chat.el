@@ -1,0 +1,295 @@
+;;; chat-session.el --- Session management for chat.el -*- lexical-binding: t -*-
+
+;; Copyright (C) 2026 chat.el contributors
+
+;; Author: chat.el contributors
+;; Keywords: chat, session, conversation
+
+;; This file is not part of GNU Emacs.
+
+;;; Commentary:
+
+;; This module provides session management for chat.el.
+;; A session represents a single conversation with context,
+;; messages, and configuration.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'json)
+
+;; ------------------------------------------------------------------
+;; Customization
+;; ------------------------------------------------------------------
+
+(defgroup chat-session nil
+  "Session management for chat.el."
+  :group 'chat)
+
+(defcustom chat-session-directory
+  (expand-file-name "~/.chat/sessions/")
+  "Directory where session files are stored."
+  :type 'directory
+  :group 'chat-session)
+
+(defcustom chat-session-auto-save t
+  "Whether to automatically save sessions after modifications."
+  :type 'boolean
+  :group 'chat-session)
+
+;; ------------------------------------------------------------------
+;; Data Structures
+;; ------------------------------------------------------------------
+
+(cl-defstruct chat-session
+  id                    ; Unique identifier string
+  name                  ; Display name
+  created-at            ; Creation timestamp
+  updated-at            ; Last update timestamp
+  model-id              ; LLM model symbol
+  messages              ; List of chat-message structs
+  prompt-stack          ; Multi-level prompt stack
+  context-window        ; Context window settings
+  tool-config           ; Tool configuration
+  metadata)             ; Additional metadata plist
+
+(cl-defstruct chat-message
+  id                    ; Unique identifier
+  role                  ; :user :assistant :system :tool
+  content               ; Message content string
+  timestamp             ; Message timestamp
+  parent-id             ; Parent message ID for branching
+  branch-ids            ; List of branch message IDs
+  metadata              ; Additional metadata
+  tool-calls            ; Tool call requests
+  tool-results)         ; Tool execution results
+
+;; ------------------------------------------------------------------
+;; Session Lifecycle
+;; ------------------------------------------------------------------
+
+(defun chat-session--generate-id ()
+  "Generate a unique session ID."
+  (format "%s-%s"
+          (format-time-string "%Y%m%d%H%M%S")
+          (random 10000)))
+
+(defun chat-session--ensure-directory ()
+  "Ensure session directory exists."
+  (unless (file-directory-p chat-session-directory)
+    (make-directory chat-session-directory t)))
+
+(defun chat-session-create (name &optional model-id)
+  "Create a new chat session with NAME and optional MODEL-ID.
+
+NAME is a string identifying the session.
+MODEL-ID is a symbol specifying the LLM model, defaults to
+chat-default-model if nil.
+
+Returns the newly created chat-session struct."
+  (chat-session--ensure-directory)
+  (let* ((id (chat-session--generate-id))
+         (now (current-time))
+         (session (make-chat-session
+                   :id id
+                   :name name
+                   :created-at now
+                   :updated-at now
+                   :model-id (or model-id 'gpt-4o)
+                   :messages nil
+                   :prompt-stack nil
+                   :metadata nil)))
+    (when chat-session-auto-save
+      (chat-session-save session))
+    session))
+
+(defun chat-session-save (session)
+  "Save SESSION to disk.
+
+SESSION is a chat-session struct.
+Returns t on success, nil on failure."
+  (chat-session--ensure-directory)
+  (let* ((id (chat-session-id session))
+         (filename (expand-file-name
+                    (format "%s.json" id)
+                    chat-session-directory))
+         (data (chat-session--serialize session)))
+    (with-temp-file filename
+      (insert (json-encode data)))
+    t))
+
+(defun chat-session-load (session-id)
+  "Load session with SESSION-ID from disk.
+
+SESSION-ID is a string identifying the session.
+Returns the chat-session struct, or nil if not found."
+  (let ((filename (expand-file-name
+                   (format "%s.json" session-id)
+                   chat-session-directory)))
+    (when (file-exists-p filename)
+      (with-temp-buffer
+        (insert-file-contents filename)
+        (chat-session--deserialize
+         (json-read-from-string
+          (buffer-string)))))))
+
+(defun chat-session-delete (session-id)
+  "Delete session with SESSION-ID from disk.
+
+Returns t if deleted, nil if file did not exist."
+  (let ((filename (expand-file-name
+                   (format "%s.json" session-id)
+                   chat-session-directory)))
+    (when (file-exists-p filename)
+      (delete-file filename)
+      t)))
+
+(defun chat-session-rename (session-id new-name)
+  "Rename session with SESSION-ID to NEW-NAME."
+  (let ((session (chat-session-load session-id)))
+    (when session
+      (setf (chat-session-name session) new-name)
+      (setf (chat-session-updated-at session) (current-time))
+      (chat-session-save session)
+      t)))
+
+;; ------------------------------------------------------------------
+;; Session Listing
+;; ------------------------------------------------------------------
+
+(defun chat-session-list ()
+  "Return a list of all saved sessions.
+
+Returns a list of chat-session structs, sorted by updated-at
+descending."
+  (chat-session--ensure-directory)
+  (let (sessions)
+    (dolist (file (directory-files
+                   chat-session-directory
+                   t
+                   "\\.json$"))
+      (condition-case nil
+          (push (chat-session-load
+                 (file-name-base file))
+                sessions)
+        (error nil)))
+    (sort sessions
+          (lambda (a b)
+            (time-less-p
+             (chat-session-updated-at b)
+             (chat-session-updated-at a))))))
+
+;; ------------------------------------------------------------------
+;; Message Management
+;; ------------------------------------------------------------------
+
+(defun chat-session-add-message (session message)
+  "Add MESSAGE to SESSION.
+
+SESSION is a chat-session struct.
+MESSAGE is a chat-message struct."
+  (setf (chat-session-messages session)
+        (append (chat-session-messages session)
+                (list message)))
+  (setf (chat-session-updated-at session)
+        (current-time))
+  (when chat-session-auto-save
+    (chat-session-save session)))
+
+(defun chat-session-get-messages (session &optional limit)
+  "Get messages from SESSION, optionally limited to LIMIT most recent.
+
+Returns a list of chat-message structs."
+  (let ((messages (chat-session-messages session)))
+    (if limit
+        (last messages limit)
+      messages)))
+
+(defun chat-session-clear-messages (session)
+  "Clear all messages from SESSION."
+  (setf (chat-session-messages session) nil)
+  (setf (chat-session-updated-at session)
+        (current-time))
+  (when chat-session-auto-save
+    (chat-session-save session)))
+
+;; ------------------------------------------------------------------
+;; Serialization
+;; ------------------------------------------------------------------
+
+(defun chat-session--serialize (session)
+  "Convert SESSION struct to JSON-serializable alist."
+  `((id . ,(chat-session-id session))
+    (name . ,(chat-session-name session))
+    (createdAt . ,(format-time-string
+                   "%Y-%m-%dT%H:%M:%S"
+                   (chat-session-created-at session)))
+    (updatedAt . ,(format-time-string
+                   "%Y-%m-%dT%H:%M:%S"
+                   (chat-session-updated-at session)))
+    (modelId . ,(symbol-name (chat-session-model-id session)))
+    (messages . ,(mapcar #'chat-message--serialize
+                         (chat-session-messages session)))
+    (metadata . ,(or (chat-session-metadata session) nil))))
+
+(defun chat-message--serialize (message)
+  "Convert MESSAGE struct to JSON-serializable alist."
+  `((id . ,(chat-message-id message))
+    (role . ,(symbol-name (chat-message-role message)))
+    (content . ,(chat-message-content message))
+    (timestamp . ,(format-time-string
+                   "%Y-%m-%dT%H:%M:%S"
+                   (or (chat-message-timestamp message)
+                       (current-time))))
+    (metadata . ,(or (chat-message-metadata message) nil))))
+
+(defun chat-session--alist-get (alist key)
+  "Get value for KEY from ALIST."
+  (cdr (assoc key alist)))
+
+(defun chat-session--deserialize (data)
+  "Convert JSON-parsed DATA to chat-session struct."
+  (make-chat-session
+   :id (chat-session--alist-get data 'id)
+   :name (chat-session--alist-get data 'name)
+   :created-at (decode-time
+                (parse-time-string
+                 (chat-session--alist-get data 'createdAt)))
+   :updated-at (decode-time
+                (parse-time-string
+                 (chat-session--alist-get data 'updatedAt)))
+   :model-id (intern (chat-session--alist-get data 'modelId))
+   :messages (mapcar #'chat-message--deserialize
+                     (chat-session--alist-get data 'messages))
+   :metadata (chat-session--alist-get data 'metadata)))
+
+(defun chat-message--deserialize (data)
+  "Convert JSON-parsed DATA to chat-message struct."
+  (make-chat-message
+   :id (chat-session--alist-get data 'id)
+   :role (intern (chat-session--alist-get data 'role))
+   :content (chat-session--alist-get data 'content)
+   :timestamp (decode-time
+               (parse-time-string
+                (chat-session--alist-get data 'timestamp)))
+   :metadata (chat-session--alist-get data 'metadata)))
+
+;; ------------------------------------------------------------------
+;; Utility Functions
+;; ------------------------------------------------------------------
+
+(defun chat-session-get (session-id)
+  "Get session by SESSION-ID, loading from disk if necessary.
+
+Returns the chat-session struct, or nil if not found."
+  (chat-session-load session-id))
+
+(defun chat-session-exists-p (session-id)
+  "Check if session with SESSION-ID exists on disk."
+  (file-exists-p
+   (expand-file-name
+    (format "%s.json" session-id)
+    chat-session-directory)))
+
+(provide 'chat-session)
+;;; chat-session.el ends here
