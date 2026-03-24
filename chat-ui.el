@@ -15,6 +15,7 @@
 
 (require 'chat-session)
 (require 'chat-llm)
+(require 'chat-stream)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -94,60 +95,46 @@
         (chat-ui--get-response)))))
 
 (defun chat-ui--get-response ()
-  "Get AI response for current session."
+  "Get AI response for current session with streaming display."
   (message "Getting response from AI...")
   (let* ((session chat--current-session)
          (model (chat-session-model-id session))
          (messages (chat-session-messages session))
-         ;; Insert thinking indicator
-         (thinking-msg (make-chat-message
-                       :id (format "msg-%s" (random 10000))
-                       :role :assistant
-                       :content "[thinking...]"
-                       :timestamp (current-time))))
-    ;; Insert thinking placeholder
+         ;; Create message structure
+         (msg-id (format "msg-%s" (random 10000)))
+         (content-start (point-marker)))
+    
+    ;; Insert initial assistant message header
     (save-excursion
       (goto-char chat-ui--messages-end)
-      (chat-ui--insert-message thinking-msg)
+      (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
+      (setq content-start (point-marker))
+      (insert "\n\n")
       (set-marker chat-ui--messages-end (point)))
-    ;; Make async API call
-    (chat-ui--request-async model messages
-     (lambda (content)
-       ;; Replace thinking with actual response
-       (let ((ai-msg (make-chat-message
-                     :id (format "msg-%s" (random 10000))
-                     :role :assistant
-                     :content content
-                     :timestamp (current-time))))
-         (chat-session-add-message session ai-msg)
+    
+    ;; Start streaming request
+    (let ((accumulated-content ""))
+      (chat-stream-request
+       model messages
+       (lambda (chunk)
+         ;; Called for each content chunk
+         (setq accumulated-content (concat accumulated-content chunk))
          (save-excursion
-           (goto-char chat-ui--messages-end)
-           (forward-line -3)  ;; Move back to replace [thinking...]
-           (delete-region (point) chat-ui--messages-end)
-           (chat-ui--insert-message ai-msg)
-           (set-marker chat-ui--messages-end (point)))))
-     (lambda (error)
-       (let ((err-msg (make-chat-message
-                      :id (format "msg-%s" (random 10000))
-                      :role :assistant
-                      :content (format "[Error: %s]" error)
-                      :timestamp (current-time))))
-         (save-excursion
-           (goto-char chat-ui--messages-end)
-           (forward-line -3)
-           (delete-region (point) chat-ui--messages-end)
-           (chat-ui--insert-message err-msg)
-           (set-marker chat-ui--messages-end (point))))))))
-
-(defun chat-ui--request-async (model messages success-callback error-callback)
-  "Make async request to MODEL with MESSAGES.
-SUCCESS-CALLBACK receives response content.
-ERROR-CALLBACK receives error message."
-  (condition-case err
-      (let ((content (chat-llm-request model messages)))
-        (funcall success-callback content))
-    (error
-     (funcall error-callback (error-message-string err)))))
+           (goto-char content-start)
+           (delete-region content-start chat-ui--messages-end)
+           (insert accumulated-content)
+           (insert "\n\n")
+           (set-marker chat-ui--messages-end (point)))
+         (redisplay t))
+       '(:temperature 0.7))
+      
+      ;; Save to session when done
+      (let ((ai-msg (make-chat-message
+                    :id msg-id
+                    :role :assistant
+                    :content accumulated-content
+                    :timestamp (current-time))))
+        (chat-session-add-message session ai-msg)))))
 
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
