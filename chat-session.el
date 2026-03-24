@@ -95,7 +95,7 @@ Returns the newly created chat-session struct."
                    :name name
                    :created-at now
                    :updated-at now
-                   :model-id (or model-id 'gpt-4o)
+                   :model-id (or model-id (bound-and-true-p chat-default-model) 'kimi)
                    :messages nil
                    :prompt-stack nil
                    :metadata nil)))

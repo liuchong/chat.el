@@ -77,12 +77,12 @@
   (let ((messages (list (make-chat-message :role :user :content "Hello")
                         (make-chat-message :role :assistant :content "Hi"))))
     (let ((formatted (chat-llm--format-messages messages)))
-      (should (listp formatted))
+      (should (arrayp formatted))
       (should (= (length formatted) 2))
-      (let ((first (car formatted)))
-        (should (plistp first))
-        (should (equal (plist-get first :role) "user"))
-        (should (equal (plist-get first :content) "Hello"))))))
+      (let ((first (aref formatted 0)))
+        (should (listp first))
+        (should (equal (cdr (assoc 'role first)) "user"))
+        (should (equal (cdr (assoc 'content first)) "Hello"))))))
 
 ;; ------------------------------------------------------------------
 ;; Request Building

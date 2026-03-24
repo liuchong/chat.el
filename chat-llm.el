@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'json)
 (require 'url)
+(require 'chat-log)
 
 ;; ------------------------------------------------------------------
 ;; Provider Registry
@@ -83,13 +84,14 @@ Checks in order:
 
 (defun chat-llm--format-messages (messages)
   "Convert chat MESSAGE structs to API format."
-  (mapcar (lambda (msg)
-            (let ((role (chat-message-role msg)))
-              (list :role (if (keywordp role)
+  (vconcat
+   (mapcar (lambda (msg)
+             (let ((role (chat-message-role msg)))
+               `((role . ,(if (keywordp role)
                              (substring (symbol-name role) 1)
-                           (symbol-name role))
-                    :content (chat-message-content msg))))
-          messages))
+                           (symbol-name role)))
+                 (content . ,(chat-message-content msg)))))
+           messages)))
 
 (defun chat-llm--build-request (provider messages options)
   "Build request payload for PROVIDER with MESSAGES and OPTIONS."
@@ -98,7 +100,7 @@ Checks in order:
                     (plist-get config :model)))
          (temperature (or (plist-get options :temperature) 0.7))
          (max-tokens (plist-get options :max-tokens))
-         (stream (or (plist-get options :stream) t)))
+         (stream (plist-get options :stream)))
     (list :model model
           :messages (chat-llm--format-messages messages)
           :temperature temperature
@@ -113,35 +115,55 @@ Checks in order:
   "Generate HTTP headers for PROVIDER."
   (let* ((config (chat-llm-get-provider provider))
          (api-key (chat-llm--get-api-key provider))
-         (extra-headers (plist-get config :headers)))
+         (extra-headers-raw (plist-get config :headers))
+         (extra-headers (if (functionp extra-headers-raw)
+                            (funcall extra-headers-raw)
+                          extra-headers-raw)))
     (append
      (list (cons "Content-Type" "application/json")
            (cons "Authorization" (format "Bearer %s" api-key)))
      extra-headers)))
 
-(defun chat-llm--post (url headers body callback error-callback)
-  "Make async POST request to URL.
+(defun chat-llm--post-sync (url headers body timeout-secs)
+  "Make synchronous POST request to URL with TIMEOUT-SECS.
 
 HEADERS is an alist of HTTP headers.
 BODY is the request body string.
-CALLBACK is called with response body on success.
-ERROR-CALLBACK is called with error message on failure."
+Returns (BODY . STATUS-CODE) on success, or signals error on failure."
+  (chat-log "[LLM] POST to %s" url)
+  (chat-log "[LLM] Body length: %d bytes" (length body))
   (let ((url-request-method "POST")
         (url-request-extra-headers headers)
-        (url-request-data body))
-    (url-retrieve
-     url
-     (lambda (status)
-       (if (plist-get status :error)
-           (funcall error-callback
-                    (format "HTTP error: %s" (plist-get status :error)))
-         (goto-char (point-min))
-         (re-search-forward "\n\n" nil t)
-         (let ((body (buffer-substring (point) (point-max))))
-           (funcall callback body))
-         (kill-buffer (current-buffer))))
-     nil
-     t)))
+        (url-request-data body)
+        ;; Extract User-Agent from headers if present
+        (url-user-agent (or (cdr (assoc "User-Agent" headers))
+                            "chat.el/1.0"))
+        response-buffer status-code response-body)
+    (chat-log "[LLM] Headers: %S" headers)
+    (chat-log "[LLM] User-Agent: %s" url-user-agent)
+    (condition-case err
+        (progn
+          (setq response-buffer 
+                (with-timeout (timeout-secs (error "Request timeout after %d seconds" timeout-secs))
+                  (url-retrieve-synchronously url nil t timeout-secs)))
+          (when response-buffer
+            (unwind-protect
+                (with-current-buffer response-buffer
+                  (goto-char (point-min))
+                  ;; Parse HTTP status
+                  (when (looking-at "HTTP/[^ ]+ \\([0-9]+\\)")
+                    (setq status-code (string-to-number (match-string 1)))
+                    (chat-log "[LLM] HTTP status code: %d" status-code))
+                  ;; Extract body
+                  (if (re-search-forward "\n\n" nil t)
+                      (setq response-body (buffer-substring (point) (point-max)))
+                    (setq response-body ""))
+                  (chat-log "[LLM] Response body length: %d bytes" (length response-body))
+                  (cons response-body status-code))
+              (kill-buffer response-buffer))))
+      (error
+       (when response-buffer (kill-buffer response-buffer))
+       (signal (car err) (cdr err))))))
 
 ;; ------------------------------------------------------------------
 ;; Main API
@@ -155,38 +177,30 @@ MESSAGES is a list of chat-message structs.
 OPTIONS is an optional plist of request parameters.
 
 Returns the response content string."
+  (chat-log "[LLM] Starting request to provider: %s" provider)
   (let* ((config (chat-llm-get-provider provider))
          (base-url (plist-get config :base-url))
          (request-body (chat-llm--build-request provider messages options))
          (headers (chat-llm--make-headers provider))
-         (response nil)
-         (error-msg nil)
-         (done nil))
-    (chat-llm--post
-     (concat base-url "/chat/completions")
-     headers
-     (json-encode request-body)
-     (lambda (body)
-       (condition-case err
-           (let* ((json-data (json-read-from-string body))
-                  (parser (or (plist-get config :response-fn)
-                              #'chat-llm--default-parse-response))
-                  (content (funcall parser json-data)))
-             (setq response content
-                   done t))
-         (error
-          (setq error-msg (format "Parse error: %s" (error-message-string err))
-                done t))))
-     (lambda (err)
-       (setq error-msg err
-             done t)))
-    ;; Wait for async response with timeout
-    (with-timeout (30 (error "Request timeout"))
-      (while (not done)
-        (sit-for 0.1)))
-    (if error-msg
-        (error error-msg)
-      response)))
+         (timeout (or (plist-get options :timeout) 60)))
+    (chat-log "[LLM] Base URL: %s" base-url)
+    (chat-log "[LLM] Request body: %s" (json-encode request-body))
+    (chat-log "[LLM] Headers present: %s" (if headers "yes" "no"))
+    ;; Synchronous request
+    (let* ((result (chat-llm--post-sync
+                    (concat base-url "/chat/completions")
+                    headers
+                    (json-encode request-body)
+                    timeout))
+           (body (car result))
+           (status-code (cdr result))
+           (parser (or (plist-get config :response-fn)
+                       #'chat-llm--default-parse-response)))
+      (chat-log "[LLM] Got response body: %s..." (substring body 0 (min 100 (length body))))
+      (if (/= status-code 200)
+          (error "HTTP error %d: %s" status-code body)
+        (let ((json-data (json-read-from-string body)))
+          (funcall parser json-data))))))
 
 (defun chat-llm-stream (provider messages callback &optional options)
   "Stream response from PROVIDER with MESSAGES to CALLBACK.
@@ -220,10 +234,19 @@ OPTIONS is an optional plist of request parameters."
 
 (defun chat-llm--default-parse-response (json-data)
   "Default response parser for JSON-DATA."
+  ;; Check for API error response
+  (when-let ((error-obj (cdr (assoc 'error json-data))))
+    (let ((err-msg (cdr (assoc 'message error-obj)))
+          (err-type (cdr (assoc 'type error-obj))))
+      (error "API error: %s (%s)" (or err-msg "Unknown") (or err-type "unknown"))))
+  ;; Parse normal response
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (aref choices 0))
-         (message (cdr (assoc 'message first-choice)))
-         (content (cdr (assoc 'content message))))
+         (first-choice (and choices (aref choices 0)))
+         (message (and first-choice (cdr (assoc 'message first-choice))))
+         (content (and message (cdr (assoc 'content message)))))
+    (unless content
+      (error "Unexpected response format: %s" 
+             (json-encode json-data)))
     content))
 
 ;; ------------------------------------------------------------------

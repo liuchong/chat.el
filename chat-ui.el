@@ -17,6 +17,7 @@
 (require 'chat-llm)
 (require 'chat-stream)
 (require 'chat-tool-forge-ai)
+(require 'chat-log)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -99,46 +100,71 @@
           (chat-ui--get-response))))))
 
 (defun chat-ui--get-response ()
-  "Get AI response for current session with streaming display."
+  "Get AI response for current session."
   (message "Getting response from AI...")
+  (chat-log "=== Starting chat-ui--get-response ===")
   (let* ((session chat--current-session)
          (model (chat-session-model-id session))
          (messages (chat-session-messages session))
-         ;; Create message structure
          (msg-id (format "msg-%s" (random 10000)))
-         (content-start (point-marker)))
+         (buffer (current-buffer)))
     
-    ;; Insert initial assistant message header
+    (chat-log "Session: %s, Model: %s, Messages count: %d"
+             (chat-session-id session) model (length messages))
+    
+    ;; Insert assistant header
     (save-excursion
       (goto-char chat-ui--messages-end)
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
-      (setq content-start (point-marker))
-      (insert "\n\n")
       (set-marker chat-ui--messages-end (point)))
     
-    ;; Start streaming request
-    (let ((accumulated-content ""))
-      (chat-stream-request
-       model messages
-       (lambda (chunk)
-         ;; Called for each content chunk
-         (setq accumulated-content (concat accumulated-content chunk))
-         (save-excursion
-           (goto-char content-start)
-           (delete-region content-start chat-ui--messages-end)
-           (insert accumulated-content)
-           (insert "\n\n")
-           (set-marker chat-ui--messages-end (point)))
-         (redisplay t))
-       '(:temperature 0.7))
-      
-      ;; Save to session when done
-      (let ((ai-msg (make-chat-message
-                    :id msg-id
-                    :role :assistant
-                    :content accumulated-content
-                    :timestamp (current-time))))
-        (chat-session-add-message session ai-msg)))))
+    (chat-log "Starting async request using idle timer")
+    
+    ;; Use idle timer instead of make-thread (avoids thread variable visibility issues)
+    (run-with-idle-timer
+     0.1 nil
+     (lambda (sess model-id msgs msg-id ui-buffer)
+       (chat-log "[Async] Started request")
+       (condition-case err
+           (let ((response (chat-llm-request model-id msgs '(:temperature 0.7))))
+             (chat-log "[Async] Got response: %s..." 
+                      (substring response 0 (min 50 (length response))))
+             ;; Schedule UI update on main thread
+             (run-at-time 
+              0 nil
+              (lambda (resp)
+                (chat-log "[UI] Updating buffer")
+                (when (buffer-live-p ui-buffer)
+                  (with-current-buffer ui-buffer
+                    ;; Insert response
+                    (save-excursion
+                      (goto-char chat-ui--messages-end)
+                      (insert resp)
+                      (insert "\n\n")
+                      (set-marker chat-ui--messages-end (point)))
+                    ;; Save to session
+                    (let ((ai-msg (make-chat-message
+                                  :id msg-id
+                                  :role :assistant
+                                  :content resp
+                                  :timestamp (current-time))))
+                      (chat-session-add-message sess ai-msg))
+                    (chat-log "[UI] Response saved to session"))))
+              response))
+         (error
+          (chat-log "[Async] ERROR: %s" (error-message-string err))
+          (run-at-time 
+           0 nil
+           (lambda (e)
+             (when (buffer-live-p ui-buffer)
+               (with-current-buffer ui-buffer
+                 (save-excursion
+                   (goto-char chat-ui--messages-end)
+                   (insert (format "[Error: %s]" e))
+                   (insert "\n\n")
+                   (set-marker chat-ui--messages-end (point))))))
+           (error-message-string err)))))
+     session model messages msg-id buffer)))
 
 ;; ------------------------------------------------------------------
 ;; Interactive Commands

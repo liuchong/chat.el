@@ -50,7 +50,7 @@
     (should (equal (plist-get request :model) "moonshot-v1-8k"))
     (should (= (plist-get request :temperature) 0.7))
     (should (plist-get request :messages))
-    (should (plist-get request :stream))))
+    (should-not (plist-get request :stream))))
 
 ;; ------------------------------------------------------------------
 ;; Response Parsing

@@ -39,6 +39,8 @@
 ;; ------------------------------------------------------------------
 
 ;; Load core modules if not already loaded
+(unless (featurep 'chat-log)
+  (load "chat-log.el" nil t))
 (unless (featurep 'chat-session)
   (load "chat-session.el" nil t))
 (unless (featurep 'chat-files)
@@ -47,6 +49,8 @@
   (load "chat-llm.el" nil t))
 (unless (featurep 'chat-llm-kimi)
   (load "chat-llm-kimi.el" nil t))
+(unless (featurep 'chat-llm-kimi-code)
+  (load "chat-llm-kimi-code.el" nil t))
 (unless (featurep 'chat-llm-openai)
   (load "chat-llm-openai.el" nil t))
 

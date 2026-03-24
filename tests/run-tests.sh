@@ -4,6 +4,7 @@
 cd "$(dirname "$0")/.."
 
 emacs -Q -batch \
+  -l chat-log.el \
   -l chat-session.el \
   -l chat-files.el \
   -l chat-llm.el \

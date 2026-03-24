@@ -59,9 +59,7 @@ If nil, will try to lookup from auth-source or chat-llm-openai-api-key-fn."
                     chat-llm-openai-default-model))
          (temperature (or (plist-get options :temperature) 0.7))
          (max-tokens (or (plist-get options :max-tokens) 2048))
-         (stream (if (plist-member options :stream)
-                     (plist-get options :stream)
-                   t)))
+         (stream (plist-get options :stream)))
     (list :model model
           :messages (chat-llm--format-messages messages)
           :temperature temperature
@@ -70,10 +68,19 @@ If nil, will try to lookup from auth-source or chat-llm-openai-api-key-fn."
 
 (defun chat-llm-openai--parse-response (json-data)
   "Parse OpenAI API JSON-DATA response."
+  ;; Check for API error response
+  (when-let ((error-obj (cdr (assoc 'error json-data))))
+    (let ((err-msg (cdr (assoc 'message error-obj)))
+          (err-type (cdr (assoc 'type error-obj))))
+      (error "OpenAI API error: %s (%s)" (or err-msg "Unknown") (or err-type "unknown"))))
+  ;; Parse normal response
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (aref choices 0))
-         (message (cdr (assoc 'message first-choice)))
-         (content (cdr (assoc 'content message))))
+         (first-choice (and choices (aref choices 0)))
+         (message (and first-choice (cdr (assoc 'message first-choice))))
+         (content (and message (cdr (assoc 'content message)))))
+    (unless content
+      (error "Unexpected response format: %s" 
+             (json-encode json-data)))
     content))
 
 ;; ------------------------------------------------------------------
