@@ -58,4 +58,19 @@ This document records known issues and their solutions for chat.el development.
 
 ---
 
+## JSON Data Construction in Tests
+
+**Problem**: Hand-written JSON strings in tests fail to parse correctly
+
+**Solution**: Use elisp data structures with `json-encode` instead of string literals:
+```elisp
+;; Wrong
+"{\"choices\": [{\"delta\": {\"content\": \"text\"}}]}"
+
+;; Right
+(json-encode '((choices . [((delta . ((content . "text"))))])))
+```
+
+---
+
 *Last updated: 2026-03-24*
