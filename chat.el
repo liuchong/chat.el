@@ -45,6 +45,12 @@
   (load "chat-files.el" nil t))
 (unless (featurep 'chat-llm)
   (load "chat-llm.el" nil t))
+(unless (featurep 'chat-llm-kimi)
+  (load "chat-llm-kimi.el" nil t))
+
+;; Load UI
+(unless (featurep 'chat-ui)
+  (load "chat-ui.el" nil t))
 
 ;; Load local configuration if exists
 (let ((local-config (expand-file-name "chat-config.local.el"
@@ -151,7 +157,7 @@ SESSION is a chat-session struct."
     (with-current-buffer buffer
       (chat-mode)
       (setq-local chat--current-session session)
-      (chat--refresh-buffer))
+      (chat-ui-setup-buffer session))
     (pop-to-buffer buffer)))
 
 ;; ------------------------------------------------------------------

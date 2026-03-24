@@ -1,56 +1,75 @@
 # chat.el
 
-A pure Emacs AI executor inspired by OpenClaw.
+A pure Emacs AI chat client with Kimi integration.
 
 ## Features
 
-- Session management for multiple conversations
-- File operations for AI tool use
-- Extensible architecture for LLM providers
+- **Multiple chat sessions** - Manage separate conversations
+- **Session persistence** - Auto-saved to ~/.chat/sessions/
+- **Kimi AI integration** - Powered by Moonshot AI
+- **File operations** - AI can read and work with your files
+- **Pure Emacs Lisp** - No external dependencies
 
-## Installation
+## Quick Start
 
-Clone this repository and add to your load path:
-
+1. Clone and add to load path:
 ```elisp
 (add-to-list 'load-path "~/path/to/chat.el")
 (require 'chat)
 ```
 
-## Configuration
-
-### Kimi API Setup
-
-1. Get your API key from https://platform.moonshot.cn/
-
-2. Create `chat-config.local.el` in the chat.el directory:
-
+2. Configure your Kimi API key in `chat-config.local.el`:
 ```elisp
-(setq chat-llm-kimi-api-key "your-api-key-here")
+(setq chat-llm-kimi-api-key "your-api-key")
 (setq chat-default-model 'kimi)
 ```
 
-3. Or use auth-source (recommended). Add to `~/.authinfo.gpg`:
-
-```
-machine kimi-api user api-key password YOUR_API_KEY
-```
-
-## Usage
-
-Start a chat session:
+3. Start chatting:
 ```
 M-x chat
 ```
 
-Create a new session:
-```
-M-x chat-new-session
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat` | Start or resume a session |
+| `M-x chat-new-session` | Create new chat session |
+| `M-x chat-list-sessions` | List all saved sessions |
+
+In chat buffer:
+- Type your message after the `>` prompt
+- Press `RET` to send
+- AI response appears below
+
+## Configuration
+
+### API Key Setup
+
+Create `chat-config.local.el` in the chat.el directory:
+
+```elisp
+(setq chat-llm-kimi-api-key "sk-...")
 ```
 
-List all sessions:
+Or use auth-source (more secure):
+
+Add to `~/.authinfo.gpg`:
 ```
-M-x chat-list-sessions
+machine kimi-api user api-key password YOUR_API_KEY
+```
+
+### Customization
+
+```elisp
+;; Default model
+(setq chat-default-model 'kimi)
+
+;; Session storage location
+(setq chat-session-directory "~/.chat/sessions/")
+
+;; Auto-save sessions
+(setq chat-auto-save t)
 ```
 
 ## Development
@@ -58,6 +77,19 @@ M-x chat-list-sessions
 Run tests:
 ```bash
 ./tests/run-tests.sh
+```
+
+Tested on Emacs 27+.
+
+## Architecture
+
+```
+chat.el (main entry)
+├── chat-session.el    (session management)
+├── chat-files.el      (file operations)
+├── chat-llm.el        (LLM abstraction)
+├── chat-llm-kimi.el   (Kimi provider)
+└── chat-ui.el         (UI components)
 ```
 
 ## License

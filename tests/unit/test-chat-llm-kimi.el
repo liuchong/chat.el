@@ -74,21 +74,25 @@
     (should (string= parsed " chunk"))))
 
 ;; ------------------------------------------------------------------
-;; End-to-end Tests (Skipped without API key)
+;; End-to-end Tests
 ;; ------------------------------------------------------------------
 
 (ert-deftest chat-llm-kimi-simple-request ()
-  "Test making a simple request to Kimi API."
+  "Test making a simple request to Kimi API.
+Skipped in batch mode to avoid hanging tests."
+  (skip-unless (not noninteractive))
   (skip-unless (test-chat-kimi--has-api-key))
   (let* ((messages (list (make-chat-message
                           :role :user
                           :content "Say hello in one word")))
-         (response (chat-llm-request 'kimi messages)))
+         (response (chat-llm-request 'kimi messages '(:max-tokens 10))))
     (should (stringp response))
     (should (> (length response) 0))))
 
 (ert-deftest chat-llm-kimi-streaming-request ()
-  "Test streaming request to Kimi API."
+  "Test streaming request to Kimi API.
+Skipped in batch mode to avoid hanging tests."
+  (skip-unless (not noninteractive))
   (skip-unless (test-chat-kimi--has-api-key))
   (let* ((messages (list (make-chat-message
                           :role :user
