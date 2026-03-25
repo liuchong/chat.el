@@ -26,6 +26,19 @@ works, the complete source code must be made available under the same license te
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
+### Code Mode (AI Programming IDE)
+
+A dedicated mode for software engineering with:
+
+- **Smart Context** - Automatically includes project structure, symbols, git status
+- **Code Editing** - Explain, refactor, fix, document, and generate tests inline
+- **Multi-file Refactoring** - Cross-file rename, extract to file, move functions
+- **Test Integration** - Auto-detect test frameworks, run tests, auto-fix failures
+- **Git Integration** - AI-suggested commit messages, pre-commit checks, code review
+- **LSP Integration** - Works with lsp-mode and eglot for enhanced context
+- **Symbol Indexing** - Cross-references, call graph, related symbols
+- **Streaming Responses** - Real-time code generation display
+
 ## Quick Start
 
 Load the package:
@@ -105,6 +118,74 @@ You can override this with `chat-files-allowed-directories`.
       (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
+## Code Mode (AI Programming IDE)
+
+chat.el includes a comprehensive **Code Mode** for AI-assisted programming:
+
+### Starting Code Mode
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat-code-start` | Start code mode for current project |
+| `M-x chat-code-for-file` | Focus on specific file |
+| `M-x chat-code-for-selection` | Use current selection as context |
+
+### Inline Editing Commands
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat-edit-explain` | Explain code at point |
+| `M-x chat-edit-refactor` | Refactor with instruction |
+| `M-x chat-edit-fix` | Fix code issues |
+| `M-x chat-edit-docs` | Generate documentation |
+| `M-x chat-edit-tests` | Generate unit tests |
+| `M-x chat-edit-complete` | Complete code at point |
+
+### Multi-file Refactoring
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat-code-rename-symbol` | Rename symbol across project |
+| `M-x chat-code-extract-to-file` | Extract code to new file |
+| `M-x chat-code-move-function` | Move function between files |
+
+### Test Integration
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat-code-run-tests` | Run tests for current file |
+| `M-x chat-code-test-generate` | Generate tests for function |
+| `M-x chat-code-test-coverage-current` | Show test coverage |
+
+### Git Integration
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat-code-git-commit-suggest` | AI-suggested commit message |
+| `M-x chat-code-git-review` | Review changes with AI |
+| `M-x chat-code-git-pre-commit` | Run pre-commit checks |
+
+### Code Intelligence
+
+| Command | Description |
+|---------|-------------|
+| `M-x chat-code-index-project` | Index project symbols |
+| `M-x chat-code-find-symbol` | Find symbol definition |
+| `M-x chat-code-find-references` | Find symbol references |
+| `M-x chat-code-incremental-index` | Update index incrementally |
+
+### Code Mode Features
+
+- **Single-window design** - Respects your window layout
+- **4 context strategies** - minimal, focused, balanced, comprehensive
+- **Symbol indexing** - Cross-references and call graph analysis
+- **LSP integration** - Works with lsp-mode and eglot
+- **Streaming responses** - Real-time code generation
+- **Git diff context** - Automatic inclusion of uncommitted changes
+- **Performance** - Incremental indexing and background updates
+
+See `specs/002-code-mode*.md` for detailed documentation.
+
 ## Architecture Map
 
 | File | Responsibility |
@@ -120,6 +201,16 @@ You can override this with `chat-files-allowed-directories`.
 | `chat-context.el` | Context trimming and summary generation |
 | `chat-tool-forge.el` | Tool registry, compilation, loading, and execution |
 | `chat-tool-forge-ai.el` | AI assisted tool generation flow |
+| `chat-code.el` | Code mode main entry |
+| `chat-context-code.el` | Smart context building |
+| `chat-edit.el` | Edit operations |
+| `chat-code-preview.el` | Preview buffer for changes |
+| `chat-code-intel.el` | Symbol indexing and call graph |
+| `chat-code-lsp.el` | LSP client integration |
+| `chat-code-refactor.el` | Multi-file refactoring |
+| `chat-code-test.el` | Test framework integration |
+| `chat-code-git.el` | Git integration |
+| `chat-code-perf.el` | Performance optimization |
 
 ## Testing
 

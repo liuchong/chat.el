@@ -1,96 +1,67 @@
-# Documentation Index
+# chat.el 文档
 
-This directory keeps project level status, troubleshooting notes, and AI session records.
+## Code Mode（AI 编程 IDE）
 
-## Read This First
+Code Mode 是 chat.el 的 AI 编程功能，提供代码生成、重构、测试集成等能力。
 
-- `../README.md` gives the main project overview and quick start
-- `PROJECT_STATUS.md` gives the current implementation snapshot
-- `troubleshooting-pitfalls.md` lists known issues and their fixes
-- `../AGENTS.md` defines repository rules for AI and IDE agents
+### 入门文档
 
-## AI Context Records
+| 文档 | 说明 |
+|------|------|
+| [code-mode-usage.md](code-mode-usage.md) | **完整使用指南** - 安装、配置、示例、故障排除 |
+| [code-mode-cheatsheet.md](code-mode-cheatsheet.md) | **快速参考卡** - 一页速查，适合打印 |
 
-The `ai-contexts/` directory stores session level records.
-Each record should explain:
+### 设计文档
 
-- requirements
-- technical decisions
-- completed work
-- pending work
-- key code paths
-- issues encountered
-- verification results
+| 文档 | 说明 |
+|------|------|
+| [../specs/002-code-mode.md](../specs/002-code-mode.md) | 主设计 Spec |
+| [../specs/002-code-mode-architecture.md](../specs/002-code-mode-architecture.md) | 架构详细说明 |
+| [../specs/002-code-mode-summary.md](../specs/002-code-mode-summary.md) | 一页总结 |
+| [../specs/002-code-mode-quickstart.md](../specs/002-code-mode-quickstart.md) | 快速入门 |
 
-See `ai-contexts/README.md` for the naming format and suggested template.
+### 实现文档
 
-## Books
+| 文档 | 说明 |
+|------|------|
+| [../specs/002-code-mode-implementation.md](../specs/002-code-mode-implementation.md) | Phase 1 - 核心基础设施 |
+| [../specs/002-code-mode-phase2.md](../specs/002-code-mode-phase2.md) | Phase 2 - LLM 集成和内联编辑 |
+| [../specs/002-code-mode-phase3.md](../specs/002-code-mode-phase3.md) | Phase 3 - 代码智能和流式响应 |
+| [../specs/002-code-mode-phase4.md](../specs/002-code-mode-phase4.md) | Phase 4 - 高级功能和优化 |
 
-The `books/` directory stores comprehensive, systematic documentation.
+## 快速导航
 
-Long-form content that covers a topic in depth:
-- Architecture guides
-- Design principles
-- Complete feature specifications
-- Development handbooks
+### 我是新用户
 
-## Articles
+1. 阅读 [快速入门](../specs/002-code-mode-quickstart.md)
+2. 查看 [快速参考卡](code-mode-cheatsheet.md)
+3. 详细阅读 [完整使用指南](code-mode-usage.md)
 
-The `articles/` directory stores focused, medium-length writings.
+### 我是开发者
 
-Single-topic pieces that explore specific subjects:
-- Technical deep dives
-- Best practice guides
-- Post-mortem analysis
-- Implementation stories
-- Tool comparisons
+1. 阅读 [主设计 Spec](../specs/002-code-mode.md)
+2. 查看 [架构说明](../specs/002-code-mode-architecture.md)
+3. 参考实现文档（Phase 1-4）
 
-## Tips
+### 我需要快速查阅
 
-The `tips/` directory stores short-form inspirations and quick notes.
+直接查看 [快速参考卡](code-mode-cheatsheet.md) 或打印它。
 
-Brief but valuable snippets:
-- Code patterns worth remembering
-- One-liners and quick fixes
-- Tool tricks and hidden features
-- Aha moments and insights
-- Bookmark-worthy resources
+## 模块说明
 
-## When To Update Which File
+```
+chat-code.el              - 主入口和 UI
+chat-context-code.el      - 智能上下文构建
+chat-edit.el              - 编辑操作
+chat-code-preview.el      - 预览 buffer
+chat-code-intel.el        - 符号索引和调用图
+chat-code-lsp.el          - LSP 集成
+chat-code-refactor.el     - 多文件重构
+chat-code-test.el         - 测试集成
+chat-code-git.el          - Git 集成
+chat-code-perf.el         - 性能优化
+```
 
-- Update `PROJECT_STATUS.md` when the project baseline changes in a meaningful way
-- Update `troubleshooting-pitfalls.md` when you discover a new failure mode or fix pattern
-- Add or update an `ai-contexts/conversation-YYYY-MM-DD-topic.md` file at the end of each development session
-- Update `README.md` when setup, commands, architecture, or user visible capabilities change
+---
 
-## Troubleshooting Maintenance Rules
-
-`troubleshooting-pitfalls.md` is a structured handbook rather than a running log.
-
-- Add new entries under the closest topic section
-- Keep the topic order stable
-- Use the field order `Problem` `Cause` `Solution`
-- Merge duplicates before adding new entries
-
-## Current Documentation Layout
-
-| File/Directory | Purpose |
-|----------------|---------|
-| `README.md` | Project overview and quick start |
-| `PROJECT_STATUS.md` | Current state and next focus |
-| `troubleshooting-pitfalls.md` | Known issues and fixes |
-| `ai-contexts/README.md` | Rules for session documents |
-| `ai-contexts/*.md` | Historical implementation records |
-| `books/` | Long-form systematic documentation |
-| `articles/` | Focused medium-length articles |
-| `tips/` | Short-form inspirations and quick notes |
-| `specs/` | Feature specifications and design documents |
-
-## Test Directory Layout
-
-| Directory | Purpose |
-|-----------|---------|
-| `tests/unit/` | Unit tests using ERT |
-| `tests/integration/` | Integration tests |
-| `tests/prototypes/` | Prototype tests for feasibility validation |
-| `specs/` | Feature specifications and design specs |
+*Code Mode Documentation Index*
