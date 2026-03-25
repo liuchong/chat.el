@@ -59,6 +59,8 @@
   (load "chat-ui.el" nil t))
 
 ;; Load tool forge
+(unless (featurep 'chat-approval)
+  (load "chat-approval.el" nil t))
 (unless (featurep 'chat-tool-forge)
   (load "chat-tool-forge.el" nil t))
 (unless (featurep 'chat-tool-forge-ai)
@@ -66,6 +68,7 @@
 (unless (featurep 'chat-tool-caller)
   (load "chat-tool-caller.el" nil t))
 (chat-tool-forge-load-all)
+(chat-files-register-built-in-tools)
 (unless (featurep 'chat-tool-shell)
   (load "chat-tool-shell.el" nil t))
 

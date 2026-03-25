@@ -141,6 +141,22 @@ M-x chat-new-session  ; New session uses 'kimi-code
 
 ---
 
+## Test Runner
+
+### `tests/run-tests.sh` Cannot Load `chat-tool-caller`
+
+**Problem**: Running `bash tests/run-tests.sh` fails before tests start
+
+**Cause**: The shell runner does not load the full source chain needed by `chat-ui.el`
+
+**Solution**: Use the batch entry at `tests/run-tests.el` as the canonical runner until the shell script is aligned
+
+```bash
+emacs -Q -batch -l tests/run-tests.el
+```
+
+---
+
 ## File I/O
 
 ### UTF-8 Encoding Errors

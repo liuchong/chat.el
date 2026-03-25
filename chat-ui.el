@@ -144,6 +144,7 @@
               (chat-ui--tool-result-lines tool-calls tool-results)
               "\n")
    "\nUse these results to continue helping.\n"
+   "If a tool result says approval denied, do not retry the same risky tool immediately.\n"
    "If another tool is needed, call one tool as JSON.\n"
    "Otherwise answer normally."))
 
@@ -155,7 +156,7 @@
         :tool-results (append (plist-get base :tool-results)
                               (plist-get extra :tool-results))))
 
-(defcustom chat-ui-tool-loop-max-steps 3
+(defcustom chat-ui-tool-loop-max-steps 6
   "Maximum number of tool loop follow-up requests."
   :type 'integer
   :group 'chat)

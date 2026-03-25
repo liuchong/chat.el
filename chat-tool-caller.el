@@ -15,10 +15,15 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'chat-approval)
+(require 'chat-files)
 (require 'chat-tool-forge)
 (require 'json)
+(require 'pp)
 (require 'seq)
 (require 'subr-x)
+
+(chat-files-register-built-in-tools)
 
 (defcustom chat-tool-caller-enabled t
   "Enable AI tool calling."
@@ -73,6 +78,7 @@
          "If a tool is needed, respond with only one JSON object and no markdown.\n"
          "After a tool runs, the system will send the tool result back to you.\n"
          "You may then either answer normally or call one more tool.\n"
+         "Some tools may require user approval before execution.\n"
          "Use this exact shape:\n"
          "{\"function_call\": {\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"value\"}}}\n"
          "Rules:\n"
@@ -189,6 +195,14 @@
      (t
       (mapcar #'cdr arguments)))))
 
+(defun chat-tool-caller--stringify-result (result)
+  "Convert RESULT into a stable string."
+  (cond
+   ((stringp result) result)
+   ((null result) "nil")
+   (t
+    (string-trim-right (pp-to-string result)))))
+
 (defun chat-tool-caller-execute (call)
   "Execute one parsed tool CALL."
   (let* ((name (plist-get call :name))
@@ -197,9 +211,12 @@
          (tool (chat-tool-forge-get tool-id)))
     (condition-case err
         (if tool
-            (chat-tool-forge-execute
-             tool-id
-             (chat-tool-caller--arguments-to-argv tool arguments))
+            (if (chat-approval-request-tool-call tool call)
+                (chat-tool-caller--stringify-result
+                 (chat-tool-forge-execute
+                  tool-id
+                  (chat-tool-caller--arguments-to-argv tool arguments)))
+              (format "Approval denied for tool '%s'" name))
           (format "Error: Tool '%s' not found" name))
       (error
        (format "Error executing tool '%s': %s"

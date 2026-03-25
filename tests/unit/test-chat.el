@@ -72,5 +72,11 @@
     (should (stringp version))
     (should (> (length version) 0))))
 
+(ert-deftest chat-registers-core-file-tools ()
+  "Test that loading chat registers built in file tools."
+  (should (chat-tool-forge-get 'files_read))
+  (should (chat-tool-forge-get 'files_patch))
+  (should (chat-tool-forge-get 'files_write)))
+
 (provide 'test-chat)
 ;;; test-chat.el ends here

@@ -18,6 +18,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'chat-tool-forge)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -619,6 +620,90 @@ Returns total size, line count, and file type distribution."
   (let (result)
     (maphash (lambda (k v) (setq result (cons k (cons v result)))) hash)
     result))
+
+;; ------------------------------------------------------------------
+;; Built In Tool Registration
+;; ------------------------------------------------------------------
+
+(defun chat-files--register-built-in-tool (id name description parameters function)
+  "Register one built in file tool."
+  (chat-tool-forge-register
+   (make-chat-forged-tool
+    :id id
+    :name name
+    :description description
+    :language 'elisp
+    :parameters parameters
+    :compiled-function function
+    :is-active t
+    :usage-count 0
+    :version "1.0.0")))
+
+(defun chat-files-register-built-in-tools ()
+  "Register the core file tools used by tool calling."
+  (chat-files--register-built-in-tool
+   'files_read
+   "Read File"
+   "Read content from a file"
+   '((:name "path" :type "string" :required t)
+     (:name "offset" :type "integer")
+     (:name "limit" :type "integer"))
+   (lambda (path &optional offset limit)
+     (chat-files-read path offset limit)))
+  (chat-files--register-built-in-tool
+   'files_read_lines
+   "Read File Lines"
+   "Read a line range from a file"
+   '((:name "path" :type "string" :required t)
+     (:name "start_line" :type "integer")
+     (:name "num_lines" :type "integer"))
+   (lambda (path &optional start-line num-lines)
+     (chat-files-read-lines path start-line num-lines)))
+  (chat-files--register-built-in-tool
+   'files_list
+   "List Files"
+   "List files in a directory"
+   '((:name "directory" :type "string" :required t)
+     (:name "pattern" :type "string")
+     (:name "recursive" :type "boolean"))
+   (lambda (directory &optional pattern recursive)
+     (chat-files-list directory pattern recursive)))
+  (chat-files--register-built-in-tool
+   'files_grep
+   "Search File"
+   "Search for a pattern inside a file"
+   '((:name "pattern" :type "string" :required t)
+     (:name "path" :type "string" :required t)
+     (:name "context_lines" :type "integer"))
+   (lambda (pattern path &optional context-lines)
+     (chat-files-grep pattern path context-lines)))
+  (chat-files--register-built-in-tool
+   'files_write
+   "Write File"
+   "Write content to a file"
+   '((:name "path" :type "string" :required t)
+     (:name "content" :type "string" :required t)
+     (:name "append" :type "boolean"))
+   (lambda (path content &optional append)
+     (chat-files-write path content append)))
+  (chat-files--register-built-in-tool
+   'files_replace
+   "Replace File Text"
+   "Replace text inside a file"
+   '((:name "path" :type "string" :required t)
+     (:name "search" :type "string" :required t)
+     (:name "replace" :type "string" :required t)
+     (:name "limit" :type "integer"))
+   (lambda (path search replace &optional limit)
+     (chat-files-replace path search replace limit)))
+  (chat-files--register-built-in-tool
+   'files_patch
+   "Patch File"
+   "Apply atomic search and replace patches to a file"
+   '((:name "path" :type "string" :required t)
+     (:name "patches" :type "array" :required t))
+   (lambda (path patches)
+     (chat-files-patch path patches))))
 
 ;; ------------------------------------------------------------------
 ;; Tool Interface for AI

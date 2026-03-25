@@ -90,6 +90,52 @@
      (let ((prompt (chat-tool-caller-build-system-prompt "Base")))
        (should-not (string-match-p "shell_execute" prompt))))))
 
+(ert-deftest chat-tool-caller-builds-prompt-with-built-in-file-tools ()
+  "Test that file tools are advertised with their declared parameters."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-tool-shell-enabled nil))
+    (chat-files-register-built-in-tools)
+    (let ((prompt (chat-tool-caller-build-system-prompt "Base")))
+      (should (string-match-p "files_read" prompt))
+      (should (string-match-p "files_patch" prompt))
+      (should (string-match-p "\"path\"" prompt)))))
+
+(ert-deftest chat-tool-caller-denies-unapproved-dangerous-tool ()
+  "Test that dangerous tools are blocked when approval is denied."
+  (chat-test-with-temp-dir
+   (let* ((target-file (expand-file-name "blocked.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          captured-tool)
+     (chat-files-register-built-in-tools)
+     (cl-letf (((symbol-function 'chat-approval-request-tool-call)
+                (lambda (tool _call)
+                  (setq captured-tool (chat-forged-tool-id tool))
+                  nil)))
+       (let ((result (chat-tool-caller-execute
+                      `(:name "files_write"
+                        :arguments (("path" . ,target-file)
+                                    ("content" . "blocked"))))))
+         (should (eq captured-tool 'files_write))
+         (should (string-match-p "Approval denied" result))
+         (should-not (file-exists-p target-file)))))))
+
+(ert-deftest chat-tool-caller-stringifies-built-in-file-results ()
+  "Test that file tool results are converted to strings for follow up prompts."
+  (chat-test-with-temp-dir
+   (let* ((source-file (expand-file-name "source.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (with-temp-file source-file
+       (insert "hello tool"))
+     (chat-files-register-built-in-tools)
+     (let ((result (chat-tool-caller-execute
+                    `(:name "files_read"
+                      :arguments (("path" . ,source-file))))))
+       (should (stringp result))
+       (should (string-match-p "hello tool" result))
+       (should (string-match-p ":content" result))))))
+
 (ert-deftest chat-tool-caller-processes-response-without-tools ()
   "Test processing a plain response."
   (let ((result nil))
