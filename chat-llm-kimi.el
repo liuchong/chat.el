@@ -76,7 +76,10 @@ Called with no arguments, should return the API key string."
       (error "Kimi API error: %s (%s)" (or err-msg "Unknown") (or err-type "unknown"))))
   ;; Parse normal response
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (and choices (aref choices 0)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
          (message (and first-choice (cdr (assoc 'message first-choice))))
          (content (and message (cdr (assoc 'content message)))))
     (unless content
@@ -87,7 +90,10 @@ Called with no arguments, should return the API key string."
 (defun chat-llm-kimi--parse-stream-chunk (json-data)
   "Parse a Kimi streaming chunk JSON-DATA."
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (aref choices 0))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
          (delta (cdr (assoc 'delta first-choice)))
          (content (cdr (assoc 'content delta))))
     content))

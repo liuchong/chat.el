@@ -187,6 +187,26 @@ emacs -Q -batch -l tests/run-tests.el
 
 ---
 
+## Streaming JSON Parsing
+
+### `choices` Container Type Drift
+
+**Problem**: Streaming chunk parsing returns nil even though the payload contains content
+
+**Cause**: Some paths decode JSON arrays as lists while provider parsers assume vectors
+
+**Solution**: Provider response parsers and stream parsers should accept both list and vector choices
+
+```elisp
+(let ((first-choice (and choices
+                         (if (vectorp choices)
+                             (aref choices 0)
+                           (car choices)))))
+  ...)
+```
+
+---
+
 ## Timestamp Handling
 
 **Problem**: decode-time expects specific format from parse-time-string

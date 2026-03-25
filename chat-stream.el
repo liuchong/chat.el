@@ -60,21 +60,25 @@ Handles format: data: {...} or data:{...} (with or without space)"
   (condition-case nil
       (let* ((json-object-type 'alist)
              (json-array-type 'list)
-             (json-key-type 'string)
-             (data (json-read-from-string json-string)))
-        (pcase provider
-          ((or 'kimi 'kimi-code) (chat-stream--extract-openai-content data))
-          (_ (chat-stream--extract-openai-content data))))
+             (json-key-type 'symbol)
+             (data (json-read-from-string json-string))
+             (config (chat-llm-get-provider provider))
+             (parser (or (plist-get config :stream-fn)
+                         #'chat-stream--extract-openai-content)))
+        (funcall parser data))
     (error nil)))
 
 (defun chat-stream--extract-openai-content (data)
   "Extract stream content from OpenAI-compatible DATA."
-  (let* ((choices (cdr (assoc "choices" data)))
+  (let* ((choices (or (cdr (assoc 'choices data))
+                      (cdr (assoc "choices" data))))
          (first-choice (car-safe choices))
          (delta (and (listp first-choice)
-                     (cdr (assoc "delta" first-choice))))
+                     (or (cdr (assoc 'delta first-choice))
+                         (cdr (assoc "delta" first-choice)))))
          (content (and (listp delta)
-                       (cdr (assoc "content" delta)))))
+                       (or (cdr (assoc 'content delta))
+                           (cdr (assoc "content" delta))))))
     content))
 
 ;; ------------------------------------------------------------------

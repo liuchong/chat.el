@@ -75,7 +75,10 @@ If nil, will try to lookup from auth-source or chat-llm-openai-api-key-fn."
       (error "OpenAI API error: %s (%s)" (or err-msg "Unknown") (or err-type "unknown"))))
   ;; Parse normal response
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (and choices (aref choices 0)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
          (message (and first-choice (cdr (assoc 'message first-choice))))
          (content (and message (cdr (assoc 'content message)))))
     (unless content

@@ -80,7 +80,10 @@ Handles OpenAI-compatible response format."
              (or err-type "unknown"))))
   ;; Parse normal response
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (and choices (aref choices 0)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
          (message (and first-choice (cdr (assoc 'message first-choice))))
          (content (and message (cdr (assoc 'content message)))))
     (unless content
@@ -93,7 +96,10 @@ Handles OpenAI-compatible response format."
 
 Uses OpenAI-compatible streaming format."
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (and choices (aref choices 0)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
          (delta (and first-choice (cdr (assoc 'delta first-choice))))
          (content (and delta (cdr (assoc 'content delta)))))
     content))

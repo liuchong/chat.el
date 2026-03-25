@@ -99,5 +99,65 @@
     (should (plist-get request :messages))
     (should (= (length (plist-get request :messages)) 1))))
 
+(ert-deftest chat-llm-build-request-uses-provider-request-hook ()
+  "Test request builder hooks override the default payload shape."
+  (chat-llm-register-provider 'hook-test
+                              :model "ignored"
+                              :request-fn (lambda (_messages _options)
+                                            '((custom . t))))
+  (should (equal (chat-llm--build-request 'hook-test nil nil)
+                 '((custom . t)))))
+
+(ert-deftest chat-llm-build-request-uses-provider-build-request-hook ()
+  "Test `:build-request-fn' is also honored."
+  (chat-llm-register-provider 'build-hook-test
+                              :model "ignored"
+                              :build-request-fn (lambda (_messages _options)
+                                                  '((builder . t))))
+  (should (equal (chat-llm--build-request 'build-hook-test nil nil)
+                 '((builder . t)))))
+
+(ert-deftest chat-llm-request-async-calls-success-callback ()
+  "Test async requests pass parsed response to the success callback."
+  (let (captured-result)
+    (chat-llm-register-provider 'async-test
+                                :base-url "https://async.example.com"
+                                :api-key "token"
+                                :response-fn (lambda (_json-data) "async ok"))
+    (cl-letf (((symbol-function 'chat-llm--post-async)
+               (lambda (_url _headers _body success _error &optional _timeout)
+                 (funcall success "{\"choices\":[{\"message\":{\"content\":\"ignored\"}}]}" 200)
+                 'fake-handle)))
+      (let ((handle (chat-llm-request-async
+                     'async-test
+                     (list (make-chat-message :role :user :content "Hi"))
+                     (lambda (result)
+                       (setq captured-result result))
+                     (lambda (_err)
+                       (should nil)))))
+        (should (eq handle 'fake-handle))
+        (should (equal (plist-get captured-result :content) "async ok"))
+        (should (stringp (plist-get captured-result :raw-request)))
+        (should (stringp (plist-get captured-result :raw-response)))))))
+
+(ert-deftest chat-llm-request-async-calls-error-callback ()
+  "Test async requests surface transport errors."
+  (let (captured-error)
+    (chat-llm-register-provider 'async-error-test
+                                :base-url "https://async.example.com"
+                                :api-key "token")
+    (cl-letf (((symbol-function 'chat-llm--post-async)
+               (lambda (_url _headers _body _success error &optional _timeout)
+                 (funcall error "network failed")
+                 'fake-handle)))
+      (chat-llm-request-async
+       'async-error-test
+       (list (make-chat-message :role :user :content "Hi"))
+       (lambda (_result)
+         (should nil))
+       (lambda (err)
+         (setq captured-error err)))
+      (should (string= captured-error "network failed")))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

@@ -100,5 +100,48 @@
         (should (string-match-p "tool-ok"
                                 (chat-message-content followup)))))))
 
+(ert-deftest chat-ui-get-response-sync-uses-async-request-path ()
+  "Test that non streaming UI requests go through the async LLM API."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Async Session" 'kimi))
+          (chat-ui--messages-end nil)
+          requested)
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "user-1"
+       :role :user
+       :content "Hello"
+       :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-llm-request-async)
+                  (lambda (_model messages success _error _options)
+                    (setq requested messages)
+                    (funcall success
+                             '(:content "Async answer"
+                               :raw-request "{\"request\":true}"
+                               :raw-response "{\"response\":true}"))
+                    'request-handle)))
+         (chat-ui--get-response-sync)
+         (should requested)
+         (should (equal chat-ui--active-request-handle 'request-handle))
+         (let ((saved (car (last (chat-session-messages session)))))
+           (should (string= (chat-message-content saved) "Async answer"))))))))
+
+(ert-deftest chat-ui-cancel-response-cancels-non-stream-request ()
+  "Test cancelling also stops an active async request handle."
+  (let ((chat-ui--active-request-handle 'request-handle)
+        cancelled)
+    (cl-letf (((symbol-function 'chat-llm-cancel-request)
+               (lambda (handle)
+                 (setq cancelled handle)
+                 t)))
+      (chat-ui-cancel-response)
+      (should (eq cancelled 'request-handle))
+      (should-not chat-ui--active-request-handle))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

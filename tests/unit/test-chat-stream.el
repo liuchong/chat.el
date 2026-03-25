@@ -37,6 +37,15 @@
          (chunk (json-encode json-data)))
     (should (string= (chat-stream--extract-content chunk 'kimi) " world"))))
 
+(ert-deftest chat-stream-extract-content-uses-provider-stream-hook ()
+  "Test stream extraction honors provider specific parser hooks."
+  (chat-llm-register-provider 'stream-hook-test
+                              :stream-fn (lambda (json-data)
+                                           (cdr (assoc 'text json-data))))
+  (should (string=
+           (chat-stream--extract-content "{\"text\":\"hooked\"}" 'stream-hook-test)
+           "hooked")))
+
 (ert-deftest chat-stream-extract-content-returns-nil-on-done ()
   "Test that [DONE] signal returns nil."
   (should-not (chat-stream--extract-content "[DONE]" 'kimi))

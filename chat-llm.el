@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'json)
 (require 'url)
+(require 'subr-x)
 (require 'chat-log)
 
 ;; ------------------------------------------------------------------
@@ -99,9 +100,20 @@ Filters out empty assistant messages which are not allowed by the API."
                          (content . ,(or content ""))))))
                  messages))))
 
+(defun chat-llm--request-builder (config)
+  "Return the request builder function from CONFIG."
+  (or (plist-get config :build-request-fn)
+      (plist-get config :request-fn)))
+
+(defun chat-llm--response-parser (config)
+  "Return the response parser function from CONFIG."
+  (or (plist-get config :response-fn)
+      #'chat-llm--default-parse-response))
+
 (defun chat-llm--build-request (provider messages options)
   "Build request payload for PROVIDER with MESSAGES and OPTIONS."
   (let* ((config (chat-llm-get-provider provider))
+         (builder (chat-llm--request-builder config))
          (model (or (plist-get options :model)
                     (plist-get config :model)))
          (temperature (or (plist-get options :temperature) 0.7))
@@ -110,11 +122,17 @@ Filters out empty assistant messages which are not allowed by the API."
          (formatted-msgs (chat-llm--format-messages messages)))
     (chat-log "[BUILD-REQUEST] Provider: %s, Model: %s" provider model)
     (chat-log "[BUILD-REQUEST] Formatted messages: %S" formatted-msgs)
-    (list :model model
-          :messages formatted-msgs
-          :temperature temperature
-          :stream stream
-          :max_tokens max-tokens)))
+    (if builder
+        (funcall builder messages options)
+      (list :model model
+            :messages formatted-msgs
+            :temperature temperature
+            :stream stream
+            :max_tokens max-tokens))))
+
+(defun chat-llm--request-url (config)
+  "Return the request URL for CONFIG."
+  (concat (plist-get config :base-url) "/chat/completions"))
 
 ;; ------------------------------------------------------------------
 ;; HTTP Utilities
@@ -179,6 +197,62 @@ Returns (BODY . STATUS-CODE) on success, or signals error on failure."
        (when response-buffer (kill-buffer response-buffer))
        (signal (car err) (cdr err))))))
 
+(defun chat-llm--parse-http-response-buffer ()
+  "Parse the current HTTP response buffer.
+Returns a cons cell of raw response body and status code."
+  (goto-char (point-min))
+  (let (status-code response-body)
+    (when (looking-at "HTTP/[^ ]+ \\([0-9]+\\)")
+      (setq status-code (string-to-number (match-string 1)))
+      (chat-log "[LLM] HTTP status code: %d" status-code))
+    (if (re-search-forward "\r?\n\r?\n" nil t)
+        (let ((raw-body (buffer-substring (point) (point-max))))
+          (setq response-body (decode-coding-string raw-body 'utf-8)))
+      (setq response-body ""))
+    (chat-log "[LLM] Response body length: %d bytes" (length response-body))
+    (cons response-body status-code)))
+
+(defun chat-llm--post-async (url headers body success error &optional _timeout-secs)
+  "Make asynchronous POST request to URL.
+SUCCESS receives RAW-BODY and STATUS-CODE.
+ERROR receives a string message."
+  (chat-log "[LLM] Async POST to %s" url)
+  (let ((url-request-method "POST")
+        (url-request-extra-headers headers)
+        (url-request-data (if (multibyte-string-p body)
+                              (encode-coding-string body 'utf-8)
+                            body))
+        (url-user-agent (or (cdr (assoc "User-Agent" headers))
+                            "chat.el/1.0")))
+    (url-retrieve
+     url
+     (lambda (status success-callback error-callback)
+       (unwind-protect
+           (condition-case err
+               (if-let ((request-error (plist-get status :error)))
+                   (funcall error-callback (format "%s" request-error))
+                 (let* ((parsed (chat-llm--parse-http-response-buffer))
+                        (raw-body (car parsed))
+                        (status-code (cdr parsed)))
+                   (funcall success-callback raw-body status-code)))
+             (error
+              (funcall error-callback (error-message-string err))))
+         (when (buffer-live-p (current-buffer))
+           (kill-buffer (current-buffer)))))
+     (list success error)
+     t
+     t)))
+
+(defun chat-llm--decode-response (config raw-request raw-response status-code)
+  "Decode one response using CONFIG and request metadata."
+  (let ((parser (chat-llm--response-parser config)))
+    (if (/= status-code 200)
+        (error "HTTP error %d: %s" status-code raw-response)
+      (let ((json-data (json-read-from-string raw-response)))
+        (list :content (funcall parser json-data)
+              :raw-request raw-request
+              :raw-response raw-response)))))
+
 ;; ------------------------------------------------------------------
 ;; Main API
 ;; ------------------------------------------------------------------
@@ -193,31 +267,60 @@ OPTIONS is an optional plist of request parameters.
 Returns a plist with :content, :raw-request and :raw-response."
   (chat-log "[LLM] Starting request to provider: %s" provider)
   (let* ((config (chat-llm-get-provider provider))
-         (base-url (plist-get config :base-url))
          (request-body (chat-llm--build-request provider messages options))
          (headers (chat-llm--make-headers provider))
          (timeout (or (plist-get options :timeout) 60))
          (raw-request (json-encode request-body)))
-    (chat-log "[LLM] Base URL: %s" base-url)
+    (chat-log "[LLM] Base URL: %s" (plist-get config :base-url))
     (chat-log "[LLM] Request body: %s" raw-request)
     (chat-log "[LLM] Headers present: %s" (if headers "yes" "no"))
-    ;; Synchronous request
     (let* ((result (chat-llm--post-sync
-                    (concat base-url "/chat/completions")
+                    (chat-llm--request-url config)
                     headers
                     raw-request
                     timeout))
            (raw-response (car result))
-           (status-code (cdr result))
-           (parser (or (plist-get config :response-fn)
-                       #'chat-llm--default-parse-response)))
+           (status-code (cdr result)))
       (chat-log "[LLM] Got response body: %s..." (substring raw-response 0 (min 100 (length raw-response))))
-      (if (/= status-code 200)
-          (error "HTTP error %d: %s" status-code raw-response)
-        (let ((json-data (json-read-from-string raw-response)))
-          (list :content (funcall parser json-data)
-                :raw-request raw-request
-                :raw-response raw-response))))))
+      (chat-llm--decode-response config raw-request raw-response status-code))))
+
+(defun chat-llm-request-async (provider messages success-callback error-callback &optional options)
+  "Send an asynchronous request to PROVIDER with MESSAGES.
+SUCCESS-CALLBACK receives the response plist.
+ERROR-CALLBACK receives an error string.
+Returns a request handle."
+  (chat-log "[LLM] Starting async request to provider: %s" provider)
+  (let* ((config (chat-llm-get-provider provider))
+         (request-body (chat-llm--build-request provider messages options))
+         (headers (chat-llm--make-headers provider))
+         (timeout (or (plist-get options :timeout) 60))
+         (raw-request (json-encode request-body)))
+    (chat-log "[LLM] Async request body: %s" raw-request)
+    (chat-llm--post-async
+     (chat-llm--request-url config)
+     headers
+     raw-request
+     (lambda (raw-response status-code)
+       (condition-case err
+           (funcall success-callback
+                    (chat-llm--decode-response config raw-request raw-response status-code))
+         (error
+          (funcall error-callback (error-message-string err)))))
+     (lambda (err)
+       (funcall error-callback
+                (if (stringp err)
+                    err
+                  (error-message-string err))))
+     timeout)))
+
+(defun chat-llm-cancel-request (handle)
+  "Cancel asynchronous request HANDLE."
+  (when (buffer-live-p handle)
+    (let ((proc (get-buffer-process handle)))
+      (when (process-live-p proc)
+        (delete-process proc)))
+    (kill-buffer handle)
+    t))
 
 (defun chat-llm-stream (provider messages callback &optional options)
   "Stream response from PROVIDER with MESSAGES to CALLBACK.
@@ -258,7 +361,10 @@ OPTIONS is an optional plist of request parameters."
       (error "API error: %s (%s)" (or err-msg "Unknown") (or err-type "unknown"))))
   ;; Parse normal response
   (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (and choices (aref choices 0)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
          (message (and first-choice (cdr (assoc 'message first-choice))))
          (content (and message (cdr (assoc 'content message)))))
     (unless content
