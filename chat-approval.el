@@ -15,7 +15,7 @@
   :type 'boolean
   :group 'chat-approval)
 (defcustom chat-approval-required-tools
-  '(files_write files_replace files_patch shell_execute)
+  '(files_write files_replace files_patch apply_patch shell_execute)
   "Tools that require approval before execution."
   :type '(repeat symbol)
   :group 'chat-approval)
@@ -23,6 +23,7 @@
   '((files_write . medium)
     (files_replace . medium)
     (files_patch . high)
+    (apply_patch . high)
     (shell_execute . high))
   "Risk level mapping for tool approvals."
   :type '(alist :key-type symbol :value-type symbol)

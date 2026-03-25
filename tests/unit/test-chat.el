@@ -76,6 +76,7 @@
   "Test that loading chat registers built in file tools."
   (should (chat-tool-forge-get 'files_read))
   (should (chat-tool-forge-get 'files_patch))
+  (should (chat-tool-forge-get 'apply_patch))
   (should (chat-tool-forge-get 'files_write)))
 
 (provide 'test-chat)

@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'diff)
 (require 'seq)
 (require 'chat-tool-forge)
 
@@ -480,7 +481,8 @@ PATCHES is a list of plists with:
 
 All patches are applied atomically (or none if any fails)."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (backup-path (concat safe-path ".chat-backup")))
+         (backup-path (concat safe-path ".chat-backup"))
+         diff-output)
     ;; Create backup
     (copy-file safe-path backup-path t)
     (condition-case err
@@ -502,14 +504,20 @@ All patches are applied atomically (or none if any fails)."
                   (when (search-forward search nil t)
                     (replace-match replace t t))))))
           (write-region (point-min) (point-max) safe-path)
+          (setq diff-output (chat-files-diff backup-path safe-path))
           (delete-file backup-path)
           (list :path safe-path
                 :patches-applied (length patches)
+                :diff diff-output
                 :status 'success))
       (error
        ;; Restore from backup
        (rename-file backup-path safe-path t)
        (error "Patch failed: %s" (error-message-string err))))))
+
+(defun chat-files-apply-patch (path patches)
+  "Apply PATCHES to PATH using the patch engine."
+  (chat-files-patch path patches))
 
 ;; ------------------------------------------------------------------
 ;; File Concatenation and Assembly
@@ -703,7 +711,15 @@ Returns total size, line count, and file type distribution."
    '((:name "path" :type "string" :required t)
      (:name "patches" :type "array" :required t))
    (lambda (path patches)
-     (chat-files-patch path patches))))
+     (chat-files-patch path patches)))
+  (chat-files--register-built-in-tool
+   'apply_patch
+   "Apply Patch"
+   "Apply structured search and replace patches to an existing file"
+   '((:name "path" :type "string" :required t)
+     (:name "patches" :type "array" :required t))
+   (lambda (path patches)
+     (chat-files-apply-patch path patches))))
 
 ;; ------------------------------------------------------------------
 ;; Tool Interface for AI
@@ -774,9 +790,20 @@ Returns unified diff format as string."
          (safe-path2 (chat-files--safe-path-p path2))
          (ctx (or context 3)))
     (with-temp-buffer
-      (let ((diff-switches (format "-u%d" ctx)))
-        (diff safe-path1 safe-path2 nil 'noasync)
-        (buffer-string)))))
+      (let ((exit-code (call-process
+                        "diff"
+                        nil
+                        t
+                        nil
+                        (format "-u%d" ctx)
+                        safe-path1
+                        safe-path2)))
+        (cond
+         ((or (eq exit-code 0)
+              (eq exit-code 1))
+          (buffer-string))
+         (t
+          (error "Diff failed for %s and %s" safe-path1 safe-path2)))))))
 
 ;;;###autoload
 (defun chat-files-checksum (path &optional algorithm)

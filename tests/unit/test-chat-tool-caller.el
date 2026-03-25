@@ -98,6 +98,8 @@
     (let ((prompt (chat-tool-caller-build-system-prompt "Base")))
       (should (string-match-p "files_read" prompt))
       (should (string-match-p "files_patch" prompt))
+      (should (string-match-p "apply_patch" prompt))
+      (should (string-match-p "Read files before editing" prompt))
       (should (string-match-p "\"path\"" prompt)))))
 
 (ert-deftest chat-tool-caller-denies-unapproved-dangerous-tool ()

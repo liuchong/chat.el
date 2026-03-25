@@ -183,6 +183,36 @@
                         (buffer-string))
                       "new text here")))))
 
+(ert-deftest chat-files-patch-returns-diff-preview ()
+  "Test patch operations return a unified diff preview."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (let ((result (chat-files-patch
+                    test-file
+                    '((:search "beta" :replace "gamma")))))
+       (should (eq (plist-get result :status) 'success))
+       (should (stringp (plist-get result :diff)))
+       (should (string-match-p "-beta" (plist-get result :diff)))
+       (should (string-match-p "+gamma" (plist-get result :diff)))))))
+
+(ert-deftest chat-files-apply-patch-alias-uses-patch-engine ()
+  "Test apply patch wrapper delegates to file patching."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "apply.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "hello old world"))
+     (chat-files-apply-patch
+      test-file
+      '((:search "old" :replace "new")))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello new world")))))
+
 ;; ------------------------------------------------------------------
 ;; Statistics
 ;; ------------------------------------------------------------------
