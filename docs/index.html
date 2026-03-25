@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>chat.el - AI Chat for Emacs</title>
+    <link rel="icon" type="image/svg+xml" href="pages/assets/images/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="pages/assets/css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="navbar-container">
+            <a href="index.html" class="navbar-brand">chat.el</a>
+            <button class="mobile-menu-toggle" onclick="toggleMenu()">☰</button>
+            <ul class="navbar-nav" id="navbarNav">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="pages/docs.html">Documentation</a></li>
+                <li><a href="https://github.com/liuchong/chat.el" target="_blank">GitHub</a></li>
+                <li><a href="https://license.pub/1pl/" target="_blank">License</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-bg-logo"></div>
+        <div class="hero-particles" id="particles"></div>
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="pulse"></span>
+                <span>Now Available — v0.1.0</span>
+            </div>
+            <h1>AI Chat for Emacs</h1>
+            <p class="hero-description">
+                A pure Emacs AI chat client focused on coding workflows. 
+                Multi-turn conversations, tool calling, file operations, 
+                and session persistence — all without leaving your editor.
+            </p>
+            <div class="hero-cta">
+                <a href="#get-started" class="btn btn-primary">Get Started →</a>
+                <a href="pages/docs.html" class="btn btn-secondary">Documentation</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="section">
+        <div class="main-content">
+            <div class="section-header fade-in">
+                <h2>Built for Coders</h2>
+                <p>Everything you need to supercharge your Emacs workflow with AI assistance</p>
+            </div>
+            
+            <div class="features-grid">
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">💬</div>
+                    <h3>Multi-Turn Chat</h3>
+                    <p>Natural conversations with context preservation and intelligent trimming. Your chat history stays organized and accessible.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">🔌</div>
+                    <h3>Multiple Providers</h3>
+                    <p>Connect to Kimi, Kimi Code, and any OpenAI-compatible API. Switch providers seamlessly without changing your workflow.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">🛠️</div>
+                    <h3>Tool Calling</h3>
+                    <p>Let AI read files, search code, and execute commands. Built-in approval gates keep risky operations under your control.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">📁</div>
+                    <h3>File Operations</h3>
+                    <p>AI-assisted file reading, grep, and modification with configurable safety controls. Works within allowed directories only.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">💾</div>
+                    <h3>Session Management</h3>
+                    <p>Save and resume chat sessions anytime. Inspect raw request/response data for debugging and transparency.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Streaming Display</h3>
+                    <p>Real-time response streaming through async non-blocking UI. Watch the AI think and respond in real-time.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start Section -->
+    <section class="section" id="get-started" style="background: #f8fafc;">
+        <div class="main-content">
+            <div class="section-header fade-in">
+                <h2>Quick Start</h2>
+                <p>Get up and running in under a minute</p>
+            </div>
+            
+            <div class="code-section fade-in">
+                <div class="code-header">
+                    <span class="code-dot red"></span>
+                    <span class="code-dot yellow"></span>
+                    <span class="code-dot green"></span>
+                    <span style="margin-left: 1rem; color: #64748b; font-size: 0.85rem;">emacs-lisp</span>
+                </div>
+                <div class="code-block">
+                    <pre><code><span class="code-comment">;; 1. Add to your load path</span>
+(<span class="code-function">add-to-list</span> <span class="code-string">'load-path</span> <span class="code-string">"/path/to/chat.el"</span>)
+(<span class="code-function">require</span> <span class="code-string">'chat</span>)
+
+<span class="code-comment">;; 2. Configure your provider</span>
+(<span class="code-function">setq</span> <span class="code-variable">chat-default-model</span> <span class="code-string">'kimi-code</span>)
+(<span class="code-function">setq</span> <span class="code-variable">chat-llm-kimi-code-api-key</span> <span class="code-string">"your-api-key"</span>)
+
+<span class="code-comment">;; 3. Or use auth-source for secure storage</span>
+<span class="code-comment">;; machine kimi-code-api user api-key password YOUR_KEY</span>
+
+<span class="code-comment">;; 4. Start chatting</span>
+<span class="code-comment">;; M-x chat</span></code></pre>
+                </div>
+            </div>
+            
+            <div class="cta" style="text-align: center; margin-top: 3rem;">
+                <a href="pages/docs.html" class="btn btn-dark">View Full Documentation →</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section class="section">
+        <div class="main-content">
+            <div class="section-header fade-in">
+                <h2>Modular Architecture</h2>
+                <p>Clean separation of concerns with focused modules</p>
+            </div>
+            
+            <div class="architecture-grid fade-in">
+                <div class="arch-card">
+                    <h4>chat.el</h4>
+                    <p>Entry point and command wiring</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-ui.el</h4>
+                    <p>Chat buffer rendering and response lifecycle</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-session.el</h4>
+                    <p>Session and message persistence</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-llm.el</h4>
+                    <p>Provider abstraction and async request handling</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-stream.el</h4>
+                    <p>SSE parsing and chunk handling</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-tool-caller.el</h4>
+                    <p>Tool prompt contract, parsing, and execution</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-approval.el</h4>
+                    <p>Approval flow for risky tools and tool creation</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-files.el</h4>
+                    <p>Built-in file tools and path safety checks</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-context.el</h4>
+                    <p>Context trimming and summary generation</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-tool-forge.el</h4>
+                    <p>Tool registry, compilation, loading, and execution</p>
+                </div>
+                <div class="arch-card">
+                    <h4>chat-tool-forge-ai.el</h4>
+                    <p>AI-assisted tool generation flow</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="section" style="padding: 0;">
+        <div class="main-content">
+            <div class="stats-section fade-in">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <h3>120+</h3>
+                        <p>Tests Passing</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>11</h3>
+                        <p>Core Modules</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>3+</h3>
+                        <p>LLM Providers</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>1PL</h3>
+                        <p>Copyleft License</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- License Section -->
+    <section class="section">
+        <div class="main-content">
+            <div class="license-banner fade-in">
+                <div class="license-icon">📜</div>
+                <div class="license-content">
+                    <h3>Licensed under 1PL (One Public License)</h3>
+                    <p>A copyleft license that ensures when you distribute this software or derivative works, the complete source code must be made available under the same license terms. Freedom passed on without interruption.</p>
+                    <a href="https://license.pub/1pl/" target="_blank">Read the full license →</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h4>chat.el</h4>
+                <p style="color: #94a3b8; margin-top: 1rem;">AI Chat Client for Emacs<br>Built with 💜 for the community</p>
+            </div>
+            <div class="footer-section">
+                <h4>Resources</h4>
+                <a href="pages/docs.html">Documentation</a>
+                <a href="https://github.com/liuchong/chat.el">GitHub Repository</a>
+                <a href="pages/docs.html#architecture">Architecture</a>
+                <a href="pages/docs.html#tools">Tool Reference</a>
+            </div>
+            <div class="footer-section">
+                <h4>Community</h4>
+                <a href="https://github.com/liuchong/chat.el/issues">Issue Tracker</a>
+                <a href="https://license.pub/1pl/">1PL License</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>© 2026 chat.el contributors · Licensed under <a href="https://license.pub/1pl/" style="color: var(--primary-light);">1PL</a></p>
+        </div>
+    </footer>
+
+    <script>
+        // Navbar scroll effect
+        window.addEventListener('scroll', () => {
+            const navbar = document.getElementById('navbar');
+            if (window.scrollY > 50) {
+                navbar.classList.add('scrolled');
+            } else {
+                navbar.classList.remove('scrolled');
+            }
+        });
+
+        // Mobile menu toggle
+        function toggleMenu() {
+            const nav = document.getElementById('navbarNav');
+            nav.classList.toggle('active');
+        }
+
+        // Create floating particles
+        const particlesContainer = document.getElementById('particles');
+        for (let i = 0; i < 30; i++) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            particle.style.left = Math.random() * 100 + '%';
+            particle.style.animationDelay = Math.random() * 20 + 's';
+            particle.style.animationDuration = (15 + Math.random() * 10) + 's';
+            particlesContainer.appendChild(particle);
+        }
+
+        // Intersection Observer for fade-in animations
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>

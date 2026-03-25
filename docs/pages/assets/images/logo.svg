@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="mainGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="50%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#a855f7"/>
+    </linearGradient>
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ec4899"/>
+      <stop offset="100%" style="stop-color:#f472b6"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer ring - Emacs circle reference -->
+  <circle cx="50" cy="50" r="45" fill="none" stroke="url(#mainGradient)" stroke-width="2.5"/>
+  
+  <!-- Inner circle border -->
+  <circle cx="50" cy="50" r="38" fill="none" stroke="url(#mainGradient)" stroke-width="1" opacity="0.3"/>
+  
+  <!-- Chat bubble shape merged with gnu horns -->
+  <path d="M30 40 
+           Q30 30, 40 30 
+           L45 30
+           Q50 25, 55 30
+           L60 30
+           Q70 30, 70 40
+           L70 55
+           Q70 62, 62 62
+           L55 62
+           L50 70
+           L45 62
+           L38 62
+           Q30 62, 30 55
+           Z" 
+        fill="url(#mainGradient)" opacity="0.15"/>
+  
+  <!-- Main chat bubble outline -->
+  <path d="M32 42 
+           Q32 34, 40 34 
+           L44 34
+           Q50 30, 56 34
+           L60 34
+           Q68 34, 68 42
+           L68 54
+           Q68 60, 60 60
+           L55 60
+           L50 66
+           L45 60
+           L40 60
+           Q32 60, 32 54
+           Z" 
+        fill="none" stroke="url(#mainGradient)" stroke-width="2" stroke-linejoin="round"/>
+  
+  <!-- AI neural nodes inside bubble -->
+  <circle cx="42" cy="44" r="3" fill="url(#accentGradient)"/>
+  <circle cx="50" cy="40" r="3" fill="url(#accentGradient)"/>
+  <circle cx="58" cy="44" r="3" fill="url(#accentGradient)"/>
+  <circle cx="46" cy="52" r="3" fill="url(#accentGradient)"/>
+  <circle cx="54" cy="52" r="3" fill="url(#accentGradient)"/>
+  
+  <!-- Neural connections -->
+  <line x1="42" y1="44" x2="50" y2="40" stroke="url(#mainGradient)" stroke-width="1" opacity="0.6"/>
+  <line x1="50" y1="40" x2="58" y2="44" stroke="url(#mainGradient)" stroke-width="1" opacity="0.6"/>
+  <line x1="42" y1="44" x2="46" y2="52" stroke="url(#mainGradient)" stroke-width="1" opacity="0.6"/>
+  <line x1="58" y1="44" x2="54" y2="52" stroke="url(#mainGradient)" stroke-width="1" opacity="0.6"/>
+  <line x1="46" y1="52" x2="54" y2="52" stroke="url(#mainGradient)" stroke-width="1" opacity="0.6"/>
+  <line x1="50" y1="40" x2="46" y2="52" stroke="url(#mainGradient)" stroke-width="1" opacity="0.3"/>
+  <line x1="50" y1="40" x2="54" y2="52" stroke="url(#mainGradient)" stroke-width="1" opacity="0.3"/>
+  
+  <!-- Emacs gnu horn reference - stylized curves on sides -->
+  <path d="M25 35 Q20 45, 25 55" fill="none" stroke="url(#mainGradient)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <path d="M75 35 Q80 45, 75 55" fill="none" stroke="url(#mainGradient)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  
+  <!-- E letter hint for Emacs -->
+  <text x="50" y="85" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="7" font-weight="600" fill="url(#mainGradient)" opacity="0.4">E</text>
+</svg>

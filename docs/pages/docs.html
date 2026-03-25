@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation - chat.el</title>
+    <link rel="icon" type="image/svg+xml" href="assets/images/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar scrolled" id="navbar">
+        <div class="navbar-container">
+            <a href="../index.html" class="navbar-brand">chat.el</a>
+            <button class="mobile-menu-toggle" onclick="toggleMenu()">☰</button>
+            <ul class="navbar-nav" id="navbarNav">
+                <li><a href="../index.html">Home</a></li>
+                <li><a href="docs.html" style="color: var(--primary);">Documentation</a></li>
+                <li><a href="https://github.com/liuchong/chat.el" target="_blank">GitHub</a></li>
+                <li><a href="https://license.pub/1pl/" target="_blank">License</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Documentation Container -->
+    <div class="docs-container">
+        <!-- Sidebar Navigation -->
+        <aside class="docs-sidebar">
+            <h3>Getting Started</h3>
+            <ul class="docs-nav">
+                <li><a href="#installation" class="active">Installation</a></li>
+                <li><a href="#configuration">Configuration</a></li>
+                <li><a href="#quick-start">Quick Start</a></li>
+            </ul>
+            
+            <h3 style="margin-top: 1.5rem;">Usage</h3>
+            <ul class="docs-nav">
+                <li><a href="#commands">Commands</a></li>
+                <li><a href="#providers">LLM Providers</a></li>
+                <li><a href="#tools" id="tools">Tool System</a></li>
+                <li><a href="#sessions">Session Management</a></li>
+            </ul>
+            
+            <h3 style="margin-top: 1.5rem;">Reference</h3>
+            <ul class="docs-nav">
+                <li><a href="#architecture" id="architecture">Architecture</a></li>
+                <li><a href="#file-access">File Access</a></li>
+                <li><a href="#testing">Testing</a></li>
+                <li><a href="#troubleshooting">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="docs-content">
+            <h1>Documentation</h1>
+            <p>Complete guide to installing, configuring, and using chat.el</p>
+
+            <h2 id="installation">Installation</h2>
+            <p>chat.el is a pure Emacs Lisp package with no external dependencies beyond Emacs 27+.</p>
+            
+            <h3>Manual Installation</h3>
+            <ol>
+                <li>Clone the repository:</li>
+            </ol>
+            <pre><code>git clone https://github.com/liuchong/chat.el.git</code></pre>
+            
+            <ol start="2">
+                <li>Add to your Emacs configuration:</li>
+            </ol>
+            <pre><code>(add-to-list 'load-path "/path/to/chat.el")
+(require 'chat)</code></pre>
+
+            <h2 id="configuration">Configuration</h2>
+            
+            <h3>Provider Setup</h3>
+            <p>Configure your preferred LLM provider:</p>
+            
+            <h4>Kimi Code</h4>
+            <pre><code>(setq chat-default-model 'kimi-code)
+(setq chat-llm-kimi-code-api-key "sk-kimi-...")</code></pre>
+
+            <h4>Kimi</h4>
+            <pre><code>(setq chat-default-model 'kimi)
+(setq chat-llm-kimi-api-key "sk-...")</code></pre>
+
+            <h4>OpenAI Compatible</h4>
+            <pre><code>(setq chat-default-model 'openai)
+(setq chat-llm-openai-api-key "sk-...")
+(setq chat-llm-openai-base-url "https://api.openai.com/v1")</code></pre>
+
+            <h3>Secure Credential Storage</h3>
+            <p>Recommended: Use <code>auth-source</code> instead of hardcoding API keys:</p>
+            <pre><code># ~/.authinfo or ~/.authinfo.gpg
+machine kimi-code-api user api-key password YOUR_KEY
+machine openai-api user api-key password YOUR_KEY</code></pre>
+
+            <h3>Recommended Configuration</h3>
+            <pre><code>(setq chat-default-model 'kimi-code)
+(setq chat-ui-use-streaming t)
+(setq chat-session-auto-save t)
+(setq chat-files-allowed-directories
+      (list default-directory "/tmp/" "/var/tmp/"))</code></pre>
+
+            <h2 id="quick-start">Quick Start</h2>
+            <p>Start a chat session with:</p>
+            <pre><code>M-x chat</code></pre>
+            <p>This will open or resume the current chat buffer. Type your message and press <code>C-c C-c</code> to send.</p>
+
+            <h2 id="commands">Commands</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Command</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>M-x chat</code></td>
+                        <td>Open or resume the current chat buffer</td>
+                    </tr>
+                    <tr>
+                        <td><code>M-x chat-new-session</code></td>
+                        <td>Create a new session</td>
+                    </tr>
+                    <tr>
+                        <td><code>M-x chat-list-sessions</code></td>
+                        <td>Switch to an existing session</td>
+                    </tr>
+                    <tr>
+                        <td><code>M-x chat-view-raw-message</code></td>
+                        <td>Inspect the last raw API exchange</td>
+                    </tr>
+                    <tr>
+                        <td><code>M-x chat-view-last-raw-exchange</code></td>
+                        <td>Open the latest assistant request and response</td>
+                    </tr>
+                    <tr>
+                        <td><code>M-x chat-ui-cancel-response</code></td>
+                        <td>Cancel the active response</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 id="providers">LLM Providers</h2>
+            <p>chat.el supports multiple LLM providers through a unified abstraction layer.</p>
+            
+            <h3>Supported Providers</h3>
+            <ul>
+                <li><strong>Kimi</strong> — Moonshot AI's general-purpose model</li>
+                <li><strong>Kimi Code</strong> — Optimized for coding tasks with China region support</li>
+                <li><strong>OpenAI Compatible</strong> — Any OpenAI-compatible API endpoint</li>
+            </ul>
+
+            <h3>Adding Custom Providers</h3>
+            <p>Extend <code>chat-llm.el</code> to add new providers. See existing implementations in <code>chat-llm-kimi.el</code> and <code>chat-llm-openai.el</code>.</p>
+
+            <h2 id="tools">Tool System</h2>
+            <p>chat.el includes a powerful tool calling system that allows the AI to interact with your filesystem and execute commands.</p>
+
+            <h3>Built-in Tools</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Description</th>
+                        <th>Risk Level</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>files_read</code></td>
+                        <td>Read file contents</td>
+                        <td>Low</td>
+                    </tr>
+                    <tr>
+                        <td><code>files_read_lines</code></td>
+                        <td>Read specific line ranges</td>
+                        <td>Low</td>
+                    </tr>
+                    <tr>
+                        <td><code>files_list</code></td>
+                        <td>List directory contents</td>
+                        <td>Low</td>
+                    </tr>
+                    <tr>
+                        <td><code>files_grep</code></td>
+                        <td>Search file contents</td>
+                        <td>Low</td>
+                    </tr>
+                    <tr>
+                        <td><code>files_write</code></td>
+                        <td>Write file contents</td>
+                        <td>High</td>
+                    </tr>
+                    <tr>
+                        <td><code>files_replace</code></td>
+                        <td>Replace file contents</td>
+                        <td>High</td>
+                    </tr>
+                    <tr>
+                        <td><code>files_patch</code></td>
+                        <td>Apply patches to files</td>
+                        <td>High</td>
+                    </tr>
+                    <tr>
+                        <td><code>apply_patch</code></td>
+                        <td>Apply unified diff patches</td>
+                        <td>High</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Approval System</h3>
+            <p>High-risk tools require explicit user approval before execution. The approval flow:</p>
+            <ol>
+                <li>AI requests to use a risky tool</li>
+                <li>User reviews the proposed action</li>
+                <li>User approves or denies</li>
+                <li>Result is fed back to the AI</li>
+            </ol>
+
+            <h3>AI-Generated Tools</h3>
+            <p>chat.el can generate custom tools through AI assistance. Generated tools:</p>
+            <ul>
+                <li>Must be a single top-level <code>lambda</code> form</li>
+                <li>Require approval before registration</li>
+                <li>Are saved to disk for persistence</li>
+                <li>Are compiled and loaded dynamically</li>
+            </ul>
+
+            <h2 id="sessions">Session Management</h2>
+            <p>Sessions are automatically saved to disk, allowing you to resume conversations across Emacs restarts.</p>
+
+            <h3>Session Features</h3>
+            <ul>
+                <li><strong>Auto-save</strong> — Sessions persist automatically</li>
+                <li><strong>Context trimming</strong> — Long conversations are intelligently trimmed</li>
+                <li><strong>System message preservation</strong> — Important context is retained</li>
+                <li><strong>Summary generation</strong> — Conversation summaries for long threads</li>
+            </ul>
+
+            <h3>Session Commands</h3>
+            <pre><code>M-x chat-new-session        ; Create new session
+M-x chat-list-sessions      ; List and switch sessions
+M-x chat-view-raw-message   ; Inspect API exchanges</code></pre>
+
+            <h2 id="architecture">Architecture</h2>
+            <p>chat.el follows a modular architecture with clear separation of concerns:</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Responsibility</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>chat.el</code></td>
+                        <td>Entry point and command wiring</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-ui.el</code></td>
+                        <td>Chat buffer rendering and response lifecycle</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-session.el</code></td>
+                        <td>Session and message persistence</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-llm.el</code></td>
+                        <td>Provider abstraction and async request handling</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-stream.el</code></td>
+                        <td>SSE parsing and chunk handling</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-tool-caller.el</code></td>
+                        <td>Tool prompt contract, parsing, and execution</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-approval.el</code></td>
+                        <td>Approval flow for risky tools</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-files.el</code></td>
+                        <td>Built-in file tools and path safety</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-context.el</code></td>
+                        <td>Context trimming and summary generation</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-tool-forge.el</code></td>
+                        <td>Tool registry, compilation, loading</td>
+                    </tr>
+                    <tr>
+                        <td><code>chat-tool-forge-ai.el</code></td>
+                        <td>AI-assisted tool generation</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 id="file-access">File Access</h2>
+            <p>By default, file tools can only access:</p>
+            <ul>
+                <li>The current project directory</li>
+                <li><code>/tmp/</code></li>
+                <li><code>/var/tmp/</code></li>
+            </ul>
+            
+            <p>Override with:</p>
+            <pre><code>(setq chat-files-allowed-directories
+      (list default-directory "/tmp/" "/var/tmp/" "/custom/path/"))</code></pre>
+
+            <h2 id="testing">Testing</h2>
+            <p>Run the test suite:</p>
+            <pre><code>emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit</code></pre>
+            
+            <p>Current baseline:</p>
+            <ul>
+                <li>122 tests discovered</li>
+                <li>120 passing</li>
+                <li>2 skipped (provider integration tests)</li>
+            </ul>
+
+            <h2 id="troubleshooting">Troubleshooting</h2>
+            
+            <h3>Common Issues</h3>
+            
+            <h4>API Key Not Found</h4>
+            <p>Ensure your API key is set or use <code>auth-source</code>:</p>
+            <pre><code>(setq chat-llm-kimi-code-api-key "your-key")
+;; or
+(machine kimi-code-api user api-key password YOUR_KEY)</code></pre>
+
+            <h4>File Access Denied</h4>
+            <p>Check <code>chat-files-allowed-directories</code> includes your target path.</p>
+
+            <h4>Streaming Not Working</h4>
+            <p>Ensure <code>chat-ui-use-streaming</code> is enabled and your provider supports SSE.</p>
+
+            <h3>Getting Help</h3>
+            <ul>
+                <li>Check <a href="https://github.com/liuchong/chat.el/issues">GitHub Issues</a></li>
+                <li>Review <code>M-x chat-view-last-raw-exchange</code> for API debugging</li>
+                <li>Read <code>docs/troubleshooting-pitfalls.md</code> in the repository</li>
+            </ul>
+
+            <div style="margin-top: 4rem; padding-top: 2rem; border-top: 2px solid var(--gray-light);">
+                <p style="color: var(--gray);">📄 This documentation is also available in the repository's <code>docs/</code> directory.</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer" style="margin-top: 0;">
+        <div class="footer-content" style="max-width: 1400px; margin: 0 auto;">
+            <div class="footer-section">
+                <h4>chat.el</h4>
+                <p style="color: #94a3b8; margin-top: 1rem;">AI Chat Client for Emacs</p>
+            </div>
+            <div class="footer-section">
+                <h4>Resources</h4>
+                <a href="../index.html">Home</a>
+                <a href="https://github.com/liuchong/chat.el">GitHub</a>
+                <a href="https://license.pub/1pl/">License</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>© 2026 chat.el contributors · <a href="https://license.pub/1pl/" style="color: var(--primary-light);">1PL</a></p>
+        </div>
+    </footer>
+
+    <script>
+        // Mobile menu toggle
+        function toggleMenu() {
+            const nav = document.getElementById('navbarNav');
+            nav.classList.toggle('active');
+        }
+
+        // Active nav link based on scroll
+        const sections = document.querySelectorAll('.docs-content h2[id]');
+        const navLinks = document.querySelectorAll('.docs-nav a');
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (scrollY >= sectionTop - 150) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === '#' + current) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
