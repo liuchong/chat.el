@@ -99,6 +99,22 @@ conversation-YYYY-MM-DD-topic.md
 - 不要随意打乱 topic 顺序
 - 如果确实需要新增 topic 只新增一级 `##` 主题
 
+### Documentation Directory Structure
+
+`docs/` 目录按内容篇幅和深度分层：
+
+| 目录 | 用途 | 内容示例 |
+|------|------|----------|
+| `ai-contexts/` | 会话级开发记录 | 每次开发会话的完整记录 |
+| `tips/` | 短形式的灵感和速记 | 代码片段、快捷技巧、aha moments |
+| `articles/` | 中等篇幅专题文章 | 技术深入、最佳实践、实现故事 |
+| `books/` | 长篇系统性文档 | 架构指南、设计原则、完整规范 |
+
+选择依据：
+- 单条灵感或速记 → `tips/`
+- 一个主题的完整探讨 → `articles/`
+- 成体系的系统性内容 → `books/`
+
 参考：
 
 - `docs/README.md`

@@ -24,6 +24,38 @@ Each record should explain:
 
 See `ai-contexts/README.md` for the naming format and suggested template.
 
+## Books
+
+The `books/` directory stores comprehensive, systematic documentation.
+
+Long-form content that covers a topic in depth:
+- Architecture guides
+- Design principles
+- Complete feature specifications
+- Development handbooks
+
+## Articles
+
+The `articles/` directory stores focused, medium-length writings.
+
+Single-topic pieces that explore specific subjects:
+- Technical deep dives
+- Best practice guides
+- Post-mortem analysis
+- Implementation stories
+- Tool comparisons
+
+## Tips
+
+The `tips/` directory stores short-form inspirations and quick notes.
+
+Brief but valuable snippets:
+- Code patterns worth remembering
+- One-liners and quick fixes
+- Tool tricks and hidden features
+- Aha moments and insights
+- Bookmark-worthy resources
+
 ## When To Update Which File
 
 - Update `PROJECT_STATUS.md` when the project baseline changes in a meaningful way
@@ -42,10 +74,13 @@ See `ai-contexts/README.md` for the naming format and suggested template.
 
 ## Current Documentation Layout
 
-| File | Purpose |
-|------|---------|
+| File/Directory | Purpose |
+|----------------|---------|
 | `README.md` | Project overview and quick start |
 | `PROJECT_STATUS.md` | Current state and next focus |
 | `troubleshooting-pitfalls.md` | Known issues and fixes |
 | `ai-contexts/README.md` | Rules for session documents |
 | `ai-contexts/*.md` | Historical implementation records |
+| `books/` | Long-form systematic documentation |
+| `articles/` | Focused medium-length articles |
+| `tips/` | Short-form inspirations and quick notes |
