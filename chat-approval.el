@@ -7,6 +7,10 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'subr-x)
+
+;; Forward declarations
+(declare-function chat-forged-tool-id "chat-tool-forge" (tool))
+(declare-function chat-session-auto-approve-p "chat-session" (session))
 (defgroup chat-approval nil
   "Approval handling for chat.el."
   :group 'chat)
@@ -41,6 +45,20 @@
 (defcustom chat-approval-tool-creation-required t
   "Whether AI generated tools require explicit approval."
   :type 'boolean
+  :group 'chat-approval)
+
+(defcustom chat-approval-auto-approve-global nil
+  "Whether to auto-approve tools without prompting.
+When non-nil, tools in `chat-approval-auto-approve-tools' will be
+executed without user confirmation."
+  :type 'boolean
+  :group 'chat-approval)
+
+(defcustom chat-approval-auto-approve-tools
+  '(files_read files_grep apply_patch)
+  "Tools that can be auto-approved when `chat-approval-auto-approve-global' is t.
+Note: shell_execute is excluded by default for security."
+  :type '(repeat symbol)
   :group 'chat-approval)
 (defun chat-approval-tool-required-p (tool-id)
   "Return non-nil when TOOL-ID requires approval."
@@ -83,8 +101,22 @@
   (and noninteractive
        (eq chat-approval-noninteractive-policy 'deny)))
 
-(defun chat-approval-request-tool-call (tool call)
+(defun chat-approval--auto-approve-p (tool-id &optional session)
+  "Return non-nil when TOOL-ID should be auto-approved.
+Check global settings and SESSION-specific settings."
+  (let ((session-auto-approve
+         (when session
+           (and (fboundp 'chat-session-auto-approve-p)
+                (chat-session-auto-approve-p session))))
+        (global-auto-approve chat-approval-auto-approve-global)
+        (in-auto-approve-list (memq tool-id chat-approval-auto-approve-tools)))
+    (and (or session-auto-approve
+             (and global-auto-approve in-auto-approve-list))
+         t)))
+
+(defun chat-approval-request-tool-call (tool call &optional session)
   "Request approval for TOOL using CALL data.
+Optional SESSION is the current chat session for context.
 Returns non-nil when execution should proceed."
   (let* ((tool-id (chat-forged-tool-id tool))
          (arguments (plist-get call :arguments))
@@ -92,6 +124,7 @@ Returns non-nil when execution should proceed."
     (cond
      ((not chat-approval-enabled) t)
      ((not (chat-approval-tool-required-p tool-id)) t)
+     ((chat-approval--auto-approve-p tool-id session) t)
      ((chat-approval--allow-noninteractive-p)
       t)
      ((chat-approval--deny-noninteractive-p)

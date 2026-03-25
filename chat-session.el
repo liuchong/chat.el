@@ -52,6 +52,7 @@
   prompt-stack          ; Multi-level prompt stack
   context-window        ; Context window settings
   tool-config           ; Tool configuration
+  auto-approve          ; nil, t, or 'inherit (inherit from global)
   metadata)             ; Additional metadata plist
 
 (cl-defstruct chat-message
@@ -233,6 +234,10 @@ Returns a list of chat-message structs."
     (modelId . ,(symbol-name (chat-session-model-id session)))
     (messages . ,(mapcar #'chat-message--serialize
                          (chat-session-messages session)))
+    (autoApprove . ,(let ((aa (chat-session-auto-approve session)))
+                      (cond ((eq aa t) t)
+                            ((eq aa nil) :json-false)
+                            (t 'inherit))))
     (metadata . ,(or (chat-session-metadata session) nil))))
 
 (defun chat-message--serialize (message)
@@ -297,19 +302,24 @@ Returns a list of chat-message structs."
 
 (defun chat-session--deserialize (data)
   "Convert JSON-parsed DATA to chat-session struct."
-  (make-chat-session
-   :id (chat-session--alist-get data 'id)
-   :name (chat-session--alist-get data 'name)
-   :created-at (decode-time
-                (parse-time-string
-                 (chat-session--alist-get data 'createdAt)))
-   :updated-at (decode-time
-                (parse-time-string
-                 (chat-session--alist-get data 'updatedAt)))
-   :model-id (intern (chat-session--alist-get data 'modelId))
-   :messages (mapcar #'chat-message--deserialize
-                     (chat-session--alist-get data 'messages))
-   :metadata (chat-session--alist-get data 'metadata)))
+  (let ((auto-approve-val (chat-session--alist-get data 'autoApprove)))
+    (make-chat-session
+     :id (chat-session--alist-get data 'id)
+     :name (chat-session--alist-get data 'name)
+     :created-at (decode-time
+                  (parse-time-string
+                   (chat-session--alist-get data 'createdAt)))
+     :updated-at (decode-time
+                  (parse-time-string
+                   (chat-session--alist-get data 'updatedAt)))
+     :model-id (intern (chat-session--alist-get data 'modelId))
+     :messages (mapcar #'chat-message--deserialize
+                       (chat-session--alist-get data 'messages))
+     :auto-approve (cond ((eq auto-approve-val t) t)
+                         ((eq auto-approve-val :json-false) nil)
+                         ((eq auto-approve-val 'inherit) 'inherit)
+                         (t nil))  ; default to nil (follow global)
+     :metadata (chat-session--alist-get data 'metadata))))
 
 (defun chat-message--deserialize (data)
   "Convert JSON-parsed DATA to chat-message struct."
@@ -344,6 +354,34 @@ Returns the chat-session struct, or nil if not found."
    (expand-file-name
     (format "%s.json" session-id)
     chat-session-directory)))
+
+;; ------------------------------------------------------------------
+;; Auto-Approval
+;; ------------------------------------------------------------------
+
+(defun chat-session-auto-approve-p (session)
+  "Return non-nil when SESSION has auto-approve enabled.
+Returns nil if explicitly disabled, t if explicitly enabled,
+and follows global setting if `inherit' or nil."
+  (let ((setting (chat-session-auto-approve session)))
+    (cond
+     ((eq setting t) t)
+     ((eq setting nil)
+      ;; Check if explicitly set to nil or just default
+      (and (boundp 'chat-approval-auto-approve-global)
+           chat-approval-auto-approve-global))
+     (t
+      ;; 'inherit or any other value - use global
+      (and (boundp 'chat-approval-auto-approve-global)
+           chat-approval-auto-approve-global)))))
+
+(defun chat-session-set-auto-approve (session value)
+  "Set SESSION's auto-approve setting to VALUE.
+VALUE should be t, nil, or `inherit'."
+  (setf (chat-session-auto-approve session) value)
+  (setf (chat-session-updated-at session) (current-time))
+  (when chat-session-auto-save
+    (chat-session-save session)))
 
 (provide 'chat-session)
 ;;; chat-session.el ends here

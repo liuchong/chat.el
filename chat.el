@@ -203,6 +203,7 @@ SESSION is a chat-session struct."
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
     (define-key map (kbd "C-g") 'chat-ui-cancel-response)
+    (define-key map (kbd "C-c C-a") 'chat-toggle-auto-approve-session)
     map)
   "Keymap for chat mode buffers.")
 
@@ -224,6 +225,54 @@ SESSION is a chat-session struct."
                        (upcase (symbol-name (chat-message-role msg)))
                        (chat-message-content msg))))
       (insert "\n> "))))
+
+;; ------------------------------------------------------------------
+;; Auto-Approval Commands
+;; ------------------------------------------------------------------
+
+(defun chat-toggle-auto-approve-global ()
+  "Toggle global auto-approval setting."
+  (interactive)
+  (setq chat-approval-auto-approve-global (not chat-approval-auto-approve-global))
+  (message "Global auto-approval: %s"
+           (if chat-approval-auto-approve-global "enabled" "disabled")))
+
+(defun chat-toggle-auto-approve-session ()
+  "Toggle auto-approval for current session."
+  (interactive)
+  (if (and (boundp 'chat--current-session) chat--current-session)
+      (let* ((session chat--current-session)
+             (current (chat-session-auto-approve session))
+             (new-value (not current)))
+        (chat-session-set-auto-approve session new-value)
+        (message "Session '%s' auto-approval: %s"
+                 (chat-session-name session)
+                 (if new-value "enabled" "disabled")))
+    (message "No active session")))
+
+(defun chat-add-to-shell-whitelist (pattern)
+  "Add PATTERN to shell command whitelist."
+  (interactive "sCommand pattern to whitelist (e.g., 'ls ' or 'git status'): ")
+  (require 'chat-tool-shell)
+  (chat-tool-shell-whitelist-add pattern))
+
+(defun chat-remove-from-shell-whitelist (pattern)
+  "Remove PATTERN from shell command whitelist."
+  (interactive)
+  (require 'chat-tool-shell)
+  (if (and (boundp 'chat-tool-shell-whitelist) chat-tool-shell-whitelist)
+      (chat-tool-shell-whitelist-remove
+       (completing-read "Remove pattern: " chat-tool-shell-whitelist nil t))
+    (message "Shell whitelist is empty")))
+
+(defun chat-show-shell-whitelist ()
+  "Display current shell command whitelist."
+  (interactive)
+  (require 'chat-tool-shell)
+  (if (and (boundp 'chat-tool-shell-whitelist) chat-tool-shell-whitelist)
+      (message "Shell whitelist: %s"
+               (mapconcat #'identity chat-tool-shell-whitelist ", "))
+    (message "Shell whitelist is empty")))
 
 ;; ------------------------------------------------------------------
 ;; Provide

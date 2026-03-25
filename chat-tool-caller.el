@@ -207,20 +207,44 @@
    (t
     (string-trim-right (pp-to-string result)))))
 
-(defun chat-tool-caller-execute (call)
-  "Execute one parsed tool CALL."
+(defun chat-tool-caller--shell-whitelist-approve-p (call)
+  "Check if shell command in CALL is whitelisted for auto-approval."
+  (let ((arguments (plist-get call :arguments))
+        (require (require 'chat-tool-shell nil t)))
+    (when require
+      (let ((command (cdr (assoc "command" arguments))))
+        (and command
+             (fboundp 'chat-tool-shell-whitelist-match-p)
+             (chat-tool-shell-whitelist-match-p command))))))
+
+(defun chat-tool-caller-execute (call &optional session)
+  "Execute one parsed tool CALL.
+Optional SESSION is the current chat session for approval context.
+If SESSION is nil, uses `chat--current-session' if bound."
   (let* ((name (plist-get call :name))
          (arguments (plist-get call :arguments))
          (tool-id (intern name))
-         (tool (chat-tool-forge-get tool-id)))
+         (tool (chat-tool-forge-get tool-id))
+         (actual-session (or session
+                             (when (boundp 'chat--current-session)
+                               chat--current-session))))
     (condition-case err
         (if tool
-            (if (chat-approval-request-tool-call tool call)
+            ;; Check shell whitelist first for shell_execute
+            (if (and (eq tool-id 'shell_execute)
+                     (chat-tool-caller--shell-whitelist-approve-p call))
+                ;; Whitelisted shell command: execute without approval
                 (chat-tool-caller--stringify-result
                  (chat-tool-forge-execute
                   tool-id
                   (chat-tool-caller--arguments-to-argv tool arguments)))
-              (format "Approval denied for tool '%s'" name))
+              ;; Normal approval flow
+              (if (chat-approval-request-tool-call tool call actual-session)
+                  (chat-tool-caller--stringify-result
+                   (chat-tool-forge-execute
+                    tool-id
+                    (chat-tool-caller--arguments-to-argv tool arguments)))
+                (format "Approval denied for tool '%s'" name)))
           (format "Error: Tool '%s' not found" name))
       (error
        (format "Error executing tool '%s': %s"

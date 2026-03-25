@@ -21,6 +21,19 @@ WARNING: Only enable in trusted environments."
   :type '(repeat string)
   :group 'chat)
 
+(defcustom chat-tool-shell-whitelist '()
+  "List of command patterns that can execute without approval.
+Each pattern is matched against the command string:
+- If pattern ends with space, matches any command starting with that pattern
+- Otherwise, requires exact match
+Examples:
+  \"ls \" matches \"ls\", \"ls -l\", \"ls /path\"
+  \"ls\" matches only \"ls\" exactly
+  \"git status\" matches only \"git status\" exactly
+  \"git \" matches \"git status\", \"git log\", etc."
+  :type '(repeat string)
+  :group 'chat)
+
 (defconst chat-tool-shell--unsafe-pattern
   "[;&|><`$\n\r]"
   "Pattern for shell metacharacters that are not allowed.")
@@ -28,6 +41,42 @@ WARNING: Only enable in trusted environments."
 (defun chat-tool-shell--split-command (command)
   "Parse COMMAND into an argv list."
   (split-string-and-unquote command))
+
+(defun chat-tool-shell-whitelist-match-p (command)
+  "Return non-nil if COMMAND matches any pattern in whitelist.
+Matching rules:
+- If whitelist pattern ends with space, matches any command with that prefix
+- Otherwise, requires exact match
+- \"ls \" matches \"ls\", \"ls -l\", but not \"lsxxx\""
+  (catch 'matched
+    (dolist (pattern chat-tool-shell-whitelist)
+      (when (and (> (length pattern) 0)
+                 (if (= (aref pattern (1- (length pattern))) ? )
+                     ;; Pattern ends with space: prefix match
+                     (and (>= (length command) (1- (length pattern)))
+                          (string-equal (substring command 0 (1- (length pattern)))
+                                        (substring pattern 0 (1- (length pattern))))
+                          ;; Ensure word boundary: either exact match or next char is space/special
+                          (or (= (length command) (1- (length pattern)))
+                              (= (aref command (1- (length pattern))) ? )))
+                   ;; No trailing space: exact match only
+                   (string-equal command pattern)))
+        (throw 'matched t)))
+    nil))
+
+(defun chat-tool-shell-whitelist-add (pattern)
+  "Add PATTERN to the shell command whitelist."
+  (interactive "sCommand pattern to whitelist (e.g., 'ls ' or 'git status'): ")
+  (unless (member pattern chat-tool-shell-whitelist)
+    (push pattern chat-tool-shell-whitelist)
+    (message "Added '%s' to shell whitelist" pattern)))
+
+(defun chat-tool-shell-whitelist-remove (pattern)
+  "Remove PATTERN from the shell command whitelist."
+  (interactive
+   (list (completing-read "Remove pattern: " chat-tool-shell-whitelist nil t)))
+  (setq chat-tool-shell-whitelist (delete pattern chat-tool-shell-whitelist))
+  (message "Removed '%s' from shell whitelist" pattern))
 
 (defun chat-tool-shell-validate (command)
   "Check if COMMAND is in the allowed list."
