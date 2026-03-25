@@ -169,8 +169,10 @@ conversation-YYYY-MM-DD-topic.md
 - Python
 - JavaScript
 
-原型文件放在 `prototypes/`。
+原型文件放在 `tests/prototypes/`。
 命名格式是 `YYYYMMDD-feature.ext`。
+
+原型测试是测试的一种，用于验证关键功能点或外部系统集成的可行性。
 
 ### Test Driven Fixes
 
@@ -178,6 +180,8 @@ conversation-YYYY-MM-DD-topic.md
 - 新增外部自由结构数据解析时要补测试
 - 单元测试使用 `ert`
 - 集成测试放在 `tests/integration/`
+- 原型测试放在 `tests/prototypes/`
+- Spec 文件放在 `specs/`
 
 ### Verification
 

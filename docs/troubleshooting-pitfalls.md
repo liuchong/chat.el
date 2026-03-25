@@ -393,7 +393,7 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Cause**: external APIs and transport details are easy to misread from docs alone.
 
-**Solution**: validate the critical path with a small prototype in `prototypes/` before formal integration.
+**Solution**: validate the critical path with a small prototype in `tests/prototypes/` before formal integration.
 
 ## Quick Reference
 

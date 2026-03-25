@@ -84,3 +84,13 @@ Brief but valuable snippets:
 | `books/` | Long-form systematic documentation |
 | `articles/` | Focused medium-length articles |
 | `tips/` | Short-form inspirations and quick notes |
+| `specs/` | Feature specifications and design documents |
+
+## Test Directory Layout
+
+| Directory | Purpose |
+|-----------|---------|
+| `tests/unit/` | Unit tests using ERT |
+| `tests/integration/` | Integration tests |
+| `tests/prototypes/` | Prototype tests for feasibility validation |
+| `specs/` | Feature specifications and design specs |
