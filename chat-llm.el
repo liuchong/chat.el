@@ -218,6 +218,10 @@ Returns a cons cell of raw response body and status code."
     (chat-log "[LLM] Response body length: %d bytes" (length response-body))
     (cons response-body status-code)))
 
+(defun chat-llm--header-value (headers name)
+  "Return header NAME from HEADERS."
+  (cdr (assoc name headers)))
+
 (defun chat-llm--post-async (url headers body success error &optional timeout-secs)
   "Make asynchronous POST request to URL.
 SUCCESS receives RAW-BODY and STATUS-CODE.
@@ -279,6 +283,98 @@ ERROR receives a string message."
               timeout-secs))))
       request-buffer))))
 
+(defun chat-llm--post-async-curl (url headers body success error &optional timeout-secs)
+  "Make asynchronous POST request to URL with curl.
+SUCCESS receives RAW-BODY and STATUS-CODE.
+ERROR receives a string message."
+  (let* ((request-buffer (generate-new-buffer " *chat-llm-curl*"))
+         (user-agent (chat-llm--header-value headers "User-Agent"))
+         (curl-args
+          (append
+           (list "-s" "-S" "-i"
+                 "-X" "POST"
+                 "-H" (format "Content-Type: %s"
+                              (or (chat-llm--header-value headers "Content-Type")
+                                  "application/json"))
+                 "-H" (format "Authorization: %s"
+                              (or (chat-llm--header-value headers "Authorization")
+                                  ""))
+                 "--data-binary" body)
+           (when-let ((accept (chat-llm--header-value headers "Accept")))
+             (list "-H" (format "Accept: %s" accept)))
+           (when user-agent
+             (list "-A" user-agent))
+           (list url)))
+         (sentinel
+          (lambda (proc event)
+            (when (memq (process-status proc) '(exit signal))
+              (let ((response-buffer (process-buffer proc)))
+                (when (buffer-live-p response-buffer)
+                  (with-current-buffer response-buffer
+                    (unless chat-llm--callback-finished
+                      (setq chat-llm--callback-finished t)
+                      (when chat-llm--timeout-timer
+                        (cancel-timer chat-llm--timeout-timer)
+                        (setq chat-llm--timeout-timer nil))
+                      (condition-case parse-error
+                          (let* ((parsed (chat-llm--parse-http-response-buffer))
+                                 (raw-body (car parsed))
+                                 (status-code (cdr parsed)))
+                            (if status-code
+                                (funcall success raw-body status-code)
+                              (funcall error
+                                       (format "curl request failed: %s"
+                                               (string-trim event)))))
+                        (error
+                         (funcall error
+                                  (if (> (process-exit-status proc) 0)
+                                      (format "curl request failed: %s"
+                                              (string-trim event))
+                                    (error-message-string parse-error))))))
+                    (kill-buffer response-buffer))))))))
+    (with-current-buffer request-buffer
+      (setq-local chat-llm--callback-finished nil)
+      (when timeout-secs
+        (setq-local
+         chat-llm--timeout-timer
+         (run-at-time
+          timeout-secs nil
+          (lambda (buffer error-callback timeout-value)
+            (when (buffer-live-p buffer)
+              (with-current-buffer buffer
+                (unless chat-llm--callback-finished
+                  (setq chat-llm--callback-finished t)
+                  (let ((proc (get-buffer-process buffer)))
+                    (when (process-live-p proc)
+                      (delete-process proc)))
+                  (funcall error-callback
+                           (format "Request timeout after %d seconds" timeout-value))
+                  (kill-buffer buffer)))))
+          request-buffer
+          error
+          timeout-secs))))
+    (condition-case err
+        (progn
+          (make-process
+           :name "chat-llm-curl"
+           :buffer request-buffer
+           :command (cons "curl" curl-args)
+           :noquery t
+           :sentinel sentinel)
+          request-buffer)
+      (error
+       (when (buffer-live-p request-buffer)
+         (kill-buffer request-buffer))
+       (signal (car err) (cdr err))))))
+
+(defun chat-llm--post-async-dispatch (config url headers body success error timeout-secs)
+  "Send one async request using CONFIG specific transport."
+  (pcase (plist-get config :async-transport)
+    ('curl
+     (chat-llm--post-async-curl url headers body success error timeout-secs))
+    (_
+     (chat-llm--post-async url headers body success error timeout-secs))))
+
 (defun chat-llm--decode-response (config raw-request raw-response status-code)
   "Decode one response using CONFIG and request metadata."
   (let ((parser (chat-llm--response-parser config)))
@@ -332,7 +428,8 @@ Returns a request handle."
          (timeout (or (plist-get options :timeout) 60))
          (raw-request (json-encode request-body)))
     (chat-log "[LLM] Async request body: %s" raw-request)
-    (chat-llm--post-async
+    (chat-llm--post-async-dispatch
+     config
      (chat-llm--request-url config)
      headers
      raw-request

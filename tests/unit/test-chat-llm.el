@@ -159,6 +159,30 @@
          (setq captured-error err)))
       (should (string= captured-error "network failed")))))
 
+(ert-deftest chat-llm-request-async-uses-configured-curl-transport ()
+  "Test async requests honor provider specific curl transport."
+  (let (captured-dispatch)
+    (chat-llm-register-provider 'async-curl-test
+                                :base-url "https://async.example.com"
+                                :api-key "token"
+                                :async-transport 'curl)
+    (cl-letf (((symbol-function 'chat-llm--post-async-curl)
+               (lambda (_url _headers _body success _error &optional _timeout)
+                 (setq captured-dispatch 'curl)
+                 (funcall success "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}" 200)
+                 'curl-handle))
+              ((symbol-function 'chat-llm--default-parse-response)
+               (lambda (_json-data)
+                 "ok")))
+      (should (eq (chat-llm-request-async
+                   'async-curl-test
+                   (list (make-chat-message :role :user :content "Hi"))
+                   (lambda (_result))
+                   (lambda (_err)
+                     (should nil)))
+                  'curl-handle))
+      (should (eq captured-dispatch 'curl)))))
+
 (ert-deftest chat-llm-post-async-installs-timeout-timer ()
   "Test async transport installs a timeout timer for request handles."
   (let (captured-timeout handle)

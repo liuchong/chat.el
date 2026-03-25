@@ -203,5 +203,10 @@
       (should (string= (plist-get (plist-get final-result :processed) :content)
                        "命令结果是 tool-ok")))))
 
+(ert-deftest chat-ui-stream-started-p-accepts-non-nil-handle ()
+  "Test non-nil handles count as successful stream startup."
+  (should (chat-ui--stream-started-p 'stream-handle))
+  (should-not (chat-ui--stream-started-p nil)))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

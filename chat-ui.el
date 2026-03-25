@@ -528,6 +528,10 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
 (defvar chat-ui--active-stream-process nil
   "Currently active stream process for cancellation.")
 
+(defun chat-ui--stream-started-p (handle)
+  "Return non-nil when HANDLE means stream startup succeeded."
+  (not (null handle)))
+
 (defun chat-ui--stream-process-p (process)
   "Return non-nil when PROCESS is a valid stream process."
   (processp process))
@@ -596,7 +600,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                         (set-marker chat-ui--messages-end (point)))))
                   nil)))))
         (setq chat-ui--active-stream-process stream-process)
-        (if (funcall (symbol-function 'chat-ui--stream-process-p) stream-process)
+        (if (chat-ui--stream-started-p stream-process)
             (progn
               (chat-log "[STREAM] Process created successfully: %S" stream-process)
               (funcall

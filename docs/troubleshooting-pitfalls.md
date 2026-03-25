@@ -430,4 +430,12 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: keep the startup flow linear, validate the returned process first, then install the sentinel in a separate obvious step.
 
+### Kimi Code Async Follow Up Needs Curl Transport
+
+**Problem**: Kimi Code can accept the streaming request but reject the tool follow up async request with HTTP 403.
+
+**Cause**: the `url.el` async transport is not always compatible with Kimi Code agent style request requirements even when the same payload works through curl.
+
+**Solution**: route Kimi Code async follow up requests through the curl based async transport so the non streaming request path matches the proven streaming transport behavior.
+
 Last updated: 2026-03-25

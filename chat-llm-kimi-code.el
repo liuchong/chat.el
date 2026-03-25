@@ -127,6 +127,7 @@ Reference: https://www.kimi.com/code/docs/more/third-party-agents.html"
  'kimi-code
  :name "Kimi Code"
  :base-url "https://api.kimi.com/coding/v1"
+ :async-transport 'curl
  :api-key-fn #'chat-llm-kimi-code--get-api-key
  :model chat-llm-kimi-code-default-model
  :headers #'chat-llm-kimi-code--headers
