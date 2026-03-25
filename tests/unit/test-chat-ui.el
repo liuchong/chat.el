@@ -162,5 +162,46 @@
          (should-not sent)
          (should-not (chat-session-messages session)))))))
 
+(ert-deftest chat-ui-resolve-tool-loop-async-requests-followup-answer ()
+  "Test async tool loop requests the next model turn correctly."
+  (let* ((initial-messages
+          (list (make-chat-message
+                 :id "user-1"
+                 :role :user
+                 :content "执行一个简单命令然后告诉我结果"
+                 :timestamp (current-time))))
+         (processed '(:content ""
+                     :tool-calls ((:name "shell_execute"
+                                   :arguments (("command" . "echo tool-ok"))))
+                     :tool-results ("tool-ok\n")))
+         captured-options
+         final-result)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_model _messages success _error options)
+                 (setq captured-options options)
+                 (funcall success
+                          '(:content "命令结果是 tool-ok"
+                            :raw-request "{\"step\":2}"
+                            :raw-response "{\"answer\":true}"))
+                 'request-handle))
+              ((symbol-function 'chat-tool-caller-process-response-data)
+               (lambda (_content)
+                 '(:content "命令结果是 tool-ok"))))
+      (chat-ui--resolve-tool-loop-async
+       'kimi-code
+       initial-messages
+       processed
+       "{\"step\":1}"
+       nil
+       (lambda (resolved)
+         (setq final-result resolved))
+       (lambda (_err)
+         (should nil)))
+      (should (equal captured-options '(:temperature 0.7)))
+      (should (equal (plist-get (plist-get final-result :processed) :tool-results)
+                     '("tool-ok\n")))
+      (should (string= (plist-get (plist-get final-result :processed) :content)
+                       "命令结果是 tool-ok")))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

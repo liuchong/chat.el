@@ -406,4 +406,28 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 | Tool forging | require approval and a single top level lambda |
 | Tests | use `tests/run-tests.el` as the canonical entry |
 
+### Stream Debug Logs Must Be Redacted
+
+**Problem**: streaming request debug logs can leak bearer tokens or full request payloads.
+
+**Cause**: logging raw curl arguments or raw request bodies exposes secrets and user content.
+
+**Solution**: log only request metadata and use explicit redaction for authorization headers and payload size.
+
+### Async Tool Follow Up Needs Full Argument Arity
+
+**Problem**: tool loop follow up requests can fail with wrong number of arguments when callback parameters drift.
+
+**Cause**: nested async calls are easy to mis-parenthesize and silently change how success error and options are passed.
+
+**Solution**: keep the `chat-llm-request-async` call in a flat structure and add a regression test that requires the full async signature.
+
+### Streaming Setup Should Use A Straight Branch
+
+**Problem**: stream startup code can become hard to reason about and accidentally mix success and failure handling.
+
+**Cause**: process creation validation sentinel installation and finalization are all nested in one callback heavy block.
+
+**Solution**: keep the startup flow linear, validate the returned process first, then install the sentinel in a separate obvious step.
+
 Last updated: 2026-03-25

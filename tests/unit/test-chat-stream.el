@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'test-helper)
 (require 'chat-stream)
 
@@ -87,6 +88,24 @@
           (delete-process proc))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest chat-stream-redact-curl-args-for-log-hides-secrets ()
+  "Test curl args logging hides bearer tokens and large bodies."
+  (let ((redacted
+         (chat-stream--redact-curl-args-for-log
+          '("-s"
+            "-H" "Authorization: Bearer secret-token"
+            "-d" "{\"hello\":\"world\"}"
+            "https://example.com"))))
+    (should (equal redacted
+                   '("-s"
+                     "-H" "Authorization: Bearer <redacted>"
+                     "-d" "<17 bytes>"
+                     "https://example.com")))
+    (should-not (cl-some (lambda (item)
+                           (and (stringp item)
+                                (string-match-p "secret-token" item)))
+                         redacted))))
 
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

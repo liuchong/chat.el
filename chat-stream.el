@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
+(require 'chat-log)
 
 ;; ------------------------------------------------------------------
 ;; Variables
@@ -33,6 +34,23 @@
 
 (defvar chat-stream--done-callback nil
   "Callback function when stream is complete.")
+
+(defun chat-stream--redact-curl-args-for-log (args)
+  "Return ARGS with sensitive values redacted for logging."
+  (let ((result nil))
+    (while args
+      (let ((arg (car args)))
+        (cond
+         ((string-prefix-p "Authorization: Bearer " arg)
+          (push "Authorization: Bearer <redacted>" result))
+         ((and (string= arg "-d") (cdr args))
+          (push arg result)
+          (push (format "<%d bytes>" (string-bytes (cadr args))) result)
+          (setq args (cdr args)))
+         (t
+          (push arg result))))
+      (setq args (cdr args)))
+    (nreverse result)))
 
 ;; ------------------------------------------------------------------
 ;; SSE Parsing
@@ -168,13 +186,14 @@ Returns the process object."
     (unless (executable-find "curl")
       (error "curl executable not found in PATH"))
     
-    ;; Log request body for debugging
+    ;; Log request metadata without leaking user content or secrets.
     (chat-log "[REQUEST] URL: %s" url)
-    (chat-log "[REQUEST] Body: %s" (json-encode body))
-    (chat-log "[REQUEST] Messages: %S" messages)
+    (chat-log "[REQUEST] Body length: %d bytes" (string-bytes body-encoded))
+    (chat-log "[REQUEST] Message count: %d" (length messages))
     
     ;; Start curl process
-    (chat-log "[STREAM] Starting curl with args: %S" curl-args)
+    (chat-log "[STREAM] Starting curl with args: %S"
+              (chat-stream--redact-curl-args-for-log curl-args))
     (condition-case err
         (setq process (make-process
                       :name "chat-stream"
