@@ -1,201 +1,143 @@
 # Troubleshooting and Pitfalls
 
-This document records known issues and their solutions for chat.el development.
+This file is the canonical handbook for failure modes and fix patterns in `chat.el`.
+
+## How To Update This File
+
+When adding a new entry:
+
+1. Put it under the closest topic section
+2. Reuse this exact field order
+3. Merge duplicates instead of appending near copies
+4. Keep examples minimal and directly actionable
+
+Required field order:
+
+- `Problem`
+- `Cause`
+- `Solution`
+
+## Topic Index
+
+- Authentication and Provider Setup
+- Request Building and JSON
+- Async Requests and Streaming
+- Session and Persistence
+- File Tools and Security
+- Tool Calling and Tool Forging
+- Testing and Batch Mode
+- Development Hygiene
 
 ---
 
-## API Authentication Errors
+## Authentication and Provider Setup
 
 ### 401 Invalid Authentication
 
-**Problem**: API key works on website but returns 401 in Emacs
+**Problem**: API key works on the website but returns 401 in Emacs.
 
-**Cause**: Kimi Code China API keys (`sk-kimi-...` from console.kimi.com) are incompatible with standard Moonshot API (`api.moonshot.cn`)
+**Cause**: Kimi Code China keys from `console.kimi.com` are not compatible with the standard Moonshot endpoint at `api.moonshot.cn`.
 
-**Solution**: Use the correct provider:
+**Solution**: Use the provider that matches the API key and endpoint.
 
 ```elisp
-;; Wrong - uses api.moonshot.cn
+;; Wrong
 (setq chat-llm-kimi-api-key "sk-kimi-...")
 (setq chat-default-model 'kimi)
 
-;; Right - uses api.kimi.com/coding
+;; Right
 (setq chat-llm-kimi-code-api-key "sk-kimi-...")
 (setq chat-default-model 'kimi-code)
 ```
 
-### 403 Access Denied (Kimi Code China)
+### 403 Access Denied For Kimi Code
 
-**Problem**: `{"error":{"message":"Kimi For Coding is currently only available for Coding Agents..."}}`
+**Problem**: The API returns `Kimi For Coding is currently only available for Coding Agents`.
 
-**Cause**: Kimi Code China API requires specific User-Agent from approved coding agents
+**Cause**: The provider requires a specific `User-Agent` and Emacs `url` does not honor that header reliably when it is passed through regular request headers.
 
-**Solution**: Set `url-user-agent` variable (NOT headers):
+**Solution**: Bind `url-user-agent` directly instead of trying to set a `User-Agent` header.
 
 ```elisp
-;; Wrong - headers don't work for User-Agent in url library
+;; Wrong
 '(("User-Agent" . "claude-code/0.1.0"))
 
-;; Right - use variable binding
+;; Right
 (let ((url-user-agent "claude-code/0.1.0"))
   (url-retrieve-synchronously ...))
 ```
 
 ---
 
-## JSON Serialization
+## Request Building and JSON
 
-### Nested Property Lists
+### Nested Property Lists Break JSON Encoding
 
-**Problem**: `json-encode` returns malformed JSON for nested plists
+**Problem**: `json-encode` produces malformed payloads when nested plists are used as message objects.
 
-**Symptom**: 
-```elisp
-(json-encode (list :role "user" :content "hello"))
-;; => {"role":["user","content","hello"]}  ❌ WRONG
-```
+**Cause**: plists are not encoded as the object shape required by the provider request format.
 
-**Solution**: Use alist with vconcat:
-
-```elisp
-;; Correct - produces valid JSON array
-(vconcat '(((role . "user") (content . "hello"))))
-;; => [{"role":"user","content":"hello"}]  ✅ CORRECT
-```
-
-### JSON Parsing in Tests
-
-**Problem**: Hand-written JSON strings in tests fail to parse correctly
-
-**Solution**: Use elisp data structures with `json-encode`:
+**Solution**: Use alists inside a vector for message arrays.
 
 ```elisp
 ;; Wrong
-"{\"choices\": [{\"delta\": {\"content\": \"text\"}}]}"
+(json-encode (list :role "user" :content "hello"))
 
 ;; Right
-(json-encode '((choices . [((delta . ((content . "text"))))])))
+(json-encode
+ (vconcat '(((role . "user") (content . "hello")))))
 ```
 
----
+### Hand Written JSON In Tests Drifts Easily
 
-## Threading and Async
+**Problem**: test payloads written as raw JSON strings become fragile and hard to update.
 
-### Emacs Hangs on API Request
+**Cause**: escaping and nested object shape are easy to get wrong by hand.
 
-**Problem**: `make-thread` + `url-retrieve-synchronously` + `sit-for` causes deadlock
-
-**Symptom**: Emacs UI freezes indefinitely, "Getting response from AI..." persists
-
-**Root Cause**: Thread-local variables and event loop interference
-
-**Solution**: Use `run-with-idle-timer` instead of `make-thread`:
+**Solution**: build test payloads from elisp data and then call `json-encode`.
 
 ```elisp
-;; Wrong - causes deadlock
-(make-thread
- (lambda ()
-   (let ((response (chat-llm-request ...)))
-     (run-at-time 0 nil #'update-ui response))))
-
-;; Right - non-blocking async
-(run-with-idle-timer 0.1 nil
- (lambda ()
-   (let ((response (chat-llm-request ...)))
-     (run-at-time 0 nil #'update-ui response))))
+(json-encode
+ '((choices . [((delta . ((content . "text"))))])))
 ```
 
 ---
 
-## Session Management
+## Async Requests and Streaming
 
-### Model Change Not Taking Effect
+### Thread Based Request Flow Can Freeze Emacs
 
-**Problem**: Changed `chat-default-model` but old session still uses old model
+**Problem**: `make-thread` with synchronous HTTP calls can freeze the UI.
 
-**Symptom**: 
-```
-[CHAT-LOG] Model: kimi  ; <- expected 'kimi-code
-```
+**Cause**: Emacs threading and the event loop interact badly with `url-retrieve-synchronously`.
 
-**Cause**: Session files persist model information
-
-**Solution**: Create new session after changing default model:
+**Solution**: use async request APIs or timer based scheduling for non blocking behavior.
 
 ```elisp
-;; Changing config doesn't affect existing sessions
-(setq chat-default-model 'kimi-code)  ; Old sessions unaffected
-
-;; Must create new session
-M-x chat-new-session  ; New session uses 'kimi-code
+;; Prefer async requests or timer based scheduling
+(run-with-idle-timer 0.1 nil (lambda () ...))
 ```
 
-### Hardcoded Default Model
+### Async Request Timeout Must Clean Up Buffer State
 
-**Problem**: `chat-session-create` used `'gpt-4o` instead of `chat-default-model`
+**Problem**: async HTTP requests can hang forever and leave stale request state behind.
 
-**Solution**: Fixed in chat-session.el to use:
-```elisp
-:model-id (or model-id (bound-and-true-p chat-default-model) 'kimi)
-```
+**Cause**: the transport accepted a timeout option but did not tie a timer to the request buffer.
 
----
-
-## Test Runner
-
-### `tests/run-tests.sh` Cannot Load `chat-tool-caller`
-
-**Problem**: Running `bash tests/run-tests.sh` fails before tests start
-
-**Cause**: The shell runner does not load the full source chain needed by `chat-ui.el`
-
-**Solution**: Use the batch entry at `tests/run-tests.el` as the canonical runner until the shell script is aligned
-
-```bash
-emacs -Q -batch -l tests/run-tests.el
-```
-
----
-
-## File I/O
-
-### UTF-8 Encoding Errors
-
-**Problem**: `Cannot safely encode these characters` when writing logs
-
-**Symptom**: Interactive prompt to select coding system
-
-**Solution**: Explicitly set coding system:
+**Solution**: install a timeout timer on the request buffer and cancel it on success or explicit cancellation.
 
 ```elisp
-(let ((coding-system-for-write 'utf-8))
-  (write-region ...))
+(setq-local chat-llm--timeout-timer
+            (run-at-time timeout-secs nil ...))
 ```
 
----
+### Streaming Choices May Decode As Lists Or Vectors
 
-## Test Loading
+**Problem**: stream parsing returns nil even when the payload contains content.
 
-**Problem**: Tests fail because source files not loaded
+**Cause**: some decode paths produce lists and others produce vectors for the same JSON array.
 
-**Solution**: Ensure run-tests.el loads source files before test files
-
-```elisp
-(dolist (src '("chat-session"))
-  (load (expand-file-name (format "%s.el" src) source-dir) nil t))
-```
-
----
-
-## Streaming JSON Parsing
-
-### `choices` Container Type Drift
-
-**Problem**: Streaming chunk parsing returns nil even though the payload contains content
-
-**Cause**: Some paths decode JSON arrays as lists while provider parsers assume vectors
-
-**Solution**: Provider response parsers and stream parsers should accept both list and vector choices
+**Solution**: provider parsers and stream helpers must accept both shapes.
 
 ```elisp
 (let ((first-choice (and choices
@@ -205,13 +147,58 @@ emacs -Q -batch -l tests/run-tests.el
   ...)
 ```
 
+### Streaming Path Can Bypass Tool Post Processing
+
+**Problem**: streaming mode shows tool JSON but never executes the tool chain.
+
+**Cause**: chunks were appended directly to the UI without running the same final response processing used by the non streaming path.
+
+**Solution**: finalize streaming responses through the same tool processing path as the async non streaming flow.
+
+### SSE Partial Lines Can Lose Content
+
+**Problem**: stream chunks can break JSON boundaries and drop content.
+
+**Cause**: parsing each process chunk independently ignores incomplete SSE lines.
+
+**Solution**: keep a per process partial line buffer and parse only complete lines.
+
 ---
 
-## Timestamp Handling
+## Session and Persistence
 
-**Problem**: decode-time expects specific format from parse-time-string
+### Model Changes Do Not Affect Existing Sessions
 
-**Solution**: Always serialize timestamps as ISO 8601 strings
+**Problem**: changing `chat-default-model` does not update old sessions.
+
+**Cause**: the selected model is persisted with the session.
+
+**Solution**: create a new session after changing the default model.
+
+```elisp
+(setq chat-default-model 'kimi-code)
+;; Then create a new session
+```
+
+### Session Creation Must Respect `chat-default-model`
+
+**Problem**: `chat-session-create` can drift to a hardcoded model.
+
+**Cause**: fallback logic that ignores `chat-default-model`.
+
+**Solution**: always compute the model with configuration first.
+
+```elisp
+:model-id (or model-id (bound-and-true-p chat-default-model) 'kimi)
+```
+
+### Timestamp Serialization Must Stay Stable
+
+**Problem**: `decode-time` depends on a predictable timestamp format.
+
+**Cause**: loosely formatted timestamps break deserialization.
+
+**Solution**: always serialize timestamps as ISO 8601 strings.
 
 ```elisp
 (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))
@@ -219,16 +206,29 @@ emacs -Q -batch -l tests/run-tests.el
 
 ---
 
-## Security Boundaries
+## File Tools and Security
+
+### UTF-8 Writes Can Trigger Interactive Prompts
+
+**Problem**: writing logs or output can trigger a coding system selection prompt.
+
+**Cause**: the write path relies on implicit encoding choice.
+
+**Solution**: bind `coding-system-for-write` explicitly.
+
+```elisp
+(let ((coding-system-for-write 'utf-8))
+  (write-region ...))
+```
 
 ### Symlink Paths Can Escape Allowed Roots
 
-**Problem**: prefix checking on `expand-file-name` can treat a symlink under an allowed directory as safe even when it points outside that root
+**Problem**: a lexical prefix check can treat a symlink under an allowed directory as safe even when it points outside that root.
 
-**Cause**: validating only the lexical path does not validate the resolved filesystem target
+**Cause**: `expand-file-name` normalizes text paths but does not validate the resolved filesystem target.
 
-**Solution**: normalize both target paths and allowed roots through `file-truename`
-For non existing targets resolve the nearest existing ancestor first and rebuild the final path from that real directory
+**Solution**: normalize target paths and allowed roots through real path resolution.
+For paths that do not exist yet resolve the nearest existing ancestor first.
 
 ```elisp
 (let* ((ancestor (chat-files--existing-ancestor expanded))
@@ -239,11 +239,11 @@ For non existing targets resolve the nearest existing ancestor first and rebuild
 
 ### JSON Patch Arguments Lose Keyword Keys
 
-**Problem**: `files_patch` may receive decoded JSON alists while the patch engine expects plist keys like `:search`
+**Problem**: `files_patch` can receive decoded JSON alists while the patch engine expects plist keys like `:search`.
 
-**Cause**: tool calling JSON decoding does not preserve plist structure inside nested patch objects
+**Cause**: nested JSON objects do not preserve plist structure after decoding.
 
-**Solution**: normalize each patch object before applying it
+**Solution**: normalize each patch object before applying it.
 
 ```elisp
 (list :search (or (cdr (assoc 'search patch))
@@ -252,164 +252,158 @@ For non existing targets resolve the nearest existing ancestor first and rebuild
                    (cdr (assoc "replace" patch))))
 ```
 
-### Shell Whitelist Is Bypassed By Metacharacters
+### Default File Access Can Be Too Broad
 
-**Problem**: validating only the first token but executing through `call-process-shell-command` allows pipes and command chaining to bypass the intent of the whitelist
+**Problem**: using the home directory as the default allowed root gives the AI more read and write scope than necessary.
 
-**Cause**: the shell reinterprets the full string after validation
+**Cause**: permissive defaults were convenient for early prototyping.
 
-**Solution**: reject shell metacharacters and execute argv directly with `process-file`
+**Solution**: prefer the current project directory plus temporary directories as the default baseline.
+
+```elisp
+'("./" "/tmp/" "/var/tmp/")
+```
+
+---
+
+## Tool Calling and Tool Forging
+
+### Prompt Parse Execute Drift
+
+**Problem**: tool calling fails even when the model returns a JSON object.
+
+**Cause**: the system prompt format, response parser, and executor argument mapping drift apart.
+
+**Solution**: keep one formal contract across all three layers.
+Use a single `function_call` object.
+Parse both bare JSON and fenced JSON.
+Map arguments by declared parameter names instead of hardcoded `input`.
+
+### Built In Tools Can Be Overridden By Saved Copies
+
+**Problem**: `shell_execute` can show wrong argument names or fail with `Tool not compiled`.
+
+**Cause**: a saved tool with the same id can overwrite the in memory built in registration.
+
+**Solution**: load saved tools first and then register built in tools.
+Do not persist tools that only have an in memory compiled function and no source body.
+
+### Built In Tools Must Be Explicitly Active
+
+**Problem**: a built in tool appears in the prompt but fails with `Tool is not active`.
+
+**Cause**: `chat-forged-tool` defaults to inactive unless `:is-active t` is set.
+
+**Solution**: mark built in tools active during registration and cover that path with a regression test.
+
+### Tool Results Must Reenter The Conversation
+
+**Problem**: the model repeats the same command instead of answering after a tool succeeds.
+
+**Cause**: tool results are stored in metadata only and do not reenter the visible conversation history.
+
+**Solution**: feed tool results back through a follow up system message and persist a readable assistant side summary when needed.
+
+### Shell Whitelists Fail If Execution Still Uses A Shell
+
+**Problem**: a whitelist that validates only the first token can still be bypassed with pipes and command chaining.
+
+**Cause**: `call-process-shell-command` hands the full string back to the shell for expansion.
+
+**Solution**: reject shell metacharacters and execute argv directly with `process-file`.
 
 ```elisp
 (and (not (string-match-p chat-tool-shell--unsafe-pattern command))
      (member (car argv) chat-tool-shell-allowed-commands))
 ```
 
----
+### AI Tool Source Can Execute During Compilation
 
-### AI Tool Source Executes During Compilation
+**Problem**: generated tool source can run arbitrary top level code while being compiled.
 
-**Problem**: generated tool source can execute arbitrary top level code during compilation
+**Cause**: compiling unrestricted forms with `eval` allows wrapper forms like `progn` to execute immediately.
 
-**Cause**: compiling by `eval` on an unrestricted form allows wrappers like `progn` to run immediately
-
-**Solution**: only accept exactly one top level form and require that form to be a `lambda`
+**Solution**: accept exactly one top level form and require that form to be a `lambda`.
 
 ```elisp
 (unless (chat-tool-forge--lambda-form-p form)
   (error "Tool source must be exactly one lambda form"))
 ```
 
-### Async Request Timeout Must Clean Up Buffer State
-
-**Problem**: async HTTP requests can hang forever and leave stale state behind
-
-**Cause**: the async transport accepted a timeout option but did not bind any timer to the request buffer
-
-**Solution**: install a timeout timer on the request buffer and cancel that timer on success or explicit cancellation
-
-```elisp
-(setq-local chat-llm--timeout-timer
-            (run-at-time timeout-secs nil ...))
-```
-
----
-
-## Parenthesis Counting
-
-**Problem**: Difficult to track matching parentheses in complex nested forms
-
-**Solution**: Use check-parens frequently and write tests to verify code loads correctly
-
-## Load Path in Batch Mode
-
-**Problem**: Relative paths do not work reliably in Emacs batch mode with --eval
-
-**Solution**: Use -l parameter with explicit file paths or shell script wrappers
-
----
-
-## Tool Calling
-
-### Prompt Parse Execute Drift
-
-**Problem**: Tool calling fails even when the model returns a JSON object
-
-**Cause**: The system prompt response format, response parser, and executor argument mapping drifted apart
-
-**Solution**: Keep one formal contract across all three layers
-Use one JSON object with `function_call`
-Parse both bare JSON and fenced JSON for compatibility
-Map arguments by declared parameter names instead of hardcoded `input`
-
-### Streaming Path Bypasses Tool Calling
-
-**Problem**: Streaming mode displays tool JSON but never executes the tool
-
-**Cause**: `chat-ui--get-response-streaming` appended chunks directly to the buffer and saved the final text without running tool post processing
-
-**Solution**: Finalize streaming responses through the same response processing path used by the sync flow
-
-### SSE Partial Line Loss
-
-**Problem**: Stream chunks randomly lose content or break JSON boundaries
-
-**Cause**: SSE parsing handled each process chunk independently and ignored partial lines
-
-**Solution**: Keep a per process partial line buffer and only parse complete SSE lines
-
 ### Empty Source Tools Break Loading
 
-**Problem**: Loading a saved built in tool with no source body raises EOF
+**Problem**: loading a saved built in tool with no source body raises EOF or compile errors.
 
-**Cause**: The loader treated trailing whitespace as source code and attempted to compile it
+**Cause**: the loader treats trailing whitespace as source code.
 
-**Solution**: Trim loaded tool bodies and convert empty content to nil before compiling
-
-### Built In Tool Gets Overridden By Saved Copy
-
-**Problem**: `shell_execute` shows wrong argument names and fails with `Tool not compiled`
-
-**Cause**: The built in tool was registered before loading saved tools
-The registry entry was later overwritten by a saved empty source file with the same id
-
-**Solution**: Load saved tools before registering built in tools
-Do not persist tools that only have an in memory compiled function and no source body
-
-### Built In Tool Is Registered But Inactive
-
-**Problem**: `shell_execute` appears in the prompt but execution fails with `Tool is not active`
-
-**Cause**: `chat-forged-tool` defaults to inactive unless `:is-active t` is set explicitly
-
-**Solution**: Mark built in tools active when registering them and add a regression test for the active flag
-
-### Tool Results Are Not Fed Back To The Model
-
-**Problem**: The first shell call works but later turns keep repeating the same command and never answer the real question
-
-**Cause**: Tool execution results were saved only in `toolResults`
-The assistant message content stayed empty
-Later requests filtered out empty assistant messages so the model never saw the tool output
-
-**Solution**: Add a tool loop that sends tool results back in a follow up system message
-Also persist a readable tool summary in assistant content when no natural language answer is produced
-
-### Narrow Shell Whitelist Causes Weak Capability
-
-**Problem**: Simple filesystem questions still fail even when tool calling works
-
-**Cause**: The shell whitelist lacked commands needed for common inspection tasks such as directory size and aggregation
-
-**Solution**: Expand the whitelist to include `du` `stat` `sort` `uniq` `cut` `sed` `awk` and `tr`
+**Solution**: trim loaded bodies and convert empty content to nil before attempting compilation.
 
 ---
 
-## Development Checklist
+## Testing and Batch Mode
 
-Before starting new features:
+### `tests/run-tests.sh` Is Not The Canonical Runner
 
-- [ ] **HTTP API integration** → Write Python/Elisp prototype first
-- [ ] **JSON construction** → Use `vconcat` + alist, never plist
-- [ ] **User-Agent** → Use `url-user-agent` variable, never headers
-- [ ] **Async processing** → Use `run-with-idle-timer`, never `make-thread`
-- [ ] **Session model** → Need `chat-new-session` after config change
-- [ ] **Encoding issues** → Set `coding-system-for-write` for file ops
+**Problem**: `bash tests/run-tests.sh` can fail before tests even start.
+
+**Cause**: the shell wrapper can drift from the actual source loading sequence.
+
+**Solution**: use `tests/run-tests.el` as the canonical entry.
+
+```bash
+emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
+```
+
+### Source Files Must Load Before Test Files
+
+**Problem**: tests fail because required source modules are missing from the load path or never loaded.
+
+**Cause**: batch mode does not infer repository local load paths reliably.
+
+**Solution**: make the test runner load source files explicitly before loading test files.
+
+```elisp
+(dolist (src '("chat-session"))
+  (load (expand-file-name (format "%s.el" src) source-dir) nil t))
+```
+
+### Relative Paths In `--eval` Are Fragile
+
+**Problem**: ad hoc batch commands often fail to find files when launched with `--eval`.
+
+**Cause**: current working directory and file local assumptions are easy to drift.
+
+**Solution**: prefer `-l` with explicit file paths or a checked shell wrapper.
 
 ---
 
-## Quick Reference: All Fixes (2026-03-24)
+## Development Hygiene
 
-| Issue | Error/Symptom | Fix |
-|-------|---------------|-----|
-| API Key Mismatch | 401 Invalid Authentication | Use `kimi-code` provider |
-| JSON Encoding | Malformed request body | alist + vconcat |
-| User-Agent | 403 Access Denied | `url-user-agent` variable |
-| Thread Deadlock | Emacs freezes | `run-with-idle-timer` |
-| Hardcoded Model | Config ignored | Fix `chat-session-create` |
-| UTF-8 Encoding | Coding system prompt | `coding-system-for-write` |
-| Old Session | Model not updating | `chat-new-session` |
+### Complex Nested Forms Need Structural Checks
 
----
+**Problem**: nested async callbacks and timers are easy to break with unmatched parentheses.
 
-*Last updated: 2026-03-25*
+**Cause**: Lisp syntax is compact and callback heavy code can hide a missing close paren for a long time.
+
+**Solution**: run `check-parens` before full test runs whenever deeply nested forms are edited.
+
+### New Feature Work Needs Prototypes
+
+**Problem**: provider integrations and protocol assumptions can be wrong even when the code looks plausible.
+
+**Cause**: external APIs and transport details are easy to misread from docs alone.
+
+**Solution**: validate the critical path with a small prototype in `prototypes/` before formal integration.
+
+## Quick Reference
+
+| Area | Rule |
+|------|------|
+| JSON requests | use alists and vectors |
+| Async I/O | do not block the Emacs main loop |
+| File safety | resolve real paths not just lexical paths |
+| Shell safety | validate argv and avoid shell expansion |
+| Tool forging | require approval and a single top level lambda |
+| Tests | use `tests/run-tests.el` as the canonical entry |
+
+Last updated: 2026-03-25

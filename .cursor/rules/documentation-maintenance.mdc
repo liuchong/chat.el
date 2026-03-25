@@ -1,0 +1,16 @@
+---
+description: Documentation maintenance and troubleshooting update rules
+alwaysApply: true
+---
+
+# Documentation Maintenance
+
+- Update `docs/ai-contexts/` at the end of each development session
+- Use the required ai-context sections from `docs/ai-contexts/README.md`
+- Update `docs/troubleshooting-pitfalls.md` when a new failure mode or durable fix pattern is discovered
+- Keep `docs/troubleshooting-pitfalls.md` in its existing topic structure
+- Add troubleshooting entries under the closest `##` topic section
+- Use the exact field order `Problem` `Cause` `Solution`
+- Merge duplicate troubleshooting entries instead of appending near copies
+- Update `README.md` when setup commands architecture or user visible behavior changes
+- Update `docs/PROJECT_STATUS.md` when the project baseline changes in a meaningful way

@@ -1,188 +1,140 @@
 # chat.el
 
-A self-evolving AI chat client for Emacs with tool forging capabilities.
+`chat.el` is a pure Emacs AI chat client focused on coding workflows.
+It supports multi turn chat, tool calling, file operations, session persistence, context trimming, streaming display, and AI assisted tool forging.
 
-## Features
 
-- **🤖 Multiple AI Providers** - Kimi (Moonshot) and OpenAI support
-- **⚡ Streaming Responses** - Real-time typing effect
-- **🛠️ Tool Forging** - AI creates custom tools that persist and evolve
-- **💾 Session Management** - Multiple conversations with persistence
-- **📁 File Operations** - AI can read, search, and modify files
-- **🔄 Self-Evolution** - System capabilities grow through use
+Copyright 2026 chat.el contributors.
+
+## Current Capabilities
+
+- Chat with Kimi, Kimi Code, and OpenAI compatible providers
+- Keep multiple sessions on disk and inspect raw request and response data
+- Stream or fetch responses through an async non blocking UI path
+- Expose built in file tools with approval gates for risky operations
+- Feed tool results back into the model through a bounded tool loop
+- Trim long conversations with system message preservation and summary messages
+- Generate custom tools and save them to disk after explicit approval
 
 ## Quick Start
 
-1. Clone and load:
+Load the package:
+
 ```elisp
-(add-to-list 'load-path "~/path/to/chat.el")
+(add-to-list 'load-path "/path/to/chat.el")
 (require 'chat)
 ```
 
-2. Configure API key in `chat-config.local.el`:
-```elisp
-(setq chat-llm-kimi-api-key "your-api-key")
-(setq chat-default-model 'kimi)
-```
-
-3. Start chatting:
-```
-M-x chat
-```
-
-## Tool Forging (Self-Evolution)
-
-The killer feature: AI can create new tools for you.
-
-### Creating a Tool
-
-In chat, simply say:
-```
-Create a tool that counts words in text
-```
-
-The AI will:
-1. Generate Emacs Lisp code
-2. Compile and test it
-3. Register the tool
-4. Save it to `~/.chat/tools/`
-
-### Using Created Tools
+Configure one provider:
 
 ```elisp
-;; Execute a forged tool
-(chat-tool-forge-execute 'word-counter "your text here")
-
-;; List all available tools
-(chat-tool-forge-list)
-
-;; See tool details
-(chat-tool-forge-get 'word-counter)
+(setq chat-default-model 'kimi-code)
+(setq chat-llm-kimi-code-api-key "sk-kimi-...")
 ```
 
-### Tool Storage
+Or use `auth-source`:
 
-Tools are saved as plain Emacs Lisp files in `~/.chat/tools/`:
-```elisp
-;;; chat-tool: word-counter
-;;; name: Word Counter
-;;; description: Count words in text
-;;; language: elisp
-
-(lambda (text)
-  "Count words in TEXT."
-  (length (split-string text)))
-```
-
-Tools auto-load on startup and persist across sessions.
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `M-x chat` | Start or resume chat |
-| `M-x chat-new-session` | Create new session |
-| `M-x chat-list-sessions` | List all sessions |
-| `M-x chat-tool-forge-list` | List forged tools |
-
-In chat buffer:
-- Type message after `>` and press `RET` to send
-- Type "Create a tool that..." to forge new tools
-- AI responds with streaming text display
-
-## Configuration
-
-### API Keys
-
-Create `chat-config.local.el`:
-```elisp
-;; For Kimi (Moonshot)
-(setq chat-llm-kimi-api-key "sk-...")
-
-;; For OpenAI (optional)
-(setq chat-llm-openai-api-key "sk-...")
-
-;; Default model
-(setq chat-default-model 'kimi)  ; or 'openai
-```
-
-Or use auth-source (secure):
-```
-# ~/.authinfo.gpg
-machine kimi-api user api-key password YOUR_KEY
+```text
+machine kimi-code-api user api-key password YOUR_KEY
 machine openai-api user api-key password YOUR_KEY
 ```
 
-### Customization
+Start a session:
+
+```text
+M-x chat
+```
+
+## Common Commands
+
+| Command | Purpose |
+|---------|---------|
+| `M-x chat` | Open or resume the current chat buffer |
+| `M-x chat-new-session` | Create a new session |
+| `M-x chat-list-sessions` | Switch to an existing session |
+| `M-x chat-view-raw-message` | Inspect the last raw API exchange |
+| `M-x chat-view-last-raw-exchange` | Open the latest assistant request and response |
+| `M-x chat-ui-cancel-response` | Cancel the active response |
+
+## Tool Model
+
+Built in tools currently focus on coding assistance:
+
+- `files_read`
+- `files_read_lines`
+- `files_list`
+- `files_grep`
+- `files_write`
+- `files_replace`
+- `files_patch`
+- `apply_patch`
+
+Risky tools require approval before execution.
+Generated tools also require approval before registration.
+
+Generated elisp tools must be a single top level `lambda` form.
+This prevents compile time side effects from arbitrary wrapper forms.
+
+## File Access Defaults
+
+By default file tools can access:
+
+- the current project directory
+- `/tmp/`
+- `/var/tmp/`
+
+You can override this with `chat-files-allowed-directories`.
+
+## Recommended Local Config
 
 ```elisp
-;; Session storage
-(setq chat-session-directory "~/.chat/sessions/")
-
-;; Tool storage
-(setq chat-tool-forge-directory "~/.chat/tools/")
-
-;; Auto-save
-(setq chat-auto-save t)
+(setq chat-default-model 'kimi-code)
+(setq chat-ui-use-streaming t)
+(setq chat-session-auto-save t)
+(setq chat-files-allowed-directories
+      (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
-## Architecture
+## Architecture Map
 
-```
-chat.el
-├── Core
-│   ├── chat-session.el      ; Session persistence
-│   ├── chat-files.el        ; File operations
-│   └── chat-ui.el           ; Interactive UI
-├── LLM
-│   ├── chat-llm.el          ; Provider abstraction
-│   ├── chat-llm-kimi.el     ; Kimi provider
-│   ├── chat-llm-openai.el   ; OpenAI provider
-│   └── chat-stream.el       ; Streaming display
-└── Tool Forge (Self-Evolution)
-    ├── chat-tool-forge.el     ; Tool management
-    └── chat-tool-forge-ai.el  ; AI tool generation
-```
+| File | Responsibility |
+|------|----------------|
+| `chat.el` | Entry point and command wiring |
+| `chat-ui.el` | Chat buffer rendering and response lifecycle |
+| `chat-session.el` | Session and message persistence |
+| `chat-llm.el` | Provider abstraction and async request handling |
+| `chat-stream.el` | SSE parsing and chunk handling |
+| `chat-tool-caller.el` | Tool prompt contract, parsing, and execution |
+| `chat-approval.el` | Approval flow for risky tools and tool creation |
+| `chat-files.el` | Built in file tools and path safety checks |
+| `chat-context.el` | Context trimming and summary generation |
+| `chat-tool-forge.el` | Tool registry, compilation, loading, and execution |
+| `chat-tool-forge-ai.el` | AI assisted tool generation flow |
 
-## Development
+## Testing
 
-Run tests:
+Run the canonical test entry:
+
 ```bash
-./tests/run-tests.sh
+emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 ```
 
-57 tests covering all modules.
+Current baseline:
 
-## How It Works
+- 122 tests discovered
+- 120 passing
+- 2 skipped provider integration tests
 
-### Tool Generation Flow
+## Documentation Map
 
-1. **User Request** → "Create a tool that X"
-2. **Tool Request Detection** → chat-tool-forge-ai detects trigger phrase
-3. **Prompt Engineering** → Build prompt with existing tools context
-4. **Code Generation** → LLM generates Emacs Lisp lambda
-5. **Compilation** → Code is compiled and validated
-6. **Registration** → Tool added to in-memory registry
-7. **Persistence** → Tool saved to disk for future sessions
-8. **Confirmation** → User sees "✅ Tool 'Name' created"
+- `docs/README.md` for the document index
+- `docs/PROJECT_STATUS.md` for the current status snapshot
+- `docs/troubleshooting-pitfalls.md` for known issues and fixes
+- `docs/ai-contexts/` for session records and implementation history
 
-### Example Tool Evolution
+## Notes For Contributors
 
-```
-User: Create a tool that extracts URLs from text
-
-AI: ✅ Tool 'URL Extractor' (url-extractor) created!
-
-User: (later) Create a tool that downloads URLs
-
-AI: ✅ Tool 'URL Downloader' (url-downloader) created!
-    (AI knows about url-extractor and may use it)
-```
-
-## License
-
-Copyright 2026 chat.el contributors
-
-## Acknowledgments
-
-Inspired by OpenClaw's self-evolving architecture, implemented purely in Emacs Lisp.
+- Read `AGENTS.md` before making changes
+- Update `docs/ai-contexts/` after each development session
+- Add regression tests for each bug fix
+- Do not use destructive git commands or create commits from AI

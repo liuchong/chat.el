@@ -1,105 +1,97 @@
-# chat.el Project Status Review
+# Project Status
 
-**Review Date**: 2026-03-25  
-**Current Version**: 0.2.0
+Last updated: 2026-03-25
 
----
+## Summary
 
-## ✅ Completed Phases
+`chat.el` is now at a usable coding assistant baseline inside Emacs.
+The core chat flow, tool calling flow, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 
-### Phase 1: Core Experience ✅
+## Implemented Areas
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| AI Tool Calling | ✅ | AI invokes forged tools during conversation |
-| Streaming Response | ✅ | Real-time character display with C-g cancellation |
-| Raw Message Viewer | ✅ | View request/response JSON |
+### Chat Core
 
-### Phase 2: Context Management ✅
+- session creation and persistence
+- raw request and response inspection
+- async non streaming request path
+- optional streaming UI path
+- response cancellation
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Token Counting | ✅ | Approximate token estimation |
-| Sliding Window | ✅ | Automatic context truncation |
-| Context Integration | ✅ | Applied before API requests |
+### Tool Calling
 
----
+- one tool per turn JSON contract
+- built in file tools registration
+- approval for risky tool execution
+- bounded follow up tool loop
+- tool results fed back into later model turns
 
-## 📊 Test Status
+### File Operations
 
-| Module | Tests | Status |
-|--------|-------|--------|
-| chat-session | 8 | ✅ |
-| chat-files | 12 | ✅ |
-| chat-llm | 10 | ✅ |
-| chat-stream | 4 | ✅ |
-| chat-tool-forge | 10 | ✅ |
-| chat-tool-forge-ai | 6 | ✅ |
-| chat-tool-caller | 4 | ✅ |
-| chat-ui | 6 | ✅ |
-| **Total** | **70** | **68 passing, 2 skipped** |
+- read and line range reads
+- directory listing and grep
+- write replace and patch flows
+- diff previews for patch operations
+- symlink aware path safety checks
 
----
+### Context Management
 
-## 🎯 Architecture Integrity
+- token estimation
+- leading system message preservation
+- omitted history summary messages
+- summary inclusion of tool calls and tool results
 
-All critical fixes preserved:
-- ✅ **No thread deadlocks** - Uses `run-with-idle-timer` instead of `make-thread`
-- ✅ **Correct JSON encoding** - Uses `alist + vconcat` (not plist)
-- ✅ **Proper User-Agent** - Uses `url-user-agent` variable (not headers)
-- ✅ **Session model fix** - Uses `chat-default-model` correctly
-- ✅ **UTF-8 encoding** - Explicit `coding-system-for-write`
+### Tool Forging
 
----
+- AI assisted tool generation
+- explicit approval before tool registration
+- lambda only elisp source validation
+- registry loading and persistence
 
-## 🚀 Ready for Use
+## Current Quality Baseline
 
-### Quick Start
+### Test Status
 
-```elisp
-;; ~/.emacs or init.el
-(add-to-list 'load-path "~/path/to/chat.el")
-(require 'chat)
+- canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
+- 122 tests discovered
+- 120 passing
+- 2 skipped provider integration tests
+- 0 failures in the current baseline
 
-;; Configure API key
-(setq chat-llm-kimi-code-api-key "sk-kimi-xxxxx")
-(setq chat-default-model 'kimi-code)
+### Stability Highlights
 
-;; Optional: Enable streaming
-(setq chat-ui-use-streaming t)
+- no thread based request deadlocks in the main request path
+- async requests now have timeout timers and cleanup
+- empty assistant messages are filtered before API submission
+- risky tools require approval before execution
+- AI generated tools require approval before registration
+- shell execution no longer goes through shell expansion
 
-;; Start chatting
-M-x chat
-```
+## Known Boundaries
 
-### Key Bindings (in chat buffer)
+- token counting is still heuristic rather than model exact
+- streaming currently falls back to the async request path in `chat-llm-stream`
+- default providers still depend on external API availability and local keys
+- provider integration tests are intentionally skipped in offline or unconfigured environments
 
-| Key | Command |
-|-----|---------|
-| RET | Send message |
-| C-g | Cancel streaming response |
-| C-c C-n | New session |
-| C-c C-l | List sessions |
+## Recommended Next Work
 
----
+- make true provider streaming and fallback behavior share one transport abstraction
+- improve session editing and regeneration flows
+- add integration coverage for approval and tool loop behavior
+- consider a richer session browser and export flow
 
-## 📋 Potential Enhancements (Future)
+## Key Files
 
-### High Priority
-- Message editing/regeneration
-- Session branching UI
-- Model switching mid-conversation
-
-### Medium Priority
-- Export sessions (markdown/org)
-- Prompt templates
-- Search across sessions
-
-### Low Priority
-- Image support (vision models)
-- Cost tracking/analytics
-- Tool marketplace
-
----
-
-*Last updated: 2026-03-25*
+| File | Area |
+|------|------|
+| `chat.el` | entry point |
+| `chat-ui.el` | UI and response lifecycle |
+| `chat-session.el` | persistence |
+| `chat-llm.el` | provider abstraction |
+| `chat-stream.el` | stream parsing |
+| `chat-tool-caller.el` | tool protocol |
+| `chat-approval.el` | approvals |
+| `chat-files.el` | file tools |
+| `chat-context.el` | context trimming |
+| `chat-tool-forge.el` | tool registry and compilation |
+| `chat-tool-forge-ai.el` | AI tool generation |
