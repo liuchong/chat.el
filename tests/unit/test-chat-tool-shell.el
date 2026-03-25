@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'subr-x)
 (require 'test-helper)
 (require 'chat-tool-shell)
 
@@ -28,7 +29,17 @@
 (ert-deftest chat-tool-shell-allows-directory-size-command ()
   "Test that common directory inspection commands are allowed."
   (should (chat-tool-shell-validate "du -sh ~/Downloads"))
-  (should (chat-tool-shell-validate "find . -type d | wc -l")))
+  (should (chat-tool-shell-validate "find . -type d")))
+
+(ert-deftest chat-tool-shell-rejects-shell-metacharacters ()
+  "Test that shell metacharacters are rejected."
+  (should-not (chat-tool-shell-validate "find . -type d | wc -l"))
+  (should-not (chat-tool-shell-validate "echo ok; rm -rf /tmp/demo")))
+
+(ert-deftest chat-tool-shell-executes-without-shell-expansion ()
+  "Test shell tool uses argv execution for safe commands."
+  (let ((chat-tool-shell-enabled t))
+    (should (string= (string-trim (chat-tool-shell-execute "echo hello")) "hello"))))
 
 (provide 'test-chat-tool-shell)
 ;;; test-chat-tool-shell.el ends here

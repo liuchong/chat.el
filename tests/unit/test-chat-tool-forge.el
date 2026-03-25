@@ -46,7 +46,7 @@
                  :id 'my-tool
                  :name "My Tool"
                  :language 'elisp
-                 :source-code "(defun my-tool () t)")))
+                 :source-code "(lambda () t)")))
        (chat-tool-forge-register tool)
        (should (chat-tool-forge-get 'my-tool))))))
 
@@ -89,7 +89,7 @@
                  :id 'temp-tool
                  :name "Temp"
                  :language 'elisp
-                 :source-code "(defun temp () t)")))
+                 :source-code "(lambda () t)")))
        (chat-tool-forge-register tool)
        (should (chat-tool-forge-get 'temp-tool))
        (chat-tool-forge-unload 'temp-tool)
@@ -118,6 +118,24 @@
       (should (= (chat-forged-tool-usage-count tool) 1)))
     ;; Cleanup
     (remhash 'test-add chat-tool-forge--registry)))
+
+(ert-deftest chat-tool-forge-compile-rejects-non-lambda-form ()
+  "Test tool compilation rejects forms other than a single lambda."
+  (let ((tool (make-chat-forged-tool
+               :id 'bad-tool
+               :name "Bad Tool"
+               :language 'elisp
+               :source-code "(progn (message \"side effect\") (lambda () t))")))
+    (should-error (chat-tool-forge--compile-elisp tool))))
+
+(ert-deftest chat-tool-forge-compile-rejects-multiple-top-level-forms ()
+  "Test tool compilation rejects multiple top level forms."
+  (let ((tool (make-chat-forged-tool
+               :id 'bad-tool
+               :name "Bad Tool"
+               :language 'elisp
+               :source-code "(lambda () t)\n(lambda () nil)")))
+    (should-error (chat-tool-forge--compile-elisp tool))))
 
 ;; ------------------------------------------------------------------
 ;; Tool Discovery

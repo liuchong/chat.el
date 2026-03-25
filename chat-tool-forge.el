@@ -153,9 +153,26 @@
       (with-temp-buffer
         (insert source)
         (goto-char (point-min))
-        ;; Read and evaluate to get function
-        (let ((func (eval (read (current-buffer)) t)))
-          (setf (chat-forged-tool-compiled-function tool) func))))))
+        (let ((form (chat-tool-forge--read-single-form (current-buffer))))
+          (unless (chat-tool-forge--lambda-form-p form)
+            (error "Tool source must be exactly one lambda form"))
+          (setf (chat-forged-tool-compiled-function tool)
+                (eval form t)))))))
+
+(defun chat-tool-forge--read-single-form (buffer)
+  "Read exactly one Lisp form from BUFFER."
+  (with-current-buffer buffer
+    (goto-char (point-min))
+    (let ((form (read (current-buffer))))
+      (forward-comment (point-max))
+      (unless (eobp)
+        (error "Tool source must contain exactly one top level form"))
+      form)))
+
+(defun chat-tool-forge--lambda-form-p (form)
+  "Return non nil when FORM is a lambda expression."
+  (and (consp form)
+       (eq (car form) 'lambda)))
 
 ;; ------------------------------------------------------------------
 ;; Persistence

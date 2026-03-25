@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'test-helper)
 (require 'chat-tool-forge-ai)
 
@@ -61,6 +62,26 @@
          (spec (chat-tool-forge-ai--parse-response response "Echo input")))
     (should (eq (plist-get spec :language) 'elisp))
     (should (string= (plist-get spec :source-code) "(lambda (input) input)"))))
+
+(ert-deftest chat-tool-forge-ai-create-and-register-needs-approval ()
+  "Test tool creation is blocked when approval is denied."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (cl-letf (((symbol-function 'chat-tool-forge-ai-generate)
+                (lambda (_description &optional _model)
+                  '(:id denied-tool
+                    :name "Denied Tool"
+                    :description "Denied"
+                    :language elisp
+                    :source-code "(lambda () t)"
+                    :version "1.0.0"
+                    :is-active t)))
+               ((symbol-function 'chat-approval-request-tool-creation)
+                (lambda (_description _spec)
+                  nil)))
+       (should-not (chat-tool-forge-ai-create-and-register "Create a denied tool"))
+       (should-not (chat-tool-forge-get 'denied-tool))))))
 
 (provide 'test-chat-tool-forge-ai)
 ;;; test-chat-tool-forge-ai.el ends here

@@ -38,6 +38,10 @@
                  (const :tag "Deny" deny)
                  (const :tag "Ask" ask))
   :group 'chat-approval)
+(defcustom chat-approval-tool-creation-required t
+  "Whether AI generated tools require explicit approval."
+  :type 'boolean
+  :group 'chat-approval)
 (defun chat-approval-tool-required-p (tool-id)
   "Return non-nil when TOOL-ID requires approval."
   (memq tool-id chat-approval-required-tools))
@@ -68,6 +72,17 @@
           (chat-approval--risk-level tool-id)
           tool-id
           (chat-approval--summarize-arguments arguments)))
+
+(defun chat-approval--allow-noninteractive-p ()
+  "Return non nil when the current noninteractive policy allows execution."
+  (and noninteractive
+       (eq chat-approval-noninteractive-policy 'approve)))
+
+(defun chat-approval--deny-noninteractive-p ()
+  "Return non nil when the current noninteractive policy denies execution."
+  (and noninteractive
+       (eq chat-approval-noninteractive-policy 'deny)))
+
 (defun chat-approval-request-tool-call (tool call)
   "Request approval for TOOL using CALL data.
 Returns non-nil when execution should proceed."
@@ -77,12 +92,27 @@ Returns non-nil when execution should proceed."
     (cond
      ((not chat-approval-enabled) t)
      ((not (chat-approval-tool-required-p tool-id)) t)
-     ((and noninteractive
-           (eq chat-approval-noninteractive-policy 'approve))
+     ((chat-approval--allow-noninteractive-p)
       t)
-     ((and noninteractive
-           (eq chat-approval-noninteractive-policy 'deny))
+     ((chat-approval--deny-noninteractive-p)
       nil)
+     (t
+      (y-or-n-p prompt)))))
+
+(defun chat-approval-request-tool-creation (description spec)
+  "Request approval for creating a generated tool from DESCRIPTION and SPEC."
+  (let* ((tool-id (plist-get spec :id))
+         (language (plist-get spec :language))
+         (prompt (format
+                  "Approve high risk tool creation %s in %s for %s? "
+                  tool-id
+                  language
+                  (chat-approval--summarize-value description))))
+    (cond
+     ((not chat-approval-enabled) t)
+     ((not chat-approval-tool-creation-required) t)
+     ((chat-approval--allow-noninteractive-p) t)
+     ((chat-approval--deny-noninteractive-p) nil)
      (t
       (y-or-n-p prompt)))))
 (provide 'chat-approval)

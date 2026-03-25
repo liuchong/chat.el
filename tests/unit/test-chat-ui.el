@@ -143,5 +143,24 @@
       (should (eq cancelled 'request-handle))
       (should-not chat-ui--active-request-handle))))
 
+(ert-deftest chat-ui-send-message-blocks-while-request-is-active ()
+  "Test sending a new message is blocked while another response is active."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Busy Session" 'kimi))
+          (chat-ui--active-request-handle 'request-handle)
+          sent)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "Hello while busy")
+       (cl-letf (((symbol-function 'chat-ui--get-response)
+                  (lambda ()
+                    (setq sent t))))
+         (chat-ui-send-message)
+         (should-not sent)
+         (should-not (chat-session-messages session)))))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

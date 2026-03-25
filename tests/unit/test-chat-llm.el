@@ -159,5 +159,59 @@
          (setq captured-error err)))
       (should (string= captured-error "network failed")))))
 
+(ert-deftest chat-llm-post-async-installs-timeout-timer ()
+  "Test async transport installs a timeout timer for request handles."
+  (let (captured-timeout handle)
+    (cl-letf (((symbol-function 'url-retrieve)
+               (lambda (_url _callback _cbargs _silent _inhibit)
+                 (setq handle (generate-new-buffer " *chat-llm-timeout*"))
+                 handle))
+              ((symbol-function 'run-at-time)
+               (lambda (secs _repeat function &rest args)
+                 (setq captured-timeout secs)
+                 (list :timer function args))))
+      (setq handle
+            (chat-llm--post-async "https://example.com"
+                                  nil
+                                  "{}"
+                                  (lambda (_body _status))
+                                  (lambda (_err))
+                                  7))
+      (should (bufferp handle))
+      (should (= captured-timeout 7)))))
+
+(ert-deftest chat-llm-stream-falls-back-to-async-request ()
+  "Test streaming API at least emits one content callback and a terminator."
+  (let (chunks)
+    (chat-llm-register-provider 'stream-fallback-test
+                                :base-url "https://async.example.com"
+                                :api-key "token")
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_provider _messages success _error &optional _options)
+                 (funcall success
+                          '(:content "stream-body"
+                            :raw-request "{\"request\":true}"
+                            :raw-response "{\"response\":true}"))
+                 'stream-handle)))
+      (should (eq (chat-llm-stream
+                   'stream-fallback-test
+                   (list (make-chat-message :role :user :content "Hi"))
+                   (lambda (chunk)
+                     (push chunk chunks)))
+                  'stream-handle))
+      (should (equal (nreverse chunks) '("stream-body" nil))))))
+
+(ert-deftest chat-llm-cancel-request-cancels-timeout-timer ()
+  "Test cancelling a request also cancels its timeout timer."
+  (let ((handle (generate-new-buffer " *chat-llm-cancel*"))
+        cancelled)
+    (with-current-buffer handle
+      (setq-local chat-llm--timeout-timer 'fake-timer))
+    (cl-letf (((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (setq cancelled timer))))
+      (should (chat-llm-cancel-request handle))
+      (should (eq cancelled 'fake-timer)))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

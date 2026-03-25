@@ -48,5 +48,19 @@
                       ("content" . "hello world")))))
       (should (string-match-p "files_write" captured-prompt))
       (should (string-match-p "/tmp/demo.txt" captured-prompt)))))
+
+(ert-deftest chat-approval-prompts-for-tool-creation ()
+  "Test that forged tool creation also requests approval."
+  (let ((chat-approval-tool-creation-required t)
+        (chat-approval-noninteractive-policy 'ask)
+        captured-prompt)
+    (cl-letf (((symbol-function 'y-or-n-p)
+               (lambda (prompt)
+                 (setq captured-prompt prompt)
+                 t)))
+      (should (chat-approval-request-tool-creation
+               "Create a tool that lists windows"
+               '(:id window-tool :language elisp)))
+      (should (string-match-p "window-tool" captured-prompt)))))
 (provide 'test-chat-approval)
 ;;; test-chat-approval.el ends here

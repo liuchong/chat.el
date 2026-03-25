@@ -27,9 +27,23 @@
       0
     (ceiling (/ (length text) 4.0))))
 
+(defun chat-context--tool-calls-snippet (msg)
+  "Return a short snippet of tool calls from MSG."
+  (when-let ((tool-calls (chat-message-tool-calls msg)))
+    (chat-context--message-snippet
+     (mapconcat (lambda (call)
+                  (format "%s %s"
+                          (plist-get call :name)
+                          (or (plist-get call :arguments) "")))
+                tool-calls
+                " | "))))
+
 (defun chat-context-message-tokens (msg)
   "Estimate token count for MSG."
-  (+ 4 (chat-context-count-tokens (or (chat-message-content msg) ""))))
+  (+ 4
+     (chat-context-count-tokens (or (chat-message-content msg) ""))
+     (chat-context-count-tokens (or (chat-context--tool-calls-snippet msg) ""))
+     (chat-context-count-tokens (or (chat-context--tool-results-snippet msg) ""))))
 
 (defun chat-context-total-tokens (msgs)
   "Calculate total token count for MSGS."
@@ -57,12 +71,15 @@
   "Return a one line summary for MSG."
   (let* ((role (chat-context--message-role-name msg))
          (content (chat-context--message-snippet (chat-message-content msg)))
+         (tool-calls (chat-context--tool-calls-snippet msg))
          (tool-results (chat-context--tool-results-snippet msg)))
     (string-trim
      (mapconcat #'identity
                 (delq nil
                       (list role
                             (unless (string-blank-p content) content)
+                            (when tool-calls
+                              (format "tool-calls %s" tool-calls))
                             (when tool-results
                               (format "tool-results %s" tool-results))))
                 ": "))))

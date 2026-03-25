@@ -20,6 +20,12 @@
 (require 'subr-x)
 (require 'chat-log)
 
+(defvar-local chat-llm--timeout-timer nil
+  "Timeout timer for the current async request buffer.")
+
+(defvar-local chat-llm--callback-finished nil
+  "Whether the async request buffer has already completed.")
+
 ;; ------------------------------------------------------------------
 ;; Provider Registry
 ;; ------------------------------------------------------------------
@@ -212,7 +218,7 @@ Returns a cons cell of raw response body and status code."
     (chat-log "[LLM] Response body length: %d bytes" (length response-body))
     (cons response-body status-code)))
 
-(defun chat-llm--post-async (url headers body success error &optional _timeout-secs)
+(defun chat-llm--post-async (url headers body success error &optional timeout-secs)
   "Make asynchronous POST request to URL.
 SUCCESS receives RAW-BODY and STATUS-CODE.
 ERROR receives a string message."
@@ -224,24 +230,54 @@ ERROR receives a string message."
                             body))
         (url-user-agent (or (cdr (assoc "User-Agent" headers))
                             "chat.el/1.0")))
-    (url-retrieve
-     url
-     (lambda (status success-callback error-callback)
-       (unwind-protect
-           (condition-case err
-               (if-let ((request-error (plist-get status :error)))
-                   (funcall error-callback (format "%s" request-error))
-                 (let* ((parsed (chat-llm--parse-http-response-buffer))
-                        (raw-body (car parsed))
-                        (status-code (cdr parsed)))
-                   (funcall success-callback raw-body status-code)))
-             (error
-              (funcall error-callback (error-message-string err))))
-         (when (buffer-live-p (current-buffer))
-           (kill-buffer (current-buffer)))))
-     (list success error)
-     t
-     t)))
+    (let ((request-buffer
+           (url-retrieve
+            url
+            (lambda (status success-callback error-callback)
+              (let ((response-buffer (current-buffer)))
+                (unwind-protect
+                    (unless chat-llm--callback-finished
+                      (setq chat-llm--callback-finished t)
+                      (when chat-llm--timeout-timer
+                        (cancel-timer chat-llm--timeout-timer)
+                        (setq chat-llm--timeout-timer nil))
+                      (condition-case err
+                          (if-let ((request-error (plist-get status :error)))
+                              (funcall error-callback (format "%s" request-error))
+                            (let* ((parsed (chat-llm--parse-http-response-buffer))
+                                   (raw-body (car parsed))
+                                   (status-code (cdr parsed)))
+                              (funcall success-callback raw-body status-code)))
+                        (error
+                         (funcall error-callback (error-message-string err)))))
+                  (when (buffer-live-p response-buffer)
+                    (kill-buffer response-buffer)))))
+            (list success error)
+            t
+            t)))
+      (when (buffer-live-p request-buffer)
+        (with-current-buffer request-buffer
+          (setq-local chat-llm--callback-finished nil)
+          (when timeout-secs
+            (setq-local
+             chat-llm--timeout-timer
+             (run-at-time
+              timeout-secs nil
+              (lambda (buffer error-callback timeout-value)
+                (when (buffer-live-p buffer)
+                  (with-current-buffer buffer
+                    (unless chat-llm--callback-finished
+                      (setq chat-llm--callback-finished t)
+                      (let ((proc (get-buffer-process buffer)))
+                        (when (process-live-p proc)
+                          (delete-process proc)))
+                      (funcall error-callback
+                               (format "Request timeout after %d seconds" timeout-value))
+                      (kill-buffer buffer)))))
+              request-buffer
+              error
+              timeout-secs))))
+      request-buffer))))
 
 (defun chat-llm--decode-response (config raw-request raw-response status-code)
   "Decode one response using CONFIG and request metadata."
@@ -316,6 +352,11 @@ Returns a request handle."
 (defun chat-llm-cancel-request (handle)
   "Cancel asynchronous request HANDLE."
   (when (buffer-live-p handle)
+    (with-current-buffer handle
+      (when chat-llm--timeout-timer
+        (cancel-timer chat-llm--timeout-timer)
+        (setq chat-llm--timeout-timer nil))
+      (setq chat-llm--callback-finished t))
     (let ((proc (get-buffer-process handle)))
       (when (process-live-p proc)
         (delete-process proc)))
@@ -327,30 +368,16 @@ Returns a request handle."
 
 CALLBACK is called with each chunk of the response.
 OPTIONS is an optional plist of request parameters."
-  (let* ((config (chat-llm-get-provider provider))
-         (base-url (plist-get config :base-url))
-         (opts (plist-put (copy-tree options) :stream t))
-         (request-body (chat-llm--build-request provider messages opts))
-         (headers (chat-llm--make-headers provider))
-         (process nil)
-         (buffer (generate-new-buffer " *chat-llm-stream*")))
-    ;; This is a simplified streaming implementation
-    ;; Full implementation would use process filters for SSE
-    (chat-llm--post
-     (concat base-url "/chat/completions")
-     headers
-     (json-encode request-body)
-     (lambda (body)
-       ;; For non-streaming fallback
-       (let* ((json-data (json-read-from-string body))
-              (parser (or (plist-get config :response-fn)
-                          #'chat-llm--default-parse-response))
-              (content (funcall parser json-data)))
-         (funcall callback content)
-         (funcall callback nil)))
-     (lambda (err)
-       (funcall callback nil)
-       (error err)))))
+  (chat-llm-request-async
+   provider
+   messages
+   (lambda (result)
+     (funcall callback (plist-get result :content))
+     (funcall callback nil))
+   (lambda (err)
+     (funcall callback nil)
+     (error "%s" err))
+   (plist-put (copy-tree options) :stream t)))
 
 (defun chat-llm--default-parse-response (json-data)
   "Default response parser for JSON-DATA."

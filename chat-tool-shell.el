@@ -21,10 +21,20 @@ WARNING: Only enable in trusted environments."
   :type '(repeat string)
   :group 'chat)
 
+(defconst chat-tool-shell--unsafe-pattern
+  "[;&|><`$\n\r]"
+  "Pattern for shell metacharacters that are not allowed.")
+
+(defun chat-tool-shell--split-command (command)
+  "Parse COMMAND into an argv list."
+  (split-string-and-unquote command))
+
 (defun chat-tool-shell-validate (command)
   "Check if COMMAND is in the allowed list."
-  (let ((cmd (car (split-string command))))
-    (member cmd chat-tool-shell-allowed-commands)))
+  (let ((argv (chat-tool-shell--split-command command)))
+    (and argv
+         (not (string-match-p chat-tool-shell--unsafe-pattern command))
+         (member (car argv) chat-tool-shell-allowed-commands))))
 
 (defun chat-tool-shell-execute (command)
   "Execute shell COMMAND and return output."
@@ -33,9 +43,10 @@ WARNING: Only enable in trusted environments."
     (if (not (chat-tool-shell-validate command))
         (format "Error: Command not allowed: %s" command)
       (condition-case err
-          (with-output-to-string
-            (with-current-buffer standard-output
-              (call-process-shell-command command nil t nil)))
+          (let ((argv (chat-tool-shell--split-command command)))
+            (with-output-to-string
+              (with-current-buffer standard-output
+                (apply #'process-file (car argv) nil t nil (cdr argv)))))
         (error (format "Error executing command: %s" (error-message-string err)))))))
 
 ;; Register the tool

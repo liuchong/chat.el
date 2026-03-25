@@ -44,5 +44,27 @@
          (summary (chat-context--summarize-message message)))
     (should (string-match-p "patch applied" summary))
     (should (string-match-p "assistant" summary))))
+
+(ert-deftest chat-context-summary-includes-tool-call-names ()
+  "Test that tool call names appear in message summaries."
+  (let* ((message (make-chat-message
+                   :id "a-2"
+                   :role :assistant
+                   :content "done"
+                   :tool-calls '((:name "files_read" :arguments (("path" . "a.txt"))))
+                   :tool-results '("ok")))
+         (summary (chat-context--summarize-message message)))
+    (should (string-match-p "files_read" summary))
+    (should (string-match-p "ok" summary))))
+
+(ert-deftest chat-context-message-tokens-counts-tool-metadata ()
+  "Test token estimation accounts for tool metadata."
+  (let* ((message (make-chat-message
+                   :id "a-3"
+                   :role :assistant
+                   :content ""
+                   :tool-calls '((:name "apply_patch" :arguments (("path" . "demo.el"))))
+                   :tool-results '("patched demo.el"))))
+    (should (> (chat-context-message-tokens message) 4))))
 (provide 'test-chat-context)
 ;;; test-chat-context.el ends here

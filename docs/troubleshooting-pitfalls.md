@@ -219,6 +219,82 @@ emacs -Q -batch -l tests/run-tests.el
 
 ---
 
+## Security Boundaries
+
+### Symlink Paths Can Escape Allowed Roots
+
+**Problem**: prefix checking on `expand-file-name` can treat a symlink under an allowed directory as safe even when it points outside that root
+
+**Cause**: validating only the lexical path does not validate the resolved filesystem target
+
+**Solution**: normalize both target paths and allowed roots through `file-truename`
+For non existing targets resolve the nearest existing ancestor first and rebuild the final path from that real directory
+
+```elisp
+(let* ((ancestor (chat-files--existing-ancestor expanded))
+       (ancestor-truename (file-truename ancestor))
+       (relative (file-relative-name expanded ancestor)))
+  (expand-file-name relative ancestor-truename))
+```
+
+### JSON Patch Arguments Lose Keyword Keys
+
+**Problem**: `files_patch` may receive decoded JSON alists while the patch engine expects plist keys like `:search`
+
+**Cause**: tool calling JSON decoding does not preserve plist structure inside nested patch objects
+
+**Solution**: normalize each patch object before applying it
+
+```elisp
+(list :search (or (cdr (assoc 'search patch))
+                  (cdr (assoc "search" patch)))
+      :replace (or (cdr (assoc 'replace patch))
+                   (cdr (assoc "replace" patch))))
+```
+
+### Shell Whitelist Is Bypassed By Metacharacters
+
+**Problem**: validating only the first token but executing through `call-process-shell-command` allows pipes and command chaining to bypass the intent of the whitelist
+
+**Cause**: the shell reinterprets the full string after validation
+
+**Solution**: reject shell metacharacters and execute argv directly with `process-file`
+
+```elisp
+(and (not (string-match-p chat-tool-shell--unsafe-pattern command))
+     (member (car argv) chat-tool-shell-allowed-commands))
+```
+
+---
+
+### AI Tool Source Executes During Compilation
+
+**Problem**: generated tool source can execute arbitrary top level code during compilation
+
+**Cause**: compiling by `eval` on an unrestricted form allows wrappers like `progn` to run immediately
+
+**Solution**: only accept exactly one top level form and require that form to be a `lambda`
+
+```elisp
+(unless (chat-tool-forge--lambda-form-p form)
+  (error "Tool source must be exactly one lambda form"))
+```
+
+### Async Request Timeout Must Clean Up Buffer State
+
+**Problem**: async HTTP requests can hang forever and leave stale state behind
+
+**Cause**: the async transport accepted a timeout option but did not bind any timer to the request buffer
+
+**Solution**: install a timeout timer on the request buffer and cancel that timer on success or explicit cancellation
+
+```elisp
+(setq-local chat-llm--timeout-timer
+            (run-at-time timeout-secs nil ...))
+```
+
+---
+
 ## Parenthesis Counting
 
 **Problem**: Difficult to track matching parentheses in complex nested forms

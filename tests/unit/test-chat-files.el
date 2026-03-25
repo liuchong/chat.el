@@ -39,6 +39,24 @@
         (chat-files-deny-patterns '("\\.key$")))
     (should-error (chat-files--safe-path-p "~/secret.key"))))
 
+(ert-deftest chat-files-safe-path-rejects-symlink-escaping-allowed-root ()
+  "Test that symlinks cannot escape the allowed root."
+  (skip-unless (fboundp 'make-symbolic-link))
+  (chat-test-with-temp-dir
+   (let* ((outside-dir (make-temp-file "chat-outside-" t))
+          (link-path (expand-file-name "escape-link" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (unwind-protect
+         (progn
+           (make-symbolic-link outside-dir link-path t)
+           (should-error (chat-files--safe-path-p (expand-file-name "secret.txt" link-path))))
+       (when (file-directory-p outside-dir)
+         (delete-directory outside-dir t))))))
+
+(ert-deftest chat-files-default-allowed-directories-do-not-include-home-root ()
+  "Test default file access is not the entire home directory."
+  (should-not (member "~/" chat-files-allowed-directories)))
+
 ;; ------------------------------------------------------------------
 ;; Basic File Operations
 ;; ------------------------------------------------------------------
@@ -53,7 +71,7 @@
      (let ((result (chat-files-read test-file)))
        (should (plistp result))
        (should (string= (plist-get result :content) "Hello World"))
-       (should (equal (plist-get result :path) test-file))))))
+       (should (equal (plist-get result :path) (file-truename test-file)))))))
 
 (ert-deftest chat-files-read-lines-specific-range ()
   "Test reading specific line range."
@@ -87,6 +105,17 @@
      (make-directory (expand-file-name "subdir" temp-dir))
      (let ((result (chat-files-list temp-dir)))
        (should (= (length result) 3))))))
+
+(ert-deftest chat-files-list-recursive-keeps-plist-shape ()
+  "Test recursive listing returns plist entries like non recursive mode."
+  (chat-test-with-temp-dir
+   (let ((chat-files-allowed-directories (list temp-dir)))
+     (make-directory (expand-file-name "sub" temp-dir))
+     (with-temp-file (expand-file-name "sub/file.txt" temp-dir) nil)
+     (let ((result (chat-files-list temp-dir "file\\.txt$" t)))
+       (should (= (length result) 1))
+       (should (plist-get (car result) :path))
+       (should (equal (plist-get (car result) :type) 'file))))))
 
 ;; ------------------------------------------------------------------
 ;; File Movement
@@ -212,6 +241,23 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "hello new world")))))
+
+(ert-deftest chat-files-patch-accepts-json-style-alists ()
+  "Test patch engine accepts alist patches from decoded JSON."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "json-patch.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "one\ntwo\n"))
+     (chat-files-patch
+      test-file
+      '((("search" . "two")
+         ("replace" . "three")
+         ("count" . 1))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "one\nthree\n")))))
 
 ;; ------------------------------------------------------------------
 ;; Statistics

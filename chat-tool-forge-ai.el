@@ -15,6 +15,7 @@
 
 ;;; Code:
 
+(require 'chat-approval)
 (require 'chat-tool-forge)
 (require 'chat-llm)
 
@@ -164,13 +165,15 @@ The code should be a single lambda expression like:
 Returns the created tool or nil on failure."
   (condition-case err
       (let* ((spec (chat-tool-forge-ai-generate description model))
-             (tool (apply #'make-chat-forged-tool spec)))
-        ;; Validate the code compiles
-        (when (eq (chat-forged-tool-language tool) 'elisp)
-          (chat-tool-forge--compile-elisp tool))
-        ;; Register
-        (chat-tool-forge-register tool)
-        tool)
+             (tool (and (chat-approval-request-tool-creation description spec)
+                        (apply #'make-chat-forged-tool spec))))
+        (when tool
+          ;; Validate the code compiles
+          (when (eq (chat-forged-tool-language tool) 'elisp)
+            (chat-tool-forge--compile-elisp tool))
+          ;; Register
+          (chat-tool-forge-register tool)
+          tool))
     (error
      (message "Tool generation failed: %s" (error-message-string err))
      nil)))

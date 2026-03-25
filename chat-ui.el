@@ -34,6 +34,12 @@
 (defvar chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
 
+(defun chat-ui--response-active-p ()
+  "Return non nil when a response is already in progress."
+  (or chat-ui--active-request-handle
+      (and chat-ui--active-stream-process
+           (process-live-p chat-ui--active-stream-process))))
+
 (defun chat-ui-setup-buffer (session)
   "Setup chat buffer for SESSION."
   (let ((inhibit-read-only t))
@@ -80,29 +86,31 @@
   "Send message from input area."
   (interactive)
   (when chat--current-session
-    (let* ((input-start (marker-position chat-ui--input-overlay))
-           (input-end (point-max))
-           (content (buffer-substring-no-properties input-start input-end)))
-      ;; Clear input
-      (delete-region input-start input-end)
-      (goto-char input-start)
-      ;; Check for tool creation request
-      (if (chat-tool-forge-ai--tool-request-p content)
-          (chat-ui--handle-tool-creation content)
-        ;; Normal message flow
-        (let ((user-msg (make-chat-message
-                        :id (format "msg-%s" (random 10000))
-                        :role :user
-                        :content (string-trim content)
-                        :timestamp (current-time))))
-          (chat-session-add-message chat--current-session user-msg)
-          ;; Insert in buffer
-          (save-excursion
-            (goto-char chat-ui--messages-end)
-            (chat-ui--insert-message user-msg)
-            (set-marker chat-ui--messages-end (point)))
-          ;; Get AI response
-          (chat-ui--get-response))))))
+    (if (chat-ui--response-active-p)
+        (message "A response is already in progress. Cancel it before sending another message.")
+      (let* ((input-start (marker-position chat-ui--input-overlay))
+             (input-end (point-max))
+             (content (buffer-substring-no-properties input-start input-end)))
+        ;; Clear input
+        (delete-region input-start input-end)
+        (goto-char input-start)
+        ;; Check for tool creation request
+        (if (chat-tool-forge-ai--tool-request-p content)
+            (chat-ui--handle-tool-creation content)
+          ;; Normal message flow
+          (let ((user-msg (make-chat-message
+                          :id (format "msg-%s" (random 10000))
+                          :role :user
+                          :content (string-trim content)
+                          :timestamp (current-time))))
+            (chat-session-add-message chat--current-session user-msg)
+            ;; Insert in buffer
+            (save-excursion
+              (goto-char chat-ui--messages-end)
+              (chat-ui--insert-message user-msg)
+              (set-marker chat-ui--messages-end (point)))
+            ;; Get AI response
+            (chat-ui--get-response)))))))
 
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."
@@ -566,7 +574,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                      chat-ui--active-stream-process
                      (lambda (proc event)
                        (chat-log "[STREAM] Sentinel event: %s" event)
-                       (when (string-match-p "finished\\|closed" event)
+                      (when (string-match-p "finished\\|closed\\|exited" event)
                          (setq chat-ui--active-stream-process nil)
                          (let ((processed
                                 (chat-tool-caller-process-response-data content-acc)))
@@ -577,6 +585,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                             request-json
                             nil
                             (lambda (resolved)
+                              (setq chat-ui--active-request-handle nil)
                               (chat-ui--finalize-response
                                sess
                                id

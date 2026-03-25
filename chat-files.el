@@ -35,7 +35,7 @@
   :group 'chat-files)
 
 (defcustom chat-files-allowed-directories
-  '("~/" "/tmp/" "/var/tmp/")
+  '("./" "/tmp/" "/var/tmp/")
   "Directories that AI is allowed to access.
 Can be overridden per-session."
   :type '(repeat directory)
@@ -51,10 +51,32 @@ Can be overridden per-session."
 ;; Security and Validation
 ;; ------------------------------------------------------------------
 
+(defun chat-files--existing-ancestor (path)
+  "Return the nearest existing ancestor for PATH."
+  (let ((current (expand-file-name path)))
+    (while (and current
+                (not (file-exists-p current))
+                (not (string= current "/")))
+      (setq current (directory-file-name (file-name-directory current))))
+    (if (file-exists-p current)
+        current
+      "/")))
+
+(defun chat-files--resolved-path (path)
+  "Return a normalized PATH with symlinks resolved."
+  (let* ((expanded (expand-file-name path))
+         (exists (file-exists-p expanded)))
+    (if exists
+        (file-truename expanded)
+      (let* ((ancestor (chat-files--existing-ancestor expanded))
+             (ancestor-truename (file-truename ancestor))
+             (relative (file-relative-name expanded ancestor)))
+        (expand-file-name relative ancestor-truename)))))
+
 (defun chat-files--safe-path-p (path)
   "Check if PATH is safe to access.
 Returns nil if path matches deny patterns or is outside allowed directories."
-  (let ((expanded (expand-file-name path)))
+  (let ((expanded (chat-files--resolved-path path)))
     ;; Check deny patterns
     (when (seq-find (lambda (pat)
                       (string-match-p pat expanded))
@@ -62,7 +84,11 @@ Returns nil if path matches deny patterns or is outside allowed directories."
       (error "Access denied: path matches sensitive file pattern"))
     ;; Check allowed directories
     (unless (seq-find (lambda (dir)
-                        (string-prefix-p (expand-file-name dir) expanded))
+                        (let ((allowed-root (file-name-as-directory
+                                             (chat-files--resolved-path dir))))
+                          (or (string= expanded (directory-file-name allowed-root))
+                              (string-prefix-p allowed-root
+                                               (file-name-as-directory expanded)))))
                       chat-files-allowed-directories)
       (error "Access denied: path outside allowed directories"))
     expanded))
@@ -156,7 +182,16 @@ Returns a list of plists with :name, :path, :size, :mtime, :type."
   (let* ((safe-dir (chat-files--safe-path-p directory))
          (files '()))
     (if recursive
-        (directory-files-recursively safe-dir pattern)
+        (progn
+          (dolist (full-path (directory-files-recursively safe-dir pattern))
+            (push (list :name (file-name-nondirectory full-path)
+                        :path full-path
+                        :size (file-attribute-size (file-attributes full-path))
+                        :mtime (file-attribute-modification-time
+                                (file-attributes full-path))
+                        :type 'file)
+                  files))
+          (nreverse files))
       (progn
         (dolist (name (directory-files safe-dir nil pattern))
           (unless (member name '("." ".."))
@@ -429,7 +464,7 @@ ENCODING specifies the file encoding (default utf-8)."
 (defun chat-files-replace (path search replace &optional limit)
   "Replace SEARCH pattern with REPLACE text in file at PATH.
 If LIMIT is specified, only perform up to LIMIT replacements.
-SEARCH can be a string or regex (if it contains special chars).
+SEARCH is matched as literal text.
 
 Returns a plist with :replacements-made, :path."
   (let* ((safe-path (chat-files--safe-path-p path))
@@ -489,10 +524,13 @@ All patches are applied atomically (or none if any fails)."
         (with-temp-buffer
           (insert-file-contents safe-path)
           (dolist (patch patches)
-            (let ((search (plist-get patch :search))
-                  (replace (plist-get patch :replace))
-                  (line (plist-get patch :line))
-                  (count (or (plist-get patch :count) 1)))
+            (let* ((normalized-patch (chat-files--normalize-patch patch))
+                   (search (plist-get normalized-patch :search))
+                   (replace (plist-get normalized-patch :replace))
+                   (line (plist-get normalized-patch :line))
+                   (count (or (plist-get normalized-patch :count) 1)))
+              (unless search
+                (error "Patch is missing search text"))
               (if line
                   (progn
                     (goto-char (point-min))
@@ -518,6 +556,23 @@ All patches are applied atomically (or none if any fails)."
 (defun chat-files-apply-patch (path patches)
   "Apply PATCHES to PATH using the patch engine."
   (chat-files-patch path patches))
+
+(defun chat-files--normalize-patch (patch)
+  "Normalize PATCH from plist or JSON alist into a plist."
+  (cond
+   ((and (listp patch) (keywordp (car patch)))
+    patch)
+   ((listp patch)
+    (list :search (or (cdr (assoc 'search patch))
+                      (cdr (assoc "search" patch)))
+          :replace (or (cdr (assoc 'replace patch))
+                       (cdr (assoc "replace" patch)))
+          :line (or (cdr (assoc 'line patch))
+                    (cdr (assoc "line" patch)))
+          :count (or (cdr (assoc 'count patch))
+                     (cdr (assoc "count" patch)))))
+   (t
+    (error "Invalid patch data: %S" patch))))
 
 ;; ------------------------------------------------------------------
 ;; File Concatenation and Assembly
@@ -769,13 +824,10 @@ This describes available file operations to the AI."
          :description "Apply multiple patches atomically"
          :parameters '((:name "path" :type "string" :required t)
                        (:name "patches" :type "array" :required t)))
-   (list :name "files_move"
-         :description "Move or rename a file"
-         :parameters '((:name "source" :type "string" :required t)
-                       (:name "dest" :type "string" :required t)))
-   (list :name "files_stat"
-         :description "Get file statistics"
-         :parameters '((:name "path" :type "string" :required t)))))
+   (list :name "apply_patch"
+         :description "Apply structured patches to an existing file"
+         :parameters '((:name "path" :type "string" :required t)
+                       (:name "patches" :type "array" :required t)))))
 
 ;; ------------------------------------------------------------------
 ;; Additional Operations (Extended)
