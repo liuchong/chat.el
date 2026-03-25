@@ -91,27 +91,30 @@
         (message "A response is already in progress. Cancel it before sending another message.")
       (let* ((input-start (marker-position chat-ui--input-overlay))
              (input-end (point-max))
-             (content (buffer-substring-no-properties input-start input-end)))
-        ;; Clear input
-        (delete-region input-start input-end)
-        (goto-char input-start)
-        ;; Check for tool creation request
-        (if (chat-tool-forge-ai--tool-request-p content)
-            (chat-ui--handle-tool-creation content)
-          ;; Normal message flow
-          (let ((user-msg (make-chat-message
-                          :id (format "msg-%s" (random 10000))
-                          :role :user
-                          :content (string-trim content)
-                          :timestamp (current-time))))
-            (chat-session-add-message chat--current-session user-msg)
-            ;; Insert in buffer
-            (save-excursion
-              (goto-char chat-ui--messages-end)
-              (chat-ui--insert-message user-msg)
-              (set-marker chat-ui--messages-end (point)))
-            ;; Get AI response
-            (chat-ui--get-response)))))))
+             (content (string-trim (buffer-substring-no-properties input-start input-end))))
+        ;; Check for empty message
+        (if (string-empty-p content)
+            (message "Cannot send empty message")
+          ;; Clear input
+          (delete-region input-start input-end)
+          (goto-char input-start)
+          ;; Check for tool creation request
+          (if (chat-tool-forge-ai--tool-request-p content)
+              (chat-ui--handle-tool-creation content)
+            ;; Normal message flow
+            (let ((user-msg (make-chat-message
+                            :id (format "msg-%s" (random 10000))
+                            :role :user
+                            :content content
+                            :timestamp (current-time))))
+              (chat-session-add-message chat--current-session user-msg)
+              ;; Insert in buffer
+              (save-excursion
+                (goto-char chat-ui--messages-end)
+                (chat-ui--insert-message user-msg)
+                (set-marker chat-ui--messages-end (point)))
+              ;; Get AI response
+              (chat-ui--get-response))))))))
 
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."

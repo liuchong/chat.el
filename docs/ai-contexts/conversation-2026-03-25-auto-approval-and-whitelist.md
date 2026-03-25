@@ -192,6 +192,11 @@ chat-tool-caller-execute
 2. **Forward declarations:** `chat-approval.el` uses functions from `chat-tool-forge` and `chat-session`
    - Solution: Added `declare-function` statements
 
+3. **Empty messages being sent:** User accidentally pressing Enter sends empty messages
+   - Solution: Added empty message check in `chat-ui-send-message`
+   - Before: Empty or whitespace-only content was added to session
+   - After: Empty messages are rejected with "Cannot send empty message" warning
+
 ## No New Pitfalls Added
 
 本次修改没有新增需要记录到 troubleshooting-pitfalls.md 的失败模式。
