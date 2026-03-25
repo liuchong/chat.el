@@ -252,6 +252,25 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: Mark built in tools active when registering them and add a regression test for the active flag
 
+### Tool Results Are Not Fed Back To The Model
+
+**Problem**: The first shell call works but later turns keep repeating the same command and never answer the real question
+
+**Cause**: Tool execution results were saved only in `toolResults`
+The assistant message content stayed empty
+Later requests filtered out empty assistant messages so the model never saw the tool output
+
+**Solution**: Add a tool loop that sends tool results back in a follow up system message
+Also persist a readable tool summary in assistant content when no natural language answer is produced
+
+### Narrow Shell Whitelist Causes Weak Capability
+
+**Problem**: Simple filesystem questions still fail even when tool calling works
+
+**Cause**: The shell whitelist lacked commands needed for common inspection tasks such as directory size and aggregation
+
+**Solution**: Expand the whitelist to include `du` `stat` `sort` `uniq` `cut` `sed` `awk` and `tr`
+
 ---
 
 ## Development Checklist

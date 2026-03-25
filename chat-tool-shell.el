@@ -15,7 +15,8 @@ WARNING: Only enable in trusted environments."
   :group 'chat)
 
 (defcustom chat-tool-shell-allowed-commands
-  '("ls" "cat" "pwd" "echo" "head" "tail" "grep" "find" "wc" "which" "type")
+  '("ls" "cat" "pwd" "echo" "head" "tail" "grep" "find" "wc" "which" "type"
+    "du" "stat" "sort" "uniq" "cut" "sed" "awk" "tr")
   "List of allowed shell commands for safety."
   :type '(repeat string)
   :group 'chat)
@@ -42,7 +43,7 @@ WARNING: Only enable in trusted environments."
  (make-chat-forged-tool
   :id 'shell_execute
   :name "Shell Execute"
-  :description "Execute a shell command and return the output. Available commands: ls, cat, pwd, echo, head, tail, grep, find, wc, which, type"
+  :description "Execute a shell command and return the output. Available commands: ls, cat, pwd, echo, head, tail, grep, find, wc, which, type, du, stat, sort, uniq, cut, sed, awk, tr"
   :language 'elisp
   :parameters '((:name "command" :type "string" :required t))
   :compiled-function #'chat-tool-shell-execute

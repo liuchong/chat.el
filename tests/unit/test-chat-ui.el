@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'test-helper)
 (require 'chat-ui)
 
@@ -61,11 +62,43 @@
          (goto-char (point-min))
          (should (search-forward "[Tools used: done]" nil t))
          (let ((saved (car (last (chat-session-messages session)))))
+           (should (string= (chat-message-content saved) "done"))
            (should (equal (chat-message-tool-results saved) '("done")))
            (should (equal (chat-message-tool-calls saved)
                           '((:name "demo" :arguments (("input" . "hello"))))))
            (should (string= (chat-message-raw-request saved) "{\"request\":true}"))
            (should (string= (chat-message-raw-response saved) "{\"response\":true}"))))))))
+
+(ert-deftest chat-ui-resolve-tool-loop-requests-followup-answer ()
+  "Test that tool results are fed back into a follow-up model call."
+  (let* ((initial-messages
+          (list (make-chat-message
+                 :id "user-1"
+                 :role :user
+                 :content "执行一个简单命令然后告诉我结果"
+                 :timestamp (current-time))))
+         (processed '(:content ""
+                     :tool-calls ((:name "shell_execute"
+                                   :arguments (("command" . "echo tool-ok"))))
+                     :tool-results ("tool-ok\n")))
+         captured-messages)
+    (cl-letf (((symbol-function 'chat-llm-request)
+               (lambda (_model messages _options)
+                 (setq captured-messages messages)
+                 '(:content "命令结果是 tool-ok"
+                   :raw-request "{\"step\":2}"
+                   :raw-response "{\"answer\":true}"))))
+      (let* ((resolved (chat-ui--resolve-tool-loop
+                        'kimi-code initial-messages processed "{\"step\":1}" nil))
+             (final (plist-get resolved :processed))
+             (followup (car (last captured-messages))))
+        (should (string= (plist-get final :content) "命令结果是 tool-ok"))
+        (should (equal (plist-get final :tool-results) '("tool-ok\n")))
+        (should (eq (chat-message-role followup) :system))
+        (should (string-match-p "Tool results from the previous step"
+                                (chat-message-content followup)))
+        (should (string-match-p "tool-ok"
+                                (chat-message-content followup)))))))
 
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

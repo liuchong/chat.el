@@ -69,8 +69,10 @@
         (concat
          base-prompt
          "\n\n"
-         "You can call one tool when it is necessary.\n"
+         "You can call one tool per response when it is necessary.\n"
          "If a tool is needed, respond with only one JSON object and no markdown.\n"
+         "After a tool runs, the system will send the tool result back to you.\n"
+         "You may then either answer normally or call one more tool.\n"
          "Use this exact shape:\n"
          "{\"function_call\": {\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"value\"}}}\n"
          "Rules:\n"

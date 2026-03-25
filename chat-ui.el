@@ -123,13 +123,90 @@
   (when tool-results
     (mapconcat #'identity tool-results "\n")))
 
+(defun chat-ui--tool-result-lines (tool-calls tool-results)
+  "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
+  (let (lines)
+    (while (and tool-calls tool-results)
+      (let* ((call (car tool-calls))
+             (name (plist-get call :name))
+             (arguments (plist-get call :arguments))
+             (result (string-trim-right (or (car tool-results) ""))))
+        (push (format "- %s %S => %s" name arguments result) lines))
+      (setq tool-calls (cdr tool-calls))
+      (setq tool-results (cdr tool-results)))
+    (nreverse lines)))
+
+(defun chat-ui--tool-followup-message (tool-calls tool-results)
+  "Build a follow-up system message from TOOL-CALLS and TOOL-RESULTS."
+  (concat
+   "Tool results from the previous step:\n"
+   (mapconcat #'identity
+              (chat-ui--tool-result-lines tool-calls tool-results)
+              "\n")
+   "\nUse these results to continue helping.\n"
+   "If another tool is needed, call one tool as JSON.\n"
+   "Otherwise answer normally."))
+
+(defun chat-ui--merge-processed-results (base extra)
+  "Merge processed tool data from BASE and EXTRA."
+  (list :content (plist-get extra :content)
+        :tool-calls (append (plist-get base :tool-calls)
+                            (plist-get extra :tool-calls))
+        :tool-results (append (plist-get base :tool-results)
+                              (plist-get extra :tool-results))))
+
+(defcustom chat-ui-tool-loop-max-steps 3
+  "Maximum number of tool loop follow-up requests."
+  :type 'integer
+  :group 'chat)
+
+(defun chat-ui--resolve-tool-loop (model messages processed raw-request raw-response
+                                         &optional depth)
+  "Continue tool use for MODEL with MESSAGES until a final answer appears."
+  (let ((step (or depth 0)))
+    (if (or (null (plist-get processed :tool-calls))
+            (>= step chat-ui-tool-loop-max-steps))
+        (list :processed processed
+              :raw-request raw-request
+              :raw-response raw-response)
+      (let* ((followup-message
+              (make-chat-message
+               :id (format "tool-step-%s" (random 10000))
+               :role :system
+               :content (chat-ui--tool-followup-message
+                         (plist-get processed :tool-calls)
+                         (plist-get processed :tool-results))
+               :timestamp (current-time)))
+             (next-messages (append messages (list followup-message)))
+             (next-result (chat-llm-request model next-messages '(:temperature 0.7)))
+             (next-processed
+              (chat-tool-caller-process-response-data
+               (plist-get next-result :content)))
+             (resolved
+              (chat-ui--resolve-tool-loop
+               model
+               next-messages
+               next-processed
+               (plist-get next-result :raw-request)
+               (plist-get next-result :raw-response)
+               (1+ step))))
+        (list :processed
+              (chat-ui--merge-processed-results
+               processed
+               (plist-get resolved :processed))
+              :raw-request (plist-get resolved :raw-request)
+              :raw-response (plist-get resolved :raw-response))))))
+
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
   "Render PROCESSED response and persist it for SESSION."
   (let* ((content (or (plist-get processed :content) ""))
          (tool-calls (plist-get processed :tool-calls))
          (tool-results (plist-get processed :tool-results))
-         (tool-summary (chat-ui--format-tool-results tool-results)))
+         (tool-summary (chat-ui--format-tool-results tool-results))
+         (history-content (if (and (string-blank-p content) tool-summary)
+                              tool-summary
+                            content)))
     (when (buffer-live-p ui-buffer)
       (with-current-buffer ui-buffer
         (save-excursion
@@ -148,7 +225,7 @@
      (make-chat-message
       :id msg-id
       :role :assistant
-      :content content
+      :content history-content
       :timestamp (current-time)
       :tool-calls tool-calls
       :tool-results tool-results
@@ -201,7 +278,13 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                     (content (plist-get result :content))
                     (raw-request (plist-get result :raw-request))
                     (raw-response (plist-get result :raw-response))
-                    (processed (chat-tool-caller-process-response-data content)))
+                    (processed (chat-tool-caller-process-response-data content))
+                    (resolved (chat-ui--resolve-tool-loop
+                               model-id
+                               msgs
+                               processed
+                               raw-request
+                               raw-response)))
                (chat-log "[Async] Got response: %s..." 
                         (substring content 0 (min 50 (length content))))
                (run-at-time 
@@ -210,7 +293,9 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                   (chat-log "[UI] Updating buffer")
                   (chat-ui--finalize-response
                    sess msg-id ui-buffer assistant-start response-data req-json resp-json))
-                processed raw-request raw-response))
+                (plist-get resolved :processed)
+                (plist-get resolved :raw-request)
+                (plist-get resolved :raw-response)))
            (error
             (chat-log "[Async] ERROR: %s" (error-message-string err))
             (run-at-time 
@@ -428,17 +513,29 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                           (chat-log "[STREAM] Sentinel event: %s" event)
                           (when (string-match-p "finished\\|closed" event)
                             (setq chat-ui--active-stream-process nil)
-                            (chat-ui--finalize-response
-                             sess
-                             id
-                             ui-buffer
-                             assistant-start
-                             (chat-tool-caller-process-response-data content-acc)
-                             request-json
-                             nil)
-                            (when (buffer-live-p (process-buffer proc))
-                              (kill-buffer (process-buffer proc)))
-                            (chat-log "[STREAM] Response complete")))))
+                            (run-with-idle-timer
+                             0 nil
+                             (lambda ()
+                               (let* ((processed
+                                       (chat-tool-caller-process-response-data content-acc))
+                                      (resolved
+                                       (chat-ui--resolve-tool-loop
+                                        model-id
+                                        msgs
+                                        processed
+                                        request-json
+                                        nil)))
+                                 (chat-ui--finalize-response
+                                  sess
+                                  id
+                                  ui-buffer
+                                  assistant-start
+                                  (plist-get resolved :processed)
+                                  (plist-get resolved :raw-request)
+                                  (plist-get resolved :raw-response))
+                                 (when (buffer-live-p (process-buffer proc))
+                                   (kill-buffer (process-buffer proc)))
+                                 (chat-log "[STREAM] Response complete"))))))))
                    (chat-log "[STREAM] ERROR: Process creation returned nil")
                    (message "Error: Failed to start stream process")
                    (when (buffer-live-p ui-buffer)

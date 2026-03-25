@@ -25,5 +25,10 @@
     (should (equal (chat-forged-tool-parameters tool)
                    '((:name "command" :type "string" :required t))))))
 
+(ert-deftest chat-tool-shell-allows-directory-size-command ()
+  "Test that common directory inspection commands are allowed."
+  (should (chat-tool-shell-validate "du -sh ~/Downloads"))
+  (should (chat-tool-shell-validate "find . -type d | wc -l")))
+
 (provide 'test-chat-tool-shell)
 ;;; test-chat-tool-shell.el ends here
