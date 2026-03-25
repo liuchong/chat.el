@@ -104,15 +104,57 @@
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."
   (if (not chat-tool-caller-enabled)
-      messages
+      (progn
+        (chat-log "[TOOLS] Tool calling disabled, using original messages")
+        messages)
     (let ((system-prompt (chat-tool-caller-build-system-prompt
                           "You are a helpful AI assistant.")))
+      (chat-log "[TOOLS] System prompt: %s" system-prompt)
+      (chat-log "[TOOLS] Adding system message to %d user messages" (length messages))
       (cons (make-chat-message
              :id "system-tools"
              :role :system
              :content system-prompt
              :timestamp (current-time))
             messages))))
+
+(defun chat-ui--format-tool-results (tool-results)
+  "Format TOOL-RESULTS for display."
+  (when tool-results
+    (mapconcat #'identity tool-results "\n")))
+
+(defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
+                                           &optional raw-request raw-response)
+  "Render PROCESSED response and persist it for SESSION."
+  (let* ((content (or (plist-get processed :content) ""))
+         (tool-calls (plist-get processed :tool-calls))
+         (tool-results (plist-get processed :tool-results))
+         (tool-summary (chat-ui--format-tool-results tool-results)))
+    (when (buffer-live-p ui-buffer)
+      (with-current-buffer ui-buffer
+        (save-excursion
+          (let ((inhibit-read-only t))
+            (delete-region content-start chat-ui--messages-end)
+            (goto-char content-start)
+            (insert content)
+            (when tool-summary
+              (when (> (length content) 0)
+                (insert "\n"))
+              (insert (format "[Tools used: %s]" tool-summary)))
+            (insert "\n\n")
+            (set-marker chat-ui--messages-end (point))))))
+    (chat-session-add-message
+     session
+     (make-chat-message
+      :id msg-id
+      :role :assistant
+      :content content
+      :timestamp (current-time)
+      :tool-calls tool-calls
+      :tool-results tool-results
+      :raw-request raw-request
+      :raw-response raw-response))
+    (chat-log "[UI] Response saved to session")))
 
 (defun chat-ui--get-response ()
   "Get AI response for current session.
@@ -129,7 +171,8 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
          (model (chat-session-model-id session))
          (messages (chat-session-messages session))
          (msg-id (format "msg-%s" (random 10000)))
-         (buffer (current-buffer)))
+         (buffer (current-buffer))
+         assistant-start)
     
     (chat-log "Session: %s, Model: %s, Messages count: %d"
              (chat-session-id session) model (length messages))
@@ -138,7 +181,8 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
     (save-excursion
       (goto-char chat-ui--messages-end)
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
-      (set-marker chat-ui--messages-end (point)))
+      (set-marker chat-ui--messages-end (point))
+      (setq assistant-start (copy-marker (point))))
     
     ;; Prepare messages with context management and tool calling
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
@@ -156,39 +200,17 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
              (let* ((result (chat-llm-request model-id msgs '(:temperature 0.7)))
                     (content (plist-get result :content))
                     (raw-request (plist-get result :raw-request))
-                    (raw-response (plist-get result :raw-response)))
+                    (raw-response (plist-get result :raw-response))
+                    (processed (chat-tool-caller-process-response-data content)))
                (chat-log "[Async] Got response: %s..." 
                         (substring content 0 (min 50 (length content))))
-               ;; Process tool calls if any
-               (chat-tool-caller-process-response
-                content
-                (lambda (user-content tool-results)
-                  ;; Schedule UI update on main thread
-                  (run-at-time 
-                   0 nil
-                   (lambda (resp tool-res req-json resp-json)
-                     (chat-log "[UI] Updating buffer")
-                     (when (buffer-live-p ui-buffer)
-                       (with-current-buffer ui-buffer
-                         ;; Insert response (tool calls removed)
-                         (save-excursion
-                           (goto-char chat-ui--messages-end)
-                           (insert resp)
-                           (when tool-res
-                             (insert (format "\n[Tools used: %s]" tool-res)))
-                           (insert "\n\n")
-                           (set-marker chat-ui--messages-end (point)))
-                         ;; Save to session with raw data
-                         (let ((ai-msg (make-chat-message
-                                       :id msg-id
-                                       :role :assistant
-                                       :content resp
-                                       :timestamp (current-time)
-                                       :raw-request req-json
-                                       :raw-response resp-json)))
-                           (chat-session-add-message sess ai-msg))
-                         (chat-log "[UI] Response saved to session"))))
-                   user-content tool-results raw-request raw-response))))
+               (run-at-time 
+                0 nil
+                (lambda (response-data req-json resp-json)
+                  (chat-log "[UI] Updating buffer")
+                  (chat-ui--finalize-response
+                   sess msg-id ui-buffer assistant-start response-data req-json resp-json))
+                processed raw-request raw-response))
            (error
             (chat-log "[Async] ERROR: %s" (error-message-string err))
             (run-at-time 
@@ -202,7 +224,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                      (insert "\n\n")
                      (set-marker chat-ui--messages-end (point))))))
              (error-message-string err)))))
-       session model messages-with-tools msg-id buffer))))
+       session model messages-final msg-id buffer))))
 
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
@@ -355,29 +377,29 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
          (messages (chat-session-messages session))
          (msg-id (format "msg-%s" (random 10000)))
          (buffer (current-buffer))
-         (content-acc ""))
-    
-    ;; Insert assistant header
+         (content-acc "")
+         assistant-start)
     (save-excursion
       (goto-char chat-ui--messages-end)
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
-      (set-marker chat-ui--messages-end (point)))
-    
-    ;; Prepare messages with context management
-    (let ((messages-final (chat-context-prepare-messages messages)))
+      (set-marker chat-ui--messages-end (point))
+      (setq assistant-start (copy-marker (point))))
+    (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
+           (messages-final (chat-context-prepare-messages messages-with-tools))
+           (raw-request (json-encode
+                         (chat-llm--build-request model messages-final
+                                                  '(:temperature 0.7 :stream t)))))
       (chat-log "[STREAM] Context: %d messages" (length messages-final))
-      
-      ;; Start stream - use closure to capture variables
-      ;; instead of relying on timer argument passing (fixes lexical binding issue)
       (let ((sess session)
             (model-id model)
             (msgs messages-final)
             (id msg-id)
-            (ui-buffer buffer))
+            (ui-buffer buffer)
+            (request-json raw-request))
         (run-with-idle-timer
          0.1 nil
          (lambda ()
-           (chat-log "[STREAM] Starting request to %s with %d messages" 
+           (chat-log "[STREAM] Starting request to %s with %d messages"
                      model-id (length msgs))
            (condition-case err
                (progn
@@ -396,50 +418,37 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                                   (set-marker chat-ui--messages-end (point)))
                                 (redisplay t)))))
                         '(:temperature 0.7 :stream t)))
-                 
-                 ;; Check if process was created successfully
                  (if (processp chat-ui--active-stream-process)
                      (progn
-                       (chat-log "[STREAM] Process created successfully: %S" 
+                       (chat-log "[STREAM] Process created successfully: %S"
                                  chat-ui--active-stream-process)
-                       ;; Set up completion handler
                        (set-process-sentinel
                         chat-ui--active-stream-process
                         (lambda (proc event)
                           (chat-log "[STREAM] Sentinel event: %s" event)
-                          (when (string-match-p "finished" event)
+                          (when (string-match-p "finished\\|closed" event)
                             (setq chat-ui--active-stream-process nil)
-                            (when (buffer-live-p ui-buffer)
-                              (with-current-buffer ui-buffer
-                                (save-excursion
-                                  (goto-char chat-ui--messages-end)
-                                  (insert "\n\n")
-                                  (set-marker chat-ui--messages-end (point)))
-                                (let ((ai-msg (make-chat-message
-                                              :id id
-                                              :role :assistant
-                                              :content content-acc
-                                              :timestamp (current-time))))
-                                  (chat-session-add-message sess ai-msg))
-                                (chat-log "[STREAM] Response complete"))))))
-                       
-                       ;; Store raw request for message
-                       (let ((raw-req (json-encode 
-                                       (chat-llm--build-request model-id msgs '(:stream t)))))
-                         (ignore raw-req)))
-                   
-                   ;; Process creation failed
-                   (progn
-                     (chat-log "[STREAM] ERROR: Process creation returned nil")
-                     (message "Error: Failed to start stream process")
-                     (when (buffer-live-p ui-buffer)
-                       (with-current-buffer ui-buffer
-                         (save-excursion
-                           (goto-char chat-ui--messages-end)
-                           (insert "[Error: Failed to start stream]\n\n")
-                           (set-marker chat-ui--messages-end (point))))))))
+                            (chat-ui--finalize-response
+                             sess
+                             id
+                             ui-buffer
+                             assistant-start
+                             (chat-tool-caller-process-response-data content-acc)
+                             request-json
+                             nil)
+                            (when (buffer-live-p (process-buffer proc))
+                              (kill-buffer (process-buffer proc)))
+                            (chat-log "[STREAM] Response complete")))))
+                   (chat-log "[STREAM] ERROR: Process creation returned nil")
+                   (message "Error: Failed to start stream process")
+                   (when (buffer-live-p ui-buffer)
+                     (with-current-buffer ui-buffer
+                       (save-excursion
+                         (goto-char chat-ui--messages-end)
+                         (insert "[Error: Failed to start stream]\n\n")
+                         (set-marker chat-ui--messages-end (point)))))))
              (error
-              (chat-log "[STREAM] Exception in stream setup: %s" 
+              (chat-log "[STREAM] Exception in stream setup: %s"
                         (error-message-string err))
               (message "Stream error: %s" (error-message-string err))
               (when (buffer-live-p ui-buffer)

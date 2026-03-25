@@ -89,6 +89,32 @@
        (should (string= (chat-session-name loaded) "Test"))
        (should (= (length (chat-session-messages loaded)) 1))))))
 
+(ert-deftest chat-session-save-and-load-preserves-tool-fields ()
+  "Test saving and loading message tool fields."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently
+                    (chat-session-create "Test" 'gpt-4o)))
+          (session-id (chat-session-id session)))
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "m1"
+       :role :assistant
+       :content ""
+       :tool-calls '((:name "demo" :arguments (("input" . "hello"))))
+       :tool-results '("done")
+       :raw-request "{\"request\":true}"
+       :raw-response "{\"response\":true}"))
+     (chat-session-save session)
+     (let* ((loaded (chat-session-load session-id))
+            (message (car (chat-session-messages loaded))))
+       (should (equal (chat-message-tool-calls message)
+                      '((:name "demo" :arguments (("input" . "hello"))))))
+       (should (equal (chat-message-tool-results message) '("done")))
+       (should (string= (chat-message-raw-request message) "{\"request\":true}"))
+       (should (string= (chat-message-raw-response message) "{\"response\":true}"))))))
+
 ;; Test session listing
 (ert-deftest chat-session-list-test ()
   "Test listing all sessions."

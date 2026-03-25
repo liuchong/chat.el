@@ -197,6 +197,63 @@ M-x chat-new-session  ; New session uses 'kimi-code
 
 ---
 
+## Tool Calling
+
+### Prompt Parse Execute Drift
+
+**Problem**: Tool calling fails even when the model returns a JSON object
+
+**Cause**: The system prompt response format, response parser, and executor argument mapping drifted apart
+
+**Solution**: Keep one formal contract across all three layers
+Use one JSON object with `function_call`
+Parse both bare JSON and fenced JSON for compatibility
+Map arguments by declared parameter names instead of hardcoded `input`
+
+### Streaming Path Bypasses Tool Calling
+
+**Problem**: Streaming mode displays tool JSON but never executes the tool
+
+**Cause**: `chat-ui--get-response-streaming` appended chunks directly to the buffer and saved the final text without running tool post processing
+
+**Solution**: Finalize streaming responses through the same response processing path used by the sync flow
+
+### SSE Partial Line Loss
+
+**Problem**: Stream chunks randomly lose content or break JSON boundaries
+
+**Cause**: SSE parsing handled each process chunk independently and ignored partial lines
+
+**Solution**: Keep a per process partial line buffer and only parse complete SSE lines
+
+### Empty Source Tools Break Loading
+
+**Problem**: Loading a saved built in tool with no source body raises EOF
+
+**Cause**: The loader treated trailing whitespace as source code and attempted to compile it
+
+**Solution**: Trim loaded tool bodies and convert empty content to nil before compiling
+
+### Built In Tool Gets Overridden By Saved Copy
+
+**Problem**: `shell_execute` shows wrong argument names and fails with `Tool not compiled`
+
+**Cause**: The built in tool was registered before loading saved tools
+The registry entry was later overwritten by a saved empty source file with the same id
+
+**Solution**: Load saved tools before registering built in tools
+Do not persist tools that only have an in memory compiled function and no source body
+
+### Built In Tool Is Registered But Inactive
+
+**Problem**: `shell_execute` appears in the prompt but execution fails with `Tool is not active`
+
+**Cause**: `chat-forged-tool` defaults to inactive unless `:is-active t` is set explicitly
+
+**Solution**: Mark built in tools active when registering them and add a regression test for the active flag
+
+---
+
 ## Development Checklist
 
 Before starting new features:
@@ -224,4 +281,4 @@ Before starting new features:
 
 ---
 
-*Last updated: 2026-03-24*
+*Last updated: 2026-03-25*

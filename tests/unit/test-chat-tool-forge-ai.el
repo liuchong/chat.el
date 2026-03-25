@@ -55,5 +55,12 @@
      (let ((prompt (chat-tool-forge-ai--build-prompt "Create new tool")))
        (should (string-match-p "existing-tool" prompt))))))
 
+(ert-deftest chat-tool-forge-ai-parses-chat-llm-response-plist ()
+  "Test parsing tool code from `chat-llm-request' result plist."
+  (let* ((response '(:content "```elisp\n(lambda (input) input)\n```"))
+         (spec (chat-tool-forge-ai--parse-response response "Echo input")))
+    (should (eq (plist-get spec :language) 'elisp))
+    (should (string= (plist-get spec :source-code) "(lambda (input) input)"))))
+
 (provide 'test-chat-tool-forge-ai)
 ;;; test-chat-tool-forge-ai.el ends here

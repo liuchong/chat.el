@@ -33,7 +33,7 @@
 (ert-deftest chat-stream-extract-content-from-kimi-chunk ()
   "Test extracting content from Kimi stream chunk."
   ;; Build JSON string properly
-  (let* ((json-data '((choices . [((delta . ((content . " world"))))])))
+  (let* ((json-data '(("choices" . ((("delta" . (("content" . " world"))))))))
          (chunk (json-encode json-data)))
     (should (string= (chat-stream--extract-content chunk 'kimi) " world"))))
 
@@ -50,6 +50,34 @@
       (chat-stream--insert-text "Hello")
       (chat-stream--insert-text " world")
       (should (string= (buffer-string) "Hello world")))))
+
+(ert-deftest chat-stream-handle-output-joins-partial-lines ()
+  "Test that partial SSE lines are buffered across chunks."
+  (let ((buffer (generate-new-buffer " *chat-stream-test*"))
+        (received nil))
+    (unwind-protect
+        (let ((proc (make-pipe-process :name "chat-stream-test"
+                                       :buffer buffer
+                                       :noquery t)))
+          (with-current-buffer buffer
+            (setq-local chat-stream--partial-line ""))
+          (chat-stream--handle-output
+           proc
+           "data: {\"choices\":[{\"delta\":{\"content\":\"hel"
+           'kimi
+           (lambda (chunk)
+             (push chunk received)))
+          (should (null received))
+          (chat-stream--handle-output
+           proc
+           "lo\"}}]}\n"
+           'kimi
+           (lambda (chunk)
+             (push chunk received)))
+          (should (equal received '("hello")))
+          (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

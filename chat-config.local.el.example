@@ -36,5 +36,10 @@
 ;; File operation settings
 (setq chat-files-allowed-directories '("~/" "~/.chat/" "/tmp/"))
 
+;; Shell execution tool - Enable with caution!
+;; When enabled, AI can execute shell commands like 'ls', 'cat', 'pwd'
+;; (setq chat-tool-shell-enabled t)
+;; (setq chat-tool-shell-allowed-commands '("ls" "cat" "pwd" "echo" "head" "tail" "grep" "find" "wc"))
+
 (provide 'chat-config.local)
 ;;; chat-config.local.el ends here

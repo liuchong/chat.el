@@ -109,7 +109,10 @@ The code should be a single lambda expression like:
 
 (defun chat-tool-forge-ai--parse-response (response description)
   "Parse LLM RESPONSE into tool spec plist."
-  (let* ((code (chat-tool-forge-ai--extract-code response))
+  (let* ((content (if (stringp response)
+                      response
+                    (plist-get response :content)))
+         (code (chat-tool-forge-ai--extract-code content))
          (id (chat-tool-forge-ai--generate-id description))
          (name (chat-tool-forge-ai--generate-name description)))
     (list :id id
@@ -126,7 +129,7 @@ The code should be a single lambda expression like:
 (defun chat-tool-forge-ai--extract-code (response)
   "Extract code from LLM RESPONSE."
   ;; Remove markdown code blocks if present
-  (let ((code (replace-regexp-in-string "```[^\n]*\n" "" response)))
+  (let ((code (replace-regexp-in-string "```[^\n]*\n" "" (or response ""))))
     (setq code (replace-regexp-in-string "```" "" code))
     (string-trim code)))
 

@@ -106,9 +106,12 @@ Filters out empty assistant messages which are not allowed by the API."
                     (plist-get config :model)))
          (temperature (or (plist-get options :temperature) 0.7))
          (max-tokens (plist-get options :max-tokens))
-         (stream (plist-get options :stream)))
+         (stream (plist-get options :stream))
+         (formatted-msgs (chat-llm--format-messages messages)))
+    (chat-log "[BUILD-REQUEST] Provider: %s, Model: %s" provider model)
+    (chat-log "[BUILD-REQUEST] Formatted messages: %S" formatted-msgs)
     (list :model model
-          :messages (chat-llm--format-messages messages)
+          :messages formatted-msgs
           :temperature temperature
           :stream stream
           :max_tokens max-tokens)))

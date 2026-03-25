@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -88,7 +89,8 @@
   ;; Store in registry
   (puthash (chat-forged-tool-id tool) tool chat-tool-forge--registry)
   ;; Save to disk
-  (chat-tool-forge--save tool)
+  (when (chat-forged-tool-source-code tool)
+    (chat-tool-forge--save tool))
   tool)
 
 (defun chat-tool-forge-unload (id)
@@ -147,12 +149,13 @@
 (defun chat-tool-forge--compile-elisp (tool)
   "Compile Emacs Lisp TOOL."
   (let ((source (chat-forged-tool-source-code tool)))
-    (with-temp-buffer
-      (insert source)
-      (goto-char (point-min))
-      ;; Read and evaluate to get function
-      (let ((func (eval (read (current-buffer)) t)))
-        (setf (chat-forged-tool-compiled-function tool) func)))))
+    (when source
+      (with-temp-buffer
+        (insert source)
+        (goto-char (point-min))
+        ;; Read and evaluate to get function
+        (let ((func (eval (read (current-buffer)) t)))
+          (setf (chat-forged-tool-compiled-function tool) func))))))
 
 ;; ------------------------------------------------------------------
 ;; Persistence
@@ -180,7 +183,8 @@
       (insert (format ";;; language: %s\n" lang))
       (insert (format ";;; version: %s\n" (or (chat-forged-tool-version tool) "1.0.0")))
       (insert (format ";;; created: %s\n\n" (format-time-string "%Y-%m-%dT%H:%M:%S")))
-      (insert (chat-forged-tool-source-code tool)))))
+      (when (chat-forged-tool-source-code tool)
+        (insert (chat-forged-tool-source-code tool))))))
 
 (defun chat-tool-forge-load-all ()
   "Load all saved tools from disk."
@@ -210,7 +214,9 @@
             (setq lang (intern (match-string 1 line))))))
         (forward-line 1))
       ;; Rest is source code
-      (setq source (buffer-substring (point) (point-max)))
+      (setq source (string-trim (buffer-substring (point) (point-max))))
+      (when (string-empty-p source)
+        (setq source nil))
       ;; Create and register tool
       (when (and id name)
         (chat-tool-forge-register

@@ -16,6 +16,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'subr-x)
 
 ;; ------------------------------------------------------------------
 ;; Variables
@@ -58,19 +59,22 @@ Handles format: data: {...} or data:{...} (with or without space)"
   "Extract content from JSON-STRING based on PROVIDER format."
   (condition-case nil
       (let* ((json-object-type 'alist)
-             (json-array-type 'vector)
+             (json-array-type 'list)
+             (json-key-type 'string)
              (data (json-read-from-string json-string)))
         (pcase provider
-          ('kimi (chat-stream--extract-kimi-content data))
-          (_ (chat-stream--extract-kimi-content data))))  ; Default to Kimi format
+          ((or 'kimi 'kimi-code) (chat-stream--extract-openai-content data))
+          (_ (chat-stream--extract-openai-content data))))
     (error nil)))
 
-(defun chat-stream--extract-kimi-content (data)
-  "Extract content from Kimi format DATA."
-  (let* ((choices (cdr (assoc 'choices data)))
-         (first-choice (aref choices 0))
-         (delta (cdr (assoc 'delta first-choice)))
-         (content (cdr (assoc 'content delta))))
+(defun chat-stream--extract-openai-content (data)
+  "Extract stream content from OpenAI-compatible DATA."
+  (let* ((choices (cdr (assoc "choices" data)))
+         (first-choice (car-safe choices))
+         (delta (and (listp first-choice)
+                     (cdr (assoc "delta" first-choice))))
+         (content (and (listp delta)
+                       (cdr (assoc "content" delta)))))
     content))
 
 ;; ------------------------------------------------------------------
@@ -160,6 +164,11 @@ Returns the process object."
     (unless (executable-find "curl")
       (error "curl executable not found in PATH"))
     
+    ;; Log request body for debugging
+    (chat-log "[REQUEST] URL: %s" url)
+    (chat-log "[REQUEST] Body: %s" (json-encode body))
+    (chat-log "[REQUEST] Messages: %S" messages)
+    
     ;; Start curl process
     (chat-log "[STREAM] Starting curl with args: %S" curl-args)
     (condition-case err
@@ -185,23 +194,28 @@ Returns the process object."
 (defun chat-stream--handle-output (proc string provider callback)
   "Handle output STRING from process PROC."
   (chat-log "[STREAM] Received %d bytes" (length string))
-  ;; Decode UTF-8 output for Chinese character support
   (condition-case err
-      (let* ((decoded-str (decode-coding-string string 'utf-8))
-             (lines (split-string decoded-str "\n")))
-        (dolist (line lines)
-          ;; Accumulate partial lines
-          (when (> (length line) 0)
-            ;; (chat-log "[STREAM] Processing line: %s..." (substring line 0 (min 50 (length line))))
-            (let ((data (chat-stream--parse-sse-line line)))
-              (when data
-                ;; (chat-log "[STREAM] SSE data parsed")
-                (let ((content (chat-stream--extract-content data provider)))
-                  (when content
-                    ;; (chat-log "[STREAM] Content extracted: %s..." (substring content 0 (min 30 (length content))))
-                    (condition-case err
-                        (funcall callback content)
-                      (error (chat-log "[STREAM] Callback error: %s" (error-message-string err)))))))))))
+      (let ((decoded-str (decode-coding-string string 'utf-8)))
+        (with-current-buffer (process-buffer proc)
+          (let* ((combined (concat (or chat-stream--partial-line "") decoded-str))
+                 (complete-lines (split-string combined "\n"))
+                 (has-trailing-newline (string-suffix-p "\n" combined)))
+            (setq chat-stream--partial-line
+                  (if has-trailing-newline
+                      ""
+                    (car (last complete-lines))))
+            (unless has-trailing-newline
+              (setq complete-lines (butlast complete-lines)))
+            (dolist (line complete-lines)
+              (let ((data (chat-stream--parse-sse-line (string-trim-right line "\r"))))
+                (when data
+                  (let ((content (chat-stream--extract-content data provider)))
+                    (when content
+                      (condition-case callback-error
+                          (funcall callback content)
+                        (error
+                         (chat-log "[STREAM] Callback error: %s"
+                                   (error-message-string callback-error))))))))))))
     (error
      (chat-log "[STREAM] Error in handle-output: %s" (error-message-string err)))))
 

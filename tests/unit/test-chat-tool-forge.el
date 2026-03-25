@@ -50,6 +50,37 @@
        (chat-tool-forge-register tool)
        (should (chat-tool-forge-get 'my-tool))))))
 
+(ert-deftest chat-tool-forge-does-not-save-tool-without-source ()
+  "Test registering a built in tool does not write an empty file."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'built-in-tool
+       :name "Built In Tool"
+       :language 'elisp
+       :compiled-function (lambda () "ok")
+       :is-active t
+       :usage-count 0))
+     (should-not (file-exists-p (expand-file-name "built-in-tool.el" temp-dir))))))
+
+(ert-deftest chat-tool-forge-loads-tool-with-empty-source ()
+  "Test loading a saved tool that has no source body."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (with-temp-file (expand-file-name "empty-tool.el" temp-dir)
+       (insert ";;; chat-tool: empty-tool\n")
+       (insert ";;; name: Empty Tool\n")
+       (insert ";;; description: Empty tool\n")
+       (insert ";;; language: elisp\n")
+       (insert ";;; version: 1.0.0\n")
+       (insert ";;; created: 2026-03-25T00:00:00\n"))
+     (chat-tool-forge-load-all)
+     (let ((tool (chat-tool-forge-get 'empty-tool)))
+       (should tool)
+       (should (null (chat-forged-tool-source-code tool)))))))
+
 (ert-deftest chat-tool-forge-unload-removes-tool ()
   "Test unloading a tool removes it from registry."
   (chat-test-with-temp-dir

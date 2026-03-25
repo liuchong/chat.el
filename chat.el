@@ -66,6 +66,8 @@
 (unless (featurep 'chat-tool-caller)
   (load "chat-tool-caller.el" nil t))
 (chat-tool-forge-load-all)
+(unless (featurep 'chat-tool-shell)
+  (load "chat-tool-shell.el" nil t))
 
 ;; Load context management
 (unless (featurep 'chat-context)

@@ -243,11 +243,56 @@ Returns a list of chat-message structs."
                    "%Y-%m-%dT%H:%M:%S"
                    (or (chat-message-timestamp message)
                        (current-time))))
-    (metadata . ,(or (chat-message-metadata message) nil))))
+    (metadata . ,(or (chat-message-metadata message) nil))
+    (toolCalls . ,(mapcar #'chat-session--serialize-tool-call
+                          (or (chat-message-tool-calls message) nil)))
+    (toolResults . ,(or (chat-message-tool-results message) nil))
+    (rawRequest . ,(chat-message-raw-request message))
+    (rawResponse . ,(chat-message-raw-response message))))
 
 (defun chat-session--alist-get (alist key)
   "Get value for KEY from ALIST."
   (cdr (assoc key alist)))
+
+(defun chat-session--serialize-tool-call (call)
+  "Convert tool CALL plist to an alist."
+  (list (cons 'name (plist-get call :name))
+        (cons 'arguments (plist-get call :arguments))))
+
+(defun chat-session--normalize-tool-call (call)
+  "Normalize decoded JSON CALL into a plist."
+  (cond
+   ((and (consp call) (keywordp (car call)))
+    call)
+   ((listp call)
+    (list :name (or (cdr (assoc 'name call))
+                    (cdr (assoc "name" call)))
+          :arguments (chat-session--normalize-tool-arguments
+                      (or (cdr (assoc 'arguments call))
+                          (cdr (assoc "arguments" call))))))
+   (t
+    call)))
+
+(defun chat-session--normalize-tool-calls (calls)
+  "Normalize decoded JSON CALLS list."
+  (mapcar #'chat-session--normalize-tool-call calls))
+
+(defun chat-session--normalize-tool-arguments (arguments)
+  "Normalize tool ARGUMENTS keys to strings."
+  (mapcar (lambda (entry)
+            (cons (if (symbolp (car entry))
+                      (symbol-name (car entry))
+                    (car entry))
+                  (cdr entry)))
+          arguments))
+
+(defun chat-session--normalize-list (value)
+  "Convert VALUE vectors to lists."
+  (cond
+   ((vectorp value) (append value nil))
+   ((listp value) value)
+   ((null value) nil)
+   (t (list value))))
 
 (defun chat-session--deserialize (data)
   "Convert JSON-parsed DATA to chat-session struct."
@@ -274,7 +319,13 @@ Returns a list of chat-message structs."
    :timestamp (decode-time
                (parse-time-string
                 (chat-session--alist-get data 'timestamp)))
-   :metadata (chat-session--alist-get data 'metadata)))
+   :metadata (chat-session--alist-get data 'metadata)
+   :tool-calls (chat-session--normalize-tool-calls
+                (chat-session--alist-get data 'toolCalls))
+   :tool-results (chat-session--normalize-list
+                  (chat-session--alist-get data 'toolResults))
+   :raw-request (chat-session--alist-get data 'rawRequest)
+   :raw-response (chat-session--alist-get data 'rawResponse)))
 
 ;; ------------------------------------------------------------------
 ;; Utility Functions
