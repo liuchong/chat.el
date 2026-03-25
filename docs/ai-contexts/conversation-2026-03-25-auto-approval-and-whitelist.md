@@ -197,6 +197,11 @@ chat-tool-caller-execute
    - Before: Empty or whitespace-only content was added to session
    - After: Empty messages are rejected with "Cannot send empty message" warning
 
+4. **Tool loop message duplication:** Tool results were potentially being duplicated in message history
+   - Root cause: `chat-ui--resolve-tool-loop-async` and `chat-ui--resolve-tool-loop` append tool result messages without checking for duplicates
+   - Solution: Added `chat-ui--message-exists-p` function to check for duplicate message IDs before appending
+   - Also improved message ID format to include step number for uniqueness: `tool-step-{random}-{step}`
+
 ## No New Pitfalls Added
 
 本次修改没有新增需要记录到 troubleshooting-pitfalls.md 的失败模式。

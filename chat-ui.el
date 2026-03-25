@@ -187,13 +187,16 @@
               :raw-response raw-response)
       (let* ((followup-message
               (make-chat-message
-               :id (format "tool-step-%s" (random 10000))
+               :id (format "tool-step-%s-%s" (random 10000) step)
                :role :system
                :content (chat-ui--tool-followup-message
                          (plist-get processed :tool-calls)
                          (plist-get processed :tool-results))
                :timestamp (current-time)))
-             (next-messages (append messages (list followup-message)))
+             ;; Avoid duplicate messages by checking ID
+             (next-messages (if (chat-ui--message-exists-p followup-message messages)
+                                messages
+                              (append messages (list followup-message))))
              (next-result (chat-llm-request model next-messages '(:temperature 0.7)))
              (next-processed
               (chat-tool-caller-process-response-data
@@ -213,6 +216,12 @@
               :raw-request (plist-get resolved :raw-request)
               :raw-response (plist-get resolved :raw-response))))))
 
+(defun chat-ui--message-exists-p (message messages)
+  "Check if MESSAGE (by ID) already exists in MESSAGES list."
+  (let ((msg-id (chat-message-id message)))
+    (cl-some (lambda (m) (equal (chat-message-id m) msg-id))
+             messages)))
+
 (defun chat-ui--resolve-tool-loop-async (model messages processed raw-request raw-response
                                                callback error-callback &optional depth)
   "Resolve tool use asynchronously before calling CALLBACK."
@@ -225,13 +234,16 @@
                        :raw-response raw-response))
       (let* ((followup-message
               (make-chat-message
-               :id (format "tool-step-%s" (random 10000))
+               :id (format "tool-step-%s-%s" (random 10000) step)
                :role :system
                :content (chat-ui--tool-followup-message
                          (plist-get processed :tool-calls)
                          (plist-get processed :tool-results))
                :timestamp (current-time)))
-             (next-messages (append messages (list followup-message))))
+             ;; Avoid duplicate messages by checking ID
+             (next-messages (if (chat-ui--message-exists-p followup-message messages)
+                                messages
+                              (append messages (list followup-message)))))
         (setq chat-ui--active-request-handle
               (chat-llm-request-async
                model
