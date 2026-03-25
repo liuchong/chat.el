@@ -1,10 +1,20 @@
 # chat.el
 
+[![License: 1PL](https://img.shields.io/badge/License-1PL-blue.svg)](https://license.pub/1pl/)
+
 `chat.el` is a pure Emacs AI chat client focused on coding workflows.
 It supports multi turn chat, tool calling, file operations, session persistence, context trimming, streaming display, and AI assisted tool forging.
 
 
 Copyright 2026 chat.el contributors.
+
+## License
+
+This project is licensed under the [One Public License (1PL)](https://license.pub/1pl/).
+See the [LICENSE](./LICENSE) file for the full license text.
+
+1PL is a copyleft license that ensures when you distribute this software or derivative
+works, the complete source code must be made available under the same license terms.
 
 ## Current Capabilities
 
@@ -138,3 +148,7 @@ Current baseline:
 - Update `docs/ai-contexts/` after each development session
 - Add regression tests for each bug fix
 - Do not use destructive git commands or create commits from AI
+
+## License
+
+This project is licensed under the [One Public License (1PL)](./LICENSE).

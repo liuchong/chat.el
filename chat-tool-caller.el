@@ -1,6 +1,7 @@
 ;;; chat-tool-caller.el --- AI tool calling with JSON format -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 chat.el contributors
+;; License: 1PL (One Public License) - https://license.pub/1pl/
 
 ;; Author: chat.el contributors
 ;; Keywords: tools, llm

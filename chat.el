@@ -5,8 +5,14 @@
 ;; Author: chat.el contributors
 ;; Keywords: chat, ai, llm, tools
 ;; Version: 0.1.0
+;; License: 1PL (One Public License)
+;; License URL: https://license.pub/1pl/
 
 ;; This file is not part of GNU Emacs.
+
+;; This project is licensed under the One Public License (1PL).
+;; See the LICENSE file in the project root or visit
+;; https://license.pub/1pl/ for the full license text.
 
 ;;; Commentary:
 

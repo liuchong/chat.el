@@ -1,6 +1,7 @@
 ;;; chat-ui.el --- UI components for chat.el -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 chat.el contributors
+;; License: 1PL (One Public License) - https://license.pub/1pl/
 
 ;; Author: chat.el contributors
 ;; Keywords: chat, ui
