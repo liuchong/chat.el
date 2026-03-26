@@ -2,7 +2,8 @@
 
 ## Summary
 
-Phase 2 implementation completed with the following features:
+This document records the intended Phase 2 scope.
+Several items listed here exist in the repository, but they should not be treated as fully verified completion status.
 
 ### 1. LLM Integration ✅
 
@@ -50,7 +51,7 @@ Refactor instruction: Extract this into a helper function
 Basic symbol indexing:
 - Language detection (Python, JS, Elisp, Go, Rust, etc.)
 - Symbol extraction (functions, classes, variables)
-- Index persistence to `~/.chat/index/`
+- Initial index persistence hooks
 - Project indexing command
 
 **Commands:**
@@ -61,13 +62,13 @@ Basic symbol indexing:
 
 **Files:** `chat-code.el`, `chat-edit.el`, `chat-code-preview.el`
 
-Complete edit workflow:
+Intended edit workflow:
 1. AI suggests code change
 2. Edit stored in `chat-code--pending-edit`
 3. User options displayed: [Apply] [Preview] [Reject]
 4. Auto-apply if change is small (< `chat-code-auto-apply-threshold`)
 5. Manual accept/reject with `C-c C-a` / `C-c C-k`
-6. Preview with `C-c C-v` (switches to `*chat-preview*` buffer)
+6. Preview with `C-c C-v` when preview integration is available
 
 ## Files Added/Modified
 
@@ -109,13 +110,8 @@ cd /path/to/chat.el
 emacs -Q -batch -l test-code-mode.el
 ```
 
-All tests pass:
-- Session creation
-- Context building
-- Token estimation
-- Edit creation
-- Preview buffer
-- Language detection
+Use the canonical batch entry `tests/run-tests.el` to verify current state.
+Do not treat this phase note as the source of truth for present test status.
 
 ## Next Steps (Phase 3)
 
@@ -140,4 +136,4 @@ All tests pass:
 
 ---
 
-*Phase 2 Complete - 2026-03-26*
+*Phase 2 Notes - historical record*

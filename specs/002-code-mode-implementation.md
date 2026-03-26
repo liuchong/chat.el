@@ -2,7 +2,8 @@
 
 ## Overview
 
-Phase 1 implementation of Code Mode for chat.el is complete.
+This document records the original Phase 1 target.
+The current repository has moved beyond the Phase 1 skeleton, but the implementation is still under repair and should not be treated as fully complete.
 
 ## Implemented Files
 
@@ -11,7 +12,7 @@ Phase 1 implementation of Code Mode for chat.el is complete.
 | `chat-code.el` | ✅ Complete | Main entry point, session management, UI |
 | `chat-context-code.el` | ✅ Complete | Context building with 4 strategies |
 | `chat-edit.el` | ✅ Complete | Edit operations (generate, patch, rewrite, insert, delete) |
-| `chat-code-preview.el` | ✅ Complete | Preview buffer with diff view |
+| `chat-code-preview.el` | ⚠️ Under repair | Preview buffer exists but integration is being repaired |
 | `chat.el` integration | ✅ Complete | Auto-load code mode modules |
 
 ## Architecture
@@ -21,7 +22,7 @@ Phase 1 implementation of Code Mode for chat.el is complete.
 │                         chat-code.el                             │
 │  - Session management (chat-code-session)                        │
 │  - Entry points (chat-code-start, chat-code-for-file, etc.)      │
-│  - UI buffer (*chat:code:project*)                               │
+│  - UI buffer (*chat:code:<session>*)                             │
 │  - Single-window design, no forced splits                        │
 └────────────────────────┬────────────────────────────────────────┘
                          │
@@ -55,7 +56,7 @@ Phase 1 implementation of Code Mode for chat.el is complete.
 - Language detection from file extension
 
 **UI:**
-- Single buffer design (`*chat:code:project*`)
+- Single buffer design (`*chat:code:<session>*`)
 - Header with project info, strategy, context
 - Input area at bottom
 - Message history
@@ -118,7 +119,7 @@ Phase 1 implementation of Code Mode for chat.el is complete.
 
 ## Keybindings
 
-### Code Mode Buffer (`*chat:code:project*`)
+### Code Mode Buffer (`*chat:code:<session>*`)
 
 | Key | Command | Description |
 |-----|---------|-------------|
@@ -168,43 +169,21 @@ C-x b *chat-preview* RET
 
 ## Testing
 
-Run the test file:
+Canonical test entry:
 
 ```bash
 cd /path/to/chat.el
 emacs -Q -batch -l test-code-mode.el
 ```
 
-Test coverage:
-- ✅ Session creation
-- ✅ Context building
-- ✅ Token estimation
-- ✅ Edit creation
-- ✅ Preview buffer
-- ✅ Language detection
+This phase document is historical.
+Current regression truth should be checked with `tests/unit/test-chat-code.el` and the full `tests/run-tests.el` batch run.
 
-## What's Next (Phase 2)
+## Notes For Current Repair
 
-1. **LLM Integration**
-   - Connect to chat-llm for actual AI responses
-   - Handle streaming responses
-   - Tool calling for file operations
-
-2. **Inline Editing Commands**
-   - `chat-edit-generate` at point
-   - `chat-edit-explain` for selection
-   - `chat-edit-refactor` with instructions
-   - `chat-edit-fix` for errors
-
-3. **Enhanced Context**
-   - Symbol indexing and cross-references
-   - Import resolution
-   - Git integration (diff, status)
-
-4. **Smart Features**
-   - Auto-apply small changes
-   - Partial accept/reject
-   - Conflict detection
+1. The core chat path now exists in `chat-code.el`.
+2. This document should not be used as the sole source of current feature status.
+3. Missing or unstable features are documented in newer repair notes and current specs.
 
 ## Design Decisions
 
@@ -240,6 +219,6 @@ Test coverage:
 
 ---
 
-*Implementation Version: 0.1*
+*Implementation Version: 0.2*
 *Date: 2026-03-26*
-*Status: Phase 1 Complete*
+*Status: Historical Phase 1 Record*

@@ -65,6 +65,22 @@
           (or (chat-forged-tool-description tool) "No description")
           (chat-tool-caller--tool-argument-spec tool)))
 
+(defun chat-tool-caller--tool-usage-guidance ()
+  "Return human readable usage guidance for built in tools."
+  (mapconcat
+   #'identity
+   '("Tool usage guidance:"
+     "- `files_list` lists directory entries. Use it first to understand what exists."
+     "- `files_find` searches recursively across a directory for files whose contents match a pattern."
+     "- `files_grep` searches one known file path. Do not use it on directories."
+     "- `files_read` reads a file body. Prefer `files_read_lines` when you already know the line range."
+     "- `files_read_lines` reads a specific line range and is better for large files."
+     "- `files_write` writes a full file body and is best for new files or full rewrites."
+     "- `files_patch` and `apply_patch` are better for updating existing files with targeted edits."
+     "- `shell_execute` is only for lightweight readonly inspection when file tools are not enough."
+     "- If a write tool needs approval, wait for approval instead of printing the intended file body in chat.")
+   "\n"))
+
 (defun chat-tool-caller-build-system-prompt (base-prompt)
   "Extend BASE-PROMPT with tool calling instructions."
   (if (not chat-tool-caller-enabled)
@@ -82,7 +98,10 @@
          "Some tools may require user approval before execution.\n"
          "Read files before editing them.\n"
          "Prefer apply_patch or files_patch for existing files and use files_write mainly for new files.\n"
+         "Use files_find for recursive directory text search and use files_grep for one known file.\n"
          "After editing, inspect the result or diff before declaring success.\n"
+         (chat-tool-caller--tool-usage-guidance)
+         "\n"
          "Use this exact shape:\n"
          "{\"function_call\": {\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"value\"}}}\n"
          "Rules:\n"
@@ -125,6 +144,58 @@
           (setq pos (+ end 3)))))
     (nreverse blocks)))
 
+(defun chat-tool-caller--extract-inline-json-fragments (content)
+  "Extract balanced inline JSON object fragments from CONTENT."
+  (let ((len (length content))
+        (pos 0)
+        (fragments nil))
+    (while (< pos len)
+      (let ((start (string-match "{" content pos)))
+        (if (null start)
+            (setq pos len)
+          (let ((depth 0)
+                (idx start)
+                (in-string nil)
+                (escaped nil)
+                end)
+            (while (and (< idx len) (null end))
+              (let ((ch (aref content idx)))
+                (cond
+                 (escaped
+                  (setq escaped nil))
+                 ((eq ch ?\\)
+                  (when in-string
+                    (setq escaped t)))
+                 ((eq ch ?\")
+                  (setq in-string (not in-string)))
+                 ((not in-string)
+                  (cond
+                   ((eq ch ?{)
+                    (setq depth (1+ depth)))
+                   ((eq ch ?})
+                    (setq depth (1- depth))
+                    (when (= depth 0)
+                      (setq end (1+ idx))))))))
+              (setq idx (1+ idx)))
+            (if end
+                (progn
+                  (push (substring content start end) fragments)
+                  (setq pos end))
+              (setq pos (1+ start)))))))
+    (nreverse fragments)))
+
+(defun chat-tool-caller--tool-json-fragments (content)
+  "Return parseable tool call JSON fragments found in CONTENT."
+  (let (fragments)
+    (dolist (candidate (append (chat-tool-caller--extract-fenced-json content)
+                               (chat-tool-caller--extract-inline-json-fragments content)))
+      (condition-case nil
+          (when (chat-tool-caller--call-from-data
+                 (chat-tool-caller--decode-json candidate))
+            (push candidate fragments))
+        (error nil)))
+    (nreverse (delete-dups fragments))))
+
 (defun chat-tool-caller--extract-json-candidates (content)
   "Extract candidate JSON fragments from CONTENT."
   (let ((candidates nil)
@@ -134,8 +205,8 @@
       (push trimmed candidates))
     (dolist (block (chat-tool-caller--extract-fenced-json content))
       (push block candidates))
-    (when (string-match "{.*}" content)
-      (push (match-string 0 content) candidates))
+    (dolist (fragment (chat-tool-caller--extract-inline-json-fragments content))
+      (push fragment candidates))
     (nreverse (delete-dups candidates))))
 
 (defun chat-tool-caller--call-from-data (data)
@@ -163,8 +234,11 @@
 
 (defun chat-tool-caller--argument-value (arguments key)
   "Read KEY from ARGUMENTS."
-  (or (cdr (assoc key arguments))
-      (cdr (assoc (intern key) arguments))))
+  (let ((value (or (cdr (assoc key arguments))
+                   (cdr (assoc (intern key) arguments)))))
+    (if (eq value :json-false)
+        nil
+      value)))
 
 (defun chat-tool-caller--required-argument-p (param)
   "Return non-nil when PARAM is required."
@@ -217,6 +291,26 @@
              (fboundp 'chat-tool-shell-whitelist-match-p)
              (chat-tool-shell-whitelist-match-p command))))))
 
+(defun chat-tool-caller--code-project-root ()
+  "Return the current code mode project root, when available."
+  (when (and (boundp 'chat-code--current-session)
+             chat-code--current-session
+             (fboundp 'chat-code-session-project-root))
+    (chat-code-session-project-root chat-code--current-session)))
+
+(defun chat-tool-caller--allowed-directories ()
+  "Return effective file roots for the current tool execution."
+  (let ((project-root (chat-tool-caller--code-project-root)))
+    (delete-dups
+     (append (when project-root
+               (list project-root))
+             chat-files-allowed-directories))))
+
+(defun chat-tool-caller--execution-directory ()
+  "Return the working directory for the current tool execution."
+  (or (chat-tool-caller--code-project-root)
+      default-directory))
+
 (defun chat-tool-caller-execute (call &optional session)
   "Execute one parsed tool CALL.
 Optional SESSION is the current chat session for approval context.
@@ -229,23 +323,26 @@ If SESSION is nil, uses `chat--current-session' if bound."
                              (when (boundp 'chat--current-session)
                                chat--current-session))))
     (condition-case err
-        (if tool
-            ;; Check shell whitelist first for shell_execute
-            (if (and (eq tool-id 'shell_execute)
-                     (chat-tool-caller--shell-whitelist-approve-p call))
-                ;; Whitelisted shell command: execute without approval
-                (chat-tool-caller--stringify-result
-                 (chat-tool-forge-execute
-                  tool-id
-                  (chat-tool-caller--arguments-to-argv tool arguments)))
-              ;; Normal approval flow
-              (if (chat-approval-request-tool-call tool call actual-session)
+        (let ((chat-files-allowed-directories (chat-tool-caller--allowed-directories))
+              (default-directory (file-name-as-directory
+                                  (chat-tool-caller--execution-directory))))
+          (if tool
+              ;; Check shell whitelist first for shell_execute
+              (if (and (eq tool-id 'shell_execute)
+                       (chat-tool-caller--shell-whitelist-approve-p call))
+                  ;; Whitelisted shell command: execute without approval
                   (chat-tool-caller--stringify-result
                    (chat-tool-forge-execute
                     tool-id
                     (chat-tool-caller--arguments-to-argv tool arguments)))
-                (format "Approval denied for tool '%s'" name)))
-          (format "Error: Tool '%s' not found" name))
+                ;; Normal approval flow
+                (if (chat-approval-request-tool-call tool call actual-session)
+                    (chat-tool-caller--stringify-result
+                     (chat-tool-forge-execute
+                      tool-id
+                      (chat-tool-caller--arguments-to-argv tool arguments)))
+                  (format "Approval denied for tool '%s'" name)))
+            (format "Error: Tool '%s' not found" name)))
       (error
        (format "Error executing tool '%s': %s"
                name
@@ -253,9 +350,10 @@ If SESSION is nil, uses `chat--current-session' if bound."
 
 (defun chat-tool-caller-extract-content (content)
   "Extract user-facing text from CONTENT."
-  (let ((trimmed (string-trim content)))
+  (let* ((trimmed (string-trim content))
+         (fragments (chat-tool-caller--tool-json-fragments content)))
     (cond
-     ((null (chat-tool-caller-parse content))
+     ((null fragments)
       content)
      ((and (string-prefix-p "{" trimmed)
            (string-suffix-p "}" trimmed))
@@ -272,12 +370,21 @@ If SESSION is nil, uses `chat--current-session' if bound."
                 (setq result (concat (substring result 0 start)
                                      (substring result (+ end 3))))
               (setq pos (length result)))))
-        result)))))
+        (dolist (fragment fragments)
+          (setq result (replace-regexp-in-string
+                        (regexp-quote fragment)
+                        ""
+                        result
+                        t
+                        t)))
+        (string-trim-right result))))))
 
-(defun chat-tool-caller-process-response-data (content)
-  "Process CONTENT and return a result plist."
+(defun chat-tool-caller-process-response-data (content &optional session)
+  "Process CONTENT for SESSION and return a result plist."
   (let* ((calls (chat-tool-caller-parse content))
-         (tool-results (mapcar #'chat-tool-caller-execute calls)))
+         (tool-results (mapcar (lambda (call)
+                                 (chat-tool-caller-execute call session))
+                               calls)))
     (list :content (string-trim-right (chat-tool-caller-extract-content content))
           :tool-calls calls
           :tool-results tool-results)))

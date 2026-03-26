@@ -11,6 +11,15 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
+
+(defun chat-code-git--argv (args)
+  "Normalize git ARGS into an argv list."
+  (cond
+   ((null args) nil)
+   ((listp args) args)
+   ((stringp args) (split-string-and-unquote args))
+   (t (error "Invalid git args: %S" args))))
 
 ;; ------------------------------------------------------------------
 ;; Git Utilities
@@ -21,7 +30,7 @@
 Returns output string or nil on error."
   (let ((default-directory (or directory default-directory)))
     (with-temp-buffer
-      (if (zerop (call-process "git" nil t nil args))
+      (if (zerop (apply #'call-process "git" nil t nil (chat-code-git--argv args)))
           (buffer-string)
         nil))))
 
@@ -149,16 +158,13 @@ MAX-LINES limits the diff output."
             :role :user
             :content prompt
             :timestamp (current-time)))
-     '(:temperature 0.3)
      (lambda (response)
        (let ((msg (plist-get response :content)))
          (with-current-buffer buffer
-           (message "Suggested commit message: %s" msg)
-           ;; Offer to use it
-           (when (y-or-n-p (format "Use this commit message? %s " msg))
-             (chat-code-git-commit msg)))))
+           (message "Suggested commit message: %s" msg))))
      (lambda (err)
-       (message "Error: %s" err)))))
+       (message "Error: %s" err))
+     '(:temperature 0.3))))
 
 (defun chat-code-git-commit (message)
   "Commit with MESSAGE."
@@ -199,7 +205,6 @@ MAX-LINES limits the diff output."
             :role :user
             :content prompt
             :timestamp (current-time)))
-     '(:temperature 0.5)
      (lambda (response)
        (with-current-buffer buffer
          (erase-buffer)
@@ -209,7 +214,8 @@ MAX-LINES limits the diff output."
          (insert (propertize "[q] Quit\n" 'face '(:weight bold)))))
      (lambda (err)
        (with-current-buffer buffer
-         (insert (format "Error: %s\n" err)))))))
+         (insert (format "Error: %s\n" err))))
+     '(:temperature 0.5))))
 
 ;; ------------------------------------------------------------------
 ;; Pre-commit Check
@@ -241,7 +247,6 @@ MAX-LINES limits the diff output."
             :role :user
             :content prompt
             :timestamp (current-time)))
-     '(:temperature 0.3)
      (lambda (response)
        (let ((msg (plist-get response :content)))
          (if (string-match-p "no issues\\|looks good\\|LGTM" msg)
@@ -255,7 +260,8 @@ MAX-LINES limits the diff output."
                (insert msg))
              (pop-to-buffer "*chat-pre-commit*")))))
      (lambda (err)
-       (message "Check failed: %s" err)))))
+       (message "Check failed: %s" err))
+     '(:temperature 0.3))))
 
 ;; ------------------------------------------------------------------
 ;; Integration with chat-code

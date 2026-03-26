@@ -16,6 +16,7 @@
 (require 'ert)
 (require 'subr-x)
 (require 'test-helper)
+(require 'chat-code)
 (require 'chat-tool-shell)
 
 (ert-deftest chat-tool-shell-is-registered-active ()
@@ -40,6 +41,22 @@
   "Test shell tool uses argv execution for safe commands."
   (let ((chat-tool-shell-enabled t))
     (should (string= (string-trim (chat-tool-shell-execute "echo hello")) "hello"))))
+
+(ert-deftest chat-tool-shell-whitelist-includes-common-readonly-commands ()
+  "Test builtin whitelist covers common readonly exploration commands."
+  (should (chat-tool-shell-whitelist-match-p "pwd"))
+  (should (chat-tool-shell-whitelist-match-p "ls -la"))
+  (should (chat-tool-shell-whitelist-match-p "find . -type f")))
+
+(ert-deftest chat-tool-shell-executes-safe-cd-prefix ()
+  "Test shell tool supports a safe `cd DIR && CMD` form."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-shell-enabled t)
+         (chat-files-allowed-directories (list temp-dir)))
+     (should (string= (string-trim
+                       (chat-tool-shell-execute
+                        (format "cd %s && pwd" (shell-quote-argument temp-dir))))
+                      (file-truename temp-dir))))))
 
 (provide 'test-chat-tool-shell)
 ;;; test-chat-tool-shell.el ends here

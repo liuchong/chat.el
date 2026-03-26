@@ -130,6 +130,8 @@ Reference: https://www.kimi.com/code/docs/more/third-party-agents.html"
  :async-transport 'curl
  :api-key-fn #'chat-llm-kimi-code--get-api-key
  :model chat-llm-kimi-code-default-model
+ :context-window 262144
+ :max-output-tokens 32768
  :headers #'chat-llm-kimi-code--headers
  :build-request-fn #'chat-llm-kimi-code--build-request
  :response-fn #'chat-llm-kimi-code--parse-response

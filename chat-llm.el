@@ -55,6 +55,10 @@ CONFIG is a plist with keys:
   "Get configuration for provider SYMBOL."
   (cdr (assoc symbol chat-llm-providers)))
 
+(defun chat-llm-provider-option (symbol key)
+  "Get provider config KEY for SYMBOL."
+  (plist-get (chat-llm-get-provider symbol) key))
+
 ;; ------------------------------------------------------------------
 ;; API Key Management
 ;; ------------------------------------------------------------------

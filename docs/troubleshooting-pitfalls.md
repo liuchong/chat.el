@@ -101,6 +101,14 @@ Required field order:
  '((choices . [((delta . ((content . "text"))))])))
 ```
 
+### Fenced Block Parsers Must Match Newlines Explicitly
+
+**Problem**: code mode can miss valid fenced `code-edit` blocks or ordinary code blocks even when the response text looks correct.
+
+**Cause**: Emacs regular expressions do not let `.` cross line breaks, so a naive fenced block pattern stops at the first newline.
+
+**Solution**: use an explicit multiline body pattern like `\\(?:.\\|\n\\)*?` and keep block extraction in one helper shared by all fenced block parsing paths.
+
 ---
 
 ## Async Requests and Streaming
@@ -163,6 +171,14 @@ Required field order:
 
 **Solution**: keep a per process partial line buffer and parse only complete lines.
 
+### Mode Specific Stream Adapters Can Drift From The Core API
+
+**Problem**: a mode specific streaming path fails with wrong number of arguments or never finalizes the response.
+
+**Cause**: the mode layer invents its own callback contract instead of following the actual `chat-stream-request` signature and sentinel flow.
+
+**Solution**: keep mode integrations on the same four argument `chat-stream-request` contract and finalize the completed response from the process sentinel.
+
 ---
 
 ## Session and Persistence
@@ -203,6 +219,22 @@ Required field order:
 ```elisp
 (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))
 ```
+
+### Session Metadata Must Stay JSON Serializable
+
+**Problem**: adding a message can fail during auto save with a `json-error` when session metadata contains runtime objects.
+
+**Cause**: live structs like `chat-code-session` can form circular references back to the owning `chat-session`.
+
+**Solution**: keep runtime only session state in buffer local variables or serialize only primitive metadata values into `chat-session-metadata`.
+
+### Persistence Stubs Must Not Masquerade As Real Load Paths
+
+**Problem**: higher level features like incremental indexing appear to exist but silently rebuild everything every time.
+
+**Cause**: the save path writes index files while the corresponding load path still returns `nil` as a placeholder.
+
+**Solution**: finish the load path at the same time as the save path or explicitly disable the feature until both directions are implemented and covered by tests.
 
 ---
 
@@ -303,6 +335,14 @@ Do not persist tools that only have an in memory compiled function and no source
 **Cause**: tool results are stored in metadata only and do not reenter the visible conversation history.
 
 **Solution**: feed tool results back through a follow up system message and persist a readable assistant side summary when needed.
+
+### Mode Specific Tool Prompt Drift Reintroduces Wrong Protocols
+
+**Problem**: a specialized mode like `code-mode` starts emitting XML style tool calls even though the shared chat flow already uses JSON `function_call`.
+
+**Cause**: the mode builds its own system prompt and final response path instead of reusing the shared tool calling prompt and post processing contract.
+
+**Solution**: mode specific request paths must build their system prompt through `chat-tool-caller-build-system-prompt` and finalize responses through `chat-tool-caller-process-response-data` plus the same follow up tool loop pattern.
 
 ### Shell Whitelists Fail If Execution Still Uses A Shell
 
@@ -430,6 +470,30 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: keep the startup flow linear, validate the returned process first, then install the sentinel in a separate obvious step.
 
+### Async Follow Up Must Return To The UI Buffer
+
+**Problem**: a follow up request can crash with `Wrong type argument: integer-or-marker-p, nil` after a tool call completes.
+
+**Cause**: async callbacks and sentinels run in request buffers or process contexts, but the code still tries to touch buffer local markers from the original UI buffer.
+
+**Solution**: capture the target UI buffer before starting async follow up work and wrap later marker or rendering updates in `with-current-buffer` guarded by `buffer-live-p`.
+
+### Inline Tool JSON Must Be Removed From Display Text
+
+**Problem**: the assistant can visibly print raw `{"function_call": ...}` JSON in the chat area even though the tool call was already parsed and executed.
+
+**Cause**: the parser can recognize inline JSON fragments for execution, but display text cleanup only removes fenced JSON blocks or responses that are pure JSON.
+
+**Solution**: extract balanced inline JSON fragments, validate them as tool calls, and strip those exact fragments from user facing content before rendering or persistence.
+
+### Code Mode Tool Access Must Inherit The Active Project Root
+
+**Problem**: `code-mode` can get stuck in repeated `Access denied: path outside allowed directories` errors when analyzing a project outside the chat.el workspace.
+
+**Cause**: generic file tools only see the global allowed directory list unless the active code session project root is injected into the execution context.
+
+**Solution**: derive the effective tool access roots from the current `code-mode` session and include its project root for file validation and shell working directory setup.
+
 ### Kimi Code Async Follow Up Needs Curl Transport
 
 **Problem**: Kimi Code can accept the streaming request but reject the tool follow up async request with HTTP 403.
@@ -438,4 +502,44 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: route Kimi Code async follow up requests through the curl based async transport so the non streaming request path matches the proven streaming transport behavior.
 
-Last updated: 2026-03-25
+### Debug Logging Should Not Flood The Minibuffer
+
+**Problem**: large request bodies and tool results can spill into the echo area and make the UI feel unsafe or broken.
+
+**Cause**: the logger writes to the log file and also mirrors every line to the minibuffer with `message`.
+
+**Solution**: keep persistent logging in the log file and make minibuffer echo opt in for debugging instead of the default behavior.
+
+### Tool Loop Limit Must Not Render Raw JSON As The Final Answer
+
+**Problem**: when automatic tool follow up stops at the safety limit the buffer can appear stuck on the last raw tool call instead of a readable status.
+
+**Cause**: the final processed payload still contains a tool call JSON blob, and the UI renders it as ordinary assistant text when no synthesis turn is performed.
+
+**Solution**: mark the loop limit case explicitly, suppress raw tool JSON from the rendered content, and show a short safety limit notice plus the tool summary instead.
+
+### Safe Readonly Shell Navigation Should Not Depend On Approval Spam
+
+**Problem**: harmless exploration commands like `pwd`, `ls`, `find`, or `cd DIR && ls` can still trap the user in repeated approval prompts or command rejections.
+
+**Cause**: the shell tool may know a command is readonly, but the auto approval whitelist is empty or the executor cannot interpret a safe `cd` prefix without invoking a shell.
+
+**Solution**: ship builtin readonly whitelist patterns and support a parsed `cd <allowed-dir> && <readonly command>` form that validates the directory and executes the follow up command with `process-file`.
+
+### Long Running Agent Work Needs Visible Buffer Status
+
+**Problem**: users cannot tell whether the agent is still working, has completed, has failed, or was cancelled.
+
+**Cause**: request state only exists in internal handles and process objects, while the chat buffer lacks a dedicated status channel.
+
+**Solution**: expose an explicit buffer visible status indicator with clear running, success, failed, cancelled, and stopped states, and update it at each major request phase.
+
+### Stale Bytecode Must Not Override Newer Source
+
+**Problem**: Emacs can keep running outdated behavior even after source fixes are applied.
+
+**Cause**: older `.elc` artifacts may still be loaded before newer `.el` source when `load-prefer-newer` is not enabled or stale bytecode is left behind.
+
+**Solution**: prefer newer source at package entry, and remove stale `.elc` artifacts when they no longer match the current source tree.
+
+Last updated: 2026-03-26

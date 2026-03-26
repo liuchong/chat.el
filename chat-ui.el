@@ -171,13 +171,13 @@
         :tool-results (append (plist-get base :tool-results)
                               (plist-get extra :tool-results))))
 
-(defcustom chat-ui-tool-loop-max-steps 6
+(defcustom chat-ui-tool-loop-max-steps 100
   "Maximum number of tool loop follow-up requests."
   :type 'integer
   :group 'chat)
 
 (defun chat-ui--resolve-tool-loop (model messages processed raw-request raw-response
-                                         &optional depth)
+                                         &optional depth session)
   "Continue tool use for MODEL with MESSAGES until a final answer appears."
   (let ((step (or depth 0)))
     (if (or (null (plist-get processed :tool-calls))
@@ -200,7 +200,8 @@
              (next-result (chat-llm-request model next-messages '(:temperature 0.7)))
              (next-processed
               (chat-tool-caller-process-response-data
-               (plist-get next-result :content)))
+               (plist-get next-result :content)
+               session))
              (resolved
               (chat-ui--resolve-tool-loop
                model
@@ -208,7 +209,8 @@
                next-processed
                (plist-get next-result :raw-request)
                (plist-get next-result :raw-response)
-               (1+ step))))
+               (1+ step)
+               session)))
         (list :processed
               (chat-ui--merge-processed-results
                processed
@@ -223,7 +225,7 @@
              messages)))
 
 (defun chat-ui--resolve-tool-loop-async (model messages processed raw-request raw-response
-                                               callback error-callback &optional depth)
+                                               callback error-callback &optional depth session)
   "Resolve tool use asynchronously before calling CALLBACK."
   (let ((step (or depth 0)))
     (if (or (null (plist-get processed :tool-calls))
@@ -240,7 +242,6 @@
                          (plist-get processed :tool-calls)
                          (plist-get processed :tool-results))
                :timestamp (current-time)))
-             ;; Avoid duplicate messages by checking ID
              (next-messages (if (chat-ui--message-exists-p followup-message messages)
                                 messages
                               (append messages (list followup-message)))))
@@ -251,7 +252,8 @@
                (lambda (next-result)
                  (let ((next-processed
                         (chat-tool-caller-process-response-data
-                         (plist-get next-result :content))))
+                         (plist-get next-result :content)
+                         session)))
                    (chat-ui--resolve-tool-loop-async
                     model
                     next-messages
@@ -267,7 +269,8 @@
                                      :raw-request (plist-get resolved :raw-request)
                                      :raw-response (plist-get resolved :raw-response))))
                     error-callback
-                    (1+ step))))
+                    (1+ step)
+                    session)))
                error-callback
                '(:temperature 0.7)))))))
 
@@ -321,7 +324,8 @@
 (defun chat-ui--handle-response-success (session msg-id ui-buffer content-start model messages result)
   "Handle successful RESULT for SESSION in UI-BUFFER."
   (let ((processed (chat-tool-caller-process-response-data
-                    (plist-get result :content))))
+                    (plist-get result :content)
+                    session)))
     (chat-ui--resolve-tool-loop-async
      model
      messages
@@ -338,8 +342,10 @@
         (plist-get resolved :processed)
         (plist-get resolved :raw-request)
         (plist-get resolved :raw-response)))
-     (lambda (err)
-       (chat-ui--render-error ui-buffer err)))))
+    (lambda (err)
+      (chat-ui--render-error ui-buffer err))
+    nil
+    session)))
 
 (defun chat-ui--render-stream-start-error (ui-buffer)
   "Render a stream startup error in UI-BUFFER."
@@ -627,7 +633,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                  (when (string-match-p "finished\\|closed\\|exited" event)
                    (setq chat-ui--active-stream-process nil)
                    (let ((processed
-                          (chat-tool-caller-process-response-data content-acc)))
+                          (chat-tool-caller-process-response-data content-acc session)))
                      (chat-ui--resolve-tool-loop-async
                       model
                       messages-final
@@ -648,7 +654,9 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
                           (kill-buffer (process-buffer proc)))
                         (chat-log "[STREAM] Response complete"))
                       (lambda (err-message)
-                        (chat-ui--render-error ui-buffer err-message)))))))
+                        (chat-ui--render-error ui-buffer err-message))
+                      nil
+                      session)))))
           (chat-log "[STREAM] ERROR: Process creation returned nil")
           (chat-ui--render-stream-start-error ui-buffer)))))))
 

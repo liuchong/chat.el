@@ -181,10 +181,11 @@ If RECURSIVE is non-nil, list recursively.
 
 Returns a list of plists with :name, :path, :size, :mtime, :type."
   (let* ((safe-dir (chat-files--safe-path-p directory))
+         (filter-pattern (or pattern ".*"))
          (files '()))
     (if recursive
         (progn
-          (dolist (full-path (directory-files-recursively safe-dir pattern))
+          (dolist (full-path (directory-files-recursively safe-dir filter-pattern))
             (push (list :name (file-name-nondirectory full-path)
                         :path full-path
                         :size (file-attribute-size (file-attributes full-path))
@@ -194,7 +195,7 @@ Returns a list of plists with :name, :path, :size, :mtime, :type."
                   files))
           (nreverse files))
       (progn
-        (dolist (name (directory-files safe-dir nil pattern))
+        (dolist (name (directory-files safe-dir nil filter-pattern))
           (unless (member name '("." ".."))
             (let ((full-path (expand-file-name name safe-dir)))
               (push (list :name name
@@ -735,12 +736,21 @@ Returns total size, line count, and file type distribution."
   (chat-files--register-built-in-tool
    'files_grep
    "Search File"
-   "Search for a pattern inside a file"
+   "Search for a pattern inside one known file"
    '((:name "pattern" :type "string" :required t)
      (:name "path" :type "string" :required t)
      (:name "context_lines" :type "integer"))
    (lambda (pattern path &optional context-lines)
      (chat-files-grep pattern path context-lines)))
+  (chat-files--register-built-in-tool
+   'files_find
+   "Find In Directory"
+   "Recursively find files containing a pattern in a directory"
+   '((:name "directory" :type "string" :required t)
+     (:name "pattern" :type "string" :required t)
+     (:name "file_pattern" :type "string"))
+   (lambda (directory pattern &optional file-pattern)
+     (chat-files-find directory pattern file-pattern)))
   (chat-files--register-built-in-tool
    'files_write
    "Write File"

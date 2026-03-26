@@ -22,6 +22,11 @@
   :type 'file
   :group 'chat)
 
+(defcustom chat-log-echo-to-minibuffer nil
+  "Whether chat log entries should also be echoed to the minibuffer."
+  :type 'boolean
+  :group 'chat)
+
 (defun chat-log--ensure-file ()
   "Ensure log file exists."
   (let ((dir (file-name-directory chat-log-file)))
@@ -37,8 +42,8 @@
                        (format-time-string "%Y-%m-%d %H:%M:%S")
                        (apply #'format format-string args))))
       (write-region msg nil chat-log-file t 'silent)
-      ;; Also message to minibuffer for debugging
-      (message "[CHAT-LOG] %s" (apply #'format format-string args)))))
+      (when chat-log-echo-to-minibuffer
+        (message "[CHAT-LOG] %s" (apply #'format format-string args))))))
 
 (provide 'chat-log)
 ;;; chat-log.el ends here

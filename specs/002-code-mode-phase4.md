@@ -2,15 +2,12 @@
 
 ## Summary
 
-Phase 4 implementation completed with advanced features:
-- Multi-file refactoring
-- Test integration
-- Git integration
-- Performance optimizations
+This document records the intended Phase 4 scope.
+The repository contains experimental modules for refactoring, test integration, git integration, and performance work, but they are not all production ready.
 
 ## Features Implemented
 
-### 1. Multi-file Refactoring ✅
+### 1. Multi-file Refactoring
 
 **File:** `chat-code-refactor.el` (new)
 
@@ -43,7 +40,7 @@ Function name: myFunction
 Target file: src/other/module.py
 ```
 
-### 2. Test Integration ✅
+### 2. Test Integration
 
 **File:** `chat-code-test.el` (new)
 
@@ -75,7 +72,7 @@ Function to test: calculateTotal
 M-x chat-code-test-coverage-current
 ```
 
-### 3. Git Integration ✅
+### 3. Git Integration
 
 **File:** `chat-code-git.el` (new)
 
@@ -107,7 +104,7 @@ M-x chat-code-start
 > Fix the bug  ; Context includes git diff automatically
 ```
 
-### 4. Performance Optimization ✅
+### 4. Performance Optimization
 
 **File:** `chat-code-perf.el` (new)
 
@@ -150,7 +147,7 @@ chat-code-git.el          - Git integration (new)
 chat-code-perf.el         - Performance optimization (new)
 ```
 
-## Complete Workflow Example
+## Example Of Intended Workflow
 
 ```elisp
 ;; 1. Start working on a feature
@@ -165,7 +162,7 @@ M-x chat-code-run-tests
 ;; 4. Auto-fix any failing tests
 ;; (Use 'f' in test failure buffer to auto-fix)
 
-;; 5. Commit with AI-suggested message
+;; 5. Ask for an AI-suggested commit message
 M-x chat-code-git-commit-suggest
 
 ;; 6. Need to refactor? Rename across files
@@ -174,7 +171,7 @@ M-x chat-code-rename-symbol
 ;; 7. Extract code to new file
 M-x chat-code-extract-to-file
 
-;; 8. Index is automatically maintained via incremental updates
+;; 8. Rebuild or update indexes as needed
 ```
 
 ## Configuration
@@ -198,7 +195,8 @@ cd /path/to/chat.el
 emacs -Q -batch -l test-code-mode.el
 ```
 
-All tests pass ✅
+Verify current behavior with `tests/run-tests.el`.
+Do not treat this phase document as proof that all listed commands are stable.
 
 ## Architecture Summary
 
@@ -254,5 +252,4 @@ All tests pass ✅
 
 ---
 
-*Phase 4 Complete - 2026-03-26*
-*All Phases 1-4 Complete*
+*Phase 4 Notes - historical record*

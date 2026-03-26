@@ -1,6 +1,8 @@
 # Code Mode 使用指南
 
-Code Mode 是 chat.el 的 AI 编程 IDE 功能，提供代码生成、重构、测试集成等能力。
+Code Mode 是 chat.el 的 AI 编程工作模式。
+当前稳定主路径是单 buffer 对话、基础上下文拼装、基础 edit 接受/拒绝，以及从代码缓冲发起 explain、refactor、fix、docs、tests、complete 请求。
+多文件重构、git 辅助、索引性能优化等高级模块目前仍在修整中，不应默认视为稳定能力。
 
 ## 目录
 
@@ -88,15 +90,15 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 7. 运行测试确认修复
 ```
 
-### 场景 4: 完整开发循环
+### 场景 4: 当前推荐开发循环
 
 ```text
 1. M-x chat-code-start
 2. 实现功能（与 AI 对话迭代）
 3. M-x chat-edit-tests（生成测试）
-4. M-x chat-code-run-tests（运行测试）
-5. M-x chat-code-git-review（审查变更）
-6. M-x chat-code-git-commit-suggest（提交）
+4. 运行项目测试验证修改
+5. 必要时查看 preview buffer
+6. 人工审查后再决定后续 git 操作
 ```
 
 ## 命令参考
@@ -112,7 +114,7 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 
 ### Code Mode Buffer 命令
 
-在 `*chat:code:project*` buffer 中：
+在 `*chat:code:<session>*` buffer 中：
 
 | 快捷键 | 命令 | 描述 |
 |--------|------|------|
@@ -134,6 +136,10 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `chat-edit-docs` | `C-c e d` | 生成文档 |
 | `chat-edit-tests` | `C-c e t` | 生成单元测试 |
 | `chat-edit-complete` | `C-c e c` | 代码补全 |
+
+### 实验性高级命令
+
+以下命令已经存在，但当前仍应按实验能力对待，使用前建议先阅读实现并在小范围验证：
 
 ### 多文件重构命令
 
@@ -230,13 +236,6 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 ### 高级配置
 
 ```elisp
-;; Token 限制
-(setq chat-code-max-tokens 16000)
-
-;; 上下文源（控制包含哪些信息）
-(setq chat-code-context-sources
-      '(file-content file-symbols imports git-status open-buffers))
-
 ;; 文件类型映射（添加新语言）
 (add-to-list 'chat-code-filetype-map '("\\.vue$" . vue))
 (add-to-list 'chat-code-filetype-map '("\\.php$" . php))
@@ -317,7 +316,7 @@ def divide(a, b):
 4. 选择保存位置或复制到测试文件
 ```
 
-### 示例 3: 跨文件重命名
+### 示例 3: 跨文件重命名（实验性）
 
 **操作：**
 ```text
@@ -330,7 +329,7 @@ def divide(a, b):
 7. a - 应用所有修改
 ```
 
-### 示例 4: 提取代码到新文件
+### 示例 4: 提取代码到新文件（实验性）
 
 **操作：**
 ```text
@@ -342,7 +341,7 @@ def divide(a, b):
 6. 接受修改
 ```
 
-### 示例 5: Git 工作流
+### 示例 5: Git 辅助（实验性）
 
 **操作：**
 ```text
@@ -355,13 +354,11 @@ def divide(a, b):
 
 3. 根据建议修改
 4. M-x chat-code-git-commit-suggest
-   AI: "feat: add user authentication with error handling"
-   
-5. 确认提交或修改信息
-6. 自动执行 git commit
+   AI 返回建议的提交信息文本
+5. 人工决定是否采用该信息并自行处理 git 提交
 ```
 
-### 示例 6: 测试驱动修复
+### 示例 6: 测试驱动修复（实验性）
 
 **操作：**
 ```text
@@ -399,9 +396,8 @@ def divide(a, b):
 
 5. 审查每个文件的修改
 
-6. M-x chat-code-run-tests
-
-7. M-x chat-code-git-commit-suggest
+6. 运行项目测试
+7. 需要时请求 AI 给出提交信息建议
 ```
 
 ## 故障排除
@@ -415,8 +411,6 @@ def divide(a, b):
 ;; 使用更小的策略
 (setq chat-code-default-strategy 'focused)
 
-;; 或减少 token 限制
-(setq chat-code-max-tokens 8000)
 ```
 
 ### 问题：生成的代码不准确
@@ -435,10 +429,8 @@ def divide(a, b):
 
 **解决：**
 ```text
-M-x chat-code-incremental-index    ; 只更新变更文件
-
-;; 或启用后台索引
-M-x chat-code-start-background-index
+优先只在必要时手动执行索引相关命令
+大型项目请先在小仓库验证索引行为
 ```
 
 ### 问题：修改应用失败
@@ -492,32 +484,8 @@ M-x lsp 或 M-x eglot
 (advice-add 'chat-context-code-build :override #'my-custom-context-builder)
 ```
 
-### 批量处理多个文件
-
-```elisp
-(defun chat-code-batch-process (files prompt)
-  "批量处理多个文件。"
-  (dolist (file files)
-    (chat-code-for-file file)
-    (chat-code--send-to-llm prompt)
-    (sleep-for 2)))  ; 等待处理完成
-```
-
-### 集成到 CI/CD
-
-```elisp
-;; 非交互式代码审查
-(defun chat-code-ci-review (files)
-  "在 CI 中审查文件。"
-  (let ((chat-code-auto-apply-threshold 0))  ; 永不自动应用
-    (dolist (file files)
-      (with-temp-buffer
-        (insert-file-contents file)
-        (chat-code-for-file file)
-        (chat-code--send-to-llm "Review this code for issues.")
-        ;; 输出结果到 stdout
-        (princ (buffer-string))))))
-```
+当前不推荐把 `code-mode` 直接当作批处理或 CI 非交互引擎使用。
+它的主路径仍然以交互式缓冲工作流为中心。
 
 ### 与 Projectile 集成
 
@@ -564,4 +532,4 @@ M-x lsp 或 M-x eglot
 
 ---
 
-*Code Mode v1.0 - Complete Documentation*
+*Code Mode Guide - Current Repair Edition*

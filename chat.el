@@ -29,6 +29,9 @@
 
 (require 'cl-lib)
 
+;; Prefer newer source files over stale byte-compiled artifacts.
+(setq load-prefer-newer t)
+
 ;; ------------------------------------------------------------------
 ;; Version
 ;; ------------------------------------------------------------------

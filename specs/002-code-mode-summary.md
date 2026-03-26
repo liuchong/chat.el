@@ -1,5 +1,11 @@
 # Code Mode Spec Summary
 
+## 当前状态
+
+`code-mode` 已实现基础可用的单 buffer 对话主链路。
+当前真实可用能力以 `chat-code.el`、`chat-edit.el`、`chat-context-code.el` 和 `tests/unit/test-chat-code.el` 为准。
+预览、多文件重构、索引持久化、git 集成、性能优化等外围模块仍在修整中，不应视为稳定完成。
+
 ## 核心设计原则
 
 **单窗口设计 (Single Window Design)**
@@ -15,7 +21,7 @@
 │                      User Interface                              │
 │                     (Single Buffer)                              │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │  Code Chat Buffer (*chat:code:project*)                    │ │
+│  │  Code Chat Buffer (*chat:code:<session>*)                  │ │
 │  │  - Compact header (project, strategy, tokens)              │ │
 │  │  - Conversation history                                    │ │
 │  │  - Input area                                              │ │
@@ -61,7 +67,6 @@ chat-code-from-chat          ;; 从普通聊天切换
 ### 2. 编辑命令
 
 ```elisp
-chat-edit-generate  ;; 生成代码
 chat-edit-complete  ;; 代码补全
 chat-edit-explain   ;; 解释代码
 chat-edit-refactor  ;; 重构代码
@@ -105,7 +110,7 @@ AI 生成修改
 ```
 单窗口切换 (推荐):
   C-x b src/main.py RET     ;; 回到代码
-  C-x b *chat:code* RET     ;; 回到聊天
+  C-x b *chat:code:<session>* RET  ;; 回到聊天
 
 手动分割 (可选):
   C-x 3                     ;; 垂直分割
@@ -124,9 +129,8 @@ AI 生成修改
 ;; 小修改自动应用
 (setq chat-code-auto-apply-threshold 10)
 
-;; 上下文策略
-(setq chat-code-context-sources
-      '(file-content file-symbols imports git-status))
+;; 流式响应
+(setq chat-code-use-streaming t)
 ```
 
 ## 实现阶段
@@ -147,30 +151,30 @@ specs/
 ├── 002-code-mode-quickstart.md   # 快速入门
 └── 002-code-mode-summary.md      # 本文件
 
-待实现:
-├── chat-code.el                  # 主入口
+当前主要实现:
+├── chat-code.el                  # 主入口与对话主链路
 ├── chat-context-code.el          # 上下文管理
-├── chat-code-intel.el            # 代码智能
 ├── chat-edit.el                  # 编辑操作
-└── chat-code-preview.el          # 预览 buffer
+├── chat-code-preview.el          # 预览 buffer
+└── tests/unit/test-chat-code.el  # 主链路回归测试
 ```
 
 ## 关键设计决策
 
 1. **不分割窗口**：所有操作在当前窗口，用户自己控制布局
-2. **Buffer 命名清晰**：`*chat:code:project*`, `*chat-preview*`
+2. **Buffer 命名清晰**：`*chat:code:<session>*`, `*chat-preview*`
 3. **快捷键统一**：`C-c C-a` 接受, `C-c C-k` 拒绝, `C-c C-v` 查看预览
 4. **Preview 可选**：可以直接接受，也可以先查看
 5. **尊重 Emacs 习惯**：`C-x b` 切换, `C-x 2/3` 手动分割
 
-## 下一步行动
+## 当前修整重点
 
-1. 开始 Phase 1 实现
-2. 创建 `chat-code.el` 骨架
-3. 实现基础的 context builder
-4. 集成到现有的 chat session 系统
+1. 修正文档与实现漂移
+2. 收敛 preview / refactor / intel / git / perf 高风险模块
+3. 补足 `ERT` 回归覆盖
+4. 将 spec 中未实现能力移到 future notes
 
 ---
 
-*Summary Version: 0.1*
+*Summary Version: 0.2*
 *Date: 2026-03-26*

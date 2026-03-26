@@ -2,6 +2,7 @@
 
 (require 'ert)
 (require 'test-helper)
+(require 'chat-code)
 (require 'chat-tool-caller)
 
 (ert-deftest chat-tool-caller-parses-raw-json ()
@@ -20,6 +21,10 @@
     (should (= (length calls) 1))
     (should (string= (plist-get (car calls) :name) "demo"))))
 
+(ert-deftest chat-tool-caller-normalizes-json-false-to-nil ()
+  "Test JSON false values are converted to nil for tool arguments."
+  (should-not (chat-tool-caller--argument-value '(("recursive" . :json-false)) "recursive")))
+
 (ert-deftest chat-tool-caller-extracts-content-from-raw-json ()
   "Test that bare tool JSON does not leak into user-facing text."
   (should (string= (chat-tool-caller-extract-content
@@ -30,7 +35,13 @@
   "Test that fenced tool JSON is removed from displayed text."
   (let ((content (chat-tool-caller-extract-content
                   "Working...\n```json\n{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}\n```")))
-    (should (string= content "Working...\n"))))
+    (should (string= content "Working..."))))
+
+(ert-deftest chat-tool-caller-extracts-content-from-inline-json ()
+  "Test that inline tool JSON is removed from displayed text."
+  (let ((content (chat-tool-caller-extract-content
+                  "先看一下目录。 {\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")))
+    (should (string= content "先看一下目录。"))))
 
 (ert-deftest chat-tool-caller-executes-tool-with-declared-parameters ()
   "Test that declared parameter names map to tool argv."
@@ -97,8 +108,11 @@
     (chat-files-register-built-in-tools)
     (let ((prompt (chat-tool-caller-build-system-prompt "Base")))
       (should (string-match-p "files_read" prompt))
+      (should (string-match-p "files_find" prompt))
       (should (string-match-p "files_patch" prompt))
       (should (string-match-p "apply_patch" prompt))
+      (should (string-match-p "Use files_find for recursive directory text search" prompt))
+      (should (string-match-p "`files_grep` searches one known file path" prompt))
       (should (string-match-p "Read files before editing" prompt))
       (should (string-match-p "\"path\"" prompt)))))
 
@@ -111,7 +125,7 @@
           captured-tool)
      (chat-files-register-built-in-tools)
      (cl-letf (((symbol-function 'chat-approval-request-tool-call)
-                (lambda (tool _call)
+                (lambda (tool _call &optional _session)
                   (setq captured-tool (chat-forged-tool-id tool))
                   nil)))
        (let ((result (chat-tool-caller-execute
@@ -138,6 +152,40 @@
        (should (string-match-p "hello tool" result))
        (should (string-match-p ":content" result))))))
 
+(ert-deftest chat-tool-caller-allows-code-project-root-for-file-tools ()
+  "Test file tools can access the active code session project root."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project" temp-dir))
+          (target-file (expand-file-name "README.md" project-root))
+          (chat-files-allowed-directories (list "/tmp/"))
+          (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (make-directory project-root t)
+     (with-temp-file target-file
+       (insert "project read ok"))
+     (chat-files-register-built-in-tools)
+     (with-temp-buffer
+       (setq-local chat-code--current-session
+                   (chat-code-session-create "Code Project" project-root nil))
+       (let ((result (chat-tool-caller-execute
+                      `(:name "files_read"
+                        :arguments (("path" . ,target-file))))))
+         (should (string-match-p "project read ok" result)))))))
+
+(ert-deftest chat-tool-caller-uses-project-root-as-shell-working-directory ()
+  "Test shell tools execute from the active code session project root."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project" temp-dir))
+          (chat-files-allowed-directories (list "/tmp/"))
+          (chat-tool-shell-enabled t))
+     (make-directory project-root t)
+     (with-temp-buffer
+       (setq-local chat-code--current-session
+                   (chat-code-session-create "Code Project" project-root nil))
+       (let ((result (chat-tool-caller-execute
+                      '(:name "shell_execute"
+                        :arguments (("command" . "pwd"))))))
+         (should (string= (string-trim result) (file-truename project-root))))))))
+
 (ert-deftest chat-tool-caller-processes-response-without-tools ()
   "Test processing a plain response."
   (let ((result nil))
@@ -147,6 +195,27 @@
        (setq result (list content tool-results))))
     (should (string= (nth 0 result) "Hello, how can I help?"))
     (should (null (nth 1 result)))))
+
+(ert-deftest chat-tool-caller-process-response-data-uses-session-for-approval ()
+  "Test tool execution receives the provided session context."
+  (chat-test-with-temp-dir
+   (let* ((target-file (expand-file-name "new.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (session (chat-session-create "Approval Session"))
+          captured-session)
+     (chat-files-register-built-in-tools)
+     (cl-letf (((symbol-function 'chat-approval-request-tool-call)
+                (lambda (_tool _call &optional maybe-session)
+                  (setq captured-session maybe-session)
+                  t)))
+       (let ((result (chat-tool-caller-process-response-data
+                      (format "{\"function_call\":{\"name\":\"files_write\",\"arguments\":{\"path\":\"%s\",\"content\":\"ok\"}}}"
+                              target-file)
+                      session)))
+         (should (eq captured-session session))
+         (should (file-exists-p target-file))
+         (should (= (length (plist-get result :tool-results)) 1)))))))
 
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

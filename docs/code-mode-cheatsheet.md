@@ -1,5 +1,8 @@
 # Code Mode 快速参考卡
 
+当前可靠能力以 `chat-code.el` 的主对话链路为准。
+重构、git、索引性能相关命令目前仍应按实验能力理解。
+
 ## 🚀 启动 Code Mode
 
 ```
@@ -22,7 +25,7 @@ C-c e t    chat-edit-tests          生成测试
 C-c e c    chat-edit-complete       代码补全
 ```
 
-## 💬 Code Mode Buffer（*chat:code:project*）
+## 💬 Code Mode Buffer（*chat:code:<session>*）
 
 ```
 快捷键          功能
@@ -36,7 +39,7 @@ C-c C-r       刷新上下文
 C-g           取消操作
 ```
 
-## 🔀 多文件重构
+## 🔀 多文件重构（实验性）
 
 ```
 M-x chat-code-rename-symbol          跨文件重命名
@@ -44,7 +47,7 @@ M-x chat-code-extract-to-file        提取到新文件
 M-x chat-code-move-function          移动函数
 ```
 
-## 🧪 测试集成
+## 🧪 测试集成（实验性）
 
 ```
 M-x chat-code-run-tests              运行当前文件测试
@@ -53,7 +56,7 @@ M-x chat-code-test-generate          生成测试
 M-x chat-code-test-coverage-current  查看覆盖率
 ```
 
-## 📦 Git 集成
+## 📦 Git 集成（实验性）
 
 ```
 M-x chat-code-git-diff               显示 git diff
@@ -62,7 +65,7 @@ M-x chat-code-git-review             审查变更
 M-x chat-code-git-pre-commit         提交前检查
 ```
 
-## 🧠 代码智能
+## 🧠 代码智能（实验性）
 
 ```
 M-x chat-code-index-project          索引项目
@@ -134,8 +137,8 @@ p         上一个修改
 4.  C-c C-a 接受 / C-c C-v 预览 / C-c C-k 拒绝
 5.  M-x chat-edit-tests 生成测试
 6.  M-x chat-code-run-tests 运行测试
-7.  M-x chat-code-git-review 审查
-8.  M-x chat-code-git-commit-suggest 提交
+7.  如有需要再使用实验性辅助命令
+8.  人工审查后自行处理 git 操作
 ```
 
 ## 📁 文件说明
@@ -148,10 +151,10 @@ p         上一个修改
 | chat-code-preview.el | 预览 buffer |
 | chat-code-intel.el | 符号索引 |
 | chat-code-lsp.el | LSP 集成 |
-| chat-code-refactor.el | 多文件重构 |
-| chat-code-test.el | 测试集成 |
-| chat-code-git.el | Git 集成 |
-| chat-code-perf.el | 性能优化 |
+| chat-code-refactor.el | 多文件重构（实验性） |
+| chat-code-test.el | 测试集成（实验性） |
+| chat-code-git.el | Git 集成（实验性） |
+| chat-code-perf.el | 性能优化（实验性） |
 
 ## 🐛 故障速查
 

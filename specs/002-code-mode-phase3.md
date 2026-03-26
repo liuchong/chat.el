@@ -2,11 +2,12 @@
 
 ## Summary
 
-Phase 3 implementation completed with enhanced code intelligence and streaming support.
+This document records the intended Phase 3 scope.
+Streaming support exists in the repository, but code intelligence, LSP integration, and related indexing features still require repair and validation.
 
 ## Features Implemented
 
-### 1. Enhanced Symbol Indexing ✅
+### 1. Enhanced Symbol Indexing
 
 **File:** `chat-code-intel.el`
 
@@ -28,7 +29,7 @@ Phase 3 implementation completed with enhanced code intelligence and streaming s
 - `chat-code-find-symbol` - Find symbol definition
 - `chat-code-find-references` - Find symbol references
 
-### 2. Smart Context ✅
+### 2. Smart Context
 
 **File:** `chat-context-code.el`
 
@@ -42,7 +43,7 @@ Phase 3 implementation completed with enhanced code intelligence and streaming s
 - Adds related symbol information to context
 - Integrates with existing context strategies
 
-### 3. Streaming Response Support ✅
+### 3. Streaming Response Support
 
 **File:** `chat-code.el`
 
@@ -58,9 +59,9 @@ Phase 3 implementation completed with enhanced code intelligence and streaming s
 
 **Key Functions:**
 - `chat-code--send-streaming` - Send streaming request
-- `chat-code--finish-response` - Handle complete response
+- Streaming completion is finalized through the current `chat-code` response path
 
-### 4. LSP Integration ✅
+### 4. LSP Integration
 
 **File:** `chat-code-lsp.el` (new)
 
@@ -141,7 +142,8 @@ cd /path/to/chat.el
 emacs -Q -batch -l test-code-mode.el
 ```
 
-All tests pass ✅
+Use `tests/run-tests.el` and current unit tests to verify present behavior.
+This phase note is not the source of truth for current test status.
 
 ## Next Steps (Phase 4)
 
@@ -167,4 +169,4 @@ All tests pass ✅
 
 ---
 
-*Phase 3 Complete - 2026-03-26*
+*Phase 3 Notes - historical record*

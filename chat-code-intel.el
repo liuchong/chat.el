@@ -367,6 +367,84 @@ Returns list of related symbol names."
 ;; Persistence
 ;; ------------------------------------------------------------------
 
+(defun chat-code-intel--serialize-symbol (symbol)
+  "Convert SYMBOL struct to an alist."
+  `((name . ,(chat-code-symbol-name symbol))
+    (type . ,(symbol-name (or (chat-code-symbol-type symbol) 'unknown)))
+    (file . ,(chat-code-symbol-file symbol))
+    (line . ,(chat-code-symbol-line symbol))
+    (column . ,(chat-code-symbol-column symbol))
+    (signature . ,(chat-code-symbol-signature symbol))
+    (docstring . ,(chat-code-symbol-docstring symbol))))
+
+(defun chat-code-intel--deserialize-symbol (data)
+  "Build a symbol struct from DATA."
+  (make-chat-code-symbol
+   :name (alist-get 'name data)
+   :type (intern (or (alist-get 'type data) "unknown"))
+   :file (alist-get 'file data)
+   :line (alist-get 'line data)
+   :column (alist-get 'column data)
+   :signature (alist-get 'signature data)
+   :docstring (alist-get 'docstring data)))
+
+(defun chat-code-intel--serialize-reference (reference)
+  "Convert REFERENCE struct to an alist."
+  `((symbol-name . ,(chat-code-reference-symbol-name reference))
+    (file . ,(chat-code-reference-file reference))
+    (line . ,(chat-code-reference-line reference))
+    (column . ,(chat-code-reference-column reference))
+    (type . ,(symbol-name (or (chat-code-reference-type reference) 'unknown)))))
+
+(defun chat-code-intel--deserialize-reference (data)
+  "Build a reference struct from DATA."
+  (make-chat-code-reference
+   :symbol-name (alist-get 'symbol-name data)
+   :file (alist-get 'file data)
+   :line (alist-get 'line data)
+   :column (alist-get 'column data)
+   :type (intern (or (alist-get 'type data) "unknown"))))
+
+(defun chat-code-intel--serialize-hash-table (table value-fn)
+  "Serialize TABLE using VALUE-FN for each element."
+  (let (result)
+    (maphash (lambda (key value)
+               (push (cons key (mapcar value-fn value)) result))
+             table)
+    result))
+
+(defun chat-code-intel--deserialize-hash-table (entries value-fn)
+  "Deserialize ENTRIES using VALUE-FN into a hash table."
+  (let ((table (make-hash-table :test 'equal)))
+    (dolist (entry entries)
+      (puthash (if (symbolp (car entry))
+                   (symbol-name (car entry))
+                 (car entry))
+               (mapcar value-fn (cdr entry))
+               table))
+    table))
+
+(defun chat-code-intel--serialize-call-graph (call-graph)
+  "Serialize CALL-GRAPH hash table."
+  (let (result)
+    (maphash (lambda (key value)
+               (push (cons key value) result))
+             call-graph)
+    result))
+
+(defun chat-code-intel--deserialize-call-graph (entries)
+  "Deserialize call graph ENTRIES into a hash table."
+  (let ((table (make-hash-table :test 'equal)))
+    (dolist (entry entries)
+      (puthash (if (symbolp (car entry))
+                   (symbol-name (car entry))
+                 (car entry))
+               (mapcar (lambda (item)
+                         (if (symbolp item) (symbol-name item) item))
+                       (cdr entry))
+               table))
+    table))
+
 (defun chat-code-intel--ensure-directory ()
   "Ensure index directory exists."
   (unless (file-directory-p chat-code-intel-index-directory)
@@ -379,7 +457,15 @@ Returns list of related symbol names."
                (format "%s.json" (md5 (chat-code-index-project-root index)))
                chat-code-intel-index-directory))
         (data `((project-root . ,(chat-code-index-project-root index))
-                (files . ,(chat-code-index-files index)))))
+                (files . ,(chat-code-index-files index))
+                (symbols . ,(chat-code-intel--serialize-hash-table
+                             (chat-code-index-symbols index)
+                             #'chat-code-intel--serialize-symbol))
+                (references . ,(chat-code-intel--serialize-hash-table
+                                (chat-code-index-references index)
+                                #'chat-code-intel--serialize-reference))
+                (call-graph . ,(chat-code-intel--serialize-call-graph
+                                (chat-code-index-call-graph index))))))
     (with-temp-file file
       (insert (json-encode data)))))
 
@@ -388,8 +474,26 @@ Returns list of related symbol names."
   (let ((file (expand-file-name
                (format "%s.json" (md5 project-root))
                chat-code-intel-index-directory)))
-    (and (file-exists-p file)
-         nil)))  ; For now, return nil to trigger re-index
+    (when (file-exists-p file)
+      (let* ((json-object-type 'alist)
+             (json-array-type 'list)
+             (json-key-type 'symbol)
+             (data (with-temp-buffer
+                     (insert-file-contents file)
+                     (json-read-from-string (buffer-string))))
+             (index (make-chat-code-index
+                     :project-root (or (alist-get 'project-root data) project-root)
+                     :files (alist-get 'files data)
+                     :symbols (chat-code-intel--deserialize-hash-table
+                               (alist-get 'symbols data)
+                               #'chat-code-intel--deserialize-symbol)
+                     :references (chat-code-intel--deserialize-hash-table
+                                  (alist-get 'references data)
+                                  #'chat-code-intel--deserialize-reference)
+                     :call-graph (chat-code-intel--deserialize-call-graph
+                                  (alist-get 'call-graph data)))))
+        (puthash project-root index chat-code-intel--active-indexes)
+        index))))
 
 ;; ------------------------------------------------------------------
 ;; Commands

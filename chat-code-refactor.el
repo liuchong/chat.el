@@ -11,6 +11,14 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'chat-edit)
+(require 'chat-code-intel)
+
+(defun chat-code-refactor--read-file (file)
+  "Read FILE contents."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (buffer-string)))
 
 ;; ------------------------------------------------------------------
 ;; Cross-file Rename
@@ -49,24 +57,19 @@ SCOPE can be 'file, 'project, or 'selected-files."
 (defun chat-code-refactor--find-renames-in-file (file old-name new-name)
   "Find all occurrences of OLD-NAME in FILE to rename to NEW-NAME.
 Returns list of edits."
-  (let (edits)
-    (with-temp-buffer
-      (when (file-exists-p file)
-        (insert-file-contents file)
-        (goto-char (point-min))
-        ;; Find all occurrences
-        (while (re-search-forward (format "\\b%s\\b" (regexp-quote old-name)) nil t)
-          (let* ((start (match-beginning 0))
-                 (end (match-end 0))
-                 (line (line-number-at-pos start)))
-            (push (chat-edit-create-patch
-                   file
-                   old-name
-                   new-name
-                   (cons line line)
-                   (format "Rename %s to %s" old-name new-name))
-                  edits)))))
-    (nreverse edits)))
+  (when (file-exists-p file)
+    (let* ((original-content (chat-code-refactor--read-file file))
+           (new-content (replace-regexp-in-string
+                         (format "\\b%s\\b" (regexp-quote old-name))
+                         new-name
+                         original-content)))
+      (unless (string= original-content new-content)
+        (list
+         (chat-edit-create-rewrite
+          file
+          original-content
+          new-content
+          (format "Rename %s to %s" old-name new-name)))))))
 
 ;; ------------------------------------------------------------------
 ;; Extract to New File
@@ -92,30 +95,33 @@ Updates imports/references in original file."
                           (format "Extract code from %s" source-file)))
            ;; Find and update imports
            (import-edit (chat-code-refactor--generate-import-update
-                         source-file target-file code-totract source-lang)))
+                         source-file target-file code-to-extract source-lang)))
       ;; Preview and apply
       (chat-code-refactor--preview-and-apply
-       (list extract-edit import-edit)
+       (delq nil (list extract-edit import-edit))
        "Extract to file"))))
 
 (defun chat-code-refactor--generate-import-update (source-file target-file code lang)
   "Generate import update for extracting CODE from SOURCE-FILE to TARGET-FILE."
-  (let ((target-module (file-name-base target-file)))
+  (let ((target-module (file-name-base target-file))
+        (source-content (chat-code-refactor--read-file source-file)))
     (pcase lang
       ('python
-       (chat-edit-create-patch
-        source-file
-        ""
-        (format "from %s import ...\n" target-module)
-        (cons 1 1)
-        "Add import for extracted module"))
+       (unless (string-match-p (format "^from\\s-+%s\\s-+import\\s-+" (regexp-quote target-module))
+                               source-content)
+         (chat-edit-create-rewrite
+          source-file
+          source-content
+          (concat (format "from %s import ...\n" target-module) source-content)
+          "Add import for extracted module")))
       ('javascript
-       (chat-edit-create-patch
-        source-file
-        ""
-        (format "import { ... } from './%s';\n" target-module)
-        (cons 1 1)
-        "Add import for extracted module"))
+       (unless (string-match-p (format "^import\\s-+.*['\"]\\./%s['\"]" (regexp-quote target-module))
+                               source-content)
+         (chat-edit-create-rewrite
+          source-file
+          source-content
+          (concat (format "import { ... } from './%s';\n" target-module) source-content)
+          "Add import for extracted module")))
       (_ nil))))
 
 ;; ------------------------------------------------------------------
@@ -151,7 +157,7 @@ Updates all references in project."
                              project-root function-name source-file target-file)))
       ;; Apply all edits
       (chat-code-refactor--preview-and-apply
-       (list remove-edit add-edit reference-edits)
+       (append (list remove-edit add-edit) reference-edits)
        "Move function"))))
 
 (defun chat-code-refactor--get-function-content (file function-name)
@@ -211,13 +217,17 @@ Updates all references in project."
 (defun chat-code-refactor--preview-and-apply (edits description)
   "Preview EDITS and let user confirm before applying.
 DESCRIPTION describes the refactoring operation."
-  (let ((buffer (get-buffer-create "*chat-refactor-preview*")))
+  (let* ((flat-edits
+          (cl-loop for edit in edits
+                   if (chat-edit-p edit) collect edit
+                   else if (listp edit) append (cl-remove-if-not #'chat-edit-p edit)))
+         (buffer (get-buffer-create "*chat-refactor-preview*")))
     (with-current-buffer buffer
       (erase-buffer)
       (insert (format "════════════════════════════════════════════════════════════════════\n"))
       (insert (format "Refactoring Preview: %s\n" description))
       (insert (format "════════════════════════════════════════════════════════════════════\n\n"))
-      (dolist (edit edits)
+      (dolist (edit flat-edits)
         (when edit
           (insert (format "File: %s\n" (chat-edit-file edit)))
           (insert (format "Type: %s\n" (chat-edit-type edit)))
@@ -228,7 +238,7 @@ DESCRIPTION describes the refactoring operation."
                           'face '(:weight bold)))
       (local-set-key (kbd "a") (lambda ()
                                  (interactive)
-                                 (dolist (edit edits)
+                                 (dolist (edit flat-edits)
                                    (when edit (chat-edit-apply edit)))
                                  (kill-buffer)))
       (local-set-key (kbd "c") (lambda ()

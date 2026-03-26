@@ -41,7 +41,8 @@
   :group 'chat-context-code)
 
 (defcustom chat-context-code-source-priorities
-  '(focus-file            ; The file user is currently editing
+  '(project-instructions  ; Project instruction files like AGENTS.md
+    focus-file            ; The file user is currently editing
     imports               ; Imported/required files
     related-symbols       ; Functions/classes referenced
     open-buffers          ; Other open code buffers
@@ -112,6 +113,7 @@ Uses symbol index for smart context when available."
                    :files nil
                    :symbols nil
                    :total-tokens 0)))
+    (chat-context-code--add-project-instructions context code-session)
     ;; Try to use symbol index for smart context
     (when (featurep 'chat-code-intel)
       (let ((index (chat-code-intel-get-index
@@ -128,6 +130,37 @@ Uses symbol index for smart context when available."
     ;; Optimize to fit budget
     (chat-context-code--optimize context)
     context))
+
+(defun chat-context-code--project-agents-file (code-session)
+  "Return the project `AGENTS.md` path for CODE-SESSION, when it exists."
+  (let ((path (expand-file-name "AGENTS.md"
+                                (chat-code-session-project-root code-session))))
+    (when (file-exists-p path)
+      path)))
+
+(defun chat-context-code--add-project-instructions (context code-session)
+  "Add project instruction files from CODE-SESSION into CONTEXT."
+  (when-let ((agents-file (chat-context-code--project-agents-file code-session)))
+    (let ((content (chat-context-code--read-file-content agents-file)))
+      (when content
+        (let* ((formatted (concat
+                           ";; Project Instructions: AGENTS.md\n"
+                           ";; Treat these rules as mandatory for work in this project.\n"
+                           "```text\n"
+                           content
+                           (unless (string-suffix-p "\n" content)
+                             "\n")
+                           "```\n"))
+               (tokens (chat-context-code--estimate-tokens formatted))
+               (source (make-chat-code-context-source
+                        :type 'project-instructions
+                        :priority 0
+                        :content formatted
+                        :tokens tokens
+                        :metadata `((path . ,agents-file)))))
+          (push source (chat-code-context-sources context))
+          (cl-incf (chat-code-context-total-tokens context) tokens)))))
+  context)
 
 (defun chat-context-code--add-symbol-context (context code-session index)
   "Add symbol-based context from INDEX to CONTEXT."
@@ -240,7 +273,7 @@ OPTIONS:
                           :tokens tokens)))
           (push file-ctx (chat-code-context-files context))
           (cl-incf (chat-code-context-total-tokens context) tokens))))
-  context)
+  context))
 
 (defun chat-context-code--read-file-content (file-path &optional max-lines outline-only)
   "Read content of FILE-PATH.
@@ -275,7 +308,7 @@ If OUTLINE-ONLY is t, extract only function/class signatures."
         (goto-char (point-max))
         (insert "\n\n;; Outline:\n")
         (dolist (line (nreverse outline-lines))
-          (insert ";; " line "\n"))))))
+          (insert ";; " line "\n")))))
 
 (defun chat-context-code--extract-symbols (file-path language)
   "Extract symbols from FILE-PATH based on LANGUAGE."

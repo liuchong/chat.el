@@ -249,6 +249,13 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 - AI 生成工具必须先审批
 - elisp 工具源码必须是单个顶层 `lambda`
 
+### Structured Protocol Format
+
+- 任何结构化输入输出必须使用 JSON
+- function call tool call approval payload patch 请求以及其他机器可读内容必须使用 JSON 格式
+- 不得使用 XML YAML 自定义标签或自然语言伪结构替代 JSON
+- 如果某个外部协议明确要求非 JSON 格式 必须先在代码和文档中证明该协议真实存在 再按协议执行
+
 ### Session and State
 
 - 会话状态必须隔离

@@ -1,11 +1,12 @@
 # Project Status
 
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 
 ## Summary
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
 The core chat flow, tool calling flow, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
+`code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 
 ## Implemented Areas
 
@@ -52,10 +53,10 @@ The core chat flow, tool calling flow, file tools, approval gates, async request
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 122 tests discovered
-- 120 passing
+- 150 tests discovered
+- 148 passing
 - 2 skipped provider integration tests
-- 0 failures in the current baseline
+- 0 known failures in the current baseline
 
 ### Stability Highlights
 
@@ -65,6 +66,18 @@ The core chat flow, tool calling flow, file tools, approval gates, async request
 - risky tools require approval before execution
 - AI generated tools require approval before registration
 - shell execution no longer goes through shell expansion
+- code mode supports stable input, multi turn requests, cancel, preview creation, and explicit `code-edit` parsing
+- code mode now reuses the shared JSON tool calling contract and follow up tool loop
+- code mode follow up rendering now returns to the UI buffer before touching markers
+- debug logs stay in `~/.chat/chat.log` unless minibuffer echo is explicitly enabled
+- inline JSON tool calls are stripped from displayed assistant text before rendering
+- code mode now shows a safety limit notice instead of raw tool JSON when automatic tool follow up stops
+- code mode tool execution now inherits the active project root for file access and shell working directory
+- builtin readonly shell whitelist now covers common inspection commands and safe `cd DIR && CMD` exploration
+- code mode now shows explicit running, success, failed, cancelled, and stopped status in the buffer header line
+- code mode prompt now includes project rooted operational guardrails to reduce aimless tool retries
+- code mode now injects project `AGENTS.md` into context when present
+- code mode now sends hard coded non-negotiable engineering rules in every programming request
 
 ## Known Boundaries
 
@@ -72,6 +85,7 @@ The core chat flow, tool calling flow, file tools, approval gates, async request
 - streaming currently falls back to the async request path in `chat-llm-stream`
 - default providers still depend on external API availability and local keys
 - provider integration tests are intentionally skipped in offline or unconfigured environments
+- code mode refactor, git helper, indexing extras, and performance helpers should still be treated as experimental
 
 ## Recommended Next Work
 

@@ -1,5 +1,11 @@
 # Code Mode Quickstart Guide
 
+## 当前状态说明
+
+本指南描述的是当前仓库里已经存在的 `code-mode` 主路径能力。
+其中对话、多轮会话、基础 edit 接受/拒绝、流式响应开关已经落地。
+多文件重构、索引增量更新、后台索引、git 辅助等高级功能目前仍属于实验能力，使用前应先审查实现状态。
+
 ## 快速开始
 
 ### 启动 Code Mode
@@ -47,7 +53,6 @@ M-x chat-code-from-chat
 
 | 命令 | 快捷键 | 描述 |
 |------|--------|------|
-| `chat-edit-generate` | `C-c e g` | 生成代码 |
 | `chat-edit-complete` | `C-c e c` | 代码补全 |
 | `chat-edit-explain` | `C-c e e` | 解释代码 |
 | `chat-edit-refactor` | `C-c e r` | 重构代码 |
@@ -62,7 +67,6 @@ M-x chat-code-from-chat
 | `C-c C-a` | 接受修改 | 直接应用，不看预览 |
 | `C-c C-k` | 拒绝修改 | 丢弃 AI 建议 |
 | `C-c C-v` | 查看预览 | 切换到 `*chat-preview*` buffer |
-| `C-c C-d` | 显示 diff | 在 chat buffer 中显示 diff |
 
 ### 预览 buffer 命令 (`*chat-preview*` 中)
 
@@ -235,21 +239,6 @@ def test_divide_by_zero():
 ;; 小修改自动应用（少于 10 行）
 (setq chat-code-auto-apply-threshold 10)
 
-;; 最大 token 数
-(setq chat-code-max-tokens 16000)
-```
-
-### 高级配置
-
-```elisp
-;; 自定义上下文源
-(setq chat-code-context-sources
-      '(file-content
-        file-symbols
-        imports
-        git-status
-        open-buffers))
-
 ;; 自定义系统提示词
 (setq chat-code-system-prompt
       "You are a senior software engineer. 
@@ -328,15 +317,6 @@ def test_divide_by_zero():
 - 提供风格参考文件
 - 使用项目特定的提示词模板
 
-### 问题：Token 限制
-
-**症状:** 上下文被截断
-
-**解决:**
-- 使用更聚焦的策略
-- 手动选择关键文件
-- 增加 `chat-code-max-tokens`
-
 ## 窗口管理指南
 
 **核心原则：** code mode 不管理窗口，只管理 buffer。用户完全控制窗口布局。
@@ -353,9 +333,9 @@ def test_divide_by_zero():
    └──────────────────────┘
 
 2. 执行 chat-code-for-selection
-   → 在当前窗口打开 *chat:code:project* buffer
+   → 在当前窗口打开 *chat:code:<session>* buffer
    ┌──────────────────────┐
-   │ *chat:code:project*  │
+   │ *chat:code:<session>*│
    │                      │
    │  You: 添加错误处理   │
    │  > _                 │
@@ -392,9 +372,8 @@ def test_divide_by_zero():
 
 | Buffer 名称 | 用途 |
 |------------|------|
-| `*chat:code:project*` | Code mode 主 buffer |
+| `*chat:code:<session>*` | Code mode 主 buffer |
 | `*chat-preview*` | 修改预览 diff |
-| `*chat-context*` | 当前上下文详情 |
 
 ### 常用窗口命令
 
@@ -421,6 +400,7 @@ C-x o    ;; 切换窗口
 4. **提供上下文**: 给 AI 足够的背景信息
 5. **迭代改进**: 一次只做一件事，逐步完善
 6. **控制布局**: 自己管理窗口，不依赖自动布局
+7. **谨慎使用高级命令**: 重构、git、索引性能相关命令当前仍应先验证实现状态
 
 ---
 

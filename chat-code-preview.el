@@ -20,6 +20,7 @@
 
 (require 'cl-lib)
 (require 'diff-mode)
+(require 'chat-edit)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -133,8 +134,7 @@ Returns the preview buffer."
   "Generate unified diff for FILE-PATH from ORIGINAL to NEW."
   (with-temp-buffer
     (let* ((orig-file (make-temp-file "chat-code-orig-"))
-           (new-file (make-temp-file "chat-code-new-"))
-           (diff-file (make-temp-file "chat-code-diff-")))
+           (new-file (make-temp-file "chat-code-new-")))
       (unwind-protect
           (progn
             ;; Write original content
@@ -144,21 +144,16 @@ Returns the preview buffer."
             (with-temp-file new-file
               (insert new))
             ;; Generate diff
-            (call-process "diff" nil nil nil
-                          "-u"
-                          "-L" (format "a/%s" file-path)
-                          "-L" (format "b/%s" file-path)
-                          orig-file
-                          new-file)
-            ;; Read diff output
-            (with-temp-buffer
-              (call-process "diff" nil t nil
-                            "-u"
-                            "-L" (format "a/%s" file-path)
-                            "-L" (format "b/%s" file-path)
-                            orig-file
-                            new-file)
-              (buffer-string)))
+            (if (executable-find "diff")
+                (with-temp-buffer
+                  (call-process "diff" nil t nil
+                                "-u"
+                                "-L" (format "a/%s" file-path)
+                                "-L" (format "b/%s" file-path)
+                                orig-file
+                                new-file)
+                  (buffer-string))
+              (chat-code-preview--generate-diff-internal original new)))
         ;; Cleanup
         (when (file-exists-p orig-file)
           (delete-file orig-file))
@@ -305,17 +300,18 @@ Callbacks will be called with the preview data when user accepts or rejects."
 (defun chat-code-preview-for-edit (edit)
   "Show preview for EDIT struct (from chat-edit)."
   (let ((buffer (chat-code-preview-show
-                 (chat-code-edit-file edit)
-                 (chat-code-edit-original-content edit)
-                 (chat-code-edit-new-content edit)
-                 (chat-code-edit-description edit))))
+                 (chat-edit-file edit)
+                 (chat-edit-original-content edit)
+                 (chat-edit-new-content edit)
+                 (chat-edit-description edit))))
     (with-current-buffer buffer
       (setq-local chat-code-preview--accept-callback
                   (lambda (_)
-                    (chat-code-edit-apply edit)))
+                    (chat-edit-apply edit)))
       (setq-local chat-code-preview--reject-callback
                   (lambda (_)
                     (message "Edit rejected"))))
+    (setf (chat-edit-preview-shown-p edit) t)
     buffer))
 
 ;; ------------------------------------------------------------------

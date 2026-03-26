@@ -120,7 +120,9 @@ You can override this with `chat-files-allowed-directories`.
 
 ## Code Mode (AI Programming IDE)
 
-chat.el includes a comprehensive **Code Mode** for AI-assisted programming:
+chat.el includes a **Code Mode** for AI-assisted programming.
+The current stable path is the single buffer code chat flow.
+Refactoring, git assistance, indexing extras, and performance helpers are still under repair and should be treated as experimental.
 
 ### Starting Code Mode
 
@@ -140,6 +142,10 @@ chat.el includes a comprehensive **Code Mode** for AI-assisted programming:
 | `M-x chat-edit-docs` | Generate documentation |
 | `M-x chat-edit-tests` | Generate unit tests |
 | `M-x chat-edit-complete` | Complete code at point |
+
+### Experimental Advanced Commands
+
+These commands exist in the repository but are still being repaired and validated:
 
 ### Multi-file Refactoring
 
@@ -178,11 +184,12 @@ chat.el includes a comprehensive **Code Mode** for AI-assisted programming:
 
 - **Single-window design** - Respects your window layout
 - **4 context strategies** - minimal, focused, balanced, comprehensive
-- **Symbol indexing** - Cross-references and call graph analysis
-- **LSP integration** - Works with lsp-mode and eglot
-- **Streaming responses** - Real-time code generation
-- **Git diff context** - Automatic inclusion of uncommitted changes
-- **Performance** - Incremental indexing and background updates
+- **Streaming responses** - Real-time code generation toggle exists
+- **Visible run state** - Header line shows running, success, failed, cancelled, or stopped
+- **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root
+- **Project rules in context** - `AGENTS.md` is injected into code mode context when present
+- **LSP integration** - Optional integration points exist
+- **Experimental modules** - Refactor, git, indexing extras, and perf helpers are under repair
 
 See `specs/002-code-mode*.md` for detailed documentation.
 

@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'chat-code-intel)
 
 ;; ------------------------------------------------------------------
 ;; Incremental Indexing
@@ -46,36 +47,29 @@
 Only re-indexes changed files."
   (interactive (list (chat-code--detect-project-root)))
   (let ((index (chat-code-intel-get-index project-root)))
-    (unless index
-      ;; Full index if none exists
-      (setq index (chat-code-intel-index-project project-root))
-      (chat-code-perf-update-modtimes (chat-code-index-files index))
-      (return-from chat-code-intel-incremental-update index))
-    ;; Update only changed files
-    (let ((changed-files (chat-code-perf-get-changed-files project-root)))
-      (if (null changed-files)
-          (progn
-            (message "No files changed since last index")
-            index)
-        (message "Incrementally updating %d changed files..."
-                (length changed-files))
-        ;; Remove old entries for changed files
-        (dolist (file changed-files)
-          (chat-code-perf--remove-file-from-index index file))
-        ;; Re-index changed files
-        (dolist (file changed-files)
-          (chat-code-intel--index-file-symbols index file))
-        ;; Update references
-        (dolist (file changed-files)
-          (chat-code-intel--index-file-references index file))
-        ;; Rebuild call graph
-        (chat-code-intel--build-call-graph index)
-        ;; Update modtimes
-        (chat-code-perf-update-modtimes changed-files)
-        ;; Save
-        (chat-code-intel-save-index index)
-        (message "Incremental update complete")
-        index))))
+    (if (null index)
+        (progn
+          (setq index (chat-code-intel-index-project project-root))
+          (chat-code-perf-update-modtimes (chat-code-index-files index))
+          index)
+      (let ((changed-files (chat-code-perf-get-changed-files project-root)))
+        (if (null changed-files)
+            (progn
+              (message "No files changed since last index")
+              index)
+          (message "Incrementally updating %d changed files..."
+                   (length changed-files))
+          (dolist (file changed-files)
+            (chat-code-perf--remove-file-from-index index file))
+          (dolist (file changed-files)
+            (chat-code-intel--index-file-symbols index file))
+          (dolist (file changed-files)
+            (chat-code-intel--index-file-references index file))
+          (chat-code-intel--build-call-graph index)
+          (chat-code-perf-update-modtimes changed-files)
+          (chat-code-intel-save-index index)
+          (message "Incremental update complete")
+          index)))))
 
 (defun chat-code-perf--remove-file-from-index (index file)
   "Remove all entries for FILE from INDEX."
@@ -115,6 +109,9 @@ Only re-indexes changed files."
 (defvar chat-code-perf--background-queue nil
   "Queue of files to index in background.")
 
+(defvar chat-code-perf--background-timer nil
+  "Idle timer for background indexing.")
+
 ;;;###autoload
 (defun chat-code-intel-start-background-index (project-root)
   "Start background indexing for PROJECT-ROOT."
@@ -124,13 +121,8 @@ Only re-indexes changed files."
   ;; Initialize queue
   (setq chat-code-perf--background-queue
        (chat-code-intel--find-source-files project-root))
-  ;; Start process
-  (setq chat-code-perf--background-process
-       (make-process
-        :name "chat-code-background-index"
-        :buffer nil
-        :command nil
-        :noquery t))
+  ;; Use an idle timer instead of a dummy subprocess.
+  (setq chat-code-perf--background-process t)
   ;; Process files one by one
   (chat-code-perf--process-next-background-file project-root)
   (message "Background indexing started"))
@@ -140,22 +132,33 @@ Only re-indexes changed files."
   (when (and chat-code-perf--background-process
             chat-code-perf--background-queue)
     (let ((file (pop chat-code-perf--background-queue))
-         (index (chat-code-intel-get-index project-root)))
+          (index (or (chat-code-intel-get-index project-root)
+                     (chat-code-intel-index-project project-root))))
       (when (and file index)
         ;; Index file
         (chat-code-intel--index-file-symbols index file)
         ;; Schedule next
-        (run-with-idle-timer 0.1 nil
-                            #'chat-code-perf--process-next-background-file
-                            project-root)))))
+        (setq chat-code-perf--background-timer
+              (run-with-idle-timer 0.1 nil
+                                   #'chat-code-perf--process-next-background-file
+                                   project-root)))
+      (when (and (null chat-code-perf--background-queue) index)
+        (chat-code-intel-save-index index)
+        (setq chat-code-perf--background-process nil)
+        (setq chat-code-perf--background-timer nil)
+        (message "Background indexing complete")))))
 
 ;;;###autoload
 (defun chat-code-intel-stop-background-index ()
   "Stop background indexing."
   (interactive)
-  (when chat-code-perf--background-process
+  (when (timerp chat-code-perf--background-timer)
+    (cancel-timer chat-code-perf--background-timer)
+    (setq chat-code-perf--background-timer nil))
+  (when (processp chat-code-perf--background-process)
     (delete-process chat-code-perf--background-process)
     (setq chat-code-perf--background-process nil))
+  (setq chat-code-perf--background-process nil)
   (setq chat-code-perf--background-queue nil)
   (message "Background indexing stopped"))
 

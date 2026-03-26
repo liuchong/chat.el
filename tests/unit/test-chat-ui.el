@@ -185,7 +185,7 @@
                             :raw-response "{\"answer\":true}"))
                  'request-handle))
               ((symbol-function 'chat-tool-caller-process-response-data)
-               (lambda (_content)
+               (lambda (_content &optional _session)
                  '(:content "命令结果是 tool-ok"))))
       (chat-ui--resolve-tool-loop-async
        'kimi-code
