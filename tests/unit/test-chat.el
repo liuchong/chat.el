@@ -33,7 +33,41 @@
 (ert-deftest chat-default-model-is-set ()
   "Test that chat-default-model has a default value."
   (should chat-default-model)
-  (should (symbolp chat-default-model)))
+  (should (symbolp chat-default-model))
+  (should (eq chat-default-model 'kimi)))
+
+(ert-deftest chat-load-config-files-loads-supported-locations-in-order ()
+  "Test config files load from all supported locations in override order."
+  (chat-test-with-temp-dir
+   (let* ((home-dir temp-dir)
+          (root-dir (expand-file-name "repo" temp-dir))
+          (chat-dir (expand-file-name ".chat" home-dir))
+          (process-environment (cons (format "HOME=%s" home-dir)
+                                     process-environment))
+          loaded-files)
+     (make-directory root-dir t)
+     (make-directory chat-dir t)
+     (with-temp-file (expand-file-name ".chat.el" home-dir)
+       (insert "(setq chat-test-config-order '(global-root))\n"
+               "(setq chat-test-config-value 'home)\n"))
+     (with-temp-file (expand-file-name "config.el" chat-dir)
+       (insert "(setq chat-test-config-order (append chat-test-config-order '(chat-dir)))\n"
+               "(setq chat-test-config-value 'chat-dir)\n"))
+     (with-temp-file (expand-file-name "chat-config.local.el" root-dir)
+       (insert "(setq chat-test-config-order (append chat-test-config-order '(project-local)))\n"
+               "(setq chat-test-config-value 'project)\n"))
+     (setq chat-test-config-order nil)
+     (setq chat-test-config-value nil)
+     (unwind-protect
+         (progn
+           (setq loaded-files (chat-load-config-files root-dir))
+           (should (equal (mapcar #'file-name-nondirectory loaded-files)
+                          '(".chat.el" "config.el" "chat-config.local.el")))
+           (should (equal chat-test-config-order
+                          '(global-root chat-dir project-local)))
+           (should (eq chat-test-config-value 'project)))
+       (makunbound 'chat-test-config-order)
+       (makunbound 'chat-test-config-value)))))
 
 (ert-deftest chat-session-directory-configurable ()
   "Test that session directory can be configured."

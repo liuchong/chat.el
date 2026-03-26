@@ -50,7 +50,8 @@ Get your key from: https://www.kimi.com/code"
   (or chat-llm-kimi-code-api-key
       (when chat-llm-kimi-code-api-key-fn
         (funcall chat-llm-kimi-code-api-key-fn))
-      (chat-llm--auth-source-lookup 'kimi-code)))
+      (chat-llm--auth-source-lookup 'kimi-code
+                                    (chat-llm-get-provider-config 'kimi-code))))
 
 (defun chat-llm-kimi-code--build-request (messages options)
   "Build Kimi Code request with MESSAGES and OPTIONS.

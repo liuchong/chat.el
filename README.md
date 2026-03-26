@@ -53,16 +53,44 @@ Load the package:
 (require 'chat)
 ```
 
-Configure one provider:
+Supported providers:
+
+- `kimi`
+- `kimi-code`
+- `openai`
+- `deepseek`
+- `qwen`
+- `grok`
+- `claude`
+- `gemini`
+- `glm`
+- `doubao`
+- `hunyuan`
+- `minimax`
+- `mistral`
+
+Configure providers in one of these files:
+
+- `~/.chat.el`
+- `~/.chat/config.el`
+- `chat-config.local.el` in the repository root
+
+Later files override earlier ones.
+
+Minimal local config:
 
 ```elisp
-(setq chat-default-model 'kimi-code)
-(setq chat-llm-kimi-code-api-key "sk-kimi-...")
+(setq chat-default-model 'kimi)
+(setq chat-llm-enabled-providers '(kimi openai deepseek qwen grok claude gemini))
+(setq chat-llm-kimi-api-key "sk-kimi-...")
 ```
 
 Or use `auth-source`:
 
 ```text
+machine kimi-api user api-key password YOUR_KEY
+machine claude-api user api-key password YOUR_KEY
+machine gemini-api user api-key password YOUR_KEY
 machine kimi-code-api user api-key password YOUR_KEY
 machine openai-api user api-key password YOUR_KEY
 ```
@@ -148,7 +176,9 @@ You can override this with `chat-files-allowed-directories`.
 ## Recommended Local Config
 
 ```elisp
-(setq chat-default-model 'kimi-code)
+(setq chat-default-model 'kimi)
+(setq chat-llm-enabled-providers
+      '(kimi openai deepseek qwen grok claude gemini glm doubao hunyuan minimax mistral))
 (setq chat-ui-use-streaming t)
 (setq chat-session-auto-save t)
 (setq chat-files-allowed-directories

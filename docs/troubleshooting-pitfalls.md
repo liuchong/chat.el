@@ -67,6 +67,28 @@ Required field order:
   (url-retrieve-synchronously ...))
 ```
 
+### Config File Override Order Can Hide Provider Settings
+
+**Problem**: a provider key or default model seems to be ignored or unexpectedly changed after startup.
+
+**Cause**: `chat.el` loads `~/.chat.el`, then `~/.chat/config.el`, then project local `chat-config.local.el`, and later files override earlier values.
+
+**Solution**: keep provider settings in one place when possible, or intentionally rely on the override order.
+
+```elisp
+;; Global defaults
+;; ~/.chat.el
+(setq chat-default-model 'kimi)
+
+;; Machine specific overrides
+;; ~/.chat/config.el
+(setq chat-llm-enabled-providers '(kimi claude gemini))
+
+;; Project local override
+;; ./chat-config.local.el
+(setq chat-default-model 'claude)
+```
+
 ---
 
 ## Request Building and JSON

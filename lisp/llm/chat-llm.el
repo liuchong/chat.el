@@ -17,9 +17,22 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'seq)
 (require 'url)
 (require 'subr-x)
 (require 'chat-log)
+
+(defgroup chat-llm nil
+  "LLM provider abstraction for chat.el."
+  :group 'chat)
+
+(defcustom chat-llm-enabled-providers nil
+  "Enabled LLM providers.
+When nil, all registered providers are enabled.
+When non-nil, only the listed provider symbols are available."
+  :type '(choice (const :tag "Enable all registered providers" nil)
+                 (repeat :tag "Enabled providers" symbol))
+  :group 'chat-llm)
 
 (defvar-local chat-llm--timeout-timer nil
   "Timeout timer for the current async request buffer.")
@@ -35,14 +48,36 @@
   "Alist of registered LLM providers.
 Each entry is a pair of (SYMBOL . CONFIG-PLIST).")
 
+(defun chat-llm-get-provider-config (symbol)
+  "Return raw configuration for provider SYMBOL."
+  (cdr (assoc symbol chat-llm-providers)))
+
+(defun chat-llm-provider-enabled-p (symbol)
+  "Return non-nil when provider SYMBOL is enabled."
+  (and (chat-llm-get-provider-config symbol)
+       (or (null chat-llm-enabled-providers)
+           (memq symbol chat-llm-enabled-providers))))
+
+(defun chat-llm-enabled-providers ()
+  "Return the list of enabled provider symbols."
+  (mapcar #'car
+          (seq-filter
+           (lambda (entry)
+             (chat-llm-provider-enabled-p (car entry)))
+           chat-llm-providers)))
+
 (defun chat-llm-register-provider (symbol &rest config)
   "Register a new LLM provider with SYMBOL and CONFIG.
 
 CONFIG is a plist with keys:
   :name - Display name
   :base-url - API base URL
+  :request-path - API path appended to base URL
+  :request-url-fn - Function computing full request URL
   :api-key - API key string
   :api-key-fn - Function to retrieve API key
+  :auth-source-host - Host name for auth-source lookup
+  :auth-headers-fn - Function building authentication headers
   :model - Default model name
   :headers - Additional HTTP headers
   :request-fn - Function to build request payload
@@ -53,11 +88,19 @@ CONFIG is a plist with keys:
 
 (defun chat-llm-get-provider (symbol)
   "Get configuration for provider SYMBOL."
-  (cdr (assoc symbol chat-llm-providers)))
+  (when (chat-llm-provider-enabled-p symbol)
+    (chat-llm-get-provider-config symbol)))
+
+(defun chat-llm--ensure-provider (symbol)
+  "Return enabled provider config for SYMBOL or signal an error."
+  (or (chat-llm-get-provider symbol)
+      (if (chat-llm-get-provider-config symbol)
+          (error "Provider is disabled: %s" symbol)
+        (error "Unknown provider: %s" symbol))))
 
 (defun chat-llm-provider-option (symbol key)
   "Get provider config KEY for SYMBOL."
-  (plist-get (chat-llm-get-provider symbol) key))
+  (plist-get (chat-llm--ensure-provider symbol) key))
 
 ;; ------------------------------------------------------------------
 ;; API Key Management
@@ -70,17 +113,18 @@ Checks in order:
 1. api-key-fn from config
 2. api-key from config
 3. auth-source lookup"
-  (let ((config (chat-llm-get-provider provider)))
+  (let ((config (chat-llm--ensure-provider provider)))
     (or (when-let ((fn (plist-get config :api-key-fn)))
           (funcall fn))
         (plist-get config :api-key)
-        (chat-llm--auth-source-lookup provider))))
+        (chat-llm--auth-source-lookup provider config))))
 
-(defun chat-llm--auth-source-lookup (provider)
-  "Look up API key for PROVIDER in auth-source."
+(defun chat-llm--auth-source-lookup (provider &optional config)
+  "Look up API key for PROVIDER in auth-source using CONFIG."
   (when (require 'auth-source nil t)
     (let ((result (auth-source-search
-                   :host (format "%s-api" provider)
+                   :host (or (plist-get config :auth-source-host)
+                             (format "%s-api" provider))
                    :user "api-key"
                    :require '(:secret)
                    :max 1)))
@@ -89,6 +133,11 @@ Checks in order:
           (if (functionp secret)
               (funcall secret)
             secret))))))
+
+(defun chat-llm--require-api-key (provider)
+  "Return API key for PROVIDER or signal a helpful error."
+  (or (chat-llm--get-api-key provider)
+      (error "No API key configured for provider: %s" provider)))
 
 ;; ------------------------------------------------------------------
 ;; Request Building
@@ -123,7 +172,7 @@ Filters out empty assistant messages which are not allowed by the API."
 
 (defun chat-llm--build-request (provider messages options)
   "Build request payload for PROVIDER with MESSAGES and OPTIONS."
-  (let* ((config (chat-llm-get-provider provider))
+  (let* ((config (chat-llm--ensure-provider provider))
          (builder (chat-llm--request-builder config))
          (model (or (plist-get options :model)
                     (plist-get config :model)))
@@ -141,9 +190,16 @@ Filters out empty assistant messages which are not allowed by the API."
             :stream stream
             :max_tokens max-tokens))))
 
-(defun chat-llm--request-url (config)
-  "Return the request URL for CONFIG."
-  (concat (plist-get config :base-url) "/chat/completions"))
+(defun chat-llm--request-url (provider &optional options)
+  "Return the request URL for PROVIDER using OPTIONS."
+  (let* ((config (chat-llm--ensure-provider provider))
+         (request-url-fn (plist-get config :request-url-fn))
+         (base-url (plist-get config :base-url))
+         (request-path (or (plist-get config :request-path)
+                           "/chat/completions")))
+    (if request-url-fn
+        (funcall request-url-fn provider config options)
+      (concat base-url request-path))))
 
 ;; ------------------------------------------------------------------
 ;; HTTP Utilities
@@ -151,16 +207,34 @@ Filters out empty assistant messages which are not allowed by the API."
 
 (defun chat-llm--make-headers (provider)
   "Generate HTTP headers for PROVIDER."
-  (let* ((config (chat-llm-get-provider provider))
-         (api-key (chat-llm--get-api-key provider))
+  (let* ((config (chat-llm--ensure-provider provider))
          (extra-headers-raw (plist-get config :headers))
          (extra-headers (if (functionp extra-headers-raw)
                             (funcall extra-headers-raw)
-                          extra-headers-raw)))
+                          extra-headers-raw))
+         (auth-headers-fn (plist-get config :auth-headers-fn))
+         (api-key (unless auth-headers-fn
+                    (chat-llm--require-api-key provider)))
+         (auth-headers
+          (if auth-headers-fn
+              (funcall auth-headers-fn
+                       (chat-llm--require-api-key provider)
+                       provider
+                       config)
+            (when api-key
+              (list (cons "Authorization"
+                          (format "Bearer %s" api-key)))))))
     (append
-     (list (cons "Content-Type" "application/json")
-           (cons "Authorization" (format "Bearer %s" api-key)))
+     (list (cons "Content-Type" "application/json"))
+     auth-headers
      extra-headers)))
+
+(defun chat-llm--curl-args-for-headers (headers)
+  "Build curl `-H` arguments for HEADERS."
+  (apply #'append
+         (mapcar (lambda (header)
+                   (list "-H" (format "%s: %s" (car header) (cdr header))))
+                 headers)))
 
 (defun chat-llm--post-sync (url headers body timeout-secs)
   "Make synchronous POST request to URL with TIMEOUT-SECS.
@@ -297,16 +371,12 @@ ERROR receives a string message."
          (curl-args
           (append
            (list "-s" "-S" "-i"
-                 "-X" "POST"
-                 "-H" (format "Content-Type: %s"
-                              (or (chat-llm--header-value headers "Content-Type")
-                                  "application/json"))
-                 "-H" (format "Authorization: %s"
-                              (or (chat-llm--header-value headers "Authorization")
-                                  ""))
-                 "--data-binary" body)
-           (when-let ((accept (chat-llm--header-value headers "Accept")))
-             (list "-H" (format "Accept: %s" accept)))
+                 "-X" "POST")
+           (chat-llm--curl-args-for-headers
+            (if user-agent
+                (assoc-delete-all "User-Agent" headers)
+              headers))
+           (list "--data-binary" body)
            (when user-agent
              (list "-A" user-agent))
            (list url)))
@@ -383,7 +453,9 @@ ERROR receives a string message."
 (defun chat-llm--decode-response (config raw-request raw-response status-code)
   "Decode one response using CONFIG and request metadata."
   (let ((parser (chat-llm--response-parser config)))
-    (if (/= status-code 200)
+    (if (not (and (integerp status-code)
+                  (>= status-code 200)
+                  (< status-code 300)))
         (error "HTTP error %d: %s" status-code raw-response)
       (let ((json-data (json-read-from-string raw-response)))
         (list :content (funcall parser json-data)
@@ -403,7 +475,7 @@ OPTIONS is an optional plist of request parameters.
 
 Returns a plist with :content, :raw-request and :raw-response."
   (chat-log "[LLM] Starting request to provider: %s" provider)
-  (let* ((config (chat-llm-get-provider provider))
+  (let* ((config (chat-llm--ensure-provider provider))
          (request-body (chat-llm--build-request provider messages options))
          (headers (chat-llm--make-headers provider))
          (timeout (or (plist-get options :timeout) 60))
@@ -412,7 +484,7 @@ Returns a plist with :content, :raw-request and :raw-response."
     (chat-log "[LLM] Request body: %s" raw-request)
     (chat-log "[LLM] Headers present: %s" (if headers "yes" "no"))
     (let* ((result (chat-llm--post-sync
-                    (chat-llm--request-url config)
+                    (chat-llm--request-url provider options)
                     headers
                     raw-request
                     timeout))
@@ -427,7 +499,7 @@ SUCCESS-CALLBACK receives the response plist.
 ERROR-CALLBACK receives an error string.
 Returns a request handle."
   (chat-log "[LLM] Starting async request to provider: %s" provider)
-  (let* ((config (chat-llm-get-provider provider))
+  (let* ((config (chat-llm--ensure-provider provider))
          (request-body (chat-llm--build-request provider messages options))
          (headers (chat-llm--make-headers provider))
          (timeout (or (plist-get options :timeout) 60))
@@ -435,7 +507,7 @@ Returns a request handle."
     (chat-log "[LLM] Async request body: %s" raw-request)
     (chat-llm--post-async-dispatch
      config
-     (chat-llm--request-url config)
+     (chat-llm--request-url provider options)
      headers
      raw-request
      (lambda (raw-response status-code)
@@ -500,6 +572,53 @@ OPTIONS is an optional plist of request parameters."
       (error "Unexpected response format: %s" 
              (json-encode json-data)))
     content))
+
+(defun chat-llm-build-openai-compatible-request (provider messages options)
+  "Build an OpenAI compatible request for PROVIDER."
+  (let* ((config (chat-llm--ensure-provider provider))
+         (model (or (plist-get options :model)
+                    (plist-get config :model)))
+         (temperature (or (plist-get options :temperature) 0.7))
+         (max-tokens (or (plist-get options :max-tokens)
+                         (plist-get config :max-output-tokens)))
+         (stream (plist-get options :stream)))
+    (list :model model
+          :messages (chat-llm--format-messages messages)
+          :temperature temperature
+          :max_tokens max-tokens
+          :stream stream)))
+
+(defun chat-llm-parse-openai-compatible-response (json-data)
+  "Parse an OpenAI compatible response from JSON-DATA."
+  (chat-llm--default-parse-response json-data))
+
+(defun chat-llm-parse-openai-compatible-stream (json-data)
+  "Parse an OpenAI compatible stream chunk from JSON-DATA."
+  (let* ((choices (cdr (assoc 'choices json-data)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (aref choices 0)
+                              (car choices))))
+         (delta (and first-choice (cdr (assoc 'delta first-choice)))))
+    (cdr (assoc 'content delta))))
+
+(defun chat-llm-register-openai-compatible-provider (symbol name base-url model &rest options)
+  "Register SYMBOL as an OpenAI compatible provider.
+NAME is the display name.
+BASE-URL is the provider API base URL.
+MODEL is the default remote model name.
+OPTIONS are appended to the provider plist."
+  (apply #'chat-llm-register-provider
+         symbol
+         :name name
+         :base-url base-url
+         :model model
+         :request-fn (lambda (messages request-options)
+                       (chat-llm-build-openai-compatible-request
+                        symbol messages request-options))
+         :response-fn #'chat-llm-parse-openai-compatible-response
+         :stream-fn #'chat-llm-parse-openai-compatible-stream
+         options))
 
 ;; ------------------------------------------------------------------
 ;; Provider Implementations

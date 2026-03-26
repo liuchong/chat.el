@@ -51,53 +51,19 @@ If nil, will try to lookup from auth-source or chat-llm-openai-api-key-fn."
   (or chat-llm-openai-api-key
       (when chat-llm-openai-api-key-fn
         (funcall chat-llm-openai-api-key-fn))
-      (chat-llm--auth-source-lookup 'openai)))
-
-(defun chat-llm-openai--build-request (messages options)
-  "Build OpenAI-specific request with MESSAGES and OPTIONS."
-  (let* ((model (or (plist-get options :model)
-                    chat-llm-openai-default-model))
-         (temperature (or (plist-get options :temperature) 0.7))
-         (max-tokens (or (plist-get options :max-tokens) 2048))
-         (stream (plist-get options :stream)))
-    (list :model model
-          :messages (chat-llm--format-messages messages)
-          :temperature temperature
-          :max_tokens max-tokens
-          :stream stream)))
-
-(defun chat-llm-openai--parse-response (json-data)
-  "Parse OpenAI API JSON-DATA response."
-  ;; Check for API error response
-  (when-let ((error-obj (cdr (assoc 'error json-data))))
-    (let ((err-msg (cdr (assoc 'message error-obj)))
-          (err-type (cdr (assoc 'type error-obj))))
-      (error "OpenAI API error: %s (%s)" (or err-msg "Unknown") (or err-type "unknown"))))
-  ;; Parse normal response
-  (let* ((choices (cdr (assoc 'choices json-data)))
-         (first-choice (and choices
-                            (if (vectorp choices)
-                                (aref choices 0)
-                              (car choices))))
-         (message (and first-choice (cdr (assoc 'message first-choice))))
-         (content (and message (cdr (assoc 'content message)))))
-    (unless content
-      (error "Unexpected response format: %s" 
-             (json-encode json-data)))
-    content))
+      (chat-llm--auth-source-lookup 'openai (chat-llm-get-provider-config 'openai))))
 
 ;; ------------------------------------------------------------------
 ;; Provider Registration
 ;; ------------------------------------------------------------------
 
-(chat-llm-register-provider
+(chat-llm-register-openai-compatible-provider
  'openai
- :name "OpenAI"
- :base-url "https://api.openai.com/v1"
+ "OpenAI"
+ "https://api.openai.com/v1"
+ chat-llm-openai-default-model
  :api-key-fn #'chat-llm-openai--get-api-key
- :model chat-llm-openai-default-model
- :request-fn #'chat-llm-openai--build-request
- :response-fn #'chat-llm-openai--parse-response)
+ :max-output-tokens 2048)
 
 (provide 'chat-llm-openai)
 ;;; chat-llm-openai.el ends here

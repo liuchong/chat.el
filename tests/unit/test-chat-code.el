@@ -107,7 +107,10 @@
        (should (eq captured-model 'kimi))
        (should (equal captured-messages '(message-a message-b)))
        (should (functionp captured-callback))
-       (should (equal captured-options '(:temperature 0.7 :stream t :max-tokens 4096)))
+       (should (equal captured-options
+                      (list :temperature 0.7
+                            :stream t
+                            :max-tokens (chat-code--request-output-budget 'kimi))))
        (should (eq chat-code--active-stream-process 'stream-handle))
        (funcall captured-callback "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")
        (goto-char (point-min))

@@ -8,6 +8,7 @@ Last updated: 2026-03-26
 The core chat flow, tool calling flow, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
+The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 
 ## Implemented Areas
 
@@ -18,6 +19,13 @@ Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp
 - async non streaming request path
 - optional streaming UI path
 - response cancellation
+
+### LLM Providers
+
+- official OpenAI, Kimi, Claude, Gemini, DeepSeek, Qwen, Grok, Mistral, GLM, Doubao, Hunyuan, and MiniMax provider entries
+- provider specific auth headers and request URLs
+- provider enable and disable list via configuration
+- config loading from `~/.chat.el`, `~/.chat/config.el`, and project `chat-config.local.el`
 
 ### Tool Calling
 
@@ -54,8 +62,8 @@ Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 158 tests discovered
-- 156 passing
+- 167 tests discovered
+- 165 passing
 - 2 skipped provider integration tests
 - 0 known failures in the current baseline
 
@@ -85,6 +93,7 @@ Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp
 - token counting is still heuristic rather than model exact
 - streaming currently falls back to the async request path in `chat-llm-stream`
 - default providers still depend on external API availability and local keys
+- some provider default remote model names are best effort defaults and may need local adjustment as vendor catalogs change
 - provider integration tests are intentionally skipped in offline or unconfigured environments
 - code mode refactor, git helper, indexing extras, and performance helpers should still be treated as experimental
 

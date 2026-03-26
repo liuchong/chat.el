@@ -62,7 +62,7 @@
                                 (vector (list (cons 'message
                                                     (list (cons 'content "Hello from Kimi")
                                                           (cons 'role "assistant"))))))))
-         (parsed (chat-llm-kimi--parse-response json-data)))
+         (parsed (chat-llm-parse-openai-compatible-response json-data)))
     (should (string= parsed "Hello from Kimi"))))
 
 (ert-deftest chat-llm-kimi-handles-stream-chunk ()
@@ -70,7 +70,7 @@
   (let* ((chunk (list (cons 'choices
                             (vector (list (cons 'delta
                                                 (list (cons 'content " chunk"))))))))
-         (parsed (chat-llm-kimi--parse-stream-chunk chunk)))
+         (parsed (chat-llm-parse-openai-compatible-stream chunk)))
     (should (string= parsed " chunk"))))
 
 ;; ------------------------------------------------------------------

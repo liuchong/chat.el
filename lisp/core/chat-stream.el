@@ -149,31 +149,34 @@ Returns the process object."
   (unless (fboundp 'chat-llm--build-request)
     (error "chat-llm--build-request not defined - check chat-llm.el is loaded"))
   (let* ((config (chat-llm-get-provider provider))
-         (base-url (plist-get config :base-url))
-         (api-key (chat-llm--get-api-key provider))
-         (url (concat base-url "/chat/completions"))
+         (url (chat-llm--request-url provider options))
+         (headers (chat-llm--make-headers provider))
          ;; Build request body
          (opts (plist-put (copy-tree options) :stream t))
          (body (chat-llm--build-request provider messages opts))
-         ;; Get User-Agent from provider config
-         (user-agent (let ((headers-fn (plist-get config :headers)))
-                       (if (functionp headers-fn)
-                           (cdr (assoc "User-Agent" (funcall headers-fn)))
-                         "chat.el/1.0")))
+         ;; Get User-Agent from resolved headers
+         (user-agent (or (cdr (assoc "User-Agent" headers))
+                         "chat.el/1.0"))
          ;; Encode body for curl (handle multibyte characters)
          (body-str (json-encode body))
          (body-encoded (if (multibyte-string-p body-str)
                            (encode-coding-string body-str 'utf-8)
                          body-str))
          ;; Create curl command
-         (curl-args (let ((base-args (list "-s" "-N"  ; Silent, no buffer
-                                           "-X" "POST"
-                                           "-H" "Content-Type: application/json"
-                                           "-H" (format "Authorization: Bearer %s" api-key)
-                                           "-d" body-encoded))
+         (curl-args (let ((base-args (list "-s" "-N"
+                                           "-X" "POST"))
+                          (header-args
+                           (chat-llm--curl-args-for-headers
+                            (if user-agent
+                                (assoc-delete-all "User-Agent" headers)
+                              headers)))
                           (ua-args (when user-agent
                                      (list "-A" user-agent))))
-                      (append base-args ua-args (list url))))
+                      (append base-args
+                              header-args
+                              (list "-d" body-encoded)
+                              ua-args
+                              (list url))))
          ;; Buffer for accumulating partial lines
          (buffer (generate-new-buffer " *chat-stream*"))
          (content-buffer "")

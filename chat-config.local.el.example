@@ -9,12 +9,32 @@
 
 ;; This is an example local configuration file for chat.el.
 ;; Copy this to chat-config.local.el and customize with your API keys.
+;; You can also place the same content in ~/.chat.el
+;; or ~/.chat/config.el.
 ;; DO NOT commit the .local.el file to version control.
 
 ;;; Code:
 
-;; Kimi API Key - Get from https://platform.moonshot.cn/
+;; Provider selection
+(setq chat-default-model 'kimi)
+(setq chat-llm-enabled-providers
+      '(kimi openai deepseek qwen grok claude gemini glm doubao hunyuan minimax mistral))
+
+;; Kimi API key - Get from https://platform.moonshot.cn/
 (setq chat-llm-kimi-api-key "your-kimi-api-key-here")
+
+;; Optional provider keys
+;; (setq chat-llm-openai-api-key "sk-openai-...")
+;; (setq chat-llm-deepseek-api-key "sk-deepseek-...")
+;; (setq chat-llm-qwen-api-key "sk-qwen-...")
+;; (setq chat-llm-grok-api-key "sk-grok-...")
+;; (setq chat-llm-claude-api-key "sk-ant-...")
+;; (setq chat-llm-gemini-api-key "AIza...")
+;; (setq chat-llm-glm-api-key "glm-...")
+;; (setq chat-llm-doubao-api-key "sk-doubao-...")
+;; (setq chat-llm-hunyuan-api-key "sk-hunyuan-...")
+;; (setq chat-llm-minimax-api-key "sk-minimax-...")
+;; (setq chat-llm-mistral-api-key "sk-mistral-...")
 
 ;; Alternative: Use a function to retrieve key from secure storage
 ;; (setq chat-llm-kimi-api-key-fn
@@ -24,10 +44,18 @@
 ;; Or use auth-source (recommended)
 ;; Add to ~/.authinfo.gpg:
 ;; machine kimi-api user api-key password YOUR_API_KEY
+;; machine claude-api user api-key password YOUR_API_KEY
+;; machine gemini-api user api-key password YOUR_API_KEY
+;; machine openai-api user api-key password YOUR_API_KEY
 
-;; Default model settings
-(setq chat-default-model 'kimi)
+;; Optional per-provider default remote models
 (setq chat-llm-kimi-default-model "moonshot-v1-8k")
+;; (setq chat-llm-openai-default-model "gpt-4o")
+;; (setq chat-llm-deepseek-default-model "deepseek-chat")
+;; (setq chat-llm-qwen-default-model "qwen-plus")
+;; (setq chat-llm-grok-default-model "grok-4-fast-non-reasoning")
+;; (setq chat-llm-claude-default-model "claude-sonnet-4-5")
+;; (setq chat-llm-gemini-default-model "gemini-2.5-flash")
 
 ;; Session settings
 (setq chat-session-directory "~/.chat/sessions/")

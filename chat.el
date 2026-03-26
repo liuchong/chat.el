@@ -28,12 +28,17 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 
 ;; Prefer newer source files over stale byte-compiled artifacts.
 (setq load-prefer-newer t)
 
 ;; Add runtime module directories to `load-path`.
-(let* ((chat-root (file-name-directory (or load-file-name buffer-file-name)))
+(defconst chat-root-directory
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Repository root directory for the current chat.el checkout.")
+
+(let* ((chat-root chat-root-directory)
        (module-dirs '("lisp/core"
                       "lisp/llm"
                       "lisp/tools"
@@ -70,6 +75,9 @@
 (require 'chat-llm-kimi)
 (require 'chat-llm-kimi-code)
 (require 'chat-llm-openai)
+(require 'chat-llm-compatible-providers)
+(require 'chat-llm-claude)
+(require 'chat-llm-gemini)
 
 ;; Load tool modules.
 (require 'chat-tool-forge)
@@ -95,12 +103,6 @@
   (require 'chat-code-perf)
   (require 'chat-code))
 
-;; Load local configuration if exists
-(let ((local-config (expand-file-name "chat-config.local.el"
-                                      (file-name-directory load-file-name))))
-  (when (file-exists-p local-config)
-    (load local-config nil t)))
-
 ;; ------------------------------------------------------------------
 ;; Customization
 ;; ------------------------------------------------------------------
@@ -110,7 +112,7 @@
   :group 'applications
   :prefix "chat-")
 
-(defcustom chat-default-model 'gpt-4o
+(defcustom chat-default-model 'kimi
   "Default LLM model to use for new sessions."
   :type 'symbol
   :group 'chat)
@@ -119,6 +121,26 @@
   "Whether to automatically save sessions after each message."
   :type 'boolean
   :group 'chat)
+
+(defun chat--config-file-candidates (&optional root-directory)
+  "Return config file candidates for ROOT-DIRECTORY.
+Later files override earlier ones."
+  (list (expand-file-name "~/.chat.el")
+        (expand-file-name "~/.chat/config.el")
+        (expand-file-name "chat-config.local.el"
+                          (or root-directory chat-root-directory))))
+
+(defun chat-load-config-files (&optional root-directory)
+  "Load chat config files for ROOT-DIRECTORY.
+Returns the list of files that were loaded."
+  (let (loaded-files)
+    (dolist (file (chat--config-file-candidates root-directory))
+      (when (file-exists-p file)
+        (load file nil t)
+        (push file loaded-files)))
+    (nreverse loaded-files)))
+
+(chat-load-config-files chat-root-directory)
 
 ;; ------------------------------------------------------------------
 ;; Main Entry Points
