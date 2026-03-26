@@ -19,17 +19,12 @@
 
 ;; Setup load paths
 (let ((test-dir (file-name-directory load-file-name)))
-  (add-to-list 'load-path (expand-file-name ".." test-dir))
   (add-to-list 'load-path (expand-file-name "unit" test-dir))
-  
+  (load (expand-file-name "test-paths.el" test-dir) nil t)
   ;; Load helper first
   (load (expand-file-name "unit/test-helper.el" test-dir) nil t)
-  
-  ;; Load source files
-  (let ((source-dir (expand-file-name ".." test-dir)))
-    (dolist (src '("chat-session" "chat-files" "chat"))
-      (load (expand-file-name (format "%s.el" src) source-dir) nil t)))
-  
+  ;; Load main entrypoint once so module registration matches runtime usage.
+  (load (expand-file-name "../chat.el" test-dir) nil t)
   ;; Load all test files
   (dolist (test-file (directory-files
                       (expand-file-name "unit" test-dir)

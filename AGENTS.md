@@ -4,7 +4,6 @@
 开始工作前先读一遍。
 结束工作前再对照检查一遍。
 
-
 Copyright 2026 chat.el contributors.
 
 ## First Principles

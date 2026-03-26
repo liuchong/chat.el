@@ -7,6 +7,7 @@ Last updated: 2026-03-26
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
 The core chat flow, tool calling flow, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
+Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
 
 ## Implemented Areas
 
@@ -53,8 +54,8 @@ The core chat flow, tool calling flow, file tools, approval gates, async request
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 150 tests discovered
-- 148 passing
+- 158 tests discovered
+- 156 passing
 - 2 skipped provider integration tests
 - 0 known failures in the current baseline
 
@@ -99,13 +100,13 @@ The core chat flow, tool calling flow, file tools, approval gates, async request
 | File | Area |
 |------|------|
 | `chat.el` | entry point |
-| `chat-ui.el` | UI and response lifecycle |
-| `chat-session.el` | persistence |
-| `chat-llm.el` | provider abstraction |
-| `chat-stream.el` | stream parsing |
-| `chat-tool-caller.el` | tool protocol |
-| `chat-approval.el` | approvals |
-| `chat-files.el` | file tools |
-| `chat-context.el` | context trimming |
-| `chat-tool-forge.el` | tool registry and compilation |
-| `chat-tool-forge-ai.el` | AI tool generation |
+| `lisp/ui/chat-ui.el` | UI and response lifecycle |
+| `lisp/core/chat-session.el` | persistence |
+| `lisp/llm/chat-llm.el` | provider abstraction |
+| `lisp/core/chat-stream.el` | stream parsing |
+| `lisp/tools/chat-tool-caller.el` | tool protocol |
+| `lisp/core/chat-approval.el` | approvals |
+| `lisp/core/chat-files.el` | file tools |
+| `lisp/core/chat-context.el` | context trimming |
+| `lisp/tools/chat-tool-forge.el` | tool registry and compilation |
+| `lisp/tools/chat-tool-forge-ai.el` | AI tool generation |

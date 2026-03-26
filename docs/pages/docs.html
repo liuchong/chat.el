@@ -107,7 +107,7 @@ machine openai-api user api-key password YOUR_KEY</code></pre>
             <h2 id="quick-start">Quick Start</h2>
             <p>Start a chat session with:</p>
             <pre><code>M-x chat</code></pre>
-            <p>This will open or resume the current chat buffer. Type your message and press <code>C-c C-c</code> to send.</p>
+            <p>This will open or resume the current chat buffer. Type your message and press <code>RET</code> to send.</p>
 
             <h2 id="commands">Commands</h2>
             <table>
@@ -156,7 +156,7 @@ machine openai-api user api-key password YOUR_KEY</code></pre>
             </ul>
 
             <h3>Adding Custom Providers</h3>
-            <p>Extend <code>chat-llm.el</code> to add new providers. See existing implementations in <code>chat-llm-kimi.el</code> and <code>chat-llm-openai.el</code>.</p>
+            <p>Extend <code>lisp/llm/chat-llm.el</code> to add new providers. See existing implementations in <code>lisp/llm/chat-llm-kimi.el</code> and <code>lisp/llm/chat-llm-openai.el</code>.</p>
 
             <h2 id="tools">Tool System</h2>
             <p>chat.el includes a powerful tool calling system that allows the AI to interact with your filesystem and execute commands.</p>
@@ -249,7 +249,7 @@ M-x chat-list-sessions      ; List and switch sessions
 M-x chat-view-raw-message   ; Inspect API exchanges</code></pre>
 
             <h2 id="architecture">Architecture</h2>
-            <p>chat.el follows a modular architecture with clear separation of concerns:</p>
+            <p>chat.el follows a modular architecture with clear separation of concerns. Runtime modules now live under <code>lisp/core</code>, <code>lisp/llm</code>, <code>lisp/tools</code>, <code>lisp/ui</code>, and <code>lisp/code</code>.</p>
 
             <table>
                 <thead>
@@ -264,44 +264,48 @@ M-x chat-view-raw-message   ; Inspect API exchanges</code></pre>
                         <td>Entry point and command wiring</td>
                     </tr>
                     <tr>
-                        <td><code>chat-ui.el</code></td>
+                        <td><code>lisp/ui/chat-ui.el</code></td>
                         <td>Chat buffer rendering and response lifecycle</td>
                     </tr>
                     <tr>
-                        <td><code>chat-session.el</code></td>
+                        <td><code>lisp/core/chat-session.el</code></td>
                         <td>Session and message persistence</td>
                     </tr>
                     <tr>
-                        <td><code>chat-llm.el</code></td>
+                        <td><code>lisp/llm/chat-llm.el</code></td>
                         <td>Provider abstraction and async request handling</td>
                     </tr>
                     <tr>
-                        <td><code>chat-stream.el</code></td>
+                        <td><code>lisp/core/chat-stream.el</code></td>
                         <td>SSE parsing and chunk handling</td>
                     </tr>
                     <tr>
-                        <td><code>chat-tool-caller.el</code></td>
+                        <td><code>lisp/tools/chat-tool-caller.el</code></td>
                         <td>Tool prompt contract, parsing, and execution</td>
                     </tr>
                     <tr>
-                        <td><code>chat-approval.el</code></td>
+                        <td><code>lisp/core/chat-approval.el</code></td>
                         <td>Approval flow for risky tools</td>
                     </tr>
                     <tr>
-                        <td><code>chat-files.el</code></td>
+                        <td><code>lisp/core/chat-files.el</code></td>
                         <td>Built-in file tools and path safety</td>
                     </tr>
                     <tr>
-                        <td><code>chat-context.el</code></td>
+                        <td><code>lisp/core/chat-context.el</code></td>
                         <td>Context trimming and summary generation</td>
                     </tr>
                     <tr>
-                        <td><code>chat-tool-forge.el</code></td>
+                        <td><code>lisp/tools/chat-tool-forge.el</code></td>
                         <td>Tool registry, compilation, loading</td>
                     </tr>
                     <tr>
-                        <td><code>chat-tool-forge-ai.el</code></td>
+                        <td><code>lisp/tools/chat-tool-forge-ai.el</code></td>
                         <td>AI-assisted tool generation</td>
+                    </tr>
+                    <tr>
+                        <td><code>lisp/code/chat-code.el</code></td>
+                        <td>Code mode entry point and programming workflow</td>
                     </tr>
                 </tbody>
             </table>
@@ -324,8 +328,8 @@ M-x chat-view-raw-message   ; Inspect API exchanges</code></pre>
             
             <p>Current baseline:</p>
             <ul>
-                <li>122 tests discovered</li>
-                <li>120 passing</li>
+                <li>158 tests discovered</li>
+                <li>156 passing</li>
                 <li>2 skipped (provider integration tests)</li>
             </ul>
 

@@ -1,4 +1,8 @@
-with open('chat-tool-caller.el', 'r') as f:
+from pathlib import Path
+
+target_file = Path(__file__).resolve().parents[2] / 'lisp' / 'tools' / 'chat-tool-caller.el'
+
+with target_file.open('r') as f:
     content = f.read()
 
 # Replace the parse function with a more robust version
@@ -101,7 +105,7 @@ if old_parse in content:
 else:
     print("Old parse function not found")
 
-with open('chat-tool-caller.el', 'w') as f:
+with target_file.open('w') as f:
     f.write(content)
 
 print("Done")

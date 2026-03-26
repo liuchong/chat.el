@@ -174,7 +174,7 @@ User Input → Context Builder → LLM Request → Response Parser
          v
   ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
   │   Detect     │────▶│   Collect    │────▶│   Prioritize │
-  │   Request     │     │   Sources    │     │   Content    │
+  │   Request    │     │   Sources    │     │   Content    │
   └──────────────┘     └──────┬───────┘     └──────────────┘
                               │
          ┌────────────────────┼────────────────────┐

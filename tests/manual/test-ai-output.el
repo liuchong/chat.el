@@ -1,4 +1,4 @@
-(add-to-list 'load-path ".")
+(load (expand-file-name "../test-paths.el" (file-name-directory load-file-name)) nil t)
 (require 'chat-tool-caller)
 
 ;; 测试 AI 实际输出的格式

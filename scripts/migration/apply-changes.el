@@ -1,4 +1,7 @@
-(with-current-buffer (find-file-noselect "chat-tool-caller.el")
+(with-current-buffer
+    (find-file-noselect
+     (expand-file-name "../../lisp/tools/chat-tool-caller.el"
+                       (file-name-directory load-file-name)))
   (let ((new-parse-function "(defun chat-tool-caller-parse (content)
   \"Parse tool calls from AI response CONTENT.
 

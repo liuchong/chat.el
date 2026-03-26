@@ -11,7 +11,8 @@
 (defvar test-model "moonshot-v1-8k")
 
 ;; Read API key from config file if exists
-(let ((config-file (expand-file-name "chat-config.local.el")))
+(let ((config-file (expand-file-name "../../chat-config.local.el"
+                                     (file-name-directory load-file-name))))
   (when (file-exists-p config-file)
     (load config-file nil t)))
 

@@ -6,6 +6,7 @@ References:
 """
 
 import os
+from pathlib import Path
 import json
 import urllib.request
 import ssl
@@ -19,11 +20,11 @@ def test_kimi_code_api():
     """Test Kimi Code API endpoint."""
     
     # Read API key from config
-    config_file = os.path.expanduser('~/projects/src/github.com/liuchong/chat.el/chat-config.local.el')
+    config_file = Path(__file__).resolve().parents[2] / 'chat-config.local.el'
     api_key = None
     
-    if os.path.exists(config_file):
-        with open(config_file) as f:
+    if config_file.exists():
+        with config_file.open() as f:
             content = f.read()
             import re
             # Look for kimi-code or kimi key

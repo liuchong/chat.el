@@ -7,7 +7,7 @@
 (require 'cl-lib)
 
 ;; Set load path
-(add-to-list 'load-path default-directory)
+(load (expand-file-name "../test-paths.el" (file-name-directory load-file-name)) nil t)
 
 ;; Define required variables
 (defvar chat-default-model 'kimi-code

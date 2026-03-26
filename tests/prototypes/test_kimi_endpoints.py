@@ -38,9 +38,9 @@ def test_endpoint(base_url, api_key, name):
 def main():
     # Read API key from config
     api_key = None
-    config_file = os.path.expanduser('~/projects/src/github.com/liuchong/chat.el/chat-config.local.el')
-    if os.path.exists(config_file):
-        with open(config_file) as f:
+    config_file = Path(__file__).resolve().parents[2] / 'chat-config.local.el'
+    if config_file.exists():
+        with config_file.open() as f:
             content = f.read()
             import re
             match = re.search(r'sk-[a-zA-Z0-9]+', content)

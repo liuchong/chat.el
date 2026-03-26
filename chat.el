@@ -32,6 +32,16 @@
 ;; Prefer newer source files over stale byte-compiled artifacts.
 (setq load-prefer-newer t)
 
+;; Add runtime module directories to `load-path`.
+(let* ((chat-root (file-name-directory (or load-file-name buffer-file-name)))
+       (module-dirs '("lisp/core"
+                      "lisp/llm"
+                      "lisp/tools"
+                      "lisp/ui"
+                      "lisp/code")))
+  (dolist (dir module-dirs)
+    (add-to-list 'load-path (expand-file-name dir chat-root))))
+
 ;; ------------------------------------------------------------------
 ;; Version
 ;; ------------------------------------------------------------------
@@ -47,66 +57,43 @@
 ;; Dependencies Loading
 ;; ------------------------------------------------------------------
 
-;; Load core modules if not already loaded
-(unless (featurep 'chat-log)
-  (load "chat-log.el" nil t))
-(unless (featurep 'chat-session)
-  (load "chat-session.el" nil t))
-(unless (featurep 'chat-files)
-  (load "chat-files.el" nil t))
-(unless (featurep 'chat-llm)
-  (load "chat-llm.el" nil t))
-(unless (featurep 'chat-llm-kimi)
-  (load "chat-llm-kimi.el" nil t))
-(unless (featurep 'chat-llm-kimi-code)
-  (load "chat-llm-kimi-code.el" nil t))
-(unless (featurep 'chat-llm-openai)
-  (load "chat-llm-openai.el" nil t))
+;; Load core modules.
+(require 'chat-log)
+(require 'chat-session)
+(require 'chat-stream)
+(require 'chat-context)
+(require 'chat-files)
+(require 'chat-approval)
 
-;; Load UI
-(unless (featurep 'chat-ui)
-  (load "chat-ui.el" nil t))
+;; Load LLM providers.
+(require 'chat-llm)
+(require 'chat-llm-kimi)
+(require 'chat-llm-kimi-code)
+(require 'chat-llm-openai)
 
-;; Load tool forge
-(unless (featurep 'chat-approval)
-  (load "chat-approval.el" nil t))
-(unless (featurep 'chat-tool-forge)
-  (load "chat-tool-forge.el" nil t))
-(unless (featurep 'chat-tool-forge-ai)
-  (load "chat-tool-forge-ai.el" nil t))
-(unless (featurep 'chat-tool-caller)
-  (load "chat-tool-caller.el" nil t))
+;; Load tool modules.
+(require 'chat-tool-forge)
+(require 'chat-tool-forge-ai)
+(require 'chat-tool-caller)
 (chat-tool-forge-load-all)
 (chat-files-register-built-in-tools)
-(unless (featurep 'chat-tool-shell)
-  (load "chat-tool-shell.el" nil t))
+(require 'chat-tool-shell)
 
-;; Load context management
-(unless (featurep 'chat-context)
-  (load "chat-context.el" nil t))
+;; Load UI after tooling has been registered.
+(require 'chat-ui)
 
 ;; Load code mode (optional)
-(when (locate-file "chat-code.el" load-path)
-  (unless (featurep 'chat-context-code)
-    (load "chat-context-code.el" nil t))
-  (unless (featurep 'chat-edit)
-    (load "chat-edit.el" nil t))
-  (unless (featurep 'chat-code-preview)
-    (load "chat-code-preview.el" nil t))
-  (unless (featurep 'chat-code-intel)
-    (load "chat-code-intel.el" nil t))
-  (unless (featurep 'chat-code-lsp)
-    (load "chat-code-lsp.el" nil t))
-  (unless (featurep 'chat-code-refactor)
-    (load "chat-code-refactor.el" nil t))
-  (unless (featurep 'chat-code-test)
-    (load "chat-code-test.el" nil t))
-  (unless (featurep 'chat-code-git)
-    (load "chat-code-git.el" nil t))
-  (unless (featurep 'chat-code-perf)
-    (load "chat-code-perf.el" nil t))
-  (unless (featurep 'chat-code)
-    (load "chat-code.el" nil t)))
+(when (locate-library "chat-code")
+  (require 'chat-context-code)
+  (require 'chat-edit)
+  (require 'chat-code-preview)
+  (require 'chat-code-intel)
+  (require 'chat-code-lsp)
+  (require 'chat-code-refactor)
+  (require 'chat-code-test)
+  (require 'chat-code-git)
+  (require 'chat-code-perf)
+  (require 'chat-code))
 
 ;; Load local configuration if exists
 (let ((local-config (expand-file-name "chat-config.local.el"

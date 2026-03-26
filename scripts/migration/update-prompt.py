@@ -1,6 +1,10 @@
 import re
+from pathlib import Path
 
-with open('chat-tool-caller.el', 'r') as f:
+target_file = Path(__file__).resolve().parents[2] / "lisp" / "tools" / "chat-tool-caller.el"
+
+
+with target_file.open('r') as f:
     content = f.read()
 
 # 更新提示词文字
@@ -30,7 +34,7 @@ if old_xml in content:
 else:
     print("✗ 未找到 XML 示例")
 
-with open('chat-tool-caller.el', 'w') as f:
+with target_file.open('w') as f:
     f.write(content)
 
 print("完成")

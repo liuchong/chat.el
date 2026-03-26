@@ -138,7 +138,7 @@
         <div class="main-content">
             <div class="section-header fade-in">
                 <h2>Modular Architecture</h2>
-                <p>Clean separation of concerns with focused modules</p>
+                <p>Runtime modules are organized under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/ui`, and `lisp/code`</p>
             </div>
             
             <div class="architecture-grid fade-in">
@@ -147,43 +147,47 @@
                     <p>Entry point and command wiring</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-ui.el</h4>
+                    <h4>lisp/ui/chat-ui.el</h4>
                     <p>Chat buffer rendering and response lifecycle</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-session.el</h4>
+                    <h4>lisp/core/chat-session.el</h4>
                     <p>Session and message persistence</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-llm.el</h4>
+                    <h4>lisp/llm/chat-llm.el</h4>
                     <p>Provider abstraction and async request handling</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-stream.el</h4>
+                    <h4>lisp/core/chat-stream.el</h4>
                     <p>SSE parsing and chunk handling</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-tool-caller.el</h4>
+                    <h4>lisp/tools/chat-tool-caller.el</h4>
                     <p>Tool prompt contract, parsing, and execution</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-approval.el</h4>
+                    <h4>lisp/core/chat-approval.el</h4>
                     <p>Approval flow for risky tools and tool creation</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-files.el</h4>
+                    <h4>lisp/core/chat-files.el</h4>
                     <p>Built-in file tools and path safety checks</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-context.el</h4>
+                    <h4>lisp/core/chat-context.el</h4>
                     <p>Context trimming and summary generation</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-tool-forge.el</h4>
+                    <h4>lisp/tools/chat-tool-forge.el</h4>
                     <p>Tool registry, compilation, loading, and execution</p>
                 </div>
                 <div class="arch-card">
-                    <h4>chat-tool-forge-ai.el</h4>
+                    <h4>lisp/code/chat-code.el</h4>
+                    <p>Code mode entry point and programming workflow</p>
+                </div>
+                <div class="arch-card">
+                    <h4>lisp/tools/chat-tool-forge-ai.el</h4>
                     <p>AI-assisted tool generation flow</p>
                 </div>
             </div>
@@ -196,12 +200,12 @@
             <div class="stats-section fade-in">
                 <div class="stats-grid">
                     <div class="stat-item">
-                        <h3>120+</h3>
+                        <h3>156</h3>
                         <p>Tests Passing</p>
                     </div>
                     <div class="stat-item">
-                        <h3>11</h3>
-                        <p>Core Modules</p>
+                        <h3>25</h3>
+                        <p>Runtime Modules</p>
                     </div>
                     <div class="stat-item">
                         <h3>3+</h3>

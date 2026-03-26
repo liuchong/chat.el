@@ -27,7 +27,6 @@
 新增了 `.cursor/rules/documentation-maintenance.mdc`
 为 `AGENTS.md` 增加了禁止向 git 内容泄露敏感信息的规则
 统一了文档中的测试入口和当前能力描述
-补上了许可证说明
 为 troubleshooting 文档定义了固定字段顺序和主题归档规则
 
 ## Pending Work

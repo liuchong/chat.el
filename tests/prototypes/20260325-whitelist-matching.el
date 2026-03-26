@@ -6,7 +6,7 @@
 ;;; Code:
 
 ;; Load required files
-(add-to-list 'load-path (expand-file-name "../.." (file-name-directory load-file-name)))
+(load (expand-file-name "../test-paths.el" (file-name-directory load-file-name)) nil t)
 (require 'chat-tool-forge)
 (require 'chat-tool-shell)
 

@@ -4,7 +4,7 @@
 ;; This prototype verifies Kimi Code China API works with chat.el
 ;; Reference: https://www.kimi.com/code/docs/more/third-party-agents.html
 
-(add-to-list 'load-path (expand-file-name ".." (file-name-directory load-file-name)))
+(load (expand-file-name "../test-paths.el" (file-name-directory load-file-name)) nil t)
 
 (require 'cl-lib)
 (require 'chat-session)
@@ -14,7 +14,7 @@
 (require 'chat-log)
 
 ;; Load local config for API key
-(let ((local-config (expand-file-name "../chat-config.local.el" 
+(let ((local-config (expand-file-name "../../chat-config.local.el"
                                        (file-name-directory load-file-name))))
   (when (file-exists-p local-config)
     (load local-config nil t)))

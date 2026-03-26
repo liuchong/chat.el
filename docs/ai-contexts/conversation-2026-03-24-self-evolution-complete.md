@@ -84,7 +84,7 @@ System: 🔨 Creating tool from your request...
 ## Testing
 
 **5 new tests:**
-- Tool request detection for tool requests
+- Tool request detection
 - Normal message rejection
 - Description extraction
 - ID generation

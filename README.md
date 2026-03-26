@@ -1,20 +1,25 @@
 # chat.el
 
-[![License: 1PL](https://img.shields.io/badge/License-1PL-blue.svg)](https://license.pub/1pl/)
+> ⚠️ **Alpha 阶段免责声明**
+>
+> 本项目尚处于早期测试阶段，核心功能仍在快速迭代中，**稳定性无法保证**。使用过程可能遇到功能缺陷、意外崩溃或数据丢失。
+>
+> 本项目采用**纯 AI 驱动开发**模式，代码由大语言模型生成并经人工审核，非传统人工编码方式。
+>
+> **欢迎体验测试**，但请知悉：测试期间产生的一切风险由使用者自行承担，项目方不对任何问题或损失负责。
+>
+> 🤝 **我们诚邀您参与**
+> - 提交 Bug 反馈和功能建议
+> - 贡献代码、文档或测试用例
+> - 分享您的使用场景和痛点
+> - 投入 Token、算力或时间支持项目发展
+>
+> 您的每一份贡献都将推动这个项目变得更好。
 
 `chat.el` is a pure Emacs AI chat client focused on coding workflows.
 It supports multi turn chat, tool calling, file operations, session persistence, context trimming, streaming display, and AI assisted tool forging.
 
-
 Copyright 2026 chat.el contributors.
-
-## License
-
-This project is licensed under the [One Public License (1PL)](https://license.pub/1pl/).
-See the [LICENSE](./LICENSE) file for the full license text.
-
-1PL is a copyleft license that ensures when you distribute this software or derivative
-works, the complete source code must be made available under the same license terms.
 
 ## Current Capabilities
 
@@ -26,15 +31,15 @@ works, the complete source code must be made available under the same license te
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
-### Code Mode (AI Programming IDE)
+### Code Mode
 
 A dedicated mode for software engineering with:
 
-- **Smart Context** - Automatically includes project structure, symbols, git status
+- **Smart Context** - Includes project structure, symbols, and project rules
 - **Code Editing** - Explain, refactor, fix, document, and generate tests inline
 - **Multi-file Refactoring** - Cross-file rename, extract to file, move functions
 - **Test Integration** - Auto-detect test frameworks, run tests, auto-fix failures
-- **Git Integration** - AI-suggested commit messages, pre-commit checks, code review
+- **Git Integration** - Review and analysis helpers remain available as experimental modules
 - **LSP Integration** - Works with lsp-mode and eglot for enhanced context
 - **Symbol Indexing** - Cross-references, call graph, related symbols
 - **Streaming Responses** - Real-time code generation display
@@ -67,6 +72,38 @@ Start a session:
 ```text
 M-x chat
 ```
+
+## Project Layout
+
+```text
+chat.el/
+  chat.el
+  chat-config.local.el.example
+  lisp/
+    core/
+    llm/
+    tools/
+    ui/
+    code/
+  tests/
+    unit/
+    integration/
+    prototypes/
+    manual/
+  scripts/
+    maintenance/
+    migration/
+  docs/
+  specs/
+```
+
+Layout rules:
+
+- `chat.el` stays at the repository root as the single entry point
+- runtime modules live under `lisp/` by domain
+- stable regression tests live under `tests/unit/`
+- exploratory scripts live under `tests/prototypes/` or `tests/manual/`
+- one-off migration helpers live under `scripts/migration/`
 
 ## Common Commands
 
@@ -121,7 +158,7 @@ You can override this with `chat-files-allowed-directories`.
 ## Code Mode (AI Programming IDE)
 
 chat.el includes a **Code Mode** for AI-assisted programming.
-The current stable path is the single buffer code chat flow.
+The current stable path is the single buffer code chat flow in `lisp/code/chat-code.el`.
 Refactoring, git assistance, indexing extras, and performance helpers are still under repair and should be treated as experimental.
 
 ### Starting Code Mode
@@ -198,26 +235,26 @@ See `specs/002-code-mode*.md` for detailed documentation.
 | File | Responsibility |
 |------|----------------|
 | `chat.el` | Entry point and command wiring |
-| `chat-ui.el` | Chat buffer rendering and response lifecycle |
-| `chat-session.el` | Session and message persistence |
-| `chat-llm.el` | Provider abstraction and async request handling |
-| `chat-stream.el` | SSE parsing and chunk handling |
-| `chat-tool-caller.el` | Tool prompt contract, parsing, and execution |
-| `chat-approval.el` | Approval flow for risky tools and tool creation |
-| `chat-files.el` | Built in file tools and path safety checks |
-| `chat-context.el` | Context trimming and summary generation |
-| `chat-tool-forge.el` | Tool registry, compilation, loading, and execution |
-| `chat-tool-forge-ai.el` | AI assisted tool generation flow |
-| `chat-code.el` | Code mode main entry |
-| `chat-context-code.el` | Smart context building |
-| `chat-edit.el` | Edit operations |
-| `chat-code-preview.el` | Preview buffer for changes |
-| `chat-code-intel.el` | Symbol indexing and call graph |
-| `chat-code-lsp.el` | LSP client integration |
-| `chat-code-refactor.el` | Multi-file refactoring |
-| `chat-code-test.el` | Test framework integration |
-| `chat-code-git.el` | Git integration |
-| `chat-code-perf.el` | Performance optimization |
+| `lisp/ui/chat-ui.el` | Chat buffer rendering and response lifecycle |
+| `lisp/core/chat-session.el` | Session and message persistence |
+| `lisp/llm/chat-llm.el` | Provider abstraction and async request handling |
+| `lisp/core/chat-stream.el` | SSE parsing and chunk handling |
+| `lisp/tools/chat-tool-caller.el` | Tool prompt contract, parsing, and execution |
+| `lisp/core/chat-approval.el` | Approval flow for risky tools and tool creation |
+| `lisp/core/chat-files.el` | Built in file tools and path safety checks |
+| `lisp/core/chat-context.el` | Context trimming and summary generation |
+| `lisp/tools/chat-tool-forge.el` | Tool registry, compilation, loading, and execution |
+| `lisp/tools/chat-tool-forge-ai.el` | AI assisted tool generation flow |
+| `lisp/code/chat-code.el` | Code mode main entry |
+| `lisp/code/chat-context-code.el` | Smart context building |
+| `lisp/code/chat-edit.el` | Edit operations |
+| `lisp/code/chat-code-preview.el` | Preview buffer for changes |
+| `lisp/code/chat-code-intel.el` | Symbol indexing and call graph |
+| `lisp/code/chat-code-lsp.el` | LSP client integration |
+| `lisp/code/chat-code-refactor.el` | Multi-file refactoring |
+| `lisp/code/chat-code-test.el` | Test framework integration |
+| `lisp/code/chat-code-git.el` | Git integration helpers |
+| `lisp/code/chat-code-perf.el` | Performance and indexing helpers |
 
 ## Testing
 
@@ -229,8 +266,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 122 tests discovered
-- 120 passing
+- 158 tests discovered
+- 156 passing
 - 2 skipped provider integration tests
 
 ## Documentation Map
@@ -249,4 +286,5 @@ Current baseline:
 
 ## License
 
+Copyright 2026 chat.el contributors.
 This project is licensed under the [One Public License (1PL)](./LICENSE).

@@ -398,13 +398,29 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Problem**: tests fail because required source modules are missing from the load path or never loaded.
 
-**Cause**: batch mode does not infer repository local load paths reliably.
+**Cause**: batch mode does not infer repository local load paths reliably, and this repository now keeps runtime modules under multiple `lisp/` subdirectories.
 
-**Solution**: make the test runner load source files explicitly before loading test files.
+**Solution**: bootstrap one shared test path file, then load `chat.el` before loading test files. Reuse the same helper from prototypes and manual scripts instead of maintaining per script path logic.
 
 ```elisp
-(dolist (src '("chat-session"))
-  (load (expand-file-name (format "%s.el" src) source-dir) nil t))
+(load (expand-file-name "test-paths.el" test-dir) nil t)
+(load (expand-file-name "../chat.el" test-dir) nil t)
+```
+
+### Idle Timer Tests Can Flake In Batch Mode
+
+**Problem**: tests built around `run-with-idle-timer` pass interactively but fail or hang in batch mode.
+
+**Cause**: batch test runs do not provide a reliable idle loop, so the timer callback may never fire even when the code under test is correct.
+
+**Solution**: stub `run-with-idle-timer` and assert on the captured callback closure instead of waiting for real idle execution.
+
+```elisp
+(cl-letf (((symbol-function 'run-with-idle-timer)
+           (lambda (&rest args)
+             (setq callback (nth 2 args)))))
+  (run-with-idle-timer 0.01 nil (lambda () ...)))
+(funcall callback)
 ```
 
 ### Relative Paths In `--eval` Are Fragile

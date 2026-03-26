@@ -16,9 +16,8 @@
 (require 'ert)
 (require 'cl-lib)
 
-;; Add parent directory to load path
-(add-to-list 'load-path
-             (expand-file-name "../.." (file-name-directory load-file-name)))
+;; Share the same module lookup rules across all tests.
+(load (expand-file-name "../test-paths.el" (file-name-directory load-file-name)) nil t)
 
 ;; Create temporary test directory
 (defmacro chat-test-with-temp-dir (&rest body)
