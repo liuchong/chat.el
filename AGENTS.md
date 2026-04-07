@@ -158,28 +158,44 @@ conversation-YYYY-MM-DD-topic.md
 
 调查、定位、日志采集、测试编写、纯文档修改可以直接进行。
 
-### Prototype Before Formal Integration
+### Spike Tests Before Formal Integration
 
-关键功能点要先做原型验证。
+关键功能点要先做探针测试验证。
 复杂功能或涉及外部系统的功能必须先验证可行性再进入正式实现。
-推荐原型语言：
+推荐探针测试语言：
 
 - Shell
 - Python
 - JavaScript
 
-原型文件放在 `tests/prototypes/`。
+探针测试文件放在 `tests/spike/`。
 命名格式是 `YYYYMMDD-feature.ext`。
 
-原型测试是测试的一种，用于验证关键功能点或外部系统集成的可行性。
+探针测试用于验证外部服务、第三方API、基础设施、语言特性或技术方案的可行性。
 
 ### Test Driven Fixes
 
 - 修每一个 bug 都要补至少一条测试
 - 新增外部自由结构数据解析时要补测试
-- 单元测试使用 `ert`
+
+**测试目录分层结构：**
+
+```
+tests/
+├── unit/            # 单元测试：针对业务函数、方法、类的逻辑正确性验证
+│                   # 无外部依赖，独立可运行
+├── integration/     # 集成测试：验证模块间、服务间、组件间协作流程
+│                   # 涉及数据库、缓存、模型、内部接口等依赖
+├── e2e/             # 端到端测试：模拟真实用户完整流程
+│                   # 启动全系统黑盒验证，关注最终可用性功能
+└── spike/           # 探针测试：验证外部服务、第三方API、基础设施
+                    # 语言特性、技术方案可行性，无业务逻辑
+```
+
+- 单元测试使用 `ert`，放在 `tests/unit/`
 - 集成测试放在 `tests/integration/`
-- 原型测试放在 `tests/prototypes/`
+- 端到端测试放在 `tests/e2e/`
+- 探针测试放在 `tests/spike/`
 - Spec 文件放在 `specs/`
 
 ### Verification
