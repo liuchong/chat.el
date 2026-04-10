@@ -43,7 +43,8 @@
                       "lisp/llm"
                       "lisp/tools"
                       "lisp/ui"
-                      "lisp/code")))
+                      "lisp/code"
+                      "lisp/wiki")))
   (dolist (dir module-dirs)
     (add-to-list 'load-path (expand-file-name dir chat-root))))
 
@@ -69,6 +70,7 @@
 (require 'chat-context)
 (require 'chat-files)
 (require 'chat-approval)
+(require 'chat-wiki)
 
 ;; Load LLM providers.
 (require 'chat-llm)
@@ -120,6 +122,26 @@
 (defcustom chat-auto-save t
   "Whether to automatically save sessions after each message."
   :type 'boolean
+  :group 'chat)
+
+(defcustom chat-commands-help
+  "Chat Commands:
+  /new                  - Create new session
+  /list                 - List all sessions
+  /save                 - Save current session
+  /clear                - Clear conversation
+  /model <name>         - Switch model
+
+Wiki Commands:
+  /wiki-ingest <path>   - Ingest source document
+  /wiki-query <question> - Query wiki knowledge
+  /wiki-lint            - Run wiki health check
+  /wiki-index           - Open wiki index
+  /wiki-log             - Open wiki log
+
+Type your message and press RET to send."
+  "Help text displayed for chat commands."
+  :type 'string
   :group 'chat)
 
 (defun chat--config-file-candidates (&optional root-directory)
