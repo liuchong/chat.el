@@ -126,6 +126,7 @@
 
 (defcustom chat-commands-help
   "Chat Commands:
+  /cancel               - Cancel current AI request
   /new                  - Create new session
   /list                 - List all sessions
   /save                 - Save current session

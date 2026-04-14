@@ -100,6 +100,10 @@
           (goto-char input-start)
           ;; Check for special prefixes and commands
           (cond
+           ;; Cancel current request
+           ((string-equal "/cancel" content)
+            (chat-ui-cancel-response)
+            (message "Request cancelled."))
            ;; Shell command with ! prefix
            ((string-prefix-p "!" content)
             (chat-ui--handle-shell-command (substring content 1)))
