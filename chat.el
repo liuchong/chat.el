@@ -132,6 +132,11 @@
   /clear                - Clear conversation
   /model <name>         - Switch model
 
+Quick Shell (Hybrid Mode):
+  !<cmd>                - Execute shell command directly
+  !cd <dir>             - Change working directory
+  ?<question>           - Ask AI directly (not saved to history)
+
 Wiki Commands:
   /wiki-ingest <path>   - Ingest source document
   /wiki-query <question> - Query wiki knowledge

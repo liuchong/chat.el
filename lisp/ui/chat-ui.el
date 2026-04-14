@@ -98,10 +98,19 @@
           ;; Clear input
           (delete-region input-start input-end)
           (goto-char input-start)
-          ;; Check for tool creation request
-          (if (chat-tool-forge-ai--tool-request-p content)
-              (chat-ui--handle-tool-creation content)
-            ;; Normal message flow
+          ;; Check for special prefixes and commands
+          (cond
+           ;; Shell command with ! prefix
+           ((string-prefix-p "!" content)
+            (chat-ui--handle-shell-command (substring content 1)))
+           ;; Direct AI query with ? prefix
+           ((string-prefix-p "?" content)
+            (chat-ui--handle-direct-query (substring content 1)))
+           ;; Tool creation request
+           ((chat-tool-forge-ai--tool-request-p content)
+            (chat-ui--handle-tool-creation content))
+           ;; Normal message flow
+           (t
             (let ((user-msg (make-chat-message
                             :id (format "msg-%s" (random 10000))
                             :role :user
@@ -450,6 +459,118 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
            (insert (propertize "System:\n" 'face 'font-lock-comment-face))
            (insert "❌ Failed to create tool. Please try again with a clearer description.\n\n")
            (set-marker chat-ui--messages-end (point))))))))
+
+;; ------------------------------------------------------------------
+;; Hybrid Mode - Shell & Direct Query
+;; ------------------------------------------------------------------
+
+(defun chat-ui--handle-shell-command (command)
+  "Execute shell COMMAND and display result in chat buffer.
+Handles special case: cd <dir> changes default-directory."
+  (let* ((trimmed (string-trim command))
+         (is-cd (string-match-p "^cd\\s-+" trimmed)))
+    (if (and is-cd (not (string-match-p ";\|&&\|||" trimmed)))
+        ;; Handle cd specially
+        (let ((dir (substring trimmed (match-end 0))))
+          (setq dir (string-trim dir))
+          ;; Expand ~ to home
+          (when (string-prefix-p "~" dir)
+            (setq dir (concat (getenv "HOME") (substring dir 1))))
+          ;; Check if directory exists
+          (if (file-directory-p dir)
+              (progn
+                (setq default-directory (file-name-as-directory (expand-file-name dir)))
+                (chat-ui--insert-system-message (format "📁 Changed directory to: %s" default-directory)))
+            (chat-ui--insert-system-message (format "❌ Directory not found: %s" dir))))
+      ;; Normal shell command
+      (progn
+        (chat-ui--insert-system-message (format "$ %s" trimmed))
+        (let ((output (chat-ui--execute-shell-safe trimmed)))
+          (if output
+              (chat-ui--insert-system-message output)
+            (chat-ui--insert-system-message "⚠️ Shell execution disabled or failed")))))))
+
+(defun chat-ui--execute-shell-safe (command)
+  "Safely execute shell COMMAND and return output.
+Uses chat-tool-shell if available, otherwise basic shell execution."
+  (condition-case err
+      (if (and (featurep 'chat-tool-shell)
+               (fboundp 'chat-tool-shell-execute)
+               (boundp 'chat-tool-shell-enabled)
+               chat-tool-shell-enabled)
+          ;; Use chat-tool-shell if available and enabled
+          (chat-tool-shell-execute command)
+        ;; Fallback to basic shell execution
+        (with-output-to-string
+          (with-current-buffer standard-output
+            (call-process-shell-command command nil t))))
+    (error (format "Error: %s" (error-message-string err)))))
+
+(defun chat-ui--handle-direct-query (question)
+  "Ask AI QUESTION directly without saving to session history.
+This is an ephemeral query - the result is displayed but not persisted."
+  (let ((trimmed (string-trim question)))
+    (if (string-empty-p trimmed)
+        (message "Empty question. Usage: ?<your question>")
+      (chat-ui--insert-user-message (format "?%s" trimmed))
+      (chat-ui--insert-system-message "🤖 Asking AI...")
+      ;; Get AI response asynchronously
+      (let* ((session chat--current-session)
+             (model (chat-session-model-id session))
+             (msg `((role . "user") (content . ,trimmed)))
+             (buffer (current-buffer)))
+        (chat-llm-request-async
+         model
+         (list (make-chat-message
+                :id (format "ephemeral-%s" (random 10000))
+                :role :user
+                :content trimmed
+                :timestamp (current-time)))
+         (lambda (result)
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (let ((content (plist-get result :content)))
+                 (chat-ui--insert-ephemeral-response content)))))
+         (lambda (err)
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (chat-ui--insert-system-message (format "❌ Error: %s" err)))))
+         '(:temperature 0.7))))))
+
+(defun chat-ui--insert-system-message (content)
+  "Insert a system message CONTENT into chat buffer."
+  (save-excursion
+    (goto-char chat-ui--messages-end)
+    (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+    (insert content)
+    (insert "\n\n")
+    (set-marker chat-ui--messages-end (point))))
+
+(defun chat-ui--insert-user-message (content)
+  "Insert a user message CONTENT into chat buffer (ephemeral)."
+  (save-excursion
+    (goto-char chat-ui--messages-end)
+    (insert (propertize "You:\n" 'face 'font-lock-keyword-face))
+    (insert (propertize content 'face 'italic))
+    (insert "\n\n")
+    (set-marker chat-ui--messages-end (point))))
+
+(defun chat-ui--insert-ephemeral-response (content)
+  "Insert an ephemeral AI response CONTENT into chat buffer."
+  (save-excursion
+    (goto-char chat-ui--messages-end)
+    ;; Remove the "Asking AI..." message
+    (let ((search-start (max (point-min) (- chat-ui--messages-end 500))))
+      (goto-char search-start)
+      (when (search-forward "🤖 Asking AI..." chat-ui--messages-end t)
+        (let ((beg (line-beginning-position)))
+          (goto-char chat-ui--messages-end)
+          (delete-region beg chat-ui--messages-end)
+          (goto-char beg))))
+    (insert (propertize "Assistant (quick):\n" 'face 'font-lock-function-name-face))
+    (insert content)
+    (insert "\n\n")
+    (set-marker chat-ui--messages-end (point))))
 
 (defun chat-ui-clear-input ()
   "Clear current input."
