@@ -783,7 +783,7 @@ This is an ephemeral query - the result is displayed but not persisted."
                       nil
                       session)))))
           (chat-log "[STREAM] ERROR: Process creation returned nil")
-          (chat-ui--render-stream-start-error ui-buffer)))))))
+          (chat-ui--render-stream-start-error ui-buffer))))))))
 
 ;;;###autoload
 (defun chat-ui-cancel-response ()
