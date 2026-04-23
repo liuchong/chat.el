@@ -40,7 +40,6 @@ Copyright 2026 chat.el contributors.
 
 AI 和 IDE 不得执行以下命令或动作：
 
-- `git commit`
 - `git push`
 - `git rebase`
 - `git merge`
@@ -61,10 +60,11 @@ AI 和 IDE 不得执行以下命令或动作：
 
 Exception:
 
-- 如果用户在当前会话中明确要求 AI 直接执行 `git commit`，可以在当前仓库内执行一次直接提交
-- 这种例外只覆盖 `git commit`，不覆盖 `push` `rebase` `merge` `reset` 等其他历史或远端操作
-- 执行前仍然必须完成本文件要求的调查、实现、验证和文档更新
-- commit message 必须遵守本仓库既有风格，优先使用 `type: Summary` 格式和英文正文
+- `git commit` 是唯一允许的写历史 git 操作
+- 仅允许在一个明确阶段完成并通过该阶段相关验证后执行
+- 不覆盖 `push` `rebase` `merge` `reset` 等其他历史或远端操作
+- 执行前必须完成本文件要求的调查、实现、验证和知识库更新
+- commit message 必须遵守本文件中的阶段提交格式
 
 ### Stage Commits
 
@@ -76,32 +76,13 @@ Exception:
 
 ## Documentation Must Be Updated
 
-每次开发会话结束时必须同步更新文档。
+每次开发会话结束时必须同步更新知识库和必要的人类文档。
 
 ### Required Outputs
 
-1. 在 `docs/ai-contexts/` 新建或更新会话记录
+1. 在 `.agents/` 中更新当前阶段相关记录
 2. 如果发现新的失败模式或修复模式 更新 `docs/troubleshooting-pitfalls.md`
-
-### AI Context Naming
-
-使用这个格式：
-
-```text
-conversation-YYYY-MM-DD-topic.md
-```
-
-### Required AI Context Sections
-
-- `Requirements`
-- `Technical Decisions`
-- `Completed Work`
-- `Pending Work`
-- `Key Code Paths`
-- `Verification`
-- `Issues Encountered`
-
-如果本次没有新增避坑条目，需要在 ai-context 里明确写出。
+3. 如果项目的人类使用方式、配置方式或公开行为发生变化 更新 `README.md` 或 `docs/`
 
 ### Troubleshooting Update Rule
 
@@ -115,11 +96,13 @@ conversation-YYYY-MM-DD-topic.md
 
 ### Documentation Directory Structure
 
+`docs/` 只存放面向人类使用者的项目文档。
+agent 工作流、阶段记录、决策过程和历史调查材料不再放在 `docs/`，统一进入 `.agents/`。
+
 `docs/` 目录按内容篇幅和深度分层：
 
 | 目录 | 用途 | 内容示例 |
 |------|------|----------|
-| `ai-contexts/` | 会话级开发记录 | 每次开发会话的完整记录 |
 | `tips/` | 短形式的灵感和速记 | 代码片段、快捷技巧、aha moments |
 | `articles/` | 中等篇幅专题文章 | 技术深入、最佳实践、实现故事 |
 | `books/` | 长篇系统性文档 | 架构指南、设计原则、完整规范 |
@@ -132,9 +115,55 @@ conversation-YYYY-MM-DD-topic.md
 参考：
 
 - `docs/README.md`
-- `docs/ai-contexts/README.md`
 - `docs/troubleshooting-pitfalls.md`
 - `.cursor/rules/documentation-maintenance.mdc`
+
+## Agent Knowledge Base
+
+- agent 专用知识库固定放在 `.agents/`
+- `.agents/` 虽然是隐藏目录，但属于本项目正式目录结构的一部分，所有 agent 进入项目时必须主动读取，不得因隐藏目录而忽略
+- `.agents/` 采用二维知识组织模型：
+  - 注意力层级：
+    - `00-entry`
+    - `10-active`
+    - `20-reference`
+    - `30-records`
+  - 知识类型：
+    - `decisions`
+    - `knowledge`
+    - `lessons`
+    - `logs`
+    - `compatibility`
+    - `progress`
+- agent 在开始实现前，必须按以下顺序读取项目上下文：
+  - `AGENTS.md`
+  - `.agents/README.md`
+  - `.agents/00-entry/current.md`
+  - `.agents/00-entry/read-order.md`
+  - `.agents/10-active/focus.md`
+  - `.agents/10-active/risks.md`
+  - 根据任务类型选择性读取：
+    - 功能实现优先读 `20-reference/decisions/` 与 `20-reference/knowledge/`
+    - 兼容性问题优先读 `20-reference/compatibility/`
+    - 排障与复盘优先读 `30-records/lessons/` 与 `30-records/logs/`
+    - 历史追溯优先读 `30-records/history/`
+  - 默认禁止因为“多看一点更保险”而扫描整个 `.agents/`
+- 每完成一个阶段并通过该阶段测试后，除了提交代码，还必须同步更新 `.agents/` 中对应记录
+- `.agents/` 中的内容必须提交到 git，禁止只保留在本地工作区
+- 共享知识层为 `00-entry`、`10-active`、`20-reference`、`30-records`
+- 并行 agent 的私有工作区固定放在 `.agents/workspaces/<agent-id>/`
+- 并行 agent 不得直接改写共享知识层，必须先写入各自 `workspaces/`，由主 agent 归并
+- `.agents/00-entry/` 只存入口索引与最小必读上下文
+- `.agents/10-active/` 只存当前阶段高热信息，不得长期堆积
+- `.agents/20-reference/` 只存稳定参考知识
+- `.agents/30-records/` 只存低频备查材料，包括经验、教训、日志、复盘、历史记录
+- `.agents/templates/` 用于存放统一模板，保证后续记录格式稳定
+- `.agents/` 中所有正式记录文件都应包含固定元数据字段：
+  - `Type`
+  - `Attention`
+  - `Status`
+  - `Scope`
+  - `Tags`
 
 ## Development Workflow
 
@@ -143,10 +172,15 @@ conversation-YYYY-MM-DD-topic.md
 每次开发任务开始前都必须按这个顺序执行：
 
 1. 先完整阅读 `AGENTS.md`
-2. 调查当前代码现状 已有实现 相关测试和必要文档
-3. 反思当前目标 约束 风险和已有工作
-4. 判断当前方向是否会掉进死胡同
-5. 先给方案 再进入业务代码实施
+2. 阅读 `.agents/README.md`
+3. 阅读 `.agents/00-entry/current.md`
+4. 阅读 `.agents/00-entry/read-order.md`
+5. 阅读 `.agents/10-active/focus.md`
+6. 阅读 `.agents/10-active/risks.md`
+7. 调查当前代码现状 已有实现 相关测试和必要文档
+8. 反思当前目标 约束 风险和已有工作
+9. 判断当前方向是否会掉进死胡同
+10. 先给方案 再进入业务代码实施
 
 这里的死胡同包括但不限于：
 
@@ -313,9 +347,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 ## Commit Message Output
 
-每次改动结束后提供一行英文 commit message 建议。
-只输出文本。
-不要执行 git 提交。
+如果本次不是一个完成并通过验证的阶段，改动结束后提供一行英文 commit message 建议。
+如果本次是一个完成并通过验证的阶段，必须直接执行 git 提交，并使用阶段提交格式。
 
 允许的前缀：
 
@@ -329,4 +362,4 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 ## Scope
 
 本文件适用于整个 `chat.el` 仓库内的代码、测试、文档、排障和重构工作。
-如果只是纯答疑，也至少要在 ai-context 里留一条会话记录摘要。
+如果只是纯答疑，也至少要在 `.agents/30-records/logs/` 中留下简短记录。

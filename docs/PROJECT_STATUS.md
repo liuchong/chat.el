@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-03-26
+Last updated: 2026-04-23
 
 ## Summary
 
@@ -9,6 +9,7 @@ The core chat flow, tool calling flow, file tools, approval gates, async request
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
+The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
 
 ## Implemented Areas
 
@@ -62,8 +63,8 @@ The provider layer now supports mainstream official models across domestic and i
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 167 tests discovered
-- 165 passing
+- 183 tests discovered
+- 181 passing
 - 2 skipped provider integration tests
 - 0 known failures in the current baseline
 
@@ -87,6 +88,8 @@ The provider layer now supports mainstream official models across domestic and i
 - code mode prompt now includes project rooted operational guardrails to reduce aimless tool retries
 - code mode now injects project `AGENTS.md` into context when present
 - code mode now sends hard coded non-negotiable engineering rules in every programming request
+- request diagnostics now expose current phase, recent events, and stalled-request hints in both chat and code mode
+- `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 
 ## Known Boundaries
 

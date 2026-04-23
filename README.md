@@ -296,8 +296,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 158 tests discovered
-- 156 passing
+- 183 tests discovered
+- 181 passing
 - 2 skipped provider integration tests
 
 ## Documentation Map
@@ -305,14 +305,15 @@ Current baseline:
 - `docs/README.md` for the document index
 - `docs/PROJECT_STATUS.md` for the current status snapshot
 - `docs/troubleshooting-pitfalls.md` for known issues and fixes
-- `docs/ai-contexts/` for session records and implementation history
+- `.agents/` for agent workflow records, decisions, logs, and stage history
 
 ## Notes For Contributors
 
 - Read `AGENTS.md` before making changes
-- Update `docs/ai-contexts/` after each development session
+- Read `.agents/README.md`, `.agents/00-entry/current.md`, `.agents/00-entry/read-order.md`, `.agents/10-active/focus.md`, and `.agents/10-active/risks.md` before implementation work
+- Update `.agents/` after each completed stage
 - Add regression tests for each bug fix
-- Do not use destructive git commands or create commits from AI
+- Do not use destructive git commands
 
 ## License
 
