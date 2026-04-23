@@ -70,6 +70,7 @@
   (mapconcat
    #'identity
    '("Tool usage guidance:"
+     "- `open_file` opens a safe project file in Emacs and can jump to a specific line or column."
      "- `files_list` lists directory entries. Use it first to understand what exists."
      "- `files_find` searches recursively across a directory for files whose contents match a pattern."
      "- `files_grep` searches one known file path. Do not use it on directories."
@@ -100,6 +101,7 @@
          "You may then either answer normally or call one more tool.\n"
          "Some tools may require user approval before execution.\n"
          "Read files before editing them.\n"
+         "Use `open_file` when the user wants you to open a relevant file in Emacs.\n"
          "Use `files_write` for new files or whole-file rewrites.\n"
          "Use `files_replace` for exact text replacements with strong match constraints.\n"
          "Use `apply_patch` for precise existing-file edits across one or more hunks.\n"

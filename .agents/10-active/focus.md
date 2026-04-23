@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Define and stage the next in-Emacs reading workflow so quoted code questions, AI-driven file navigation, and session command discoverability share one consistent design.
+Ship the first executable reading workflow slice so region quoting, immediate questions, safe file navigation, and session replay commands work together in code mode.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Define and stage the next in-Emacs reading workflow so quoted code questions, AI
 
 ## Immediate Next Step
 
-Implement the first slice of the new reading workflow spec, likely starting with code-mode region quoting, explicit ask commands, and safe file navigation.
+Build the next slice on top of the new region workflow baseline, likely expanding from region-only capture to defun and near-point capture without breaking the current code-mode path.

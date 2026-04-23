@@ -111,6 +111,8 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `chat-code-for-file` | - | 针对特定文件启动 |
 | `chat-code-for-selection` | - | 使用当前选区作为上下文 |
 | `chat-code-from-chat` | - | 从普通聊天会话切换 |
+| `chat-code-quote-region` | - | 把当前选区引用到 code-mode 输入区 |
+| `chat-code-ask-region` | - | 直接对当前选区提问 |
 
 ### Code Mode Buffer 命令
 
@@ -124,9 +126,25 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `C-c C-v` | `chat-code-view-preview` | 查看预览（切换到 *chat-preview*） |
 | `C-c C-f` | `chat-code-focus-file` | 更改焦点文件 |
 | `C-c C-r` | `chat-code-refresh-context` | 刷新上下文 |
+| `C-c C-q` | `chat-code-quote-region` | 把当前选区引用到输入区 |
+| `C-c C-SPC` | `chat-code-ask-region` | 直接提问当前选区 |
 | `C-c C-s` | `chat-code-show-current-request-status` | 查看当前请求的详细诊断 |
 | `C-c C-p` | `chat-code-toggle-request-panel` | 切换请求过程面板 |
+| `C-c C-e` | `chat-code-edit-last-user-message` | 编辑并重发最后一条用户消息 |
+| `C-c C-g` | `chat-code-regenerate-last-response` | 重新生成最后一条 AI 回复 |
 | `C-g` | `chat-code-cancel` | 取消当前操作 |
+
+### 阅读代码时直接提问
+
+推荐链路：
+
+```text
+1. 在源码 buffer 中选中正在阅读的代码
+2. 执行 chat-code-quote-region
+3. 在 code-mode buffer 中补充你的问题
+4. 或直接执行 chat-code-ask-region 立即发送
+5. AI 如需切换到其他文件，可调用 open_file 在 Emacs 中直接打开相关文件
+```
 
 ### 内联编辑命令（在代码缓冲区）
 

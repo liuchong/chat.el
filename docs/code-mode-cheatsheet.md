@@ -10,6 +10,8 @@ M-x chat-code-start              从当前项目启动
 M-x chat-code-for-file           针对特定文件
 M-x chat-code-for-selection      使用当前选区
 M-x chat-code-from-chat          从普通聊天切换
+M-x chat-code-quote-region       把当前选区引用到输入框
+M-x chat-code-ask-region         直接提问当前选区
 ```
 
 ## ✏️ 内联编辑（在代码缓冲区）
@@ -36,9 +38,22 @@ C-c C-k       拒绝修改
 C-c C-v       查看预览（切换到 *chat-preview*）
 C-c C-f       更改焦点文件
 C-c C-r       刷新上下文
+C-c C-q       把当前选区引用到输入区
+C-c C-SPC     直接提问当前选区
 C-c C-s       查看当前请求诊断
 C-c C-p       切换请求过程面板
+C-c C-e       编辑并重发最后一条用户消息
+C-c C-g       重新生成最后一条 AI 回复
 C-g           取消操作
+```
+
+## 📖 阅读代码工作流
+
+```text
+1. 在源码 buffer 里选中正在阅读的代码
+2. M-x chat-code-quote-region 或 C-c C-q
+3. 在 code-mode buffer 中补充问题，或直接用 M-x chat-code-ask-region / C-c C-SPC
+4. AI 如有需要可调用 open_file 直接打开相关文件
 ```
 
 ## 🔀 多文件重构（实验性）

@@ -151,6 +151,7 @@ Built in tools currently focus on coding assistance:
 
 - `files_read`
 - `files_read_lines`
+- `open_file`
 - `files_list`
 - `files_grep`
 - `files_write`
@@ -199,6 +200,8 @@ Refactoring, git assistance, indexing extras, and performance helpers are still 
 | `M-x chat-code-start` | Start code mode for current project |
 | `M-x chat-code-for-file` | Focus on specific file |
 | `M-x chat-code-for-selection` | Use current selection as context |
+| `M-x chat-code-quote-region` | Quote the active region into the code-mode input |
+| `M-x chat-code-ask-region` | Ask AI about the active region immediately |
 
 ### Inline Editing Commands
 

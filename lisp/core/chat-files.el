@@ -1004,6 +1004,22 @@ Returns total size, line count, and file type distribution."
     :usage-count 0
     :version "1.0.0")))
 
+(defun chat-files-open-file (path &optional line column)
+  "Open PATH in Emacs and optionally move to LINE and COLUMN."
+  (let* ((safe-path (chat-files--safe-path-p path))
+         (buffer (find-file-noselect safe-path)))
+    (with-current-buffer buffer
+      (goto-char (point-min))
+      (when (and line (integerp line) (> line 0))
+        (forward-line (1- line)))
+      (when (and column (integerp column) (> column 0))
+        (move-to-column (1- column))))
+    (pop-to-buffer buffer)
+    (list :status "opened"
+          :path safe-path
+          :line (or line (line-number-at-pos (with-current-buffer buffer (point))))
+          :column (or column 1))))
+
 (defun chat-files-register-built-in-tools ()
   "Register the core file tools used by tool calling."
   (chat-files--register-built-in-tool
@@ -1024,6 +1040,15 @@ Returns total size, line count, and file type distribution."
      (:name "num_lines" :type "integer"))
    (lambda (path &optional start-line num-lines)
      (chat-files-read-lines path start-line num-lines)))
+  (chat-files--register-built-in-tool
+   'open_file
+   "Open File"
+   "Open a file in Emacs and optionally jump to a line and column"
+   '((:name "path" :type "string" :required t)
+     (:name "line" :type "integer")
+     (:name "column" :type "integer"))
+   (lambda (path &optional line column)
+     (chat-files-open-file path line column)))
   (chat-files--register-built-in-tool
    'files_list
    "List Files"
@@ -1108,6 +1133,11 @@ This describes available file operations to the AI."
          :parameters '((:name "path" :type "string" :required t)
                        (:name "start_line" :type "integer")
                        (:name "num_lines" :type "integer")))
+   (list :name "open_file"
+         :description "Open a file in Emacs and optionally jump to a line and column"
+         :parameters '((:name "path" :type "string" :required t)
+                       (:name "line" :type "integer")
+                       (:name "column" :type "integer")))
    (list :name "files_grep"
          :description "Search for pattern in a file"
          :parameters '((:name "pattern" :type "string" :required t)

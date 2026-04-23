@@ -1250,8 +1250,12 @@ Optional PROJECT-ROOT overrides the detected project root."
     ;; Navigation
     (define-key map (kbd "C-c C-f") 'chat-code-focus-file)
     (define-key map (kbd "C-c C-r") 'chat-code-refresh-context)
+    (define-key map (kbd "C-c C-q") 'chat-code-quote-region)
+    (define-key map (kbd "C-c C-SPC") 'chat-code-ask-region)
     (define-key map (kbd "C-c C-s") 'chat-code-show-current-request-status)
     (define-key map (kbd "C-c C-p") 'chat-code-toggle-request-panel)
+    (define-key map (kbd "C-c C-e") 'chat-code-edit-last-user-message)
+    (define-key map (kbd "C-c C-g") 'chat-code-regenerate-last-response)
     ;; Cancel
     (define-key map (kbd "C-g") 'chat-code-cancel)
     map)
@@ -1267,8 +1271,12 @@ Key bindings:
   C-c C-v    - View preview
   C-c C-f    - Focus on file
   C-c C-r    - Refresh context
+  C-c C-q    - Quote active region into input
+  C-c C-SPC  - Ask about active region
   C-c C-s    - Show request status
   C-c C-p    - Toggle request panel
+  C-c C-e    - Edit and resend last user message
+  C-c C-g    - Regenerate last assistant response
   C-g        - Cancel current operation
 
 In this mode, all operations use a single buffer design.
@@ -1304,6 +1312,33 @@ using C-x b or C-c C-v."
             (chat-session-add-message (chat-code--base-session) user-msg)
             (chat-code--display-user-message content)
             (chat-code--process-message)))))))
+
+(defun chat-code-quote-region ()
+  "Quote the active region into the current code-mode input area."
+  (interactive)
+  (unless (region-active-p)
+    (user-error "No active region to quote"))
+  (let ((prompt (chat-code--quoted-region-prompt))
+        (session (chat-code--prepare-reading-session)))
+    (chat-code--open-session session)
+    (with-current-buffer (chat-code--buffer-name session)
+      (delete-region (marker-position chat-code--input-marker) (point-max))
+      (goto-char (marker-position chat-code--input-marker))
+      (insert prompt))))
+
+(defun chat-code-ask-region (question)
+  "Ask QUESTION about the active region in code mode."
+  (interactive "sQuestion: ")
+  (unless (region-active-p)
+    (user-error "No active region to ask about"))
+  (let ((prompt (chat-code--quoted-region-prompt question))
+        (session (chat-code--prepare-reading-session)))
+    (chat-code--open-session session)
+    (with-current-buffer (chat-code--buffer-name session)
+      (delete-region (marker-position chat-code--input-marker) (point-max))
+      (goto-char (marker-position chat-code--input-marker))
+      (insert prompt)
+      (chat-code-send-message))))
 
 (defun chat-code--process-message ()
   "Process the latest user message."
@@ -1826,6 +1861,49 @@ Returns a chat-edit struct or nil."
   "Get selected text as string."
   (when (region-active-p)
     (buffer-substring-no-properties (region-beginning) (region-end))))
+
+(defun chat-code--selection-line-range ()
+  "Return the current region line range as a cons."
+  (when (region-active-p)
+    (cons (line-number-at-pos (region-beginning))
+          (line-number-at-pos (region-end)))))
+
+(defun chat-code--prepare-reading-session ()
+  "Return a code session suitable for reading workflow commands."
+  (or (and (boundp 'chat-code--current-session)
+           chat-code--current-session)
+      (chat-code-session-create
+       (format "Code: %s"
+               (file-name-nondirectory
+                (or (buffer-file-name)
+                    default-directory)))
+       (or (ignore-errors (chat-code--detect-project-root))
+           default-directory)
+       (buffer-file-name))))
+
+(defun chat-code--quoted-region-prompt (&optional question)
+  "Build a structured quoted prompt for the active region and QUESTION."
+  (let* ((file (or (buffer-file-name)
+                   (user-error "Current buffer is not visiting a file")))
+         (code (or (chat-code--get-selection)
+                   (user-error "No active region to quote")))
+         (line-range (chat-code--selection-line-range))
+         (lang (or (cdr (seq-find (lambda (entry)
+                                    (string-match-p (car entry) file))
+                                  chat-code-filetype-map))
+                   major-mode)))
+    (concat
+     "Question about this code:\n\n"
+     (format "File: %s\n" file)
+     (format "Lines: %d-%d\n" (car line-range) (cdr line-range))
+     "Kind: region\n\n"
+     (format "```%s\n" (symbol-name lang))
+     code
+     (unless (string-suffix-p "\n" code)
+       "\n")
+     "```\n\n"
+     "Question:\n"
+     (or question ""))))
 
 (defun chat-code--get-function-at-point ()
   "Get function at point as string."

@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0013 reading workflow spec is complete.
+Phase 0014 reading workflow slice one is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while defining the next in-Emacs reading workflow stage around quoted code context, AI-driven file navigation, and session command discoverability.
+Keep `chat.el` on the new `.agents/` workflow while landing the first executable reading workflow slice around quoted code context, AI-driven file navigation, and session command discoverability.
 
 ## Active Modules
 

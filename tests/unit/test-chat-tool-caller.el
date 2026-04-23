@@ -171,6 +171,56 @@
                         :arguments (("path" . ,target-file))))))
          (should (string-match-p "project read ok" result)))))))
 
+(ert-deftest chat-tool-caller-open-file-opens-buffer-at-line ()
+  "Test open_file opens a safe file and moves point to the requested line."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project" temp-dir))
+          (target-file (expand-file-name "README.md" project-root))
+          (chat-files-allowed-directories (list "/tmp/"))
+          opened-buffer)
+     (make-directory project-root t)
+     (with-temp-file target-file
+       (insert "line1\nline2\nline3\n"))
+     (chat-files-register-built-in-tools)
+     (with-temp-buffer
+       (setq-local chat-code--current-session
+                   (chat-code-session-create "Code Project" project-root nil))
+       (cl-letf (((symbol-function 'pop-to-buffer)
+                  (lambda (buffer &rest _args)
+                    (setq opened-buffer buffer)
+                    buffer)))
+         (let ((result
+                (chat-tool-caller-execute
+                 `(:name "open_file"
+                   :arguments (("path" . ,target-file)
+                               ("line" . 3))))))
+           (should (stringp result))
+           (should (string-match-p "opened" result))
+           (should (buffer-live-p opened-buffer))
+           (with-current-buffer opened-buffer
+             (should (string= (file-truename (buffer-file-name))
+                              (file-truename target-file)))
+             (should (= (line-number-at-pos) 3)))))))))
+
+(ert-deftest chat-tool-caller-open-file-denies-outside-paths ()
+  "Test open_file obeys file safety boundaries."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project" temp-dir))
+          (outside-file (expand-file-name "secret.txt" temp-dir))
+          (chat-files-allowed-directories (list "/tmp/")))
+     (make-directory project-root t)
+     (with-temp-file outside-file
+       (insert "secret"))
+     (chat-files-register-built-in-tools)
+     (with-temp-buffer
+       (setq-local chat-code--current-session
+                   (chat-code-session-create "Code Project" project-root nil))
+       (let ((result
+              (chat-tool-caller-execute
+               `(:name "open_file"
+                 :arguments (("path" . ,outside-file))))))
+         (should (string-match-p "Access denied\\|outside allowed directories\\|Error executing tool" result)))))))
+
 (ert-deftest chat-tool-caller-uses-project-root-as-shell-working-directory ()
   "Test shell tools execute from the active code session project root."
   (chat-test-with-temp-dir

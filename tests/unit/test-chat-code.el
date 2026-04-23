@@ -140,6 +140,66 @@
        (should (search-forward "Answer 1" nil t))
        (should-not (search-forward "Answer 2" nil t))))))
 
+(ert-deftest chat-code-quote-region-inserts-structured-reference ()
+  "Test quoting a region inserts file, line, and code context into the input."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message")
+             (set-mark (line-beginning-position))
+             (goto-char (line-end-position))
+             (activate-mark)
+             (chat-code-quote-region)
+             (with-current-buffer (chat-code--buffer-name chat-code--current-session)
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-code--input-marker)
+                              (point-max))))
+                 (should (string-match-p "Question about this code:" quoted))
+                 (should (string-match-p "File: " quoted))
+                 (should (string-match-p "Lines: " quoted))
+                 (should (string-match-p "Kind: region" quoted))
+                 (should (string-match-p "message" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-ask-region-sends-structured-reference ()
+  "Test asking about a region sends a structured quoted message."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message")
+             (set-mark (line-beginning-position))
+             (goto-char (line-end-position))
+             (activate-mark)
+             (cl-letf (((symbol-function 'chat-code-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-code--input-marker)
+                                 (point-max))))))
+               (chat-code-ask-region "Why is this call here?"))
+             (should (string-match-p "Question about this code:" sent-content))
+             (should (string-match-p "Why is this call here\\?" sent-content))
+             (should (string-match-p "Kind: region" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-mode-map-includes-reading-and-session-shortcuts ()
+  "Test code mode keymap exposes reading and session workflow shortcuts."
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-e")) 'chat-code-edit-last-user-message))
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-g")) 'chat-code-regenerate-last-response))
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-q")) 'chat-code-quote-region))
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-SPC")) 'chat-code-ask-region)))
+
 (ert-deftest chat-code-send-streaming-uses-current-stream-api ()
   "Test code mode streaming uses the current chat-stream API shape."
   (chat-test-with-temp-dir
