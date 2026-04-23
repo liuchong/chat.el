@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Keep test boundaries explicit so the canonical batch runner stays deterministic while real provider checks remain available through separate integration entrypoints.
+Define and stage the next in-Emacs reading workflow so quoted code questions, AI-driven file navigation, and session command discoverability share one consistent design.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Keep test boundaries explicit so the canonical batch runner stays deterministic 
 
 ## Immediate Next Step
 
-Build the next UX or workflow stage on top of a clean regression baseline, with likely next targets being better discoverability for session commands or broader explicit integration coverage.
+Implement the first slice of the new reading workflow spec, likely starting with code-mode region quoting, explicit ask commands, and safe file navigation.

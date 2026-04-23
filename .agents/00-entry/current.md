@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0012 integration test separation is complete.
+Phase 0013 reading workflow spec is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while keeping the canonical batch suite strictly regression-safe and moving real provider checks into explicit integration entrypoints.
+Keep `chat.el` on the new `.agents/` workflow while defining the next in-Emacs reading workflow stage around quoted code context, AI-driven file navigation, and session command discoverability.
 
 ## Active Modules
 
