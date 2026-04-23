@@ -137,6 +137,15 @@
   (let ((chat--last-session-id "missing"))
     (should-not (chat--resolve-last-session))))
 
+(ert-deftest chat-resolve-last-session-loads-existing-session ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Existing" 'kimi))
+          (chat--last-session-id (chat-session-id session)))
+     (let ((resolved (chat--resolve-last-session)))
+       (should (string= (chat-session-id resolved) (chat-session-id session)))
+       (should (string= (chat-session-name resolved) "Existing"))))))
+
 (ert-deftest chat-ensure-reading-session-prefers-current-chat-session ()
   (chat-test-with-temp-dir
    (let ((chat-session-directory temp-dir)
@@ -165,6 +174,18 @@
        (let ((resolved (chat--ensure-reading-session "/tmp/other.el")))
          (should (string= (chat-session-id resolved)
                           (chat-session-id session))))))))
+
+(ert-deftest chat-ensure-reading-session-prefers-current-session-over-last-session ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (last-session (chat-session-create "Last" 'kimi)))
+     (setq chat--last-session-id (chat-session-id last-session))
+     (with-temp-buffer
+       (chat-mode)
+       (let ((current-session (chat-session-create "Current" 'kimi)))
+         (setq-local chat--current-session current-session)
+         (should (eq (chat--ensure-reading-session "/tmp/demo.el")
+                     current-session)))))))
 
 (ert-deftest chat-quote-region-opens-chat-and-inserts-structured-reference ()
   (chat-test-with-temp-dir
@@ -214,6 +235,33 @@
              (should (string-match-p "What matters here\\?" sent-content))
              (should (string-match-p "defun demo" sent-content)))
          (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-quote-region-propagates-missing-region-error ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(message \"hi\")\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-quote-region) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-ask-current-file-propagates-oversized-file-error ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat-reading-current-file-max-lines 2)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-ask-current-file "Too big?") :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-quote-current-file-propagates-non-file-buffer-error ()
+  (with-temp-buffer
+    (should-error (chat-quote-current-file) :type 'user-error)))
 
 (ert-deftest chat-quote-defun-opens-chat-and-inserts-structured-reference ()
   (chat-test-with-temp-dir

@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 255 regression tests discovered
-- 255 passing
+- 265 regression tests discovered
+- 265 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -106,6 +106,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
 - shared reading helpers now have denser regression coverage around naming, fallback behavior, minimal captures, and help-buffer behavior
+- shared reading and plain-chat bootstrap paths now also have denser refusal, default-limit, and fallback-session coverage
 
 ## Known Boundaries
 
@@ -126,6 +127,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - keep increasing focused unit coverage around new workflow modules rather than only growing end-to-end surface area
 - keep growing test density around shared reading helpers and remaining refusal edges without fragmenting the shared reading workflow
 - add denser tests around plain-chat reading commands beyond the current helper and bootstrap matrix
+- keep growing deterministic refusal and fallback coverage before adding more reading-surface features
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow
 

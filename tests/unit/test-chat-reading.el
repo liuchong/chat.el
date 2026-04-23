@@ -42,6 +42,10 @@
     (activate-mark)
     (should-error (chat-reading-capture-region) :type 'user-error)))
 
+(ert-deftest chat-reading-current-file-errors-without-file-buffer ()
+  (with-temp-buffer
+    (should-error (chat-reading--current-file) :type 'user-error)))
+
 (ert-deftest chat-reading-capture-defun-returns-structured-capture ()
   (chat-test-with-temp-dir
    (let ((source-file (expand-file-name "demo.el" temp-dir)))
@@ -103,6 +107,22 @@
                (should (= (plist-get capture :end-line) 3))))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-reading-capture-near-point-uses-default-radius ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir))
+         (chat-reading-near-point-radius 2))
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\nline4\nline5\nline6\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (forward-line 3)
+             (let ((capture (chat-reading-capture-near-point)))
+               (should (= (plist-get capture :start-line) 2))
+               (should (= (plist-get capture :end-line) 6))))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-reading-capture-current-file-returns-full-file ()
   (chat-test-with-temp-dir
    (let ((source-file (expand-file-name "demo.el" temp-dir)))
@@ -125,6 +145,17 @@
      (with-current-buffer (find-file-noselect source-file)
        (unwind-protect
            (should-error (chat-reading-capture-current-file 2) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-capture-current-file-uses-default-limit ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir))
+         (chat-reading-current-file-max-lines 2))
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-reading-capture-current-file) :type 'user-error)
          (kill-buffer (current-buffer)))))))
 
 (ert-deftest chat-reading-format-question-includes-visible-metadata ()
@@ -159,6 +190,12 @@
   (with-temp-buffer
     (text-mode)
     (should (eq (chat-reading--language "/tmp/demo.unknown") 'text-mode))))
+
+(ert-deftest chat-reading-language-prefers-configured-filetype-map ()
+  (let ((chat-reading-filetype-map '(("\\.foo\\'" . custom-lang))))
+    (with-temp-buffer
+      (text-mode)
+      (should (eq (chat-reading--language "/tmp/demo.foo") 'custom-lang)))))
 
 (ert-deftest chat-reading-capture-current-file-single-line-keeps-line-one ()
   (chat-test-with-temp-dir
@@ -199,3 +236,15 @@
                "")))
     (should (string-match-p "Kind: current-file" text))
     (should (string-match-p "Question:\n\\'" text))))
+
+(ert-deftest chat-reading-format-question-renders-custom-language-fence ()
+  (let ((text (chat-reading-format-question
+               '(:kind region
+                 :file "/tmp/demo.foo"
+                 :start-line 3
+                 :end-line 4
+                 :code "alpha\nbeta"
+                 :language custom-lang)
+               "Explain it")))
+    (should (string-match-p "```custom-lang" text))
+    (should (string-match-p "Explain it\\'" text))))
