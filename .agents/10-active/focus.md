@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Keep the shared reading workflow stable while increasing command-matrix and session-reuse coverage.
+Keep the shared reading workflow stable while improving discoverability and continuing to raise coverage around the new command surfaces.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Keep the shared reading workflow stable while increasing command-matrix and sess
 
 ## Immediate Next Step
 
-Decide whether the next stage should add more discoverability for the new plain chat reading commands or keep focusing on test density and workflow edge cases.
+Decide whether the next stage should stay focused on test density and workflow edge cases or pause to consolidate the recent reading workflow expansion.

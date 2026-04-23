@@ -96,6 +96,10 @@
   (should (fboundp 'chat-list-sessions))
   (should (commandp 'chat-list-sessions)))
 
+(ert-deftest chat-show-help-command-is-bound ()
+  (should (commandp 'chat-show-help))
+  (should (eq (lookup-key chat-mode-map (kbd "C-c C-h")) 'chat-show-help)))
+
 (ert-deftest chat-reading-commands-are-bound ()
   (should (commandp 'chat-quote-region))
   (should (commandp 'chat-ask-region))
@@ -105,6 +109,13 @@
   (should (commandp 'chat-ask-near-point))
   (should (commandp 'chat-quote-current-file))
   (should (commandp 'chat-ask-current-file)))
+
+(ert-deftest chat-show-help-renders-reading-workflow-section ()
+  (chat-show-help)
+  (with-current-buffer "*Chat Help*"
+    (should (string-match-p "Reading Workflow:" (buffer-string)))
+    (should (string-match-p "chat-quote-region" (buffer-string)))
+    (should (string-match-p "chat-ask-current-file" (buffer-string)))))
 
 (ert-deftest chat-ensure-reading-session-creates-new-session-when-none ()
   (chat-test-with-temp-dir

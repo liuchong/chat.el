@@ -141,6 +141,16 @@ Quick Shell (Hybrid Mode):
   !cd <dir>             - Change working directory
   ?<question>           - Ask AI directly (not saved to history)
 
+Reading Workflow:
+  M-x chat-quote-region       - Quote active region into chat
+  M-x chat-quote-defun        - Quote defun at point into chat
+  M-x chat-quote-near-point   - Quote nearby context into chat
+  M-x chat-quote-current-file - Quote current file into chat
+  M-x chat-ask-region         - Ask about active region
+  M-x chat-ask-defun          - Ask about defun at point
+  M-x chat-ask-near-point     - Ask about nearby context
+  M-x chat-ask-current-file   - Ask about current file
+
 Wiki Commands:
   /wiki-ingest <path>   - Ingest source document
   /wiki-query <question> - Query wiki knowledge
@@ -271,11 +281,23 @@ SESSION is a chat-session struct."
 (defvar chat--last-session-id nil
   "Most recently opened chat session id.")
 
+(defun chat-show-help ()
+  "Display the chat help buffer."
+  (interactive)
+  (with-current-buffer (get-buffer-create "*Chat Help*")
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert chat-commands-help)
+      (goto-char (point-min))
+      (view-mode 1))
+    (pop-to-buffer (current-buffer))))
+
 (defvar chat-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") 'chat-ui-send-message)
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
+    (define-key map (kbd "C-c C-h") 'chat-show-help)
     (define-key map (kbd "C-g") 'chat-ui-cancel-response)
     (define-key map (kbd "C-c C-a") 'chat-toggle-auto-approve-session)
     (define-key map (kbd "C-c C-s") 'chat-show-current-request-status)

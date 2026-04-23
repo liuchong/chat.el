@@ -140,6 +140,7 @@ Layout rules:
 | `M-x chat` | Open or resume the current chat buffer |
 | `M-x chat-new-session` | Create a new session |
 | `M-x chat-list-sessions` | Switch to an existing session |
+| `M-x chat-show-help` | Open the native chat help buffer |
 | `M-x chat-view-raw-message` | Inspect the last raw API exchange |
 | `M-x chat-view-last-raw-exchange` | Open the latest assistant request and response |
 | `M-x chat-ui-cancel-response` | Cancel the active response |
@@ -320,8 +321,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 240 regression tests discovered
-- 240 passing
+- 244 regression tests discovered
+- 244 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

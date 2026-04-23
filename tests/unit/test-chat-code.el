@@ -334,6 +334,28 @@
              (should (string-match-p "defun alpha" sent-content)))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-code-quote-current-file-propagates-oversized-file-error ()
+  "Test quoting the current file respects the shared size guard."
+  (chat-test-with-temp-dir
+   (let ((chat-reading-current-file-max-lines 1)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\nline2\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-code-quote-current-file) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-prepare-reading-session-reuses-current-session ()
+  "Test reading workflow commands reuse the active code session."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Reuse Session" temp-dir)))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (should (eq (chat-code--prepare-reading-session) session))))))
+
 (ert-deftest chat-code-mode-map-includes-reading-and-session-shortcuts ()
   "Test code mode keymap exposes reading and session workflow shortcuts."
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-e")) 'chat-code-edit-last-user-message))

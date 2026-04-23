@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0018 reading workflow coverage stage is complete.
+Phase 0019 reading workflow discoverability stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while increasing regression coverage around the shared reading workflow and keeping the plain chat and code mode entry points aligned.
+Keep `chat.el` on the new `.agents/` workflow while improving discoverability for the shared reading workflow and keeping the plain chat and code mode entry points aligned.
 
 ## Active Modules
 
