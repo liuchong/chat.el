@@ -303,9 +303,21 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 183 tests discovered
-- 181 passing
-- 2 skipped provider integration tests
+- 205 regression tests discovered
+- 205 passing
+- 0 skipped in the canonical batch suite
+
+Run provider integration tests separately:
+
+```bash
+emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit
+```
+
+Integration test notes:
+
+- requires real provider credentials
+- currently includes the Kimi online request checks
+- should be run explicitly instead of being mixed into the canonical regression suite
 
 ## Documentation Map
 

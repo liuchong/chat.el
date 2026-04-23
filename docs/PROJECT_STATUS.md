@@ -63,10 +63,11 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 207 tests discovered
+- 205 regression tests discovered
 - 205 passing
-- 2 skipped provider integration tests
+- 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
+- optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
 
 ### Stability Highlights
 
@@ -106,7 +107,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - streaming currently falls back to the async request path in `chat-llm-stream`
 - default providers still depend on external API availability and local keys
 - some provider default remote model names are best effort defaults and may need local adjustment as vendor catalogs change
-- provider integration tests are intentionally skipped in offline or unconfigured environments
+- provider integration tests now live outside the canonical batch suite and should be run explicitly with credentials and network access
 - code mode refactor, git helper, indexing extras, and performance helpers should still be treated as experimental
 
 ## Recommended Next Work

@@ -73,36 +73,5 @@
          (parsed (chat-llm-parse-openai-compatible-stream chunk)))
     (should (string= parsed " chunk"))))
 
-;; ------------------------------------------------------------------
-;; End-to-end Tests
-;; ------------------------------------------------------------------
-
-(ert-deftest chat-llm-kimi-simple-request ()
-  "Test making a simple request to Kimi API.
-Skipped in batch mode to avoid hanging tests."
-  (skip-unless (not noninteractive))
-  (skip-unless (test-chat-kimi--has-api-key))
-  (let* ((messages (list (make-chat-message
-                          :role :user
-                          :content "Say hello in one word")))
-         (response (chat-llm-request 'kimi messages '(:max-tokens 10))))
-    (should (stringp response))
-    (should (> (length response) 0))))
-
-(ert-deftest chat-llm-kimi-streaming-request ()
-  "Test streaming request to Kimi API.
-Skipped in batch mode to avoid hanging tests."
-  (skip-unless (not noninteractive))
-  (skip-unless (test-chat-kimi--has-api-key))
-  (let* ((messages (list (make-chat-message
-                          :role :user
-                          :content "Count 1 2 3")))
-         (chunks '()))
-    (chat-llm-stream 'kimi messages
-                     (lambda (chunk)
-                       (when chunk
-                         (push chunk chunks))))
-    (should (> (length chunks) 0))))
-
 (provide 'test-chat-llm-kimi)
 ;;; test-chat-llm-kimi.el ends here

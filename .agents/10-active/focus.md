@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Ship session-history workflows on top of the new `.agents/` baseline without letting resend and regenerate features diverge between chat mode and code mode.
+Keep test boundaries explicit so the canonical batch runner stays deterministic while real provider checks remain available through separate integration entrypoints.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Ship session-history workflows on top of the new `.agents/` baseline without let
 
 ## Immediate Next Step
 
-Build the next session UX stage on the new replayable history baseline, with the next likely target being discoverable session commands or a richer session browser rather than ad hoc buffer mutations.
+Build the next UX or workflow stage on top of a clean regression baseline, with likely next targets being better discoverability for session commands or broader explicit integration coverage.

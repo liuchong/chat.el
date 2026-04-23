@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0011 session editing and regeneration is complete.
+Phase 0012 integration test separation is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while turning session history into a safe, replayable model for edit-and-resend and regenerate flows.
+Keep `chat.el` on the new `.agents/` workflow while keeping the canonical batch suite strictly regression-safe and moving real provider checks into explicit integration entrypoints.
 
 ## Active Modules
 
