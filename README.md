@@ -257,6 +257,7 @@ These commands exist in the repository but are still being repaired and validate
 - **Structured request panel** - `C-c C-p` opens a dedicated panel for phases, approvals, tool calls, whitelist changes, and stalled-request context
 - **Fast approval shortcuts** - pending approval prompts accept `C-c C-a` once, `C-c C-s` session, `C-c C-t` tool, `C-c C-c` command, and `C-c C-d` deny
 - **Native prompt guidance** - approval prompts and pending-approval messages teach the same shortcut flow without inserting extra transcript noise
+- **Persistent approval status** - pending approvals also surface in code mode `header-line` / mode line and in the chat buffer status line
 - **Detailed request diagnostics** - `C-c C-s` opens the full current-request status buffer
 - **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root
 - **Project rules in context** - `AGENTS.md` is injected into code mode context when present

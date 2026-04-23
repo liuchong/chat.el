@@ -328,7 +328,7 @@
                       "C-c C-d deny"))))))
       (should-not
        (chat-ui--maybe-announce-approval-shortcuts
-        '((:type approval-pending
+       '((:type approval-pending
            :index 1
            :tool "shell_execute"
            :actions ("C-c C-a once"
@@ -336,6 +336,28 @@
                      "C-c C-t tool"
                      "C-c C-c command"
                      "C-c C-d deny"))))))))
+
+(ert-deftest chat-ui-status-line-shows-pending-approval ()
+  "Test chat UI status line reflects pending approvals."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Status Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (setq-local chat-ui--request-tool-events
+                   '((:type approval-pending
+                      :index 1
+                      :tool "shell_execute"
+                      :actions ("C-c C-a once"
+                                "C-c C-s session"
+                                "C-c C-t tool"
+                                "C-c C-c command"
+                                "C-c C-d deny"))))
+       (should (string-match-p "Approval Pending"
+                               (chat-ui--status-line session)))
+       (should (string-match-p "shell_execute"
+                               (chat-ui--status-line session)))))))
 
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

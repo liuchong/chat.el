@@ -230,6 +230,13 @@ Inherits from chat-session with additional code-specific fields."
 (defvar-local chat-code--last-approval-hint nil
   "Last approval hint signature shown in this buffer.")
 
+(defun chat-code--pending-approval-event ()
+  "Return the current pending approval event when present."
+  (seq-find
+   (lambda (event)
+     (eq (plist-get event :type) 'approval-pending))
+   chat-code--request-tool-events))
+
 (defvar chat-code--preview-buffer-name "*chat-preview*"
   "Name of the preview buffer.")
 
@@ -407,19 +414,29 @@ Inherits from chat-session with additional code-specific fields."
   "Return the dynamic header line for the current code buffer."
   (let ((label (chat-code--status-label chat-code--status-state))
         (detail (or chat-code--status-detail "Ready"))
-        (model (chat-code--model-label)))
+        (model (chat-code--model-label))
+        (pending (chat-code--pending-approval-event)))
     (concat
      (propertize " Code Mode " 'face 'mode-line-emphasis)
      (propertize (format "Status: %s" label)
                  'face (chat-code--status-face chat-code--status-state))
+     (when pending
+       (propertize
+        (format " | Approval Pending: %s" (plist-get pending :tool))
+        'face 'warning))
      (propertize (format " | Model: %s | %s" model detail) 'face 'shadow))))
 
 (defun chat-code--mode-line-status ()
   "Return a concise mode line status string."
   (let ((label (chat-code--status-label chat-code--status-state))
         (detail (or chat-code--status-detail "Ready"))
-        (model (chat-code--model-label)))
-    (format " [%s|%s|%s]" model label detail)))
+        (model (chat-code--model-label))
+        (pending (chat-code--pending-approval-event)))
+    (format " [%s|%s%s|%s]"
+            model
+            label
+            (if pending "|APPROVAL" "")
+            detail)))
 
 (defun chat-code--mode-line-format ()
   "Return the explicit mode line format for code mode."

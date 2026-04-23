@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0008 approval shortcut discoverability is complete.
+Phase 0009 approval status surfacing is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while making execution and approval flow discoverable enough for real coding sessions.
+Keep `chat.el` on the new `.agents/` workflow while making execution and approval state continuously visible in native Emacs surfaces.
 
 ## Active Modules
 

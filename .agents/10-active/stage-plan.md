@@ -4,36 +4,36 @@
 - Attention: active
 - Status: active
 - Scope: planning
-- Tags: stage, plan, approval-discoverability
+- Tags: stage, plan, approval-status
 
 ## Goal
 
-Keep the shared request panel as the visible approval surface while making approval shortcuts discoverable in native Emacs prompts and immediate status feedback.
+Keep pending approvals continuously visible through native Emacs status surfaces instead of relying only on prompt text or one-shot echo-area hints.
 
 ## Completed
 
-- Added prompt-level shortcut hints in `chat-approval.el`
-- Added a shared `chat-approval-pending-message` helper so approval guidance stays consistent
-- Updated chat mode and code mode to announce pending approval shortcuts through native `message` feedback the first time a pending approval appears
-- Kept the request panel and prompt guidance aligned without adding transcript noise or custom widget UI
-- Added regression tests for prompt hints and native approval hint generation in chat mode and code mode
-- Updated stage records and human-facing docs for the discoverability pass
+- Added pending approval extraction helpers for chat mode and code mode
+- Updated code mode `header-line` and mode line to show a persistent approval marker when a risky tool is waiting for approval
+- Updated chat UI top status line to show `Approval Pending` and the tool name when approval is waiting
+- Kept the implementation fully Emacs-native without inserting extra transcript content
+- Added regression tests for chat status-line approval rendering and code mode header/mode line approval rendering
+- Updated stage records and human-facing docs for the status-surfacing pass
 
 ## Tests
 
 - `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- Result: `196` tests run, `194` passed, `2` skipped, `0` failed
+- Result: `198` tests run, `196` passed, `2` skipped, `0` failed
 
 ## Remaining
 
-- Reduce the remaining plain-text minibuffer status flow into a more coherent persistent execution surface
-- Decide whether the next step should be panel-local button interaction or stronger status-line level affordances that stay fully Emacs-native
+- Decide whether pending approvals need even stronger modeline/header emphasis or whether the current balance is enough
+- Continue improving visibility without degrading signal-to-noise in normal editing
 
 ## Risks
 
 - Chat mode and code mode still maintain separate UI state around the same diagnostics lifecycle
-- Approval is now easier to discover, but still fundamentally depends on minibuffer interaction staying stable
+- More persistent approval status can become noisy if too many transient states are promoted into status surfaces
 
 ## Next Entry
 
-Record the next execution-UX stage in `.agents/30-records/` and distill durable native-Emacs approval guidance patterns into `20-reference/knowledge/`.
+Record the next execution-UX stage in `.agents/30-records/` and distill durable native-Emacs status-surface patterns into `20-reference/knowledge/`.

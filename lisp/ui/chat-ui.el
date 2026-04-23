@@ -52,6 +52,22 @@
 (defvar-local chat-ui--last-approval-hint nil
   "Last approval hint signature shown in this buffer.")
 
+(defun chat-ui--pending-approval-event ()
+  "Return the current pending approval event when present."
+  (seq-find
+   (lambda (event)
+     (eq (plist-get event :type) 'approval-pending))
+   chat-ui--request-tool-events))
+
+(defun chat-ui--status-line (session)
+  "Return top status line text for SESSION."
+  (let ((model (chat-session-model-id session)))
+    (if-let ((pending (chat-ui--pending-approval-event)))
+        (format "Model: %s | Approval Pending: %s"
+                model
+                (plist-get pending :tool))
+      (format "Model: %s" model))))
+
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
   (or chat-ui--active-request-handle
@@ -180,7 +196,7 @@
     (erase-buffer)
     (insert (propertize (format "═══ %s ═══\n" (chat-session-name session))
                        'face 'header-line))
-    (insert (propertize (format "Model: %s\n\n" (chat-session-model-id session))
+    (insert (propertize (format "%s\n\n" (chat-ui--status-line session))
                        'face 'shadow))
     (dolist (msg (chat-session-messages session))
       (chat-ui--insert-message msg))
@@ -338,6 +354,12 @@
          tool-events))
       (save-excursion
         (let ((inhibit-read-only t))
+          (goto-char (point-min))
+          (forward-line 1)
+          (delete-region (line-beginning-position) (line-end-position))
+          (insert (propertize
+                   (chat-ui--status-line chat--current-session)
+                   'face 'shadow))
           (delete-region content-start chat-ui--messages-end)
           (goto-char content-start)
           (unless (string-empty-p content)

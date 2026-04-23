@@ -23,6 +23,7 @@ Users need actionable visibility when a request appears to stall, but transport 
 - Carry approval context through tool events so the request panel can show pending choices, command-specific approvals, and whitelist mutations in one execution surface
 - Keep approval execution synchronous, but expose fast approval commands and minibuffer bindings so the request panel and the actual decision path stay aligned
 - Prefer native prompt and minibuffer messaging to teach approval shortcuts instead of inserting extra transcript content or building a custom widget layer
+- Use persistent native status surfaces such as `header-line`, mode line, and lightweight status headers when pending approvals should remain visible beyond a one-shot echo-area message
 
 ## Regression Guard
 

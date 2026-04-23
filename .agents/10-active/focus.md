@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Ship user-visible execution UX stages on top of the new `.agents/` workflow without falling back to fragmented, opaque, or documentation-only approval handling.
+Ship user-visible execution UX stages on top of the new `.agents/` workflow without falling back to fragmented, opaque, or transient-only approval handling.
 
 ## Not Doing Now
 
@@ -18,7 +18,8 @@ Ship user-visible execution UX stages on top of the new `.agents/` workflow with
 - No attempt to replace Emacs-native approval input with a bespoke widget layer yet
 - No async rewrite of the synchronous approval pipeline
 - No transcript-level approval blocks that would pollute the main conversation body
+- No widget-heavy panel controls that would fight normal Emacs buffer usage
 
 ## Immediate Next Step
 
-Build the next UX stage on the new diagnostics baseline, using native Emacs prompts and status feedback to teach approval actions before users even open the panel.
+Build the next UX stage on the new diagnostics baseline, using native Emacs status surfaces so pending approvals remain visible after echo-area hints disappear.

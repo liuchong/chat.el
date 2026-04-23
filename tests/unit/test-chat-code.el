@@ -448,7 +448,7 @@
                       "C-c C-d deny"))))))
       (should-not
        (chat-code--maybe-announce-approval-shortcuts
-        '((:type approval-pending
+       '((:type approval-pending
            :index 1
            :tool "shell_execute"
            :actions ("C-c C-a once"
@@ -456,6 +456,27 @@
                      "C-c C-t tool"
                      "C-c C-c command"
                      "C-c C-d deny"))))))))
+
+(ert-deftest chat-code-header-and-mode-line-show-pending-approval ()
+  "Test code mode header and mode line reflect pending approvals."
+  (with-temp-buffer
+    (chat-code-mode)
+    (setq-local chat-code--status-state 'running)
+    (setq-local chat-code--status-detail "Waiting for model")
+    (setq-local chat-code--request-tool-events
+                '((:type approval-pending
+                   :index 1
+                   :tool "shell_execute"
+                   :actions ("C-c C-a once"
+                             "C-c C-s session"
+                             "C-c C-t tool"
+                             "C-c C-c command"
+                             "C-c C-d deny"))))
+    (let ((header (chat-code--header-line))
+          (mode (chat-code--mode-line-status)))
+      (should (string-match-p "Approval Pending" header))
+      (should (string-match-p "shell_execute" header))
+      (should (string-match-p "APPROVAL" mode)))))
 
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
   "Test code mode tool loop default is production sized."
