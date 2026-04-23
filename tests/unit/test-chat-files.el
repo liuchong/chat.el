@@ -73,6 +73,27 @@
        (should (string= (plist-get result :content) "Hello World"))
        (should (equal (plist-get result :path) (file-truename test-file)))))))
 
+(ert-deftest chat-files-read-respects-offset-and-limit ()
+  "Test partial reads apply both OFFSET and LIMIT."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "test.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "0123456789"))
+     (let ((result (chat-files-read test-file 2 4)))
+       (should (string= (plist-get result :content) "2345"))
+       (should (= (plist-get result :size) 4))))))
+
+(ert-deftest chat-files-read-rejects-oversized-file ()
+  "Test reads fail when the file exceeds the configured size limit."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "large.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-files-max-size 4))
+     (with-temp-file test-file
+       (insert "12345"))
+     (should-error (chat-files-read test-file)))))
+
 (ert-deftest chat-files-read-lines-specific-range ()
   "Test reading specific line range."
   (chat-test-with-temp-dir
@@ -96,6 +117,16 @@
        (should (plist-get result :exists))
        (should (eq (plist-get result :type) 'file))))))
 
+(ert-deftest chat-files-exists-p-checks-directory ()
+  "Test existence check reports directory type."
+  (chat-test-with-temp-dir
+   (let ((test-dir (expand-file-name "exists-dir" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (make-directory test-dir)
+     (let ((result (chat-files-exists-p test-dir)))
+       (should (plist-get result :exists))
+       (should (eq (plist-get result :type) 'directory))))))
+
 (ert-deftest chat-files-list-directory ()
   "Test listing directory contents."
   (chat-test-with-temp-dir
@@ -105,6 +136,16 @@
      (make-directory (expand-file-name "subdir" temp-dir))
      (let ((result (chat-files-list temp-dir)))
        (should (= (length result) 3))))))
+
+(ert-deftest chat-files-list-directory-applies-pattern-filter ()
+  "Test non recursive listing filters by filename pattern."
+  (chat-test-with-temp-dir
+   (let ((chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file (expand-file-name "keep.txt" temp-dir) nil)
+     (with-temp-file (expand-file-name "skip.md" temp-dir) nil)
+     (let ((result (chat-files-list temp-dir "\\.txt$")))
+       (should (= (length result) 1))
+       (should (string= (plist-get (car result) :name) "keep.txt"))))))
 
 (ert-deftest chat-files-list-recursive-keeps-plist-shape ()
   "Test recursive listing returns plist entries like non recursive mode."
@@ -137,6 +178,26 @@
                         (buffer-string))
                       "content")))))
 
+(ert-deftest chat-files-move-rejects-existing-destination-without-overwrite ()
+  "Test move fails if destination exists and overwrite is nil."
+  (chat-test-with-temp-dir
+   (let* ((source (expand-file-name "old.txt" temp-dir))
+          (dest (expand-file-name "new.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file source
+       (insert "source"))
+     (with-temp-file dest
+       (insert "dest"))
+     (should-error (chat-files-move source dest))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents source)
+                        (buffer-string))
+                      "source"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents dest)
+                        (buffer-string))
+                      "dest")))))
+
 (ert-deftest chat-files-copy-duplicates-file ()
   "Test copying a file."
   (chat-test-with-temp-dir
@@ -153,6 +214,26 @@
                         (buffer-string))
                       "original")))))
 
+(ert-deftest chat-files-copy-rejects-existing-destination-without-overwrite ()
+  "Test copy fails if destination exists and overwrite is nil."
+  (chat-test-with-temp-dir
+   (let* ((source (expand-file-name "source.txt" temp-dir))
+          (dest (expand-file-name "dest.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file source
+       (insert "source"))
+     (with-temp-file dest
+       (insert "dest"))
+     (should-error (chat-files-copy source dest))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents source)
+                        (buffer-string))
+                      "source"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents dest)
+                        (buffer-string))
+                      "dest")))))
+
 (ert-deftest chat-files-delete-removes-file ()
   "Test deleting a file."
   (chat-test-with-temp-dir
@@ -163,12 +244,32 @@
      (chat-files-delete test-file)
      (should-not (file-exists-p test-file)))))
 
+(ert-deftest chat-files-delete-removes-directory-recursively ()
+  "Test deleting a directory tree with RECURSIVE."
+  (chat-test-with-temp-dir
+   (let* ((test-dir (expand-file-name "tree" temp-dir))
+          (nested-file (expand-file-name "tree/sub/file.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (make-directory (file-name-directory nested-file) t)
+     (with-temp-file nested-file
+       (insert "content"))
+     (chat-files-delete test-dir t)
+     (should-not (file-exists-p test-dir)))))
+
 (ert-deftest chat-files-mkdir-creates-directory ()
   "Test creating a directory."
   (chat-test-with-temp-dir
    (let* ((new-dir (expand-file-name "newdir" temp-dir))
           (chat-files-allowed-directories (list temp-dir)))
      (chat-files-mkdir new-dir)
+     (should (file-directory-p new-dir)))))
+
+(ert-deftest chat-files-mkdir-creates-parent-directories ()
+  "Test creating nested directories when PARENTS is non nil."
+  (chat-test-with-temp-dir
+   (let* ((new-dir (expand-file-name "a/b/c" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (chat-files-mkdir new-dir t)
      (should (file-directory-p new-dir)))))
 
 ;; ------------------------------------------------------------------

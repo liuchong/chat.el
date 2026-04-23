@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0027 open file position reporting stage is complete.
+Phase 0028 file tool semantics coverage stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, open-file landing accuracy, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, file-tool semantic coverage, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 
