@@ -210,5 +210,16 @@
                      "C-c C-t tool"
                      "C-c C-c command"
                      "C-c C-d deny")))))
+
+(ert-deftest chat-approval-prompt-includes-shortcut-hints ()
+  "Test approval prompts teach the native shortcut flow."
+  (let ((prompt (chat-approval--prompt
+                 'shell_execute
+                 '(("command" . "pwd")))))
+    (should (string-match-p "C-c C-a once" prompt))
+    (should (string-match-p "C-c C-s session" prompt))
+    (should (string-match-p "C-c C-t tool" prompt))
+    (should (string-match-p "C-c C-c command" prompt))
+    (should (string-match-p "C-c C-d deny" prompt))))
 (provide 'test-chat-approval)
 ;;; test-chat-approval.el ends here

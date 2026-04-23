@@ -428,6 +428,35 @@
         (with-current-buffer shown-buffer
           (should (search-forward "Request: req-code" nil t)))))))
 
+(ert-deftest chat-code-render-response-state-announces-approval-shortcuts ()
+  "Test code mode surfaces approval shortcuts in minibuffer feedback."
+  (with-temp-buffer
+    (chat-code-mode)
+    (let ((chat-code--messages-end (point-max-marker))
+          (chat-code--input-marker (point-max-marker)))
+      (should
+       (string-match-p
+        "Approval pending"
+        (chat-code--maybe-announce-approval-shortcuts
+         '((:type approval-pending
+            :index 1
+            :tool "shell_execute"
+            :actions ("C-c C-a once"
+                      "C-c C-s session"
+                      "C-c C-t tool"
+                      "C-c C-c command"
+                      "C-c C-d deny"))))))
+      (should-not
+       (chat-code--maybe-announce-approval-shortcuts
+        '((:type approval-pending
+           :index 1
+           :tool "shell_execute"
+           :actions ("C-c C-a once"
+                     "C-c C-s session"
+                     "C-c C-t tool"
+                     "C-c C-c command"
+                     "C-c C-d deny"))))))))
+
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
   "Test code mode tool loop default is production sized."
   (should (= chat-code-tool-loop-max-steps 100)))

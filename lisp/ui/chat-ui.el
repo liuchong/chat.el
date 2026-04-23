@@ -49,6 +49,9 @@
 (defvar-local chat-ui--request-tool-events nil
   "Current structured tool events for the request panel.")
 
+(defvar-local chat-ui--last-approval-hint nil
+  "Last approval hint signature shown in this buffer.")
+
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
   (or chat-ui--active-request-handle
@@ -83,7 +86,23 @@
     (chat-ui--clear-request-hint-timer)
     (setq chat-ui--request-hint-shown nil))
   (setq chat-ui--request-tool-events nil)
+  (setq chat-ui--last-approval-hint nil)
   (setq chat-ui--current-request-id nil))
+
+(defun chat-ui--maybe-announce-approval-shortcuts (tool-events)
+  "Show one native approval hint for TOOL-EVENTS when needed."
+  (when-let* ((pending (seq-find
+                        (lambda (event)
+                          (eq (plist-get event :type) 'approval-pending))
+                        tool-events))
+              (tool (plist-get pending :tool))
+              (actions (plist-get pending :actions)))
+    (let ((signature (list tool actions (plist-get pending :command))))
+      (unless (equal signature chat-ui--last-approval-hint)
+        (setq chat-ui--last-approval-hint signature)
+        (let ((text (chat-approval-pending-message tool actions)))
+          (message "%s" text)
+          text)))))
 
 (defun chat-ui--maybe-show-request-hint (buffer)
   "Show one stalled request hint in BUFFER if needed."
@@ -155,6 +174,7 @@
   (setq chat-ui--current-request-id nil)
   (setq chat-ui--request-hint-shown nil)
   (setq chat-ui--request-tool-events nil)
+  (setq chat-ui--last-approval-hint nil)
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
@@ -307,6 +327,7 @@
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (setq chat-ui--request-tool-events tool-events)
+      (chat-ui--maybe-announce-approval-shortcuts tool-events)
       (when (or (and chat-request-panel-auto-show
                      chat-ui--current-request-id)
                 (get-buffer-window

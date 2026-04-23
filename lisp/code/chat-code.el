@@ -227,6 +227,9 @@ Inherits from chat-session with additional code-specific fields."
 (defvar-local chat-code--request-tool-events nil
   "Current structured tool events for the request panel.")
 
+(defvar-local chat-code--last-approval-hint nil
+  "Last approval hint signature shown in this buffer.")
+
 (defvar chat-code--preview-buffer-name "*chat-preview*"
   "Name of the preview buffer.")
 
@@ -278,9 +281,25 @@ Inherits from chat-session with additional code-specific fields."
        :process chat-code--active-stream-process
        :summary summary))
     (chat-code--clear-request-hint-timer)
-    (setq chat-code--request-hint-shown nil))
+  (setq chat-code--request-hint-shown nil))
   (setq chat-code--request-tool-events nil)
+  (setq chat-code--last-approval-hint nil)
   (setq chat-code--current-request-id nil))
+
+(defun chat-code--maybe-announce-approval-shortcuts (tool-events)
+  "Show one native approval hint for TOOL-EVENTS when needed."
+  (when-let* ((pending (seq-find
+                        (lambda (event)
+                          (eq (plist-get event :type) 'approval-pending))
+                        tool-events))
+              (tool (plist-get pending :tool))
+              (actions (plist-get pending :actions)))
+    (let ((signature (list tool actions (plist-get pending :command))))
+      (unless (equal signature chat-code--last-approval-hint)
+        (setq chat-code--last-approval-hint signature)
+        (let ((text (chat-approval-pending-message tool actions)))
+          (message "%s" text)
+          text))))) 
 
 (defun chat-code--maybe-show-request-hint (buffer)
   "Show one stalled request hint in BUFFER if needed."
@@ -328,8 +347,9 @@ Inherits from chat-session with additional code-specific fields."
      'request-created
      :transport transport
      :summary (format "Preparing %s request" transport))
-    (setq chat-code--request-tool-events nil)
-    (when chat-request-panel-auto-show
+  (setq chat-code--request-tool-events nil)
+  (setq chat-code--last-approval-hint nil)
+  (when chat-request-panel-auto-show
       (chat-request-panel-open (current-buffer) request-id nil))
     (chat-code--start-request-hint-timer (current-buffer))
     request-id))
@@ -751,6 +771,7 @@ Returns either the block body string or a list of (LANG BODY)."
                                                       tool-summary)
   "Render CONTENT, TOOL-EVENTS, TOOL-LOOP-LIMIT-REACHED, and TOOL-SUMMARY."
   (setq chat-code--request-tool-events tool-events)
+  (chat-code--maybe-announce-approval-shortcuts tool-events)
   (when (or (and chat-request-panel-auto-show
                  chat-code--current-request-id)
             (get-buffer-window
@@ -1133,6 +1154,7 @@ Optional PROJECT-ROOT overrides the detected project root."
   (setq-local chat-code--current-request-id nil)
   (setq-local chat-code--request-hint-shown nil)
   (setq-local chat-code--request-tool-events nil)
+  (setq-local chat-code--last-approval-hint nil)
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)

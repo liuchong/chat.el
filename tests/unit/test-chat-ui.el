@@ -310,5 +310,32 @@
         (with-current-buffer shown-buffer
           (should (search-forward "Request: req-ui" nil t)))))))
 
+(ert-deftest chat-ui-render-response-state-announces-approval-shortcuts ()
+  "Test chat UI surfaces approval shortcuts in minibuffer feedback."
+  (with-temp-buffer
+    (let ((chat-ui--messages-end (point-max-marker)))
+      (should
+       (string-match-p
+        "Approval pending"
+        (chat-ui--maybe-announce-approval-shortcuts
+         '((:type approval-pending
+            :index 1
+            :tool "shell_execute"
+            :actions ("C-c C-a once"
+                      "C-c C-s session"
+                      "C-c C-t tool"
+                      "C-c C-c command"
+                      "C-c C-d deny"))))))
+      (should-not
+       (chat-ui--maybe-announce-approval-shortcuts
+        '((:type approval-pending
+           :index 1
+           :tool "shell_execute"
+           :actions ("C-c C-a once"
+                     "C-c C-s session"
+                     "C-c C-t tool"
+                     "C-c C-c command"
+                     "C-c C-d deny"))))))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

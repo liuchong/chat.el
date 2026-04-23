@@ -82,6 +82,19 @@ Note: shell_execute is excluded by default for security."
 (defun chat-approval-tool-required-p (tool-id)
   "Return non-nil when TOOL-ID requires approval."
   (memq tool-id chat-approval-required-tools))
+
+(defun chat-approval-shortcut-summary (tool-id)
+  "Return a human-readable shortcut summary for TOOL-ID."
+  (mapconcat #'identity
+             (chat-approval--action-hints tool-id)
+             ", "))
+
+(defun chat-approval-pending-message (tool actions)
+  "Return a native approval hint message for TOOL and ACTIONS."
+  (format "Approval pending for %s. Use %s."
+          tool
+          (mapconcat #'identity actions ", ")))
+
 (defun chat-approval--summarize-value (value)
   "Return a short string summary for VALUE."
   (let ((printed (if (stringp value)
@@ -105,10 +118,11 @@ Note: shell_execute is excluded by default for security."
       'medium))
 (defun chat-approval--prompt (tool-id arguments)
   "Build an approval prompt for TOOL-ID with ARGUMENTS."
-  (format "Approve %s risk tool %s with %s? "
+  (format "Approve %s risk tool %s with %s? Shortcuts: %s. "
           (chat-approval--risk-level tool-id)
           tool-id
-          (chat-approval--summarize-arguments arguments)))
+          (chat-approval--summarize-arguments arguments)
+          (chat-approval-shortcut-summary tool-id)))
 
 (defun chat-approval--allow-noninteractive-p ()
   "Return non nil when the current noninteractive policy allows execution."

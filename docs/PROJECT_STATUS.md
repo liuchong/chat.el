@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 193 tests discovered
-- 191 passing
+- 196 tests discovered
+- 194 passing
 - 2 skipped provider integration tests
 - 0 known failures in the current baseline
 
@@ -92,6 +92,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - request execution state now has a dedicated request panel so tool steps no longer clutter assistant transcript output
 - request panel now includes approval choices, command-level approval context, and shell whitelist mutations
 - approval prompts now support direct shortcut decisions that match the request panel action hints
+- approval shortcut guidance now also appears in native prompt text and first-occurrence minibuffer feedback in chat mode and code mode
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 
 ## Known Boundaries
