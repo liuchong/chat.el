@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 286 regression tests discovered
-- 286 passing
+- 289 regression tests discovered
+- 289 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -114,6 +114,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - whitespace-only and empty-context guardrails continue to tighten at the shared reading helper layer, with empty-file capture rejection now covered explicitly
 - `open_file` now reports the actual Emacs landing line and column when requested positions run past EOF or past the end of a line
 - basic `chat-files` operations now have denser regression coverage for partial reads, size guards, overwrite protection, recursive deletion, nested mkdir, and directory type reporting
+- `files_read_lines` now normalizes invalid start lines and keeps empty line ranges coherent when callers ask beyond EOF
 
 ## Known Boundaries
 

@@ -141,10 +141,11 @@ NUM-LINES is how many lines to read (default nil = to end).
 
 Returns a plist with :lines (list of strings), :start, :end, :total-lines."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (start (or start-line 1)))
+         (requested-start (or start-line 1)))
     (with-temp-buffer
       (insert-file-contents safe-path)
       (let* ((total (count-lines (point-min) (point-max)))
+             (start (max 1 (min requested-start (1+ total))))
              (end (if num-lines
                       (min (+ start num-lines -1) total)
                     total))

@@ -107,6 +107,42 @@
        (should (= (length (plist-get result :lines)) 3))
        (should (string= (car (plist-get result :lines)) "line2"))))))
 
+(ert-deftest chat-files-read-lines-clamps-nonpositive-start-line ()
+  "Test read-lines normalizes nonpositive start lines to the first line."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "test.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "line1\nline2\nline3\n"))
+     (let ((result (chat-files-read-lines test-file 0 2)))
+       (should (= (plist-get result :start) 1))
+       (should (= (plist-get result :end) 2))
+       (should (equal (plist-get result :lines) '("line1" "line2")))))))
+
+(ert-deftest chat-files-read-lines-beyond-eof-returns-coherent-empty-range ()
+  "Test read-lines returns an empty but coherent range beyond EOF."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "test.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "line1\nline2\nline3\n"))
+     (let ((result (chat-files-read-lines test-file 10 2)))
+       (should (= (plist-get result :start) 4))
+       (should (= (plist-get result :end) 3))
+       (should (equal (plist-get result :lines) nil))))))
+
+(ert-deftest chat-files-read-lines-zero-length-request-returns-empty-range ()
+  "Test read-lines keeps empty requests coherent."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "test.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "line1\nline2\nline3\n"))
+     (let ((result (chat-files-read-lines test-file 2 0)))
+       (should (= (plist-get result :start) 2))
+       (should (= (plist-get result :end) 1))
+       (should (equal (plist-get result :lines) nil))))))
+
 (ert-deftest chat-files-exists-p-checks-file ()
   "Test file existence check."
   (chat-test-with-temp-dir
