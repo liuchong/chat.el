@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'test-helper)
 (require 'chat-stream)
+(require 'chat-request-diagnostics)
 
 (ert-deftest chat-stream-parse-sse-line-extracts-data ()
   "Test parsing SSE format line."
@@ -106,6 +107,39 @@
                            (and (stringp item)
                                 (string-match-p "secret-token" item)))
                          redacted))))
+
+(ert-deftest chat-stream-handle-output-records-stream-diagnostics ()
+  "Test stream output updates diagnostics chunk counters."
+  (let ((buffer (generate-new-buffer " *chat-stream-diag*"))
+        (chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        snapshot)
+    (unwind-protect
+        (let ((proc (make-pipe-process :name "chat-stream-diag"
+                                       :buffer buffer
+                                       :noquery t)))
+          (puthash "req-stream"
+                   (make-chat-request-trace
+                    :id "req-stream"
+                    :mode 'chat
+                    :provider 'kimi
+                    :model 'kimi
+                    :phase 'streaming
+                    :started-at (current-time)
+                    :updated-at (current-time))
+                   chat-request-diagnostics--traces)
+          (process-put proc 'chat-request-id "req-stream")
+          (with-current-buffer buffer
+            (setq-local chat-stream--partial-line ""))
+          (chat-stream--handle-output
+           proc
+           "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n"
+           'kimi
+           (lambda (_chunk)))
+          (setq snapshot (chat-request-diagnostics-snapshot "req-stream"))
+          (should (= (plist-get snapshot :stream-chunk-count) 1))
+          (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

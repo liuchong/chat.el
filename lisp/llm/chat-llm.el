@@ -21,6 +21,7 @@
 (require 'url)
 (require 'subr-x)
 (require 'chat-log)
+(require 'chat-request-diagnostics)
 
 (defgroup chat-llm nil
   "LLM provider abstraction for chat.el."
@@ -39,6 +40,9 @@ When non-nil, only the listed provider symbols are available."
 
 (defvar-local chat-llm--callback-finished nil
   "Whether the async request buffer has already completed.")
+
+(defvar-local chat-llm--request-id nil
+  "Diagnostics request id for the current async request buffer.")
 
 ;; ------------------------------------------------------------------
 ;; Provider Registry
@@ -503,29 +507,88 @@ Returns a request handle."
          (request-body (chat-llm--build-request provider messages options))
          (headers (chat-llm--make-headers provider))
          (timeout (or (plist-get options :timeout) 60))
-         (raw-request (json-encode request-body)))
+         (raw-request (json-encode request-body))
+         (request-id (plist-get options :request-id))
+         (url (chat-llm--request-url provider options))
+         handle)
     (chat-log "[LLM] Async request body: %s" raw-request)
-    (chat-llm--post-async-dispatch
-     config
-     (chat-llm--request-url provider options)
-     headers
-     raw-request
-     (lambda (raw-response status-code)
-       (condition-case err
-           (funcall success-callback
-                    (chat-llm--decode-response config raw-request raw-response status-code))
-         (error
-          (funcall error-callback (error-message-string err)))))
-     (lambda (err)
-       (funcall error-callback
-                (if (stringp err)
-                    err
-                  (error-message-string err))))
-     timeout)))
+    (when request-id
+      (chat-request-diagnostics-record
+       request-id
+       'request-dispatched
+       :transport (or (plist-get config :async-transport) 'url)
+       :timeout timeout
+       :summary (format "Dispatching request to %s" provider)))
+    (when request-id
+      (chat-request-diagnostics-record
+       request-id
+       'timeout-armed
+       :timeout timeout
+       :summary (format "Timeout armed for %s seconds" timeout)))
+    (setq handle
+          (chat-llm--post-async-dispatch
+           config
+           url
+           headers
+           raw-request
+           (lambda (raw-response status-code)
+             (when request-id
+               (chat-request-diagnostics-record
+                request-id
+                'response-received
+                :handle handle
+                :summary (format "Received HTTP %s" status-code)))
+             (condition-case err
+                 (funcall success-callback
+                          (chat-llm--decode-response config raw-request raw-response status-code))
+               (error
+                (when request-id
+                  (chat-request-diagnostics-record
+                   request-id
+                   'error
+                   :handle handle
+                   :error (error-message-string err)
+                   :summary "Failed to decode response"))
+                (funcall error-callback (error-message-string err)))))
+           (lambda (err)
+             (let ((message (if (stringp err)
+                                err
+                              (error-message-string err))))
+               (when request-id
+                 (chat-request-diagnostics-record
+                  request-id
+                  'error
+                  :handle handle
+                  :error message
+                  :summary "Request failed"))
+               (funcall error-callback message)))
+           timeout))
+    (when (and request-id
+               (buffer-live-p handle))
+      (with-current-buffer handle
+        (setq-local chat-llm--request-id request-id))
+      (chat-request-diagnostics-record
+       request-id
+       'request-dispatched
+       :handle handle
+       :phase (and (chat-request-diagnostics-get request-id)
+                   (chat-request-trace-phase
+                    (chat-request-diagnostics-get request-id)))
+       :summary "Request handle attached"))
+    handle))
 
 (defun chat-llm-cancel-request (handle)
   "Cancel asynchronous request HANDLE."
   (when (buffer-live-p handle)
+    (let (request-id)
+      (with-current-buffer handle
+        (setq request-id chat-llm--request-id))
+      (when request-id
+        (chat-request-diagnostics-record
+         request-id
+         'cancelled
+         :handle handle
+         :summary "Cancelled by user")))
     (with-current-buffer handle
       (when chat-llm--timeout-timer
         (cancel-timer chat-llm--timeout-timer)

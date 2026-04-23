@@ -19,6 +19,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'chat-log)
+(require 'chat-request-diagnostics)
 
 ;; ------------------------------------------------------------------
 ;; Variables
@@ -151,6 +152,7 @@ Returns the process object."
   (let* ((config (chat-llm-get-provider provider))
          (url (chat-llm--request-url provider options))
          (headers (chat-llm--make-headers provider))
+         (request-id (plist-get options :request-id))
          ;; Build request body
          (opts (plist-put (copy-tree options) :stream t))
          (body (chat-llm--build-request provider messages opts))
@@ -211,10 +213,23 @@ Returns the process object."
                                    (kill-buffer buffer)))
                       :stderr (get-buffer-create "*chat-stream-err*")))
       (error
+       (when request-id
+         (chat-request-diagnostics-record
+          request-id
+          'error
+          :error (error-message-string err)
+          :summary "Failed to start stream"))
        (chat-log "[STREAM] make-process FAILED: %s" (error-message-string err))
        (kill-buffer buffer)
        (signal (car err) (cdr err))))
-    
+    (when request-id
+      (process-put process 'chat-request-id request-id)
+      (chat-request-diagnostics-record
+       request-id
+       'stream-started
+       :process process
+       :transport 'stream
+       :summary (format "Started streaming request to %s" provider)))
     (chat-log "[STREAM] Process started: %S" process)
     process))
 
@@ -226,7 +241,8 @@ Returns the process object."
         (with-current-buffer (process-buffer proc)
           (let* ((combined (concat (or chat-stream--partial-line "") decoded-str))
                  (complete-lines (split-string combined "\n"))
-                 (has-trailing-newline (string-suffix-p "\n" combined)))
+                 (has-trailing-newline (string-suffix-p "\n" combined))
+                 (request-id (process-get proc 'chat-request-id)))
             (setq chat-stream--partial-line
                   (if has-trailing-newline
                       ""
@@ -238,12 +254,28 @@ Returns the process object."
                 (when data
                   (let ((content (chat-stream--extract-content data provider)))
                     (when content
+                      (when request-id
+                        (chat-request-diagnostics-record
+                         request-id
+                         'stream-chunk
+                         :process proc
+                         :summary (format "Received %d streamed chunks"
+                                          (1+ (or (chat-request-trace-stream-chunk-count
+                                                   (chat-request-diagnostics-get request-id))
+                                                  0)))))
                       (condition-case callback-error
                           (funcall callback content)
                         (error
                          (chat-log "[STREAM] Callback error: %s"
                                    (error-message-string callback-error))))))))))))
     (error
+     (when-let ((request-id (process-get proc 'chat-request-id)))
+       (chat-request-diagnostics-record
+        request-id
+        'error
+        :process proc
+        :error (error-message-string err)
+        :summary "Failed to process stream output"))
      (chat-log "[STREAM] Error in handle-output: %s" (error-message-string err)))))
 
 (provide 'chat-stream)

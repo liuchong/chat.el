@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'test-helper)
 (require 'chat-ui)
+(require 'chat-request-diagnostics)
 
 (ert-deftest chat-ui-setup-buffer-creates-correct-structure ()
   "Test that chat-ui-setup-buffer creates proper buffer structure."
@@ -231,6 +232,60 @@
     (should (string-match-p "Approval 1: allow-session" text))
     (should (string-match-p "Tool Result 1: 3 matches" text))
     (should (string-match-p "Tool Error 2: Access denied" text))))
+
+(ert-deftest chat-ui-get-response-sync-attaches-request-diagnostics ()
+  "Test chat UI passes a request id into the async request path."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Diag Session" 'kimi))
+          (chat-ui--messages-end nil)
+          captured-options)
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "user-1"
+       :role :user
+       :content "Hello"
+       :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-llm-request-async)
+                  (lambda (_model _messages success _error options)
+                    (setq captured-options options)
+                    (funcall success
+                             '(:content "Async answer"
+                               :raw-request "{\"request\":true}"
+                               :raw-response "{\"response\":true}"))
+                    'request-handle)))
+         (chat-ui--get-response-sync)
+         (should (plist-get captured-options :request-id))
+         (should-not chat-ui--current-request-id))))))
+
+(ert-deftest chat-show-current-request-status-opens-diagnostics-buffer ()
+  "Test the status command displays the current request diagnostics."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        shown-buffer)
+    (puthash "req-ui"
+             (make-chat-request-trace
+              :id "req-ui"
+              :mode 'chat
+              :provider 'kimi
+              :model 'kimi
+              :phase 'waiting
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (setq-local chat-ui--current-request-id "req-ui")
+      (cl-letf (((symbol-function 'pop-to-buffer)
+                 (lambda (buffer &rest _args)
+                   (setq shown-buffer buffer)
+                   buffer)))
+        (chat-show-current-request-status)
+        (should (bufferp shown-buffer))
+        (with-current-buffer shown-buffer
+          (should (search-forward "Request: req-ui" nil t)))))))
 
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

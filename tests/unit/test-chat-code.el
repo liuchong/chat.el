@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'test-helper)
 (require 'chat-code)
+(require 'chat-request-diagnostics)
 
 (ert-deftest chat-code-setup-buffer-creates-input-markers ()
   "Test code mode buffer setup creates stable message and input markers."
@@ -357,6 +358,49 @@
          (chat-code-cancel))
        (should (eq chat-code--status-state 'cancelled))
        (should (string= chat-code--status-detail "Cancelled by user"))))))
+
+(ert-deftest chat-code-send-non-streaming-attaches-request-diagnostics ()
+  "Test code mode passes a request id into non-streaming requests."
+  (chat-test-with-temp-dir
+   (let ((session (chat-code-session-create "Diag Session" temp-dir nil))
+         captured-options)
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (setq-local chat-code--current-request-id "req-code")
+       (cl-letf (((symbol-function 'chat-llm-request-async)
+                  (lambda (_model _messages _success _error options)
+                    (setq captured-options options)
+                    'request-handle)))
+         (chat-code--send-non-streaming 'kimi '(message-a) (point-min)))
+       (should (equal (plist-get captured-options :request-id) "req-code"))))))
+
+(ert-deftest chat-code-show-current-request-status-opens-diagnostics-buffer ()
+  "Test the code-mode status command displays the current request diagnostics."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        shown-buffer)
+    (puthash "req-code"
+             (make-chat-request-trace
+              :id "req-code"
+              :mode 'code
+              :provider 'kimi-code
+              :model 'kimi-code
+              :phase 'waiting
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (chat-code-mode)
+      (setq-local chat-code--current-request-id "req-code")
+      (cl-letf (((symbol-function 'pop-to-buffer)
+                 (lambda (buffer &rest _args)
+                   (setq shown-buffer buffer)
+                   buffer)))
+        (chat-code-show-current-request-status)
+        (should (bufferp shown-buffer))
+        (with-current-buffer shown-buffer
+          (should (search-forward "Request: req-code" nil t)))))))
 
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
   "Test code mode tool loop default is production sized."

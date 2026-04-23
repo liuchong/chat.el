@@ -41,6 +41,7 @@
 (require 'chat-stream)
 (require 'chat-code-lsp)
 (require 'chat-tool-caller)
+(require 'chat-request-diagnostics)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -216,6 +217,12 @@ Inherits from chat-session with additional code-specific fields."
   "Model used by the current or most recent code-mode request.")
 (defvar-local chat-code--active-request-messages nil
   "Messages used by the current or most recent code-mode request.")
+(defvar-local chat-code--current-request-id nil
+  "Diagnostics request id for the current code-mode buffer.")
+(defvar-local chat-code--request-hint-timer nil
+  "Timer used to show stalled request hints in code mode.")
+(defvar-local chat-code--request-hint-shown nil
+  "Whether a stalled request hint has already been shown.")
 
 (defvar chat-code--preview-buffer-name "*chat-preview*"
   "Name of the preview buffer.")
@@ -250,6 +257,81 @@ Inherits from chat-session with additional code-specific fields."
   (or chat-code--active-request-handle
       (and (processp chat-code--active-stream-process)
            (process-live-p chat-code--active-stream-process))))
+
+(defun chat-code--clear-request-hint-timer ()
+  "Cancel and clear the stalled request hint timer."
+  (when (timerp chat-code--request-hint-timer)
+    (cancel-timer chat-code--request-hint-timer))
+  (setq chat-code--request-hint-timer nil))
+
+(defun chat-code--cleanup-request-state (&optional phase summary)
+  "Clear current request diagnostics and optionally record PHASE and SUMMARY."
+  (when chat-code--current-request-id
+    (when phase
+      (chat-request-diagnostics-record
+       chat-code--current-request-id
+       phase
+       :handle chat-code--active-request-handle
+       :process chat-code--active-stream-process
+       :summary summary))
+    (chat-code--clear-request-hint-timer)
+    (setq chat-code--request-hint-shown nil))
+  (setq chat-code--current-request-id nil))
+
+(defun chat-code--maybe-show-request-hint (buffer)
+  "Show one stalled request hint in BUFFER if needed."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when-let ((message-text
+                  (and chat-code--current-request-id
+                       (not chat-code--request-hint-shown)
+                       (chat-request-diagnostics-stall-message
+                        chat-code--current-request-id))))
+        (setq chat-code--request-hint-shown t)
+        (chat-code--append-to-messages
+         (lambda ()
+           (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+           (insert (format "%s Use M-x chat-code-show-current-request-status for details.\n\n"
+                           message-text))))))))
+
+(defun chat-code--start-request-hint-timer (buffer)
+  "Start the stalled request hint timer for BUFFER."
+  (chat-code--clear-request-hint-timer)
+  (setq chat-code--request-hint-shown nil)
+  (setq chat-code--request-hint-timer
+        (run-at-time
+         chat-request-diagnostics-stall-threshold
+         nil
+         #'chat-code--maybe-show-request-hint
+         buffer)))
+
+(defun chat-code--begin-request (model transport)
+  "Create diagnostics state for MODEL and TRANSPORT."
+  (let* ((session chat-code--current-session)
+         (base-session (and session (chat-code-session-base-session session)))
+         (request-id
+          (chat-request-diagnostics-create
+           'code
+           model
+           model
+           (list :session-id (and base-session (chat-session-id base-session))
+                 :project-root (and session (chat-code-session-project-root session))
+                 :focus-file (and session (chat-code-session-focus-file session))))))
+    (setq chat-code--current-request-id request-id)
+    (chat-request-diagnostics-record
+     request-id
+     'request-created
+     :transport transport
+     :summary (format "Preparing %s request" transport))
+    (chat-code--start-request-hint-timer (current-buffer))
+    request-id))
+
+(defun chat-code-show-current-request-status ()
+  "Show diagnostics for the current code-mode request."
+  (interactive)
+  (if chat-code--current-request-id
+      (chat-request-diagnostics-show chat-code--current-request-id)
+    (user-error "No active request diagnostics")))
 
 (defun chat-code--stream-started-p (handle)
   "Return non nil when HANDLE means stream startup succeeded."
@@ -804,6 +886,12 @@ Returns either the block body string or a list of (LANG BODY)."
         (chat-code--set-status
          'running
          (format "Resolving tools (%d/%d)" (1+ step) chat-code-tool-loop-max-steps))
+        (when chat-code--current-request-id
+          (chat-request-diagnostics-record
+           chat-code--current-request-id
+           'tool-loop-step
+           :handle chat-code--active-request-handle
+           :summary (format "Resolving tool step %d" (1+ step))))
         (setq chat-code--active-request-handle
               (chat-llm-request-async
                model
@@ -838,9 +926,12 @@ Returns either the block body string or a list of (LANG BODY)."
                  (when (buffer-live-p ui-buffer)
                    (with-current-buffer ui-buffer
                      (funcall error-callback err))))
-               (list :temperature 0.7
-                     :max-tokens (chat-code--request-output-budget model)
-                     :timeout chat-code-request-timeout)))))))
+               (append
+                (list :temperature 0.7
+                      :max-tokens (chat-code--request-output-budget model)
+                      :timeout chat-code-request-timeout)
+                (when chat-code--current-request-id
+                  (list :request-id chat-code--current-request-id)))))))))
 
 (defun chat-code--finalize-response (content content-start &optional raw-request raw-response)
   "Finalize assistant CONTENT starting at CONTENT-START."
@@ -859,6 +950,7 @@ Returns either the block body string or a list of (LANG BODY)."
      (lambda (resolved)
        (when (buffer-live-p ui-buffer)
          (with-current-buffer ui-buffer
+           (chat-code--cleanup-request-state 'completed "Request completed")
            (setq chat-code--active-request-handle nil)
            (chat-code--set-status
             (if (plist-get (plist-get resolved :processed) :tool-loop-limit-reached)
@@ -1017,6 +1109,9 @@ Optional PROJECT-ROOT overrides the detected project root."
 
 (defun chat-code--setup-buffer (code-session)
   "Setup code mode buffer for CODE-SESSION."
+  (chat-code--clear-request-hint-timer)
+  (setq-local chat-code--current-request-id nil)
+  (setq-local chat-code--request-hint-shown nil)
   (let ((inhibit-read-only t))
     (erase-buffer)
     (setq-local chat-code--active-request-handle nil)
@@ -1093,6 +1188,7 @@ Optional PROJECT-ROOT overrides the detected project root."
     ;; Navigation
     (define-key map (kbd "C-c C-f") 'chat-code-focus-file)
     (define-key map (kbd "C-c C-r") 'chat-code-refresh-context)
+    (define-key map (kbd "C-c C-s") 'chat-code-show-current-request-status)
     ;; Cancel
     (define-key map (kbd "C-g") 'chat-code-cancel)
     map)
@@ -1108,6 +1204,7 @@ Key bindings:
   C-c C-v    - View preview
   C-c C-f    - Focus on file
   C-c C-r    - Refresh context
+  C-c C-s    - Show request status
   C-g        - Cancel current operation
 
 In this mode, all operations use a single buffer design.
@@ -1183,6 +1280,9 @@ using C-x b or C-c C-v."
          (content-start (chat-code--show-assistant-indicator)))
     (setq chat-code--active-request-model model)
     (setq chat-code--active-request-messages prepared-messages)
+    (chat-code--begin-request
+     model
+     (if chat-code-use-streaming 'stream 'async))
     ;; Choose streaming or non-streaming
     (chat-code--set-status 'running "Waiting for model")
     (chat-code--render-progress content-start
@@ -1223,9 +1323,12 @@ CONTENT-START marks the assistant response body."
                            visible)
                          nil))
                       (redisplay t))))
-                (list :temperature 0.7
-                      :stream t
-                      :max-tokens (chat-code--request-output-budget model)))
+                (append
+                 (list :temperature 0.7
+                       :stream t
+                       :max-tokens (chat-code--request-output-budget model))
+                 (when chat-code--current-request-id
+                   (list :request-id chat-code--current-request-id))))
              (error
               (chat-code--handle-llm-error (error-message-string err) content-start)
               nil))))
@@ -1237,6 +1340,12 @@ CONTENT-START marks the assistant response body."
              (when (and (buffer-live-p buffer)
                         (string-match-p "finished\\|closed\\|exited" event))
                (with-current-buffer buffer
+                 (when chat-code--current-request-id
+                   (chat-request-diagnostics-record
+                    chat-code--current-request-id
+                    'response-received
+                    :process proc
+                    :summary "Streaming response finished"))
                  (setq chat-code--active-stream-process nil)
                  (chat-code--finalize-response full-content content-start))
                (when (buffer-live-p (process-buffer proc))
@@ -1254,9 +1363,12 @@ CONTENT-START marks the assistant response body."
            (chat-code--handle-llm-response response content-start))
          (lambda (error-msg)
            (chat-code--handle-llm-error error-msg content-start))
-         (list :temperature 0.7
-               :max-tokens (chat-code--request-output-budget model)
-               :timeout chat-code-request-timeout))))
+         (append
+          (list :temperature 0.7
+                :max-tokens (chat-code--request-output-budget model)
+                :timeout chat-code-request-timeout)
+          (when chat-code--current-request-id
+            (list :request-id chat-code--current-request-id))))))
 
 (defun chat-code--display-user-message (content)
   "Display user message CONTENT in buffer."
@@ -1291,6 +1403,7 @@ CONTENT-START marks the assistant response body."
 If CONTENT-START is non nil, replace the pending assistant slot."
   (setq chat-code--active-request-handle nil)
   (setq chat-code--active-stream-process nil)
+  (chat-code--cleanup-request-state 'error error-msg)
   (chat-code--set-status 'failed error-msg)
   (message "LLM Error: %s" error-msg)
   (let ((render-error
@@ -1471,8 +1584,15 @@ Returns a chat-edit struct or nil."
     (setq chat-code--active-request-handle nil))
   (when (and chat-code--active-stream-process
              (process-live-p chat-code--active-stream-process))
+    (when chat-code--current-request-id
+      (chat-request-diagnostics-record
+       chat-code--current-request-id
+       'cancelled
+       :process chat-code--active-stream-process
+       :summary "Cancelled by user"))
     (delete-process chat-code--active-stream-process)
     (setq chat-code--active-stream-process nil))
+  (chat-code--cleanup-request-state)
   (chat-code--set-status 'cancelled "Cancelled by user")
   (message "Response cancelled"))
 

@@ -201,6 +201,14 @@ Required field order:
 
 **Solution**: keep mode integrations on the same four argument `chat-stream-request` contract and finalize the completed response from the process sentinel.
 
+### Diagnostics Event Order Can Change In Fast Async Tests
+
+**Problem**: diagnostics tests fail because the last recorded event is not the response event even though the request lifecycle is correct.
+
+**Cause**: request lifecycle bookkeeping can append a later metadata event such as handle attachment after an immediate success callback fires in a mocked async transport.
+
+**Solution**: validate diagnostics semantically by checking phase and searching the event timeline for the expected response event instead of asserting that one exact event must be last.
+
 ---
 
 ## Session and Persistence

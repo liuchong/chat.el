@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'test-helper)
 (require 'chat-llm)
+(require 'chat-request-diagnostics)
 
 ;; ------------------------------------------------------------------
 ;; Provider Registration
@@ -236,6 +237,44 @@
                  (setq cancelled timer))))
       (should (chat-llm-cancel-request handle))
       (should (eq cancelled 'fake-timer)))))
+
+(ert-deftest chat-llm-request-async-records-request-diagnostics ()
+  "Test async requests update diagnostics when a request id is provided."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        snapshot)
+    (puthash "req-test"
+             (make-chat-request-trace
+              :id "req-test"
+              :mode 'chat
+              :provider 'async-diag-test
+              :model 'async-diag-test
+              :phase 'created
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (chat-llm-register-provider 'async-diag-test
+                                :base-url "https://async.example.com"
+                                :api-key "token"
+                                :response-fn (lambda (_json-data) "async ok"))
+    (cl-letf (((symbol-function 'chat-llm--post-async)
+               (lambda (_url _headers _body success _error &optional _timeout)
+                 (let ((handle (generate-new-buffer " *chat-llm-diag*")))
+                   (funcall success "{\"choices\":[{\"message\":{\"content\":\"ignored\"}}]}" 200)
+                   handle))))
+      (chat-llm-request-async
+       'async-diag-test
+       (list (make-chat-message :role :user :content "Hi"))
+       (lambda (_result))
+       (lambda (_err) (should nil))
+       (list :request-id "req-test"))
+      (setq snapshot (chat-request-diagnostics-snapshot "req-test"))
+      (should (equal (plist-get snapshot :phase) 'processing))
+      (should (equal (plist-get snapshot :timeout) 60))
+      (should (seq-some
+               (lambda (event)
+                 (string-match-p "Received HTTP 200"
+                                 (or (plist-get event :summary) "")))
+               (plist-get snapshot :events))))))
 
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

@@ -21,6 +21,7 @@
 (require 'chat-tool-caller)
 (require 'chat-context)
 (require 'chat-log)
+(require 'chat-request-diagnostics)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -35,14 +36,96 @@
 (defvar chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
 
+(defvar-local chat-ui--current-request-id nil
+  "Diagnostics request id for the current chat buffer.")
+
+(defvar-local chat-ui--request-hint-timer nil
+  "Timer used to show stalled request hints.")
+
+(defvar-local chat-ui--request-hint-shown nil
+  "Whether a stalled request hint has already been shown.")
+
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
   (or chat-ui--active-request-handle
       (and chat-ui--active-stream-process
            (process-live-p chat-ui--active-stream-process))))
 
+(defun chat-ui--clear-request-hint-timer ()
+  "Cancel and clear the stalled request hint timer."
+  (when (timerp chat-ui--request-hint-timer)
+    (cancel-timer chat-ui--request-hint-timer))
+  (setq chat-ui--request-hint-timer nil))
+
+(defun chat-ui--cleanup-request-state (&optional phase summary)
+  "Clear current request state and optionally record PHASE and SUMMARY."
+  (when chat-ui--current-request-id
+    (when phase
+      (chat-request-diagnostics-record
+       chat-ui--current-request-id
+       phase
+       :handle chat-ui--active-request-handle
+       :process chat-ui--active-stream-process
+       :summary summary))
+    (chat-ui--clear-request-hint-timer)
+    (setq chat-ui--request-hint-shown nil))
+  (setq chat-ui--current-request-id nil))
+
+(defun chat-ui--maybe-show-request-hint (buffer)
+  "Show one stalled request hint in BUFFER if needed."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when-let ((message-text
+                  (and chat-ui--current-request-id
+                       (not chat-ui--request-hint-shown)
+                       (chat-request-diagnostics-stall-message
+                        chat-ui--current-request-id))))
+        (setq chat-ui--request-hint-shown t)
+        (chat-ui--insert-system-message
+         (format "%s Use M-x chat-show-current-request-status for details."
+                 message-text))))))
+
+(defun chat-ui--start-request-hint-timer (buffer)
+  "Start the stalled request hint timer for BUFFER."
+  (chat-ui--clear-request-hint-timer)
+  (setq chat-ui--request-hint-shown nil)
+  (setq chat-ui--request-hint-timer
+        (run-at-time
+         chat-request-diagnostics-stall-threshold
+         nil
+         #'chat-ui--maybe-show-request-hint
+         buffer)))
+
+(defun chat-ui--begin-request (session model transport)
+  "Create a diagnostics request trace for SESSION, MODEL, and TRANSPORT."
+  (let ((request-id
+         (chat-request-diagnostics-create
+          'chat
+          model
+          model
+          (list :session-id (chat-session-id session)
+                :session-name (chat-session-name session)))))
+    (setq chat-ui--current-request-id request-id)
+    (chat-request-diagnostics-record
+     request-id
+     'request-created
+     :transport transport
+     :summary (format "Preparing %s request" transport))
+    (chat-ui--start-request-hint-timer (current-buffer))
+    request-id))
+
+(defun chat-show-current-request-status ()
+  "Show diagnostics for the current chat request."
+  (interactive)
+  (if chat-ui--current-request-id
+      (chat-request-diagnostics-show chat-ui--current-request-id)
+    (user-error "No active request diagnostics")))
+
 (defun chat-ui-setup-buffer (session)
   "Setup chat buffer for SESSION."
+  (chat-ui--clear-request-hint-timer)
+  (setq chat-ui--current-request-id nil)
+  (setq chat-ui--request-hint-shown nil)
   (let ((inhibit-read-only t))
     (erase-buffer)
     (insert (propertize (format "═══ %s ═══\n" (chat-session-name session))
@@ -316,6 +399,12 @@
              (next-messages (if (chat-ui--message-exists-p followup-message messages)
                                 messages
                               (append messages (list followup-message)))))
+        (when chat-ui--current-request-id
+          (chat-request-diagnostics-record
+           chat-ui--current-request-id
+           'tool-loop-step
+           :handle chat-ui--active-request-handle
+           :summary (format "Resolving tool step %d" (1+ step))))
         (setq chat-ui--active-request-handle
               (chat-llm-request-async
                model
@@ -343,7 +432,10 @@
                     (1+ step)
                     session)))
                error-callback
-               '(:temperature 0.7)))))))
+               (append
+                (list :temperature 0.7)
+                (when chat-ui--current-request-id
+                  (list :request-id chat-ui--current-request-id)))))))))
 
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
@@ -373,6 +465,10 @@
 (defun chat-ui--render-error (ui-buffer error-message)
   "Render ERROR-MESSAGE in UI-BUFFER."
   (setq chat-ui--active-request-handle nil)
+  (setq chat-ui--active-stream-process nil)
+  (when (buffer-live-p ui-buffer)
+    (with-current-buffer ui-buffer
+      (chat-ui--cleanup-request-state 'error error-message)))
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (save-excursion
@@ -406,6 +502,9 @@
      (plist-get result :raw-response)
      (lambda (resolved)
        (setq chat-ui--active-request-handle nil)
+       (when (buffer-live-p ui-buffer)
+         (with-current-buffer ui-buffer
+           (chat-ui--cleanup-request-state 'completed "Request completed")))
        (chat-ui--finalize-response
         session
         msg-id
@@ -423,6 +522,9 @@
   "Render a stream startup error in UI-BUFFER."
   (setq chat-ui--active-stream-process nil)
   (message "Error: Failed to start stream process")
+  (when (buffer-live-p ui-buffer)
+    (with-current-buffer ui-buffer
+      (chat-ui--cleanup-request-state 'error "Failed to start stream process")))
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (save-excursion
@@ -446,7 +548,8 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
          (messages (chat-session-messages session))
          (msg-id (format "msg-%s" (random 10000)))
          (buffer (current-buffer))
-         assistant-start)
+         assistant-start
+         (request-id (chat-ui--begin-request session model 'async)))
     
     (chat-log "Session: %s, Model: %s, Messages count: %d"
              (chat-session-id session) model (length messages))
@@ -478,7 +581,10 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
              (lambda (err)
                (chat-log "[Async] ERROR: %s" err)
                (chat-ui--render-error buffer err))
-             '(:temperature 0.7))))))
+             (append
+              (list :temperature 0.7)
+              (when request-id
+                (list :request-id request-id))))))))
 
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
@@ -760,7 +866,8 @@ This is an ephemeral query - the result is displayed but not persisted."
          (msg-id (format "msg-%s" (random 10000)))
          (ui-buffer (current-buffer))
          (content-acc "")
-         assistant-start)
+         assistant-start
+         (request-id (chat-ui--begin-request session model 'stream)))
     (save-excursion
       (goto-char chat-ui--messages-end)
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
@@ -793,7 +900,10 @@ This is an ephemeral query - the result is displayed but not persisted."
                             (insert chunk)
                             (set-marker chat-ui--messages-end (point)))
                           (redisplay t)))))
-                  '(:temperature 0.7 :stream t))
+                  (append
+                   (list :temperature 0.7 :stream t)
+                   (when request-id
+                     (list :request-id request-id))))
                (error
                 (let ((err-message (error-message-string err)))
                   (chat-log "[STREAM] Exception in stream setup: %s" err-message)
@@ -814,10 +924,16 @@ This is an ephemeral query - the result is displayed but not persisted."
           (funcall
            (symbol-function 'chat-ui--set-stream-process-sentinel)
            stream-process
-           (lambda (proc event)
+             (lambda (proc event)
              (chat-log "[STREAM] Sentinel event: %s" event)
              (when (string-match-p "finished\\|closed\\|exited" event)
                (setq chat-ui--active-stream-process nil)
+               (when request-id
+                 (chat-request-diagnostics-record
+                  request-id
+                  'response-received
+                  :process proc
+                  :summary "Streaming response finished"))
                (let* ((visible-content (string-trim-right
                                         (chat-tool-caller-extract-content content-acc)))
                       (tool-events nil)
@@ -840,6 +956,9 @@ This is an ephemeral query - the result is displayed but not persisted."
                   nil
                   (lambda (resolved)
                     (setq chat-ui--active-request-handle nil)
+                    (when (buffer-live-p ui-buffer)
+                      (with-current-buffer ui-buffer
+                        (chat-ui--cleanup-request-state 'completed "Request completed")))
                     (chat-ui--finalize-response
                      session
                      msg-id
@@ -865,9 +984,16 @@ This is an ephemeral query - the result is displayed but not persisted."
     (setq chat-ui--active-request-handle nil))
   (when (and chat-ui--active-stream-process
              (process-live-p chat-ui--active-stream-process))
+    (when chat-ui--current-request-id
+      (chat-request-diagnostics-record
+       chat-ui--current-request-id
+       'cancelled
+       :process chat-ui--active-stream-process
+       :summary "Cancelled by user"))
     (delete-process chat-ui--active-stream-process)
     (setq chat-ui--active-stream-process nil)
-    (message "Response cancelled")))
+    (message "Response cancelled"))
+  (chat-ui--cleanup-request-state))
 
 (provide 'chat-ui)
 ;;; chat-ui.el ends here
