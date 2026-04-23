@@ -203,9 +203,11 @@ Refactoring, git assistance, indexing extras, and performance helpers are still 
 | `M-x chat-code-quote-region` | Quote the active region into the code-mode input |
 | `M-x chat-code-quote-defun` | Quote the defun at point into the code-mode input |
 | `M-x chat-code-quote-near-point` | Quote nearby context around point into the code-mode input |
+| `M-x chat-code-quote-current-file` | Quote the current file into the code-mode input |
 | `M-x chat-code-ask-region` | Ask AI about the active region immediately |
 | `M-x chat-code-ask-defun` | Ask AI about the defun at point immediately |
 | `M-x chat-code-ask-near-point` | Ask AI about nearby context immediately |
+| `M-x chat-code-ask-current-file` | Ask AI about the current file immediately |
 
 ### Inline Editing Commands
 
@@ -310,8 +312,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 214 regression tests discovered
-- 214 passing
+- 227 regression tests discovered
+- 227 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

@@ -291,6 +291,49 @@
              (should (string-match-p "defun beta" sent-content)))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-code-quote-current-file-inserts-structured-reference ()
+  "Test quoting the current file inserts file-wide structured context."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (chat-code-quote-current-file)
+             (with-current-buffer (chat-code--buffer-name chat-code--current-session)
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-code--input-marker)
+                              (point-max))))
+                 (should (string-match-p "Question about this code:" quoted))
+                 (should (string-match-p "Lines: 1-2" quoted))
+                 (should (string-match-p "Kind: current-file" quoted))
+                 (should (string-match-p "defun alpha" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-ask-current-file-sends-structured-reference ()
+  "Test asking about the current file sends a structured quoted message."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (cl-letf (((symbol-function 'chat-code-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-code--input-marker)
+                                 (point-max))))))
+               (chat-code-ask-current-file "How is this file structured?"))
+             (should (string-match-p "Question about this code:" sent-content))
+             (should (string-match-p "Kind: current-file" sent-content))
+             (should (string-match-p "How is this file structured\\?" sent-content))
+             (should (string-match-p "defun alpha" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-code-mode-map-includes-reading-and-session-shortcuts ()
   "Test code mode keymap exposes reading and session workflow shortcuts."
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-e")) 'chat-code-edit-last-user-message))
@@ -300,7 +343,9 @@
   (should (fboundp 'chat-code-quote-defun))
   (should (fboundp 'chat-code-ask-defun))
   (should (fboundp 'chat-code-quote-near-point))
-  (should (fboundp 'chat-code-ask-near-point)))
+  (should (fboundp 'chat-code-ask-near-point))
+  (should (fboundp 'chat-code-quote-current-file))
+  (should (fboundp 'chat-code-ask-current-file)))
 
 (ert-deftest chat-code-send-streaming-uses-current-stream-api ()
   "Test code mode streaming uses the current chat-stream API shape."

@@ -33,6 +33,7 @@
 (require 'chat-session)
 (require 'chat-llm)
 (require 'chat-files)
+(require 'chat-reading)
 (require 'chat-context)
 (require 'chat-context-code)
 (require 'chat-edit)
@@ -1352,6 +1353,16 @@ using C-x b or C-c C-v."
   (interactive "sQuestion: ")
   (chat-code--ask-capture (chat-code--capture-near-point) question))
 
+(defun chat-code-quote-current-file ()
+  "Quote the current file into the current code-mode input area."
+  (interactive)
+  (chat-code--quote-capture (chat-code--capture-current-file)))
+
+(defun chat-code-ask-current-file (question)
+  "Ask QUESTION about the current file in code mode."
+  (interactive "sQuestion: ")
+  (chat-code--ask-capture (chat-code--capture-current-file) question))
+
 (defun chat-code--process-message ()
   "Process the latest user message."
   (when chat-code--current-session
@@ -1880,27 +1891,6 @@ Returns a chat-edit struct or nil."
     (cons (line-number-at-pos (region-beginning))
           (line-number-at-pos (region-end)))))
 
-(defun chat-code--current-reading-file ()
-  "Return the current file for reading workflow commands."
-  (or (buffer-file-name)
-      (user-error "Current buffer is not visiting a file")))
-
-(defun chat-code--reading-language (file)
-  "Return the language symbol for FILE."
-  (or (cdr (seq-find (lambda (entry)
-                       (string-match-p (car entry) file))
-                     chat-code-filetype-map))
-      major-mode))
-
-(defun chat-code--make-reading-capture (kind file start-line end-line code)
-  "Build a normalized reading capture."
-  (list :kind kind
-        :file file
-        :start-line start-line
-        :end-line end-line
-        :code code
-        :language (chat-code--reading-language file)))
-
 (defun chat-code--prepare-reading-session ()
   "Return a code session suitable for reading workflow commands."
   (or (and (boundp 'chat-code--current-session)
@@ -1937,23 +1927,7 @@ Returns a chat-edit struct or nil."
 
 (defun chat-code--quoted-capture-prompt (capture &optional question)
   "Build a structured quoted prompt for CAPTURE and QUESTION."
-  (let* ((file (plist-get capture :file))
-         (code (plist-get capture :code))
-         (lang (plist-get capture :language)))
-    (concat
-     "Question about this code:\n\n"
-     (format "File: %s\n" file)
-     (format "Lines: %d-%d\n"
-             (plist-get capture :start-line)
-             (plist-get capture :end-line))
-     (format "Kind: %s\n\n" (plist-get capture :kind))
-     (format "```%s\n" (symbol-name lang))
-     code
-     (unless (string-suffix-p "\n" code)
-       "\n")
-     "```\n\n"
-     "Question:\n"
-     (or question ""))))
+  (chat-reading-format-question capture question))
 
 (defun chat-code--get-function-at-point ()
   "Get function at point as string."
@@ -1965,60 +1939,19 @@ Returns a chat-edit struct or nil."
 
 (defun chat-code--capture-region ()
   "Capture the active region for reading workflow commands."
-  (let* ((file (chat-code--current-reading-file))
-         (code (or (chat-code--get-selection)
-                   (user-error "No active region to quote")))
-         (line-range (or (chat-code--selection-line-range)
-                         (user-error "No active region to quote"))))
-    (chat-code--make-reading-capture
-     'region
-     file
-     (car line-range)
-     (cdr line-range)
-     code)))
-
-(defun chat-code--defun-bounds ()
-  "Return the start and end positions of the defun at point."
-  (save-excursion
-    (condition-case nil
-        (progn
-          (beginning-of-defun)
-          (let ((start (point)))
-            (end-of-defun)
-            (cons start (point))))
-      (error nil))))
+  (chat-reading-capture-region))
 
 (defun chat-code--capture-defun ()
   "Capture the defun at point for reading workflow commands."
-  (let* ((file (chat-code--current-reading-file))
-         (bounds (or (chat-code--defun-bounds)
-                     (user-error "No defun at point to quote")))
-         (start (car bounds))
-         (end (cdr bounds))
-         (end-line-pos (if (> end start) (1- end) end)))
-    (chat-code--make-reading-capture
-     'defun
-     file
-     (line-number-at-pos start)
-     (line-number-at-pos end-line-pos)
-     (buffer-substring-no-properties start end))))
+  (chat-reading-capture-defun))
 
 (defun chat-code--capture-near-point ()
   "Capture nearby context around point for reading workflow commands."
-  (let* ((file (chat-code--current-reading-file))
-         (radius (max 0 chat-code-reading-near-point-radius))
-         (start (save-excursion
-                  (forward-line (- radius))
-                  (line-beginning-position)))
-         (end (save-excursion
-                (forward-line radius)
-                (line-end-position))))
-    (chat-code--make-reading-capture
-     'near-point
-     file
-     (line-number-at-pos start)
-     (line-number-at-pos end)
-     (buffer-substring-no-properties start end))))
+  (chat-reading-capture-near-point chat-code-reading-near-point-radius))
+
+(defun chat-code--capture-current-file ()
+  "Capture the current file for reading workflow commands."
+  (chat-reading-capture-current-file))
 
 (defun chat-code--get-context-around-point ()
   "Get context around point (100 chars before and after)."

@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Stabilize the richer reading workflow so region, defun, and near-point capture all reuse the same quoted code question path in code mode.
+Stabilize the shared reading workflow so region, defun, near-point, and current-file capture all reuse one normalized capture path.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Stabilize the richer reading workflow so region, defun, and near-point capture a
 
 ## Immediate Next Step
 
-Decide whether the next reading workflow slice should add current-file capture or start exposing the same capture model outside code mode without fragmenting the command set.
+Expose the shared reading capture model outside code mode without fragmenting the command set, and keep adding test-heavy coverage around the new shared layer.
