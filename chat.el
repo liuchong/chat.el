@@ -307,9 +307,10 @@ SESSION is a chat-session struct."
 
 (defun chat--reading-session-name (&optional file)
   "Return a default session name for reading workflow commands."
-  (format "Read: %s"
-          (file-name-nondirectory
-           (or file default-directory))))
+  (let* ((path (or file default-directory))
+         (name (file-name-nondirectory
+                (directory-file-name path))))
+    (format "Read: %s" name)))
 
 (defun chat--resolve-last-session ()
   "Return the most recently opened chat session when it still exists."

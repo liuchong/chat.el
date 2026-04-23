@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 244 regression tests discovered
-- 244 passing
+- 255 regression tests discovered
+- 255 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -105,6 +105,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - plain chat now exposes the same shared reading capture model for region, defun, near-point, and bounded current-file questions
 - AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
+- shared reading helpers now have denser regression coverage around naming, fallback behavior, minimal captures, and help-buffer behavior
 
 ## Known Boundaries
 
@@ -123,8 +124,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - consider a current-file reading command after the new region, defun, and near-point captures settle
 - expose the shared reading capture model to plain chat without duplicating formatting or session bootstrap logic
 - keep increasing focused unit coverage around new workflow modules rather than only growing end-to-end surface area
-- add denser tests around chat-side reading session reuse and the remaining command matrix
-- keep growing test density around discoverability and oversize/refusal edges without fragmenting the shared reading workflow
+- keep growing test density around shared reading helpers and remaining refusal edges without fragmenting the shared reading workflow
+- add denser tests around plain-chat reading commands beyond the current helper and bootstrap matrix
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow
 

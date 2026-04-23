@@ -117,6 +117,36 @@
     (should (string-match-p "chat-quote-region" (buffer-string)))
     (should (string-match-p "chat-ask-current-file" (buffer-string)))))
 
+(ert-deftest chat-show-help-enables-view-mode ()
+  (chat-show-help)
+  (with-current-buffer "*Chat Help*"
+    (should view-mode)))
+
+(ert-deftest chat-buffer-name-uses-session-name ()
+  (let ((session (make-chat-session :name "Demo Session")))
+    (should (string= (chat--buffer-name session) "*chat:Demo Session*"))))
+
+(ert-deftest chat-reading-session-name-prefers-file-name ()
+  (should (string= (chat--reading-session-name "/tmp/demo.el") "Read: demo.el")))
+
+(ert-deftest chat-reading-session-name-falls-back-to-directory-name ()
+  (let ((default-directory "/tmp/worktree/"))
+    (should (string= (chat--reading-session-name nil) "Read: worktree"))))
+
+(ert-deftest chat-resolve-last-session-returns-nil-when-missing ()
+  (let ((chat--last-session-id "missing"))
+    (should-not (chat--resolve-last-session))))
+
+(ert-deftest chat-ensure-reading-session-prefers-current-chat-session ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil))
+     (with-temp-buffer
+       (chat-mode)
+       (let ((session (chat-session-create "Current" 'kimi)))
+         (setq-local chat--current-session session)
+         (should (eq (chat--ensure-reading-session "/tmp/demo.el") session)))))))
+
 (ert-deftest chat-ensure-reading-session-creates-new-session-when-none ()
   (chat-test-with-temp-dir
    (let ((chat-session-directory temp-dir)
@@ -341,7 +371,24 @@
                (let ((quoted (buffer-substring-no-properties
                               (marker-position chat-ui--input-overlay)
                               (point-max))))
-                 (should (string-match-p "Kind: current-file" quoted)))))
+             (should (string-match-p "Kind: current-file" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-command-updates-last-session-id ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (chat-quote-current-file)
+             (with-current-buffer "*chat:Read: demo.el*"
+               (should (string=
+                        chat--last-session-id
+                        (chat-session-id chat--current-session)))))
          (kill-buffer (current-buffer)))))))
 
 (ert-deftest chat-quote-current-file-propagates-oversized-file-error ()

@@ -154,3 +154,48 @@
                nil)))
     (should (string-match-p "(message \"hi\")\n```" text))
     (should (string-match-p "Question:\n\\'" text))))
+
+(ert-deftest chat-reading-language-falls-back-to-major-mode ()
+  (with-temp-buffer
+    (text-mode)
+    (should (eq (chat-reading--language "/tmp/demo.unknown") 'text-mode))))
+
+(ert-deftest chat-reading-capture-current-file-single-line-keeps-line-one ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "hello"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (let ((capture (chat-reading-capture-current-file 10)))
+             (should (= (plist-get capture :start-line) 1))
+             (should (= (plist-get capture :end-line) 1)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-capture-near-point-zero-radius-captures-current-line ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (forward-line 1)
+             (let ((capture (chat-reading-capture-near-point 0)))
+               (should (= (plist-get capture :start-line) 2))
+               (should (= (plist-get capture :end-line) 2))
+               (should (string= (plist-get capture :code) "line2"))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-format-question-keeps-empty-question-header-visible ()
+  (let ((text (chat-reading-format-question
+               '(:kind current-file
+                 :file "/tmp/demo.el"
+                 :start-line 1
+                 :end-line 2
+                 :code "line1\nline2\n"
+                 :language text-mode)
+               "")))
+    (should (string-match-p "Kind: current-file" text))
+    (should (string-match-p "Question:\n\\'" text))))
