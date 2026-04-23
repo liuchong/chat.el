@@ -75,6 +75,21 @@
              (should-error (chat-reading-capture-region) :type 'user-error))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-reading-capture-region-rejects-whitespace-only-region ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "   \nvalue\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (set-mark (line-beginning-position))
+             (goto-char (line-end-position))
+             (activate-mark)
+             (should-error (chat-reading-capture-region) :type 'user-error))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-reading-current-file-errors-without-file-buffer ()
   (with-temp-buffer
     (should-error (chat-reading--current-file) :type 'user-error)))
@@ -165,6 +180,16 @@
            (should-error (chat-reading-capture-near-point) :type 'user-error)
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-reading-capture-near-point-rejects-whitespace-only-context ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "   \n\t\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-reading-capture-near-point) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-reading-capture-current-file-returns-full-file ()
   (chat-test-with-temp-dir
    (let ((source-file (expand-file-name "demo.el" temp-dir)))
@@ -204,6 +229,16 @@
   (chat-test-with-temp-dir
    (let ((source-file (expand-file-name "demo.el" temp-dir)))
      (with-temp-file source-file)
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-reading-capture-current-file) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-capture-current-file-rejects-whitespace-only-file ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "   \n\t\n"))
      (with-current-buffer (find-file-noselect source-file)
        (unwind-protect
            (should-error (chat-reading-capture-current-file) :type 'user-error)

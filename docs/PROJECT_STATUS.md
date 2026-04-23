@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 272 regression tests discovered
-- 272 passing
+- 275 regression tests discovered
+- 275 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -110,6 +110,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - region capture now correctly keeps end-line metadata stable when selections stop at the next line boundary, and reused plain-chat sessions now replace stale input before quoting or asking
 - reading captures now also reject empty regions instead of producing blank code blocks, and root-directory reading sessions now keep a visible fallback name
 - empty-file current-file and near-point captures are now rejected before they can produce blank quoted code blocks
+- whitespace-only region, near-point, and current-file captures are now also rejected before they can produce useless quoted prompts
 - whitespace-only and empty-context guardrails continue to tighten at the shared reading helper layer, with empty-file capture rejection now covered explicitly
 
 ## Known Boundaries
@@ -135,6 +136,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - keep adding helper-level tests that can still expose real metadata and reuse bugs instead of only increasing broad end-to-end coverage
 - keep pushing helper-level refusal and naming coverage before widening the reading workflow surface again
 - keep closing blank-context edge cases before spending more effort on wider reading-surface discoverability
+- keep treating whitespace-only context as invalid input so helper-level guardrails match actual AI usefulness
 - keep pushing helper-level blank-context coverage until quoted reading prompts cannot be created from useless input
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow

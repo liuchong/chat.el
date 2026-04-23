@@ -62,7 +62,8 @@
 
 (defun chat-reading--ensure-nonempty-code (code)
   "Return CODE or signal a user error when it is empty."
-  (unless (and code (> (length code) 0))
+  (unless (and code
+               (> (length (string-trim code)) 0))
     (user-error "Current file does not contain readable code to quote"))
   code)
 
@@ -88,7 +89,8 @@
          (code (and start
                     end
                     (> end start)
-                    (buffer-substring-no-properties start end)))
+                    (chat-reading--ensure-nonempty-code
+                     (buffer-substring-no-properties start end))))
          (line-range (and code (chat-reading--region-line-range))))
     (unless line-range
       (user-error "No active region to quote"))
