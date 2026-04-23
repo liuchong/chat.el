@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0010 status noise governance is complete.
+Phase 0011 session editing and regeneration is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while making execution and approval state visible without turning native status surfaces into noise.
+Keep `chat.el` on the new `.agents/` workflow while turning session history into a safe, replayable model for edit-and-resend and regenerate flows.
 
 ## Active Modules
 

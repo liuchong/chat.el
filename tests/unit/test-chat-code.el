@@ -79,6 +79,67 @@
        (should-not sent)
        (should-not (chat-session-messages (chat-code-session-base-session session)))))))
 
+(ert-deftest chat-code-regenerate-last-response-replays-last-user-turn ()
+  "Test code mode regenerates by dropping the trailing assistant turn."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Replay Session" temp-dir))
+          (base-session (chat-code-session-base-session session))
+          replayed)
+     (chat-session-add-message
+      base-session
+      (make-chat-message :id "u1" :role :user :content "Fix bug" :timestamp (current-time)))
+     (chat-session-add-message
+      base-session
+      (make-chat-message :id "a1" :role :assistant :content "Old fix" :timestamp (current-time)))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (cl-letf (((symbol-function 'chat-code--send-to-llm)
+                  (lambda ()
+                    (setq replayed t))))
+         (chat-code-regenerate-last-response))
+       (should replayed)
+       (should (equal (mapcar #'chat-message-id (chat-session-messages base-session))
+                      '("u1")))
+       (goto-char (point-min))
+       (should (search-forward "Fix bug" nil t))
+       (should-not (search-forward "Old fix" nil t))))))
+
+(ert-deftest chat-code-edit-last-user-message-restores-input-and-truncates-history ()
+  "Test code mode restores the last user turn into the input area."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Edit Session" temp-dir))
+          (base-session (chat-code-session-base-session session)))
+     (chat-session-add-message
+      base-session
+      (make-chat-message :id "u1" :role :user :content "First" :timestamp (current-time)))
+     (chat-session-add-message
+      base-session
+      (make-chat-message :id "a1" :role :assistant :content "Answer 1" :timestamp (current-time)))
+     (chat-session-add-message
+      base-session
+      (make-chat-message :id "u2" :role :user :content "Refine this" :timestamp (current-time)))
+     (chat-session-add-message
+      base-session
+      (make-chat-message :id "a2" :role :assistant :content "Answer 2" :timestamp (current-time)))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (chat-code-edit-last-user-message)
+       (should (equal (mapcar #'chat-message-id (chat-session-messages base-session))
+                      '("u1" "a1")))
+       (should (string= (buffer-substring-no-properties
+                         (marker-position chat-code--input-marker)
+                         (point-max))
+                        "Refine this"))
+       (goto-char (point-min))
+       (should (search-forward "Answer 1" nil t))
+       (should-not (search-forward "Answer 2" nil t))))))
+
 (ert-deftest chat-code-send-streaming-uses-current-stream-api ()
   "Test code mode streaming uses the current chat-stream API shape."
   (chat-test-with-temp-dir

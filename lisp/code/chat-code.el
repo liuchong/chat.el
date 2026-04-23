@@ -1180,6 +1180,9 @@ Optional PROJECT-ROOT overrides the detected project root."
     (chat-code--insert-header code-session)
     ;; Initial context summary
     (chat-code--insert-context-summary code-session)
+    (dolist (message (chat-session-messages
+                      (chat-code-session-base-session code-session)))
+      (chat-code--insert-session-message message))
     (setq chat-code--messages-end (point-marker))
     (chat-code--set-status 'idle "Ready")
     ;; Input area
@@ -1439,6 +1442,37 @@ CONTENT-START marks the assistant response body."
      (insert content)
      (insert "\n\n"))))
 
+(defun chat-code--insert-session-message (message)
+  "Insert MESSAGE into the current code-mode buffer."
+  (pcase (chat-message-role message)
+    (:user
+     (insert (propertize "You:\n" 'face 'font-lock-keyword-face))
+     (insert (chat-message-content message))
+     (insert "\n\n"))
+    (:assistant
+     (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
+     (chat-code--insert-formatted-response (chat-message-content message))
+     (insert "\n\n"))
+    (:system
+     (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+     (insert (chat-message-content message))
+     (insert "\n\n"))
+    (_
+     (insert (format "%s:\n" (chat-message-role message)))
+     (insert (chat-message-content message))
+     (insert "\n\n"))))
+
+(defun chat-code--restore-input (content)
+  "Restore CONTENT into the current code-mode input area."
+  (goto-char (marker-position chat-code--input-marker))
+  (insert content))
+
+(defun chat-code--rebuild-buffer (&optional input-content)
+  "Rebuild the current code-mode buffer and optionally restore INPUT-CONTENT."
+  (chat-code--setup-buffer chat-code--current-session)
+  (when input-content
+    (chat-code--restore-input input-content)))
+
 (defun chat-code--show-assistant-indicator ()
   "Show assistant is thinking indicator and return content marker."
   (let (content-start)
@@ -1474,6 +1508,43 @@ If CONTENT-START is non nil, replace the pending assistant slot."
     (if content-start
         (chat-code--replace-response-slot content-start render-error)
       (chat-code--append-to-messages render-error))))
+
+(defun chat-code-regenerate-last-response ()
+  "Regenerate the trailing assistant response in the current code session."
+  (interactive)
+  (unless chat-code--current-session
+    (user-error "No active code session"))
+  (if (chat-code--response-active-p)
+      (message "A response is already in progress. Cancel it before regenerating.")
+    (let* ((base-session (chat-code--base-session))
+           (assistant-msg
+            (chat-session-find-last-message-by-role base-session :assistant)))
+      (unless assistant-msg
+        (user-error "No assistant response available to regenerate"))
+      (chat-session-truncate-after-message
+       base-session
+       (chat-message-id assistant-msg)
+       t)
+      (chat-code--rebuild-buffer)
+      (chat-code--send-to-llm))))
+
+(defun chat-code-edit-last-user-message ()
+  "Restore the last user message to the input area for editing."
+  (interactive)
+  (unless chat-code--current-session
+    (user-error "No active code session"))
+  (if (chat-code--response-active-p)
+      (message "A response is already in progress. Cancel it before editing the last message.")
+    (let* ((base-session (chat-code--base-session))
+           (user-msg
+            (chat-session-find-last-message-by-role base-session :user)))
+      (unless user-msg
+        (user-error "No user message available to edit"))
+      (chat-session-truncate-after-message
+       base-session
+       (chat-message-id user-msg)
+       t)
+      (chat-code--rebuild-buffer (chat-message-content user-msg)))))
 
 (defun chat-code--display-assistant-response (content)
   "Display assistant CONTENT."

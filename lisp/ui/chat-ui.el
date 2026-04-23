@@ -821,6 +821,57 @@ This is an ephemeral query - the result is displayed but not persisted."
     (delete-region (marker-position chat-ui--input-overlay) (point-max))
     (goto-char (marker-position chat-ui--input-overlay))))
 
+(defun chat-ui--restore-input (content)
+  "Restore CONTENT into the current input area."
+  (goto-char (marker-position chat-ui--input-overlay))
+  (insert content))
+
+(defun chat-ui--rebuild-buffer (&optional input-content)
+  "Rebuild the current chat buffer and optionally restore INPUT-CONTENT."
+  (let ((session chat--current-session))
+    (chat-ui-setup-buffer session)
+    (when input-content
+      (chat-ui--restore-input input-content))))
+
+(defun chat-ui-regenerate-last-response ()
+  "Regenerate the trailing assistant response in the current session."
+  (interactive)
+  (unless chat--current-session
+    (user-error "No active chat session"))
+  (if (chat-ui--response-active-p)
+      (message "A response is already in progress. Cancel it before regenerating.")
+    (let ((assistant-msg
+           (chat-session-find-last-message-by-role
+            chat--current-session
+            :assistant)))
+      (unless assistant-msg
+        (user-error "No assistant response available to regenerate"))
+      (chat-session-truncate-after-message
+       chat--current-session
+       (chat-message-id assistant-msg)
+       t)
+      (chat-ui--rebuild-buffer)
+      (chat-ui--get-response))))
+
+(defun chat-ui-edit-last-user-message ()
+  "Restore the last user message to the input area for editing."
+  (interactive)
+  (unless chat--current-session
+    (user-error "No active chat session"))
+  (if (chat-ui--response-active-p)
+      (message "A response is already in progress. Cancel it before editing the last message.")
+    (let ((user-msg
+           (chat-session-find-last-message-by-role
+            chat--current-session
+            :user)))
+      (unless user-msg
+        (user-error "No user message available to edit"))
+      (chat-session-truncate-after-message
+       chat--current-session
+       (chat-message-id user-msg)
+       t)
+      (chat-ui--rebuild-buffer (chat-message-content user-msg)))))
+
 (defun chat-ui-previous-message ()
   "Navigate to previous message."
   (interactive)

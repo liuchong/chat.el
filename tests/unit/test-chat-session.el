@@ -171,6 +171,53 @@
                  (car (last (chat-session-messages session))))
                 :assistant))))
 
+(ert-deftest chat-session-find-last-message-by-role-test ()
+  "Test finding the last message for a given role."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "a1" :role :assistant :content "hi"))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u2" :role :user :content "again"))
+    (let ((user-msg (chat-session-find-last-message-by-role session :user))
+          (assistant-msg (chat-session-find-last-message-by-role session :assistant)))
+      (should (string= (chat-message-id user-msg) "u2"))
+      (should (string= (chat-message-id assistant-msg) "a1")))))
+
+(ert-deftest chat-session-truncate-after-message-test ()
+  "Test truncating session history at a message boundary."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "a1" :role :assistant :content "hi"))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u2" :role :user :content "again"))
+    (should (chat-session-truncate-after-message session "a1"))
+    (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                   '("u1" "a1")))
+    (should (chat-session-truncate-after-message session "a1" t))
+    (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                   '("u1")))))
+
+(ert-deftest chat-session-replace-message-content-test ()
+  "Test replacing content on an existing message."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (should (chat-session-replace-message-content session "u1" "updated"))
+    (should (string= (chat-message-content
+                      (car (chat-session-messages session)))
+                     "updated"))))
+
 ;; Test session deletion
 (ert-deftest chat-session-delete-test ()
   "Test deleting a session."

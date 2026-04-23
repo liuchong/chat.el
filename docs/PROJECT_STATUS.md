@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 200 tests discovered
-- 198 passing
+- 207 tests discovered
+- 205 passing
 - 2 skipped provider integration tests
 - 0 known failures in the current baseline
 
@@ -96,6 +96,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - pending approvals now remain visible in persistent native status surfaces instead of only transient prompts
 - persistent native status surfaces are now explicitly limited to blocking states, while transient activity stays out of header and mode lines
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
+- sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries
+- chat mode now supports regenerating the last assistant turn and restoring the last user turn into the input area for editing
+- code mode now supports the same regenerate and edit-resend flow, and buffer rebuilds now replay persisted session history instead of only showing headers and an empty prompt
 
 ## Known Boundaries
 
@@ -109,7 +112,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ## Recommended Next Work
 
 - make true provider streaming and fallback behavior share one transport abstraction
-- improve session editing and regeneration flows
+- improve discoverability for session editing and regeneration commands
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow
 

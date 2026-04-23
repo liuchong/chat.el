@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Ship user-visible execution UX stages on top of the new `.agents/` workflow without letting persistent status surfaces degrade into low-value activity walls.
+Ship session-history workflows on top of the new `.agents/` baseline without letting resend and regenerate features diverge between chat mode and code mode.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Ship user-visible execution UX stages on top of the new `.agents/` workflow with
 
 ## Immediate Next Step
 
-Build the next UX stage on the new diagnostics baseline, using explicit status-layer rules so only blocking states remain persistent in native Emacs status surfaces.
+Build the next session UX stage on the new replayable history baseline, with the next likely target being discoverable session commands or a richer session browser rather than ad hoc buffer mutations.

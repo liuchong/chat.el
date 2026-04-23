@@ -217,6 +217,53 @@ Returns a list of chat-message structs."
   (when chat-session-auto-save
     (chat-session-save session)))
 
+(defun chat-session-find-last-message (session &optional predicate)
+  "Return the last message in SESSION matching PREDICATE."
+  (let ((messages (reverse (chat-session-messages session)))
+        found)
+    (while (and messages (not found))
+      (when (or (null predicate)
+                (funcall predicate (car messages)))
+        (setq found (car messages)))
+      (setq messages (cdr messages)))
+    found))
+
+(defun chat-session-find-last-message-by-role (session role)
+  "Return the last message in SESSION whose role is ROLE."
+  (chat-session-find-last-message
+   session
+   (lambda (message)
+     (eq (chat-message-role message) role))))
+
+(defun chat-session-truncate-after-message (session message-id &optional include-message)
+  "Truncate SESSION after MESSAGE-ID.
+When INCLUDE-MESSAGE is non nil, also remove the matching message."
+  (let* ((messages (chat-session-messages session))
+         (index (cl-position message-id
+                             messages
+                             :key #'chat-message-id
+                             :test #'equal)))
+    (when index
+      (setf (chat-session-messages session)
+            (cl-subseq messages 0 (if include-message index (1+ index))))
+      (setf (chat-session-updated-at session) (current-time))
+      (when chat-session-auto-save
+        (chat-session-save session))
+      t)))
+
+(defun chat-session-replace-message-content (session message-id new-content)
+  "Replace SESSION message MESSAGE-ID content with NEW-CONTENT."
+  (let ((message (cl-find message-id
+                          (chat-session-messages session)
+                          :key #'chat-message-id
+                          :test #'equal)))
+    (when message
+      (setf (chat-message-content message) new-content)
+      (setf (chat-session-updated-at session) (current-time))
+      (when chat-session-auto-save
+        (chat-session-save session))
+      message)))
+
 ;; ------------------------------------------------------------------
 ;; Serialization
 ;; ------------------------------------------------------------------

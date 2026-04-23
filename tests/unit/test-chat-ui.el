@@ -171,6 +171,66 @@
          (should-not sent)
          (should-not (chat-session-messages session)))))))
 
+(ert-deftest chat-ui-regenerate-last-response-replays-last-user-turn ()
+  "Test regenerating removes the trailing assistant message and replays."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Replay Session" 'kimi))
+          replayed)
+     (chat-session-add-message
+      session
+      (make-chat-message :id "u1" :role :user :content "Question" :timestamp (current-time)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "a1" :role :assistant :content "Old answer" :timestamp (current-time)))
+     (with-temp-buffer
+       (setq chat-ui--active-request-handle nil)
+       (setq chat-ui--active-stream-process nil)
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-ui--get-response)
+                  (lambda ()
+                    (setq replayed t))))
+         (chat-ui-regenerate-last-response))
+       (should replayed)
+       (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                      '("u1")))
+       (goto-char (point-min))
+       (should (search-forward "Question" nil t))
+       (should-not (search-forward "Old answer" nil t))))))
+
+(ert-deftest chat-ui-edit-last-user-message-restores-input-and-truncates-history ()
+  "Test editing the last user message removes later turns and restores input."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Edit Session" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "u1" :role :user :content "First" :timestamp (current-time)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "a1" :role :assistant :content "Answer 1" :timestamp (current-time)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "u2" :role :user :content "Second draft" :timestamp (current-time)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "a2" :role :assistant :content "Answer 2" :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-ui-edit-last-user-message)
+       (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                      '("u1" "a1")))
+       (should (string= (buffer-substring-no-properties
+                         (marker-position chat-ui--input-overlay)
+                         (point-max))
+                        "Second draft"))
+       (goto-char (point-min))
+       (should (search-forward "Answer 1" nil t))
+       (should-not (search-forward "Second draft\n\nAssistant" nil t))
+       (should-not (search-forward "Answer 2" nil t))))))
+
 (ert-deftest chat-ui-resolve-tool-loop-async-requests-followup-answer ()
   "Test async tool loop requests the next model turn correctly."
   (let* ((initial-messages
