@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Ship user-visible execution UX stages on top of the new `.agents/` workflow without falling back to fragmented minibuffer-only feedback.
+Ship user-visible execution UX stages on top of the new `.agents/` workflow without falling back to fragmented or opaque approval handling.
 
 ## Not Doing Now
 
@@ -16,7 +16,8 @@ Ship user-visible execution UX stages on top of the new `.agents/` workflow with
 - No broad repository process changes outside `chat.el`
 - No full visual redesign beyond the request-panel execution surface
 - No attempt to replace Emacs-native approval input with a bespoke widget layer yet
+- No async rewrite of the synchronous approval pipeline
 
 ## Immediate Next Step
 
-Build the next UX stage on the new diagnostics baseline, using the request panel as the primary surface for in-flight execution and approval state.
+Build the next UX stage on the new diagnostics baseline, using the request panel as the primary surface for in-flight execution and fast approval actions.

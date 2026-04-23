@@ -184,5 +184,31 @@
       (should (equal (plist-get whitelist :scope) 'command))
       (should (equal (plist-get whitelist :pattern) "rg -n StickerManager ."))
       (should (equal (plist-get whitelist :tool) "shell_execute")))))
+
+(ert-deftest chat-approval-commands-set-pending-decision ()
+  "Test approval commands write the expected pending decision."
+  (let ((chat-approval--pending-request '(:tool-id shell_execute))
+        (chat-approval--pending-decision nil))
+    (cl-letf (((symbol-function 'exit-minibuffer)
+               (lambda () t)))
+      (chat-approval-allow-session)
+      (should (eq chat-approval--pending-decision 'allow-session))
+      (setq chat-approval--pending-decision nil)
+      (chat-approval-deny)
+      (should (eq chat-approval--pending-decision 'deny)))))
+
+(ert-deftest chat-approval-event-context-includes-panel-actions ()
+  "Test approval event context carries action hints for the panel."
+  (let ((context (chat-approval--event-context
+                  'shell_execute
+                  '(("command" . "pwd")))))
+    (should (equal (plist-get context :command) "pwd"))
+    (should (equal (plist-get context :risk) 'high))
+    (should (equal (plist-get context :actions)
+                   '("C-c C-a once"
+                     "C-c C-s session"
+                     "C-c C-t tool"
+                     "C-c C-c command"
+                     "C-c C-d deny")))))
 (provide 'test-chat-approval)
 ;;; test-chat-approval.el ends here

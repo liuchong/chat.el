@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0006 approval panel integration is complete.
+Phase 0007 approval shortcut flow is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while making the execution UI coherent enough for real coding sessions.
+Keep `chat.el` on the new `.agents/` workflow while making execution and approval flow fast enough for real coding sessions.
 
 ## Active Modules
 

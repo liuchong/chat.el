@@ -86,6 +86,11 @@
           :index 1
           :tool "shell_execute"
           :command "rg -n StickerManager ."
+          :actions ("C-c C-a once"
+                    "C-c C-s session"
+                    "C-c C-t tool"
+                    "C-c C-c command"
+                    "C-c C-d deny")
           :options (("allow once" . allow-once)
                     ("allow for session" . allow-session)
                     ("always allow this tool" . allow-tool)
@@ -106,6 +111,7 @@
         (should (search-forward "Approval Pending 1: shell_execute" nil t))
         (should (search-forward "Command: rg -n StickerManager ." nil t))
         (should (search-forward "Choices: allow once, allow for session, always allow this tool, always allow this command, deny" nil t))
+        (should (search-forward "Actions: C-c C-a once, C-c C-s session, C-c C-t tool, C-c C-c command, C-c C-d deny" nil t))
         (should (search-forward "Approval 1: allow-command" nil t))
         (should (search-forward "Whitelist 1: command rg -n StickerManager ." nil t))))))
 

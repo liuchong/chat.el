@@ -72,6 +72,13 @@ Note: shell_execute is excluded by default for security."
   :type '(choice (const :tag "Default prompt" nil)
                  function)
   :group 'chat-approval)
+
+(defvar chat-approval--pending-request nil
+  "Current pending approval request.")
+
+(defvar chat-approval--pending-decision nil
+  "Current approval decision selected through a command shortcut.")
+
 (defun chat-approval-tool-required-p (tool-id)
   "Return non-nil when TOOL-ID requires approval."
   (memq tool-id chat-approval-required-tools))
@@ -147,27 +154,94 @@ Check global settings and SESSION-specific settings."
      '(("always allow this command" . allow-command)))
    '(("deny" . deny))))
 
+(defun chat-approval--action-hints (tool-id)
+  "Return display strings for TOOL-ID approval shortcuts."
+  (append
+   '("C-c C-a once"
+     "C-c C-s session"
+     "C-c C-t tool")
+   (when (eq tool-id 'shell_execute)
+     '("C-c C-c command"))
+   '("C-c C-d deny")))
+
 (defun chat-approval--event-context (tool-id arguments)
   "Return shared event context for TOOL-ID and ARGUMENTS."
   (let ((command (chat-approval--command-from-arguments arguments)))
     (append
      (list :risk (chat-approval--risk-level tool-id))
+     (list :actions (chat-approval--action-hints tool-id))
      (when command
        (list :command command)))))
+
+(defun chat-approval--set-pending-decision (decision)
+  "Set pending approval DECISION and exit the minibuffer when active."
+  (unless chat-approval--pending-request
+    (user-error "No pending approval"))
+  (setq chat-approval--pending-decision decision)
+  (when (active-minibuffer-window)
+    (exit-minibuffer)))
+
+(defun chat-approval-allow-once ()
+  "Approve the current pending request once."
+  (interactive)
+  (chat-approval--set-pending-decision 'allow-once))
+
+(defun chat-approval-allow-session ()
+  "Approve the current pending request for this session."
+  (interactive)
+  (chat-approval--set-pending-decision 'allow-session))
+
+(defun chat-approval-allow-tool ()
+  "Always approve the current pending tool."
+  (interactive)
+  (chat-approval--set-pending-decision 'allow-tool))
+
+(defun chat-approval-allow-command ()
+  "Always approve the current pending shell command."
+  (interactive)
+  (chat-approval--set-pending-decision 'allow-command))
+
+(defun chat-approval-deny ()
+  "Deny the current pending approval request."
+  (interactive)
+  (chat-approval--set-pending-decision 'deny))
+
+(defun chat-approval--install-minibuffer-bindings ()
+  "Install approval shortcut bindings in the active minibuffer."
+  (use-local-map (copy-keymap (current-local-map)))
+  (local-set-key (kbd "C-c C-a") #'chat-approval-allow-once)
+  (local-set-key (kbd "C-c C-s") #'chat-approval-allow-session)
+  (local-set-key (kbd "C-c C-t") #'chat-approval-allow-tool)
+  (local-set-key (kbd "C-c C-c") #'chat-approval-allow-command)
+  (local-set-key (kbd "C-c C-d") #'chat-approval-deny))
 
 (defun chat-approval--prompt-for-decision (tool-id arguments)
   "Prompt for TOOL-ID with ARGUMENTS and return a decision symbol."
   (let* ((choices (chat-approval--decision-options tool-id))
-         (choice (completing-read
-                  (chat-approval--prompt tool-id arguments)
-                  (mapcar #'car choices)
-                  nil
-                  t
-                  nil
-                  nil
-                  "allow once")))
-    (or (cdr (assoc choice choices))
-        'deny)))
+         (chat-approval--pending-request
+          (list :tool-id tool-id
+                :arguments arguments
+                :options choices))
+         (chat-approval--pending-decision nil)
+         choice)
+    (unwind-protect
+        (progn
+          (setq choice
+                (minibuffer-with-setup-hook
+                    #'chat-approval--install-minibuffer-bindings
+                  (completing-read
+                   (chat-approval--prompt tool-id arguments)
+                   (mapcar #'car choices)
+                   nil
+                   t
+                   nil
+                   nil
+                   "allow once")))
+          (or chat-approval--pending-decision
+              (cdr (assoc choice choices))
+              'deny))
+      (setq chat-approval--pending-request nil)
+      (setq chat-approval--pending-decision nil))))
 
 (defun chat-approval--decide (tool-id arguments &optional session)
   "Return approval decision for TOOL-ID with ARGUMENTS and SESSION."

@@ -49,7 +49,10 @@
         (list (format "  Command: %s" command)))
       (when-let ((options (plist-get event :options)))
         (list (format "  Choices: %s"
-                      (mapconcat #'car options ", "))))))
+                      (mapconcat #'car options ", "))))
+      (when-let ((actions (plist-get event :actions)))
+        (list (format "  Actions: %s"
+                      (mapconcat #'identity actions ", "))))))
     ('approval
      (append
       (list (format "- Approval %s: %s"
