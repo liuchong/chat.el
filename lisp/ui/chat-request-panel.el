@@ -31,33 +31,47 @@
   "Return the request panel buffer for SOURCE-BUFFER."
   (get-buffer-create (chat-request-panel--buffer-name source-buffer)))
 
-(defun chat-request-panel--event-line (event)
-  "Return one display line for EVENT."
+(defun chat-request-panel--event-lines (event)
+  "Return display lines for EVENT."
   (pcase (plist-get event :type)
     ('thinking
-     (format "- Thinking: %s" (or (plist-get event :summary) "")))
+     (list (format "- Thinking: %s" (or (plist-get event :summary) ""))))
     ('tool-call
-     (format "- Tool Call %s: %s"
-             (or (plist-get event :index) "?")
-             (or (plist-get event :tool) "")))
+     (list (format "- Tool Call %s: %s"
+                   (or (plist-get event :index) "?")
+                   (or (plist-get event :tool) ""))))
     ('approval-pending
-     (format "- Approval Pending %s: %s"
-             (or (plist-get event :index) "?")
-             (or (plist-get event :tool) "")))
+     (append
+      (list (format "- Approval Pending %s: %s"
+                    (or (plist-get event :index) "?")
+                    (or (plist-get event :tool) "")))
+      (when-let ((command (plist-get event :command)))
+        (list (format "  Command: %s" command)))
+      (when-let ((options (plist-get event :options)))
+        (list (format "  Choices: %s"
+                      (mapconcat #'car options ", "))))))
     ('approval
-     (format "- Approval %s: %s"
-             (or (plist-get event :index) "?")
-             (or (plist-get event :decision) "")))
+     (append
+      (list (format "- Approval %s: %s"
+                    (or (plist-get event :index) "?")
+                    (or (plist-get event :decision) "")))
+      (when-let ((command (plist-get event :command)))
+        (list (format "  Command: %s" command)))))
+    ('whitelist-update
+     (list (format "- Whitelist %s: %s %s"
+                   (or (plist-get event :index) "?")
+                   (or (plist-get event :scope) "")
+                   (or (plist-get event :pattern) ""))))
     ('tool-result
-     (format "- Tool Result %s: %s"
-             (or (plist-get event :index) "?")
-             (or (plist-get event :result-summary) "")))
+     (list (format "- Tool Result %s: %s"
+                   (or (plist-get event :index) "?")
+                   (or (plist-get event :result-summary) ""))))
     ('tool-error
-     (format "- Tool Error %s: %s"
-             (or (plist-get event :index) "?")
-             (or (plist-get event :result-summary) "")))
+     (list (format "- Tool Error %s: %s"
+                   (or (plist-get event :index) "?")
+                   (or (plist-get event :result-summary) ""))))
     (_
-     (format "- %s" event))))
+     (list (format "- %s" event)))))
 
 (defun chat-request-panel--insert-lines (title lines)
   "Insert TITLE and LINES into the current buffer."
@@ -118,7 +132,8 @@
           (insert stall-message "\n\n"))
         (chat-request-panel--insert-lines
          "Tool Steps"
-         (mapcar #'chat-request-panel--event-line tool-events))
+         (apply #'append
+                (mapcar #'chat-request-panel--event-lines tool-events)))
         (chat-request-panel--insert-lines
          "Request Events"
          (mapcar

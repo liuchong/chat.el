@@ -62,4 +62,51 @@
         (chat-request-panel-toggle (current-buffer) "req-panel" nil)
         (should-not (get-buffer (chat-request-panel--buffer-name (current-buffer))))))))
 
+(ert-deftest chat-request-panel-renders-approval-context-and-whitelist-updates ()
+  "Test the request panel renders approval decisions and whitelist mutations."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        panel-buffer)
+    (puthash "req-panel"
+             (make-chat-request-trace
+              :id "req-panel"
+              :mode 'chat
+              :provider 'kimi
+              :model 'kimi
+              :phase 'tool-loop
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (setq panel-buffer
+            (chat-request-panel--buffer (current-buffer)))
+      (chat-request-panel-update
+       (current-buffer)
+       "req-panel"
+       '((:type approval-pending
+          :index 1
+          :tool "shell_execute"
+          :command "rg -n StickerManager ."
+          :options (("allow once" . allow-once)
+                    ("allow for session" . allow-session)
+                    ("always allow this tool" . allow-tool)
+                    ("always allow this command" . allow-command)
+                    ("deny" . deny)))
+         (:type approval
+          :index 1
+          :tool "shell_execute"
+          :command "rg -n StickerManager ."
+          :decision allow-command)
+         (:type whitelist-update
+          :index 1
+          :tool "shell_execute"
+          :scope command
+          :pattern "rg -n StickerManager .")))
+      (with-current-buffer panel-buffer
+        (goto-char (point-min))
+        (should (search-forward "Approval Pending 1: shell_execute" nil t))
+        (should (search-forward "Command: rg -n StickerManager ." nil t))
+        (should (search-forward "Choices: allow once, allow for session, always allow this tool, always allow this command, deny" nil t))
+        (should (search-forward "Approval 1: allow-command" nil t))
+        (should (search-forward "Whitelist 1: command rg -n StickerManager ." nil t))))))
+
 (provide 'test-chat-request-panel)

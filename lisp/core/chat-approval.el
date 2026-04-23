@@ -133,6 +133,10 @@ Check global settings and SESSION-specific settings."
   (when observer
     (funcall observer event)))
 
+(defun chat-approval--command-from-arguments (arguments)
+  "Return shell command string from ARGUMENTS when present."
+  (cdr (assoc "command" arguments)))
+
 (defun chat-approval--decision-options (tool-id)
   "Return available decisions for TOOL-ID."
   (append
@@ -142,6 +146,14 @@ Check global settings and SESSION-specific settings."
    (when (eq tool-id 'shell_execute)
      '(("always allow this command" . allow-command)))
    '(("deny" . deny))))
+
+(defun chat-approval--event-context (tool-id arguments)
+  "Return shared event context for TOOL-ID and ARGUMENTS."
+  (let ((command (chat-approval--command-from-arguments arguments)))
+    (append
+     (list :risk (chat-approval--risk-level tool-id))
+     (when command
+       (list :command command)))))
 
 (defun chat-approval--prompt-for-decision (tool-id arguments)
   "Prompt for TOOL-ID with ARGUMENTS and return a decision symbol."
@@ -201,30 +213,46 @@ Returns non-nil when execution should proceed."
      ((chat-approval--auto-approve-p tool-id session)
       (chat-approval--notify
        observer
-       (list :type 'approval
-             :tool (symbol-name tool-id)
-             :decision 'auto
-             :approved t))
+       (append
+        (list :type 'approval
+              :tool (symbol-name tool-id)
+              :decision 'auto
+              :approved t)
+        (chat-approval--event-context tool-id arguments)))
       t)
      ((chat-approval--allow-noninteractive-p)
       t)
      ((chat-approval--deny-noninteractive-p)
       nil)
      (t
-      (chat-approval--notify
+     (chat-approval--notify
        observer
-       (list :type 'approval-pending
-             :tool (symbol-name tool-id)
-             :prompt prompt))
+       (append
+        (list :type 'approval-pending
+              :tool (symbol-name tool-id)
+              :prompt prompt
+              :options (chat-approval--decision-options tool-id))
+        (chat-approval--event-context tool-id arguments)))
       (let* ((decision (chat-approval--decide tool-id arguments session))
              (approved (chat-approval--apply-decision
                         tool-id arguments decision session)))
+        (when (eq decision 'allow-command)
+          (when-let ((command (chat-approval--command-from-arguments arguments)))
+            (chat-approval--notify
+             observer
+             (list :type 'whitelist-update
+                   :tool (symbol-name tool-id)
+                   :scope 'command
+                   :pattern command
+                   :approved t))))
         (chat-approval--notify
          observer
-         (list :type 'approval
-               :tool (symbol-name tool-id)
-               :decision decision
-               :approved approved))
+         (append
+          (list :type 'approval
+                :tool (symbol-name tool-id)
+                :decision decision
+                :approved approved)
+          (chat-approval--event-context tool-id arguments)))
         approved)))))
 
 (defun chat-approval-request-tool-creation (description spec)

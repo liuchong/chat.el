@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0005 request panel delivery is complete.
+Phase 0006 approval panel integration is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while moving product work toward a cleaner and more observable coding assistant UI.
+Keep `chat.el` on the new `.agents/` workflow while making the execution UI coherent enough for real coding sessions.
 
 ## Active Modules
 

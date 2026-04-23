@@ -254,7 +254,7 @@ These commands exist in the repository but are still being repaired and validate
 - **4 context strategies** - minimal, focused, balanced, comprehensive
 - **Streaming responses** - Real-time code generation toggle exists
 - **Visible run state** - Header line shows running, success, failed, cancelled, or stopped
-- **Structured request panel** - `C-c C-p` opens a dedicated panel for phases, tool calls, and stalled-request context
+- **Structured request panel** - `C-c C-p` opens a dedicated panel for phases, approvals, tool calls, whitelist changes, and stalled-request context
 - **Detailed request diagnostics** - `C-c C-s` opens the full current-request status buffer
 - **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root
 - **Project rules in context** - `AGENTS.md` is injected into code mode context when present

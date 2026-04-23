@@ -119,5 +119,70 @@
       '(:name "shell_execute"
         :arguments (("command" . "rg -n StickerManager .")))))
     (should (member "rg -n StickerManager ." chat-tool-shell-whitelist))))
+
+(ert-deftest chat-approval-observer-receives-pending-options-and-command-context ()
+  "Test approval observers receive structured pending context."
+  (let ((chat-approval-required-tools '(shell_execute))
+        (chat-approval-noninteractive-policy 'ask)
+        (chat-approval-decision-function
+         (lambda (&rest _args)
+           'allow-once))
+        events)
+    (should
+     (chat-approval-request-tool-call
+      (make-chat-forged-tool
+       :id 'shell_execute
+       :name "Shell Execute"
+       :language 'elisp
+       :is-active t)
+      '(:name "shell_execute"
+        :arguments (("command" . "rg -n StickerManager .")))
+      nil
+      (lambda (event)
+        (push event events))))
+    (let ((pending (seq-find (lambda (event)
+                               (eq (plist-get event :type) 'approval-pending))
+                             events))
+          (approval (seq-find (lambda (event)
+                                (eq (plist-get event :type) 'approval))
+                              events)))
+      (should (equal (plist-get pending :tool) "shell_execute"))
+      (should (equal (plist-get pending :command) "rg -n StickerManager ."))
+      (should (equal (mapcar #'car (plist-get pending :options))
+                     '("allow once"
+                       "allow for session"
+                       "always allow this tool"
+                       "always allow this command"
+                       "deny")))
+      (should (eq (plist-get approval :decision) 'allow-once))
+      (should (equal (plist-get approval :command) "rg -n StickerManager .")))))
+
+(ert-deftest chat-approval-allow-command-notifies-whitelist-update ()
+  "Test command approval emits a whitelist update event for observers."
+  (let ((chat-approval-required-tools '(shell_execute))
+        (chat-approval-noninteractive-policy 'ask)
+        (chat-tool-shell-whitelist nil)
+        (chat-approval-decision-function
+         (lambda (&rest _args)
+           'allow-command))
+        events)
+    (should
+     (chat-approval-request-tool-call
+      (make-chat-forged-tool
+       :id 'shell_execute
+       :name "Shell Execute"
+       :language 'elisp
+       :is-active t)
+      '(:name "shell_execute"
+        :arguments (("command" . "rg -n StickerManager .")))
+      nil
+      (lambda (event)
+        (push event events))))
+    (let ((whitelist (seq-find (lambda (event)
+                                 (eq (plist-get event :type) 'whitelist-update))
+                               events)))
+      (should (equal (plist-get whitelist :scope) 'command))
+      (should (equal (plist-get whitelist :pattern) "rg -n StickerManager ."))
+      (should (equal (plist-get whitelist :tool) "shell_execute")))))
 (provide 'test-chat-approval)
 ;;; test-chat-approval.el ends here

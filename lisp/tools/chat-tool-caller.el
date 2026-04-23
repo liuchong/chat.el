@@ -319,6 +319,11 @@
   "Return a compact summary for RESULT."
   (chat-tool-caller--compact-text (chat-tool-caller--stringify-result result)))
 
+(defun chat-tool-caller--event-command-context (arguments)
+  "Return event plist additions for shell command ARGUMENTS."
+  (when-let ((command (cdr (assoc "command" arguments))))
+    (list :command command)))
+
 (defun chat-tool-caller--file-tool-p (tool-id)
   "Return non-nil when TOOL-ID is a file tool."
   (memq tool-id '(files_read files_read_lines files_grep files_find files_list
@@ -399,10 +404,12 @@ If SESSION is nil, uses `chat--current-session' if bound."
                            (chat-tool-caller--arguments-to-argv tool arguments)))))
                     (chat-tool-caller--notify
                      observer
-                     (list :type 'approval
-                           :tool name
-                           :decision 'whitelisted-command
-                           :approved t))
+                     (append
+                      (list :type 'approval
+                            :tool name
+                            :decision 'whitelisted-command
+                            :approved t)
+                      (chat-tool-caller--event-command-context arguments)))
                     (chat-tool-caller--notify
                      observer
                      (list :type 'tool-result

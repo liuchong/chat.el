@@ -233,6 +233,26 @@
        (should (eq (plist-get (car (plist-get result :tool-events)) :type) 'tool-call))
        (should (eq (plist-get (cadr (plist-get result :tool-events)) :type) 'tool-result))))))
 
+(ert-deftest chat-tool-caller-whitelisted-shell-event-keeps-command-context ()
+  "Test whitelisted shell execution reports command context."
+  (let ((chat-tool-shell-enabled t)
+        (chat-tool-shell-whitelist '("pwd"))
+        (events nil))
+    (with-temp-buffer
+      (let ((result
+             (chat-tool-caller-execute
+              '(:name "shell_execute"
+                :arguments (("command" . "pwd")))
+              nil
+              (lambda (event)
+                (push event events)))))
+        (should (stringp result))
+        (let ((approval (seq-find (lambda (event)
+                                    (eq (plist-get event :type) 'approval))
+                                  events)))
+          (should (eq (plist-get approval :decision) 'whitelisted-command))
+          (should (equal (plist-get approval :command) "pwd")))))))
+
 (ert-deftest chat-tool-caller-file-access-denied-suggests-code-mode ()
   "Test file access denial explains how to switch to code mode."
   (let ((chat-files-allowed-directories '("/tmp/"))
