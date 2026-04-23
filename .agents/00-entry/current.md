@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0029 read lines normalization stage is complete.
+Phase 0030 session helper coverage stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, file-tool range normalization, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, session-helper coverage, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 

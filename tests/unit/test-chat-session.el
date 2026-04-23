@@ -171,6 +171,27 @@
                  (car (last (chat-session-messages session))))
                 :assistant))))
 
+(ert-deftest chat-session-clear-messages-test ()
+  "Test clearing all messages from a session."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (chat-session-clear-messages session)
+    (should (equal (chat-session-messages session) nil))))
+
+(ert-deftest chat-session-find-last-message-without-predicate-returns-tail ()
+  "Test the generic last-message helper returns the final message by default."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "a1" :role :assistant :content "hi"))
+    (should (string= (chat-message-id (chat-session-find-last-message session))
+                     "a1"))))
+
 (ert-deftest chat-session-find-last-message-by-role-test ()
   "Test finding the last message for a given role."
   (let ((session (make-chat-session :id "test")))
@@ -187,6 +208,14 @@
           (assistant-msg (chat-session-find-last-message-by-role session :assistant)))
       (should (string= (chat-message-id user-msg) "u2"))
       (should (string= (chat-message-id assistant-msg) "a1")))))
+
+(ert-deftest chat-session-find-last-message-by-role-returns-nil-when-missing ()
+  "Test role lookup returns nil when no message matches."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (should-not (chat-session-find-last-message-by-role session :assistant))))
 
 (ert-deftest chat-session-truncate-after-message-test ()
   "Test truncating session history at a message boundary."
@@ -207,6 +236,16 @@
     (should (equal (mapcar #'chat-message-id (chat-session-messages session))
                    '("u1")))))
 
+(ert-deftest chat-session-truncate-after-message-returns-nil-for-missing-id ()
+  "Test truncation leaves history unchanged when the message is missing."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (should-not (chat-session-truncate-after-message session "missing"))
+    (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                   '("u1")))))
+
 (ert-deftest chat-session-replace-message-content-test ()
   "Test replacing content on an existing message."
   (let ((session (make-chat-session :id "test")))
@@ -217,6 +256,17 @@
     (should (string= (chat-message-content
                       (car (chat-session-messages session)))
                      "updated"))))
+
+(ert-deftest chat-session-replace-message-content-returns-nil-for-missing-id ()
+  "Test replacement leaves history unchanged when the message is missing."
+  (let ((session (make-chat-session :id "test")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (should-not (chat-session-replace-message-content session "missing" "updated"))
+    (should (string= (chat-message-content
+                      (car (chat-session-messages session)))
+                     "hello"))))
 
 ;; Test session deletion
 (ert-deftest chat-session-delete-test ()
@@ -245,6 +295,17 @@
      (chat-session-rename id "New Name")
      (let ((loaded (chat-session-load id)))
        (should (string= (chat-session-name loaded) "New Name"))))))
+
+(ert-deftest chat-session-list-ignores-invalid-json-files ()
+  "Test listing sessions ignores unreadable JSON files."
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir))
+     (chat-session-create "Valid Session" 'gpt-4o)
+     (with-temp-file (expand-file-name "broken.json" temp-dir)
+       (insert "{not-valid"))
+     (let ((sessions (chat-session-list)))
+       (should (= (length sessions) 1))
+       (should (string= (chat-session-name (car sessions)) "Valid Session"))))))
 
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here
