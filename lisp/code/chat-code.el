@@ -42,6 +42,7 @@
 (require 'chat-code-lsp)
 (require 'chat-tool-caller)
 (require 'chat-request-diagnostics)
+(require 'chat-request-panel)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -223,6 +224,8 @@ Inherits from chat-session with additional code-specific fields."
   "Timer used to show stalled request hints in code mode.")
 (defvar-local chat-code--request-hint-shown nil
   "Whether a stalled request hint has already been shown.")
+(defvar-local chat-code--request-tool-events nil
+  "Current structured tool events for the request panel.")
 
 (defvar chat-code--preview-buffer-name "*chat-preview*"
   "Name of the preview buffer.")
@@ -276,6 +279,7 @@ Inherits from chat-session with additional code-specific fields."
        :summary summary))
     (chat-code--clear-request-hint-timer)
     (setq chat-code--request-hint-shown nil))
+  (setq chat-code--request-tool-events nil)
   (setq chat-code--current-request-id nil))
 
 (defun chat-code--maybe-show-request-hint (buffer)
@@ -288,11 +292,12 @@ Inherits from chat-session with additional code-specific fields."
                        (chat-request-diagnostics-stall-message
                         chat-code--current-request-id))))
         (setq chat-code--request-hint-shown t)
-        (chat-code--append-to-messages
-         (lambda ()
-           (insert (propertize "System:\n" 'face 'font-lock-comment-face))
-           (insert (format "%s Use M-x chat-code-show-current-request-status for details.\n\n"
-                           message-text))))))))
+        (chat-request-panel-update
+         buffer
+         chat-code--current-request-id
+         chat-code--request-tool-events)
+        (message "%s Use C-c C-p or M-x chat-code-show-current-request-status for details."
+                 message-text)))))
 
 (defun chat-code--start-request-hint-timer (buffer)
   "Start the stalled request hint timer for BUFFER."
@@ -323,6 +328,9 @@ Inherits from chat-session with additional code-specific fields."
      'request-created
      :transport transport
      :summary (format "Preparing %s request" transport))
+    (setq chat-code--request-tool-events nil)
+    (when chat-request-panel-auto-show
+      (chat-request-panel-open (current-buffer) request-id nil))
     (chat-code--start-request-hint-timer (current-buffer))
     request-id))
 
@@ -332,6 +340,14 @@ Inherits from chat-session with additional code-specific fields."
   (if chat-code--current-request-id
       (chat-request-diagnostics-show chat-code--current-request-id)
     (user-error "No active request diagnostics")))
+
+(defun chat-code-toggle-request-panel ()
+  "Toggle the request panel for the current code-mode buffer."
+  (interactive)
+  (chat-request-panel-toggle
+   (current-buffer)
+   chat-code--current-request-id
+   chat-code--request-tool-events))
 
 (defun chat-code--stream-started-p (handle)
   "Return non nil when HANDLE means stream startup succeeded."
@@ -734,16 +750,20 @@ Returns either the block body string or a list of (LANG BODY)."
                                                       &optional tool-loop-limit-reached
                                                       tool-summary)
   "Render CONTENT, TOOL-EVENTS, TOOL-LOOP-LIMIT-REACHED, and TOOL-SUMMARY."
+  (setq chat-code--request-tool-events tool-events)
+  (when (or (and chat-request-panel-auto-show
+                 chat-code--current-request-id)
+            (get-buffer-window
+             (chat-request-panel--buffer-name (current-buffer)) t))
+    (chat-request-panel-update
+     (current-buffer)
+     chat-code--current-request-id
+     tool-events))
   (chat-code--replace-response-slot
    content-start
    (lambda ()
      (unless (string-empty-p content)
        (chat-code--insert-formatted-response content))
-     (let ((events-text (chat-code--format-tool-events tool-events)))
-       (when events-text
-         (unless (string-empty-p content)
-           (insert "\n\n"))
-         (insert events-text)))
      (when tool-summary
        (unless (and (string-empty-p content)
                     (not tool-events))
@@ -1112,6 +1132,8 @@ Optional PROJECT-ROOT overrides the detected project root."
   (chat-code--clear-request-hint-timer)
   (setq-local chat-code--current-request-id nil)
   (setq-local chat-code--request-hint-shown nil)
+  (setq-local chat-code--request-tool-events nil)
+  (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
     (setq-local chat-code--active-request-handle nil)
@@ -1189,6 +1211,7 @@ Optional PROJECT-ROOT overrides the detected project root."
     (define-key map (kbd "C-c C-f") 'chat-code-focus-file)
     (define-key map (kbd "C-c C-r") 'chat-code-refresh-context)
     (define-key map (kbd "C-c C-s") 'chat-code-show-current-request-status)
+    (define-key map (kbd "C-c C-p") 'chat-code-toggle-request-panel)
     ;; Cancel
     (define-key map (kbd "C-g") 'chat-code-cancel)
     map)
@@ -1205,6 +1228,7 @@ Key bindings:
   C-c C-f    - Focus on file
   C-c C-r    - Refresh context
   C-c C-s    - Show request status
+  C-c C-p    - Toggle request panel
   C-g        - Cancel current operation
 
 In this mode, all operations use a single buffer design.

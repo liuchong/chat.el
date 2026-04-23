@@ -65,6 +65,7 @@
 
 ;; Load core modules.
 (require 'chat-log)
+(require 'chat-request-diagnostics)
 (require 'chat-session)
 (require 'chat-stream)
 (require 'chat-context)
@@ -90,6 +91,7 @@
 (require 'chat-tool-shell)
 
 ;; Load UI after tooling has been registered.
+(require 'chat-request-panel)
 (require 'chat-ui)
 
 ;; Load code mode (optional)
@@ -267,6 +269,8 @@ SESSION is a chat-session struct."
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
     (define-key map (kbd "C-g") 'chat-ui-cancel-response)
     (define-key map (kbd "C-c C-a") 'chat-toggle-auto-approve-session)
+    (define-key map (kbd "C-c C-s") 'chat-show-current-request-status)
+    (define-key map (kbd "C-c C-p") 'chat-ui-toggle-request-panel)
     map)
   "Keymap for chat mode buffers.")
 

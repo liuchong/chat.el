@@ -8,14 +8,14 @@
 
 ## Doing Now
 
-Run `chat.el` with the new `.agents/` workflow and keep future stage work recorded there instead of reviving `docs/ai-contexts/`.
+Ship user-visible product stages on top of the new `.agents/` workflow without falling back to inline status spam in chat buffers.
 
 ## Not Doing Now
 
-- No dual-write workflow between `.agents/` and `docs/ai-contexts/`
+- No rollback to the legacy `docs/ai-contexts/` workflow
 - No broad repository process changes outside `chat.el`
-- No UI redesign bundled into the knowledge base migration stage
+- No full visual redesign beyond the request-panel execution surface
 
 ## Immediate Next Step
 
-Use the new `.agents/` structure for the next product stage and keep the stage commit discipline active.
+Build the next UX stage on the new diagnostics baseline, using the request panel as the primary surface for in-flight execution state.

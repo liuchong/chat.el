@@ -22,6 +22,7 @@
 (require 'chat-context)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
+(require 'chat-request-panel)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -45,6 +46,9 @@
 (defvar-local chat-ui--request-hint-shown nil
   "Whether a stalled request hint has already been shown.")
 
+(defvar-local chat-ui--request-tool-events nil
+  "Current structured tool events for the request panel.")
+
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
   (or chat-ui--active-request-handle
@@ -59,6 +63,15 @@
 
 (defun chat-ui--cleanup-request-state (&optional phase summary)
   "Clear current request state and optionally record PHASE and SUMMARY."
+  (let ((source-buffer (current-buffer)))
+    (when (and (or chat-request-panel-auto-show
+                   (get-buffer-window
+                    (chat-request-panel--buffer-name source-buffer) t))
+               chat-ui--current-request-id)
+      (chat-request-panel-update
+       source-buffer
+       chat-ui--current-request-id
+       chat-ui--request-tool-events)))
   (when chat-ui--current-request-id
     (when phase
       (chat-request-diagnostics-record
@@ -69,6 +82,7 @@
        :summary summary))
     (chat-ui--clear-request-hint-timer)
     (setq chat-ui--request-hint-shown nil))
+  (setq chat-ui--request-tool-events nil)
   (setq chat-ui--current-request-id nil))
 
 (defun chat-ui--maybe-show-request-hint (buffer)
@@ -81,9 +95,12 @@
                        (chat-request-diagnostics-stall-message
                         chat-ui--current-request-id))))
         (setq chat-ui--request-hint-shown t)
-        (chat-ui--insert-system-message
-         (format "%s Use M-x chat-show-current-request-status for details."
-                 message-text))))))
+        (chat-request-panel-update
+         buffer
+         chat-ui--current-request-id
+         chat-ui--request-tool-events)
+        (message "%s Use C-c C-p or M-x chat-show-current-request-status for details."
+                 message-text)))))
 
 (defun chat-ui--start-request-hint-timer (buffer)
   "Start the stalled request hint timer for BUFFER."
@@ -111,6 +128,9 @@
      'request-created
      :transport transport
      :summary (format "Preparing %s request" transport))
+    (setq chat-ui--request-tool-events nil)
+    (when chat-request-panel-auto-show
+      (chat-request-panel-open (current-buffer) request-id nil))
     (chat-ui--start-request-hint-timer (current-buffer))
     request-id))
 
@@ -121,11 +141,21 @@
       (chat-request-diagnostics-show chat-ui--current-request-id)
     (user-error "No active request diagnostics")))
 
+(defun chat-ui-toggle-request-panel ()
+  "Toggle the request panel for the current chat buffer."
+  (interactive)
+  (chat-request-panel-toggle
+   (current-buffer)
+   chat-ui--current-request-id
+   chat-ui--request-tool-events))
+
 (defun chat-ui-setup-buffer (session)
   "Setup chat buffer for SESSION."
   (chat-ui--clear-request-hint-timer)
   (setq chat-ui--current-request-id nil)
   (setq chat-ui--request-hint-shown nil)
+  (setq chat-ui--request-tool-events nil)
+  (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
     (insert (propertize (format "═══ %s ═══\n" (chat-session-name session))
@@ -276,17 +306,21 @@
   "Render CONTENT and TOOL-EVENTS at CONTENT-START in UI-BUFFER."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
+      (setq chat-ui--request-tool-events tool-events)
+      (when (or (and chat-request-panel-auto-show
+                     chat-ui--current-request-id)
+                (get-buffer-window
+                 (chat-request-panel--buffer-name ui-buffer) t))
+        (chat-request-panel-update
+         ui-buffer
+         chat-ui--current-request-id
+         tool-events))
       (save-excursion
         (let ((inhibit-read-only t))
           (delete-region content-start chat-ui--messages-end)
           (goto-char content-start)
           (unless (string-empty-p content)
             (insert content))
-          (let ((events-text (chat-ui--format-tool-events tool-events)))
-            (when events-text
-              (unless (string-empty-p content)
-                (insert "\n\n"))
-              (insert events-text)))
           (insert "\n\n")
           (set-marker chat-ui--messages-end (point)))))))
 

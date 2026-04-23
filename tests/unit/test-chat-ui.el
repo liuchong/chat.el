@@ -69,9 +69,7 @@
           "{\"response\":true}")
          (should-not (search-backward "function_call" nil t))
          (goto-char (point-min))
-         (should (search-forward "Steps:" nil t))
-         (should (search-forward "Tool Call 1: demo" nil t))
-         (should (search-forward "Tool Result 1: done" nil t))
+         (should-not (search-forward "Steps:" nil t))
          (let ((saved (car (last (chat-session-messages session)))))
            (should (string= (chat-message-content saved) "done"))
            (should (equal (chat-message-tool-results saved) '("done")))
@@ -283,6 +281,31 @@
                    (setq shown-buffer buffer)
                    buffer)))
         (chat-show-current-request-status)
+        (should (bufferp shown-buffer))
+        (with-current-buffer shown-buffer
+          (should (search-forward "Request: req-ui" nil t)))))))
+
+(ert-deftest chat-ui-toggle-request-panel-opens-panel-buffer ()
+  "Test chat UI can toggle the structured request panel."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        shown-buffer)
+    (puthash "req-ui"
+             (make-chat-request-trace
+              :id "req-ui"
+              :mode 'chat
+              :provider 'kimi
+              :model 'kimi
+              :phase 'waiting
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (setq-local chat-ui--current-request-id "req-ui")
+      (cl-letf (((symbol-function 'display-buffer-in-side-window)
+                 (lambda (buffer _alist)
+                   (setq shown-buffer buffer)
+                   buffer)))
+        (chat-ui-toggle-request-panel)
         (should (bufferp shown-buffer))
         (with-current-buffer shown-buffer
           (should (search-forward "Request: req-ui" nil t)))))))

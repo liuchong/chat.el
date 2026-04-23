@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0004 agent workspace migration is complete.
+Phase 0005 request panel delivery is complete.
 
 ## Main Objective
 
-Operate `chat.el` with `.agents/` as the single formal agent knowledge base while keeping `docs/` focused on human-facing documentation.
+Keep `chat.el` on the new `.agents/` workflow while moving product work toward a cleaner and more observable coding assistant UI.
 
 ## Active Modules
 

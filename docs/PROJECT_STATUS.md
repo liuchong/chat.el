@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 183 tests discovered
-- 181 passing
+- 187 tests discovered
+- 185 passing
 - 2 skipped provider integration tests
 - 0 known failures in the current baseline
 
@@ -89,6 +89,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - code mode now injects project `AGENTS.md` into context when present
 - code mode now sends hard coded non-negotiable engineering rules in every programming request
 - request diagnostics now expose current phase, recent events, and stalled-request hints in both chat and code mode
+- request execution state now has a dedicated request panel so tool steps no longer clutter assistant transcript output
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 
 ## Known Boundaries

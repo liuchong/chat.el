@@ -124,6 +124,8 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `C-c C-v` | `chat-code-view-preview` | 查看预览（切换到 *chat-preview*） |
 | `C-c C-f` | `chat-code-focus-file` | 更改焦点文件 |
 | `C-c C-r` | `chat-code-refresh-context` | 刷新上下文 |
+| `C-c C-s` | `chat-code-show-current-request-status` | 查看当前请求的详细诊断 |
+| `C-c C-p` | `chat-code-toggle-request-panel` | 切换请求过程面板 |
 | `C-g` | `chat-code-cancel` | 取消当前操作 |
 
 ### 内联编辑命令（在代码缓冲区）

@@ -36,6 +36,8 @@ C-c C-k       拒绝修改
 C-c C-v       查看预览（切换到 *chat-preview*）
 C-c C-f       更改焦点文件
 C-c C-r       刷新上下文
+C-c C-s       查看当前请求诊断
+C-c C-p       切换请求过程面板
 C-g           取消操作
 ```
 

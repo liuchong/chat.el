@@ -402,6 +402,32 @@
         (with-current-buffer shown-buffer
           (should (search-forward "Request: req-code" nil t)))))))
 
+(ert-deftest chat-code-toggle-request-panel-opens-panel-buffer ()
+  "Test code mode can toggle the structured request panel."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        shown-buffer)
+    (puthash "req-code"
+             (make-chat-request-trace
+              :id "req-code"
+              :mode 'code
+              :provider 'kimi-code
+              :model 'kimi-code
+              :phase 'waiting
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (chat-code-mode)
+      (setq-local chat-code--current-request-id "req-code")
+      (cl-letf (((symbol-function 'display-buffer-in-side-window)
+                 (lambda (buffer _alist)
+                   (setq shown-buffer buffer)
+                   buffer)))
+        (chat-code-toggle-request-panel)
+        (should (bufferp shown-buffer))
+        (with-current-buffer shown-buffer
+          (should (search-forward "Request: req-code" nil t)))))))
+
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
   "Test code mode tool loop default is production sized."
   (should (= chat-code-tool-loop-max-steps 100)))
