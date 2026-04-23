@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 227 regression tests discovered
-- 227 passing
+- 232 regression tests discovered
+- 232 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -102,6 +102,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - code mode now supports the same regenerate and edit-resend flow, and buffer rebuilds now replay persisted session history instead of only showing headers and an empty prompt
 - code mode now supports explicit reading captures for region, defun, and nearby context, all routed through the same quoted question flow
 - code mode now also supports bounded current-file capture on top of a shared reading capture module
+- plain chat now exposes the same shared reading capture model for region, defun, near-point, and bounded current-file questions
 - AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
 
 ## Known Boundaries
@@ -112,7 +113,6 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - some provider default remote model names are best effort defaults and may need local adjustment as vendor catalogs change
 - provider integration tests now live outside the canonical batch suite and should be run explicitly with credentials and network access
 - code mode refactor, git helper, indexing extras, and performance helpers should still be treated as experimental
-- plain chat mode still does not expose the new reading capture commands, so the in-editor reading workflow remains code-mode first
 - the repository still does not meet a tests-to-runtime-lines ratio above 1, so further test-heavy stages are still needed if a much denser safety net is desired
 
 ## Recommended Next Work
@@ -122,6 +122,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - consider a current-file reading command after the new region, defun, and near-point captures settle
 - expose the shared reading capture model to plain chat without duplicating formatting or session bootstrap logic
 - keep increasing focused unit coverage around new workflow modules rather than only growing end-to-end surface area
+- add denser tests around chat-side reading session reuse and the remaining command matrix
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow
 

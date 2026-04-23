@@ -70,6 +70,7 @@
 (require 'chat-stream)
 (require 'chat-context)
 (require 'chat-files)
+(require 'chat-reading)
 (require 'chat-approval)
 (require 'chat-wiki)
 
@@ -247,13 +248,18 @@ MODEL is an optional model identifier, uses chat-default-model if not provided."
   "Open SESSION in a chat buffer.
 
 SESSION is a chat-session struct."
-  (let* ((buffer-name (format "*chat:%s*" (chat-session-name session)))
+  (let* ((buffer-name (chat--buffer-name session))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
       (chat-mode)
       (setq-local chat--current-session session)
       (chat-ui-setup-buffer session))
+    (setq chat--last-session-id (chat-session-id session))
     (pop-to-buffer buffer)))
+
+(defun chat--buffer-name (session)
+  "Return the chat buffer name for SESSION."
+  (format "*chat:%s*" (chat-session-name session)))
 
 ;; ------------------------------------------------------------------
 ;; Chat Mode
@@ -261,6 +267,9 @@ SESSION is a chat-session struct."
 
 (defvar chat--current-session nil
   "Current session in this chat buffer.")
+
+(defvar chat--last-session-id nil
+  "Most recently opened chat session id.")
 
 (defvar chat-mode-map
   (let ((map (make-sparse-keymap)))
@@ -273,6 +282,86 @@ SESSION is a chat-session struct."
     (define-key map (kbd "C-c C-p") 'chat-ui-toggle-request-panel)
     map)
   "Keymap for chat mode buffers.")
+
+(defun chat--reading-session-name (&optional file)
+  "Return a default session name for reading workflow commands."
+  (format "Read: %s"
+          (file-name-nondirectory
+           (or file default-directory))))
+
+(defun chat--resolve-last-session ()
+  "Return the most recently opened chat session when it still exists."
+  (when (and chat--last-session-id
+             (chat-session-exists-p chat--last-session-id))
+    (chat-session-load chat--last-session-id)))
+
+(defun chat--ensure-reading-session (&optional file)
+  "Return a chat session suitable for reading workflow commands."
+  (or (and (derived-mode-p 'chat-mode)
+           chat--current-session)
+      (chat--resolve-last-session)
+      (chat-session-create (chat--reading-session-name file) chat-default-model)))
+
+(defun chat--quote-capture (capture)
+  "Insert CAPTURE into a chat session input area."
+  (let ((session (chat--ensure-reading-session (plist-get capture :file)))
+        (prompt (chat-reading-format-question capture)))
+    (chat--open-session session)
+    (with-current-buffer (chat--buffer-name session)
+      (delete-region (marker-position chat-ui--input-overlay) (point-max))
+      (goto-char (marker-position chat-ui--input-overlay))
+      (insert prompt))))
+
+(defun chat--ask-capture (capture question)
+  "Send QUESTION about CAPTURE in a chat session."
+  (let ((session (chat--ensure-reading-session (plist-get capture :file)))
+        (prompt (chat-reading-format-question capture question)))
+    (chat--open-session session)
+    (with-current-buffer (chat--buffer-name session)
+      (delete-region (marker-position chat-ui--input-overlay) (point-max))
+      (goto-char (marker-position chat-ui--input-overlay))
+      (insert prompt)
+      (chat-ui-send-message))))
+
+(defun chat-quote-region ()
+  "Quote the active region into a chat session."
+  (interactive)
+  (chat--quote-capture (chat-reading-capture-region)))
+
+(defun chat-ask-region (question)
+  "Ask QUESTION about the active region in a chat session."
+  (interactive "sQuestion: ")
+  (chat--ask-capture (chat-reading-capture-region) question))
+
+(defun chat-quote-defun ()
+  "Quote the defun at point into a chat session."
+  (interactive)
+  (chat--quote-capture (chat-reading-capture-defun)))
+
+(defun chat-ask-defun (question)
+  "Ask QUESTION about the defun at point in a chat session."
+  (interactive "sQuestion: ")
+  (chat--ask-capture (chat-reading-capture-defun) question))
+
+(defun chat-quote-near-point ()
+  "Quote nearby context around point into a chat session."
+  (interactive)
+  (chat--quote-capture (chat-reading-capture-near-point)))
+
+(defun chat-ask-near-point (question)
+  "Ask QUESTION about nearby context around point in a chat session."
+  (interactive "sQuestion: ")
+  (chat--ask-capture (chat-reading-capture-near-point) question))
+
+(defun chat-quote-current-file ()
+  "Quote the current file into a chat session."
+  (interactive)
+  (chat--quote-capture (chat-reading-capture-current-file)))
+
+(defun chat-ask-current-file (question)
+  "Ask QUESTION about the current file in a chat session."
+  (interactive "sQuestion: ")
+  (chat--ask-capture (chat-reading-capture-current-file) question))
 
 (define-derived-mode chat-mode fundamental-mode "Chat"
   "Major mode for chat sessions."

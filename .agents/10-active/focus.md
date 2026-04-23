@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Stabilize the shared reading workflow so region, defun, near-point, and current-file capture all reuse one normalized capture path.
+Stabilize the shared reading workflow so chat mode and code mode both reuse one normalized capture path.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Stabilize the shared reading workflow so region, defun, near-point, and current-
 
 ## Immediate Next Step
 
-Expose the shared reading capture model outside code mode without fragmenting the command set, and keep adding test-heavy coverage around the new shared layer.
+Increase test density around the shared reading workflow, especially chat-side command variants and session reuse edges.

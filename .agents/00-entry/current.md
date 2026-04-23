@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0016 reading workflow slice three is complete.
+Phase 0017 reading workflow slice four is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while moving the reading workflow onto a shared capture layer and completing code-mode coverage with bounded current-file capture.
+Keep `chat.el` on the new `.agents/` workflow while extending the shared reading capture model into plain chat and preserving one consistent prompt format across chat and code mode.
 
 ## Active Modules
 

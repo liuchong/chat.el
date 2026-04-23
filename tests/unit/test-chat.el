@@ -96,6 +96,84 @@
   (should (fboundp 'chat-list-sessions))
   (should (commandp 'chat-list-sessions)))
 
+(ert-deftest chat-reading-commands-are-bound ()
+  (should (commandp 'chat-quote-region))
+  (should (commandp 'chat-ask-region))
+  (should (commandp 'chat-quote-defun))
+  (should (commandp 'chat-ask-defun))
+  (should (commandp 'chat-quote-near-point))
+  (should (commandp 'chat-ask-near-point))
+  (should (commandp 'chat-quote-current-file))
+  (should (commandp 'chat-ask-current-file)))
+
+(ert-deftest chat-ensure-reading-session-creates-new-session-when-none ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil))
+     (with-temp-buffer
+       (let ((session (chat--ensure-reading-session "/tmp/demo.el")))
+         (should (string= (chat-session-name session) "Read: demo.el"))
+         (should (eq (chat-session-model-id session) chat-default-model)))))))
+
+(ert-deftest chat-ensure-reading-session-reuses-last-session ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Existing" 'kimi)))
+     (setq chat--last-session-id (chat-session-id session))
+     (with-temp-buffer
+       (let ((resolved (chat--ensure-reading-session "/tmp/other.el")))
+         (should (string= (chat-session-id resolved)
+                          (chat-session-id session))))))))
+
+(ert-deftest chat-quote-region-opens-chat-and-inserts-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message")
+             (set-mark (line-beginning-position))
+             (goto-char (line-end-position))
+             (activate-mark)
+             (chat-quote-region)
+             (with-current-buffer "*chat:Read: demo.el*"
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-ui--input-overlay)
+                              (point-max))))
+                 (should (string-match-p "Question about this code:" quoted))
+                 (should (string-match-p "Kind: region" quoted))
+                 (should (string-match-p "message" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-ask-current-file-sends-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (cl-letf (((symbol-function 'chat-ui-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-ui--input-overlay)
+                                 (point-max))))))
+               (chat-ask-current-file "What matters here?"))
+             (should (string-match-p "Question about this code:" sent-content))
+             (should (string-match-p "Kind: current-file" sent-content))
+             (should (string-match-p "What matters here\\?" sent-content))
+             (should (string-match-p "defun demo" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
 ;; ------------------------------------------------------------------
 ;; Utility Functions
 ;; ------------------------------------------------------------------

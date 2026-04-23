@@ -144,6 +144,14 @@ Layout rules:
 | `M-x chat-view-last-raw-exchange` | Open the latest assistant request and response |
 | `M-x chat-ui-cancel-response` | Cancel the active response |
 | `M-x chat-show-current-request-status` | Show the active request diagnostics buffer |
+| `M-x chat-quote-region` | Quote the active region into a chat session |
+| `M-x chat-quote-defun` | Quote the defun at point into a chat session |
+| `M-x chat-quote-near-point` | Quote nearby context around point into a chat session |
+| `M-x chat-quote-current-file` | Quote the current file into a chat session |
+| `M-x chat-ask-region` | Ask AI about the active region in a chat session |
+| `M-x chat-ask-defun` | Ask AI about the defun at point in a chat session |
+| `M-x chat-ask-near-point` | Ask AI about nearby context in a chat session |
+| `M-x chat-ask-current-file` | Ask AI about the current file in a chat session |
 
 ## Tool Model
 
@@ -312,8 +320,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 227 regression tests discovered
-- 227 passing
+- 232 regression tests discovered
+- 232 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:
