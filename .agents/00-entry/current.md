@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0009 approval status surfacing is complete.
+Phase 0010 status noise governance is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while making execution and approval state continuously visible in native Emacs surfaces.
+Keep `chat.el` on the new `.agents/` workflow while making execution and approval state visible without turning native status surfaces into noise.
 
 ## Active Modules
 

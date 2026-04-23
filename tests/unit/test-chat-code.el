@@ -478,6 +478,20 @@
       (should (string-match-p "shell_execute" header))
       (should (string-match-p "APPROVAL" mode)))))
 
+(ert-deftest chat-code-header-and-mode-line-ignore-nonblocking-events ()
+  "Test code mode status surfaces ignore non-blocking tool events."
+  (with-temp-buffer
+    (chat-code-mode)
+    (setq-local chat-code--status-state 'running)
+    (setq-local chat-code--status-detail "Waiting for model")
+    (setq-local chat-code--request-tool-events
+                '((:type thinking :summary "Scanning")
+                  (:type tool-call :index 1 :tool "files_find")))
+    (let ((header (chat-code--header-line))
+          (mode (chat-code--mode-line-status)))
+      (should-not (string-match-p "Approval Pending" header))
+      (should-not (string-match-p "APPROVAL" mode)))))
+
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
   "Test code mode tool loop default is production sized."
   (should (= chat-code-tool-loop-max-steps 100)))

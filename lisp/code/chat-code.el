@@ -38,6 +38,7 @@
 (require 'chat-edit)
 (require 'chat-code-preview)
 (require 'chat-code-intel)
+(require 'chat-status)
 (require 'chat-stream)
 (require 'chat-code-lsp)
 (require 'chat-tool-caller)
@@ -232,10 +233,7 @@ Inherits from chat-session with additional code-specific fields."
 
 (defun chat-code--pending-approval-event ()
   "Return the current pending approval event when present."
-  (seq-find
-   (lambda (event)
-     (eq (plist-get event :type) 'approval-pending))
-   chat-code--request-tool-events))
+  (chat-status-persistent-event chat-code--request-tool-events))
 
 (defvar chat-code--preview-buffer-name "*chat-preview*"
   "Name of the preview buffer.")
@@ -415,14 +413,14 @@ Inherits from chat-session with additional code-specific fields."
   (let ((label (chat-code--status-label chat-code--status-state))
         (detail (or chat-code--status-detail "Ready"))
         (model (chat-code--model-label))
-        (pending (chat-code--pending-approval-event)))
+        (pending-label (chat-status-persistent-label chat-code--request-tool-events)))
     (concat
      (propertize " Code Mode " 'face 'mode-line-emphasis)
      (propertize (format "Status: %s" label)
                  'face (chat-code--status-face chat-code--status-state))
-     (when pending
+     (when pending-label
        (propertize
-        (format " | Approval Pending: %s" (plist-get pending :tool))
+        (format " | %s" pending-label)
         'face 'warning))
      (propertize (format " | Model: %s | %s" model detail) 'face 'shadow))))
 
@@ -431,11 +429,11 @@ Inherits from chat-session with additional code-specific fields."
   (let ((label (chat-code--status-label chat-code--status-state))
         (detail (or chat-code--status-detail "Ready"))
         (model (chat-code--model-label))
-        (pending (chat-code--pending-approval-event)))
+        (pending-label (chat-status-persistent-label chat-code--request-tool-events)))
     (format " [%s|%s%s|%s]"
             model
             label
-            (if pending "|APPROVAL" "")
+            (if pending-label "|APPROVAL" "")
             detail)))
 
 (defun chat-code--mode-line-format ()

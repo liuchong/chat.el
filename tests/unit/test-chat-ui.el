@@ -359,5 +359,18 @@
        (should (string-match-p "shell_execute"
                                (chat-ui--status-line session)))))))
 
+(ert-deftest chat-ui-status-line-ignores-nonblocking-events ()
+  "Test chat UI status line stays quiet for non-blocking tool events."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Status Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (setq-local chat-ui--request-tool-events
+                   '((:type thinking :summary "Scanning")
+                     (:type tool-call :index 1 :tool "files_find")))
+       (should (string= (chat-ui--status-line session) "Model: kimi"))))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

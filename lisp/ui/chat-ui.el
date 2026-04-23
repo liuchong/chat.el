@@ -23,6 +23,7 @@
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-request-panel)
+(require 'chat-status)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -54,18 +55,13 @@
 
 (defun chat-ui--pending-approval-event ()
   "Return the current pending approval event when present."
-  (seq-find
-   (lambda (event)
-     (eq (plist-get event :type) 'approval-pending))
-   chat-ui--request-tool-events))
+  (chat-status-persistent-event chat-ui--request-tool-events))
 
 (defun chat-ui--status-line (session)
   "Return top status line text for SESSION."
   (let ((model (chat-session-model-id session)))
-    (if-let ((pending (chat-ui--pending-approval-event)))
-        (format "Model: %s | Approval Pending: %s"
-                model
-                (plist-get pending :tool))
+    (if-let ((label (chat-status-persistent-label chat-ui--request-tool-events)))
+        (format "Model: %s | %s" model label)
       (format "Model: %s" model))))
 
 (defun chat-ui--response-active-p ()

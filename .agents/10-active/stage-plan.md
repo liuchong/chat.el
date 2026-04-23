@@ -4,36 +4,35 @@
 - Attention: active
 - Status: active
 - Scope: planning
-- Tags: stage, plan, approval-status
+- Tags: stage, plan, status-governance
 
 ## Goal
 
-Keep pending approvals continuously visible through native Emacs status surfaces instead of relying only on prompt text or one-shot echo-area hints.
+Define and enforce which tool states deserve persistent native status surfaces so the UI does not devolve into an activity wall.
 
 ## Completed
 
-- Added pending approval extraction helpers for chat mode and code mode
-- Updated code mode `header-line` and mode line to show a persistent approval marker when a risky tool is waiting for approval
-- Updated chat UI top status line to show `Approval Pending` and the tool name when approval is waiting
-- Kept the implementation fully Emacs-native without inserting extra transcript content
-- Added regression tests for chat status-line approval rendering and code mode header/mode line approval rendering
-- Updated stage records and human-facing docs for the status-surfacing pass
+- Added shared `lisp/ui/chat-status.el` to define persistent-status eligibility rules
+- Centralized the rule that only blocking `approval-pending` events qualify for persistent status surfaces
+- Updated chat mode and code mode to consume the shared status rule instead of open-coding local checks
+- Added regression tests proving non-blocking events like `thinking` and `tool-call` do not appear in persistent status surfaces
+- Updated stage records and reference docs for the status-governance pass
 
 ## Tests
 
 - `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- Result: `198` tests run, `196` passed, `2` skipped, `0` failed
+- Result: `200` tests run, `198` passed, `2` skipped, `0` failed
 
 ## Remaining
 
-- Decide whether pending approvals need even stronger modeline/header emphasis or whether the current balance is enough
-- Continue improving visibility without degrading signal-to-noise in normal editing
+- Decide whether any future blocking state besides approvals deserves persistent status treatment
+- Keep detailed transient activity inside the request panel instead of leaking it into persistent surfaces
 
 ## Risks
 
-- Chat mode and code mode still maintain separate UI state around the same diagnostics lifecycle
-- More persistent approval status can become noisy if too many transient states are promoted into status surfaces
+- Chat mode and code mode still maintain separate rendering implementations even though status eligibility is now shared
+- Future contributors may still be tempted to bypass the shared status rule for convenience
 
 ## Next Entry
 
-Record the next execution-UX stage in `.agents/30-records/` and distill durable native-Emacs status-surface patterns into `20-reference/knowledge/`.
+Record the next execution-UX stage in `.agents/30-records/` and extend the shared status rule only if a new state truly blocks user action.
