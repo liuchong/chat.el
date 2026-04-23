@@ -11,6 +11,7 @@
 ;; Forward declarations
 (declare-function chat-forged-tool-id "chat-tool-forge" (tool))
 (declare-function chat-session-auto-approve-p "chat-session" (session))
+(declare-function chat-session-set-auto-approve "chat-session" (session value))
 (defgroup chat-approval nil
   "Approval handling for chat.el."
   :group 'chat)
@@ -59,6 +60,17 @@ executed without user confirmation."
   "Tools that can be auto-approved when `chat-approval-auto-approve-global' is t.
 Note: shell_execute is excluded by default for security."
   :type '(repeat symbol)
+  :group 'chat-approval)
+
+(defcustom chat-approval-always-approve-tools nil
+  "Tools that are always approved without prompting."
+  :type '(repeat symbol)
+  :group 'chat-approval)
+
+(defcustom chat-approval-decision-function nil
+  "Optional function that returns an approval decision symbol."
+  :type '(choice (const :tag "Default prompt" nil)
+                 function)
   :group 'chat-approval)
 (defun chat-approval-tool-required-p (tool-id)
   "Return non-nil when TOOL-ID requires approval."
@@ -109,12 +121,74 @@ Check global settings and SESSION-specific settings."
            (and (fboundp 'chat-session-auto-approve-p)
                 (chat-session-auto-approve-p session))))
         (global-auto-approve chat-approval-auto-approve-global)
-        (in-auto-approve-list (memq tool-id chat-approval-auto-approve-tools)))
+        (in-auto-approve-list (memq tool-id chat-approval-auto-approve-tools))
+        (always-auto-approve (memq tool-id chat-approval-always-approve-tools)))
     (and (or session-auto-approve
+             always-auto-approve
              (and global-auto-approve in-auto-approve-list))
          t)))
 
-(defun chat-approval-request-tool-call (tool call &optional session)
+(defun chat-approval--notify (observer event)
+  "Send EVENT to OBSERVER."
+  (when observer
+    (funcall observer event)))
+
+(defun chat-approval--decision-options (tool-id)
+  "Return available decisions for TOOL-ID."
+  (append
+   '(("allow once" . allow-once)
+     ("allow for session" . allow-session)
+     ("always allow this tool" . allow-tool))
+   (when (eq tool-id 'shell_execute)
+     '(("always allow this command" . allow-command)))
+   '(("deny" . deny))))
+
+(defun chat-approval--prompt-for-decision (tool-id arguments)
+  "Prompt for TOOL-ID with ARGUMENTS and return a decision symbol."
+  (let* ((choices (chat-approval--decision-options tool-id))
+         (choice (completing-read
+                  (chat-approval--prompt tool-id arguments)
+                  (mapcar #'car choices)
+                  nil
+                  t
+                  nil
+                  nil
+                  "allow once")))
+    (or (cdr (assoc choice choices))
+        'deny)))
+
+(defun chat-approval--decide (tool-id arguments &optional session)
+  "Return approval decision for TOOL-ID with ARGUMENTS and SESSION."
+  (cond
+   (chat-approval-decision-function
+    (funcall chat-approval-decision-function tool-id arguments session))
+   (t
+    (chat-approval--prompt-for-decision tool-id arguments))))
+
+(defun chat-approval--apply-decision (tool-id arguments decision &optional session)
+  "Apply DECISION for TOOL-ID with ARGUMENTS and SESSION."
+  (pcase decision
+    ('allow-once t)
+    ('allow-session
+     (when (and session
+                (fboundp 'chat-session-set-auto-approve))
+       (chat-session-set-auto-approve session t))
+     t)
+    ('allow-tool
+     (unless (memq tool-id chat-approval-always-approve-tools)
+       (push tool-id chat-approval-always-approve-tools))
+     t)
+    ('allow-command
+     (let ((command (cdr (assoc "command" arguments))))
+       (when (and command
+                  (require 'chat-tool-shell nil t)
+                  (fboundp 'chat-tool-shell-whitelist-add))
+         (chat-tool-shell-whitelist-add command))
+       (and command t)))
+    ('deny nil)
+    (_ nil)))
+
+(defun chat-approval-request-tool-call (tool call &optional session observer)
   "Request approval for TOOL using CALL data.
 Optional SESSION is the current chat session for context.
 Returns non-nil when execution should proceed."
@@ -124,13 +198,34 @@ Returns non-nil when execution should proceed."
     (cond
      ((not chat-approval-enabled) t)
      ((not (chat-approval-tool-required-p tool-id)) t)
-     ((chat-approval--auto-approve-p tool-id session) t)
+     ((chat-approval--auto-approve-p tool-id session)
+      (chat-approval--notify
+       observer
+       (list :type 'approval
+             :tool (symbol-name tool-id)
+             :decision 'auto
+             :approved t))
+      t)
      ((chat-approval--allow-noninteractive-p)
       t)
      ((chat-approval--deny-noninteractive-p)
       nil)
      (t
-      (y-or-n-p prompt)))))
+      (chat-approval--notify
+       observer
+       (list :type 'approval-pending
+             :tool (symbol-name tool-id)
+             :prompt prompt))
+      (let* ((decision (chat-approval--decide tool-id arguments session))
+             (approved (chat-approval--apply-decision
+                        tool-id arguments decision session)))
+        (chat-approval--notify
+         observer
+         (list :type 'approval
+               :tool (symbol-name tool-id)
+               :decision decision
+               :approved approved))
+        approved)))))
 
 (defun chat-approval-request-tool-creation (description spec)
   "Request approval for creating a generated tool from DESCRIPTION and SPEC."

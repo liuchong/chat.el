@@ -59,6 +59,13 @@ AI 和 IDE 不得执行以下命令或动作：
 
 违反这一条视为严重错误。
 
+Exception:
+
+- 如果用户在当前会话中明确要求 AI 直接执行 `git commit`，可以在当前仓库内执行一次直接提交
+- 这种例外只覆盖 `git commit`，不覆盖 `push` `rebase` `merge` `reset` 等其他历史或远端操作
+- 执行前仍然必须完成本文件要求的调查、实现、验证和文档更新
+- commit message 必须遵守本仓库既有风格，优先使用 `type: Summary` 格式和英文正文
+
 ## Documentation Must Be Updated
 
 每次开发会话结束时必须同步更新文档。

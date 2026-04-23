@@ -54,13 +54,23 @@
           (current-buffer)
           content-start
           '(:content ""
+            :tool-events ((:type tool-call
+                           :index 1
+                           :tool "demo"
+                           :arguments (("input" . "hello")))
+                          (:type tool-result
+                           :index 1
+                           :tool "demo"
+                           :result-summary "done"))
             :tool-calls ((:name "demo" :arguments (("input" . "hello"))))
             :tool-results ("done"))
           "{\"request\":true}"
           "{\"response\":true}")
          (should-not (search-backward "function_call" nil t))
          (goto-char (point-min))
-         (should (search-forward "[Tools used: done]" nil t))
+         (should (search-forward "Steps:" nil t))
+         (should (search-forward "Tool Call 1: demo" nil t))
+         (should (search-forward "Tool Result 1: done" nil t))
          (let ((saved (car (last (chat-session-messages session)))))
            (should (string= (chat-message-content saved) "done"))
            (should (equal (chat-message-tool-results saved) '("done")))
@@ -207,6 +217,20 @@
   "Test non-nil handles count as successful stream startup."
   (should (chat-ui--stream-started-p 'stream-handle))
   (should-not (chat-ui--stream-started-p nil)))
+
+(ert-deftest chat-ui-format-tool-events-renders-structured-lines ()
+  "Test tool events are rendered as readable step lines."
+  (let ((text (chat-ui--format-tool-events
+               '((:type thinking :summary "Scanning repository")
+                 (:type tool-call :index 1 :tool "files_find" :arguments (("directory" . "/tmp/project")))
+                 (:type approval :index 1 :tool "shell_execute" :decision allow-session)
+                 (:type tool-result :index 1 :tool "files_find" :result-summary "3 matches")
+                 (:type tool-error :index 2 :tool "files_find" :result-summary "Access denied")))))
+    (should (string-match-p "Thinking: Scanning repository" text))
+    (should (string-match-p "Tool Call 1: files_find" text))
+    (should (string-match-p "Approval 1: allow-session" text))
+    (should (string-match-p "Tool Result 1: 3 matches" text))
+    (should (string-match-p "Tool Error 2: Access denied" text))))
 
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

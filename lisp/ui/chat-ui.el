@@ -151,6 +151,62 @@
   (when tool-results
     (mapconcat #'identity tool-results "\n")))
 
+(defun chat-ui--format-tool-events (tool-events)
+  "Format TOOL-EVENTS into readable lines."
+  (when tool-events
+    (concat
+     "Steps:\n"
+     (mapconcat
+      (lambda (event)
+        (pcase (plist-get event :type)
+          ('thinking
+           (format "- Thinking: %s"
+                   (plist-get event :summary)))
+          ('tool-call
+           (format "- Tool Call %s: %s %s"
+                   (plist-get event :index)
+                   (plist-get event :tool)
+                   (chat-tool-caller--tool-arguments-summary
+                    (plist-get event :arguments))))
+          ('approval-pending
+           (format "- Approval Pending %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :tool)))
+          ('approval
+           (format "- Approval %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :decision)))
+          ('tool-result
+           (format "- Tool Result %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :result-summary)))
+          ('tool-error
+           (format "- Tool Error %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :result-summary)))
+          (_
+           (format "- %s" event))))
+      tool-events
+      "\n"))))
+
+(defun chat-ui--render-response-state (ui-buffer content-start content tool-events)
+  "Render CONTENT and TOOL-EVENTS at CONTENT-START in UI-BUFFER."
+  (when (buffer-live-p ui-buffer)
+    (with-current-buffer ui-buffer
+      (save-excursion
+        (let ((inhibit-read-only t))
+          (delete-region content-start chat-ui--messages-end)
+          (goto-char content-start)
+          (unless (string-empty-p content)
+            (insert content))
+          (let ((events-text (chat-ui--format-tool-events tool-events)))
+            (when events-text
+              (unless (string-empty-p content)
+                (insert "\n\n"))
+              (insert events-text)))
+          (insert "\n\n")
+          (set-marker chat-ui--messages-end (point)))))))
+
 (defun chat-ui--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
   (let (lines)
@@ -179,6 +235,8 @@
 (defun chat-ui--merge-processed-results (base extra)
   "Merge processed tool data from BASE and EXTRA."
   (list :content (plist-get extra :content)
+        :tool-events (append (plist-get base :tool-events)
+                             (plist-get extra :tool-events))
         :tool-calls (append (plist-get base :tool-calls)
                             (plist-get extra :tool-calls))
         :tool-results (append (plist-get base :tool-results)
@@ -291,25 +349,14 @@
                                            &optional raw-request raw-response)
   "Render PROCESSED response and persist it for SESSION."
   (let* ((content (or (plist-get processed :content) ""))
+         (tool-events (plist-get processed :tool-events))
          (tool-calls (plist-get processed :tool-calls))
          (tool-results (plist-get processed :tool-results))
          (tool-summary (chat-ui--format-tool-results tool-results))
          (history-content (if (and (string-blank-p content) tool-summary)
                               tool-summary
                             content)))
-    (when (buffer-live-p ui-buffer)
-      (with-current-buffer ui-buffer
-        (save-excursion
-          (let ((inhibit-read-only t))
-            (delete-region content-start chat-ui--messages-end)
-            (goto-char content-start)
-            (insert content)
-            (when tool-summary
-              (when (> (length content) 0)
-                (insert "\n"))
-              (insert (format "[Tools used: %s]" tool-summary)))
-            (insert "\n\n")
-            (set-marker chat-ui--messages-end (point))))))
+    (chat-ui--render-response-state ui-buffer content-start content tool-events)
     (chat-session-add-message
      session
      (make-chat-message
@@ -336,9 +383,21 @@
 
 (defun chat-ui--handle-response-success (session msg-id ui-buffer content-start model messages result)
   "Handle successful RESULT for SESSION in UI-BUFFER."
-  (let ((processed (chat-tool-caller-process-response-data
-                    (plist-get result :content)
-                    session)))
+  (let* ((raw-content (plist-get result :content))
+         (visible-content (string-trim-right
+                           (chat-tool-caller-extract-content raw-content)))
+         (tool-events nil)
+         (processed (chat-tool-caller-process-response-data
+                     raw-content
+                     session
+                     (lambda (event)
+                       (push event tool-events)
+                       (chat-ui--render-response-state
+                        ui-buffer
+                        content-start
+                        visible-content
+                        (nreverse tool-events))))))
+    (chat-ui--render-response-state ui-buffer content-start visible-content (nreverse tool-events))
     (chat-ui--resolve-tool-loop-async
      model
      messages
@@ -759,8 +818,20 @@ This is an ephemeral query - the result is displayed but not persisted."
              (chat-log "[STREAM] Sentinel event: %s" event)
              (when (string-match-p "finished\\|closed\\|exited" event)
                (setq chat-ui--active-stream-process nil)
-               (let ((processed
-                      (chat-tool-caller-process-response-data content-acc session)))
+               (let* ((visible-content (string-trim-right
+                                        (chat-tool-caller-extract-content content-acc)))
+                      (tool-events nil)
+                      (processed
+                       (chat-tool-caller-process-response-data
+                        content-acc
+                        session
+                        (lambda (event)
+                          (push event tool-events)
+                          (chat-ui--render-response-state
+                           ui-buffer
+                           assistant-start
+                           visible-content
+                           (nreverse tool-events))))))
                  (chat-ui--resolve-tool-loop-async
                   model
                   messages-final

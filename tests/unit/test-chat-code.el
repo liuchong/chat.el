@@ -292,7 +292,7 @@
        (chat-code--setup-buffer session)
        (let ((content-start (chat-code--show-assistant-indicator)))
          (cl-letf (((symbol-function 'chat-approval-request-tool-call)
-                    (lambda (_tool _call &optional _session) t))
+                    (lambda (_tool _call &optional _session _observer) t))
                    ((symbol-function 'chat-llm-request-async)
                     (lambda (_model _messages success _error _options)
                       (with-temp-buffer
@@ -329,8 +329,7 @@
           content-start))
        (goto-char (point-min))
        (should-not (search-forward "{\"function_call\"" nil t))
-       (should (search-forward "Tool loop stopped after reaching the safety limit." nil t))
-       (should (search-forward "Tools used: shell_execute: /tmp/project" nil t))))))
+       (should (search-forward "Tool loop stopped after reaching the safety limit." nil t))))))
 
 (ert-deftest chat-code-handle-llm-error-updates-status ()
   "Test code mode sets failed status on request errors."

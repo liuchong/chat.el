@@ -295,6 +295,44 @@
    (t
     (string-trim-right (pp-to-string result)))))
 
+(defun chat-tool-caller--compact-text (text &optional max-chars)
+  "Normalize TEXT and keep at most MAX-CHARS characters."
+  (let* ((limit (or max-chars 120))
+         (normalized (replace-regexp-in-string
+                      "[ \t\n\r]+"
+                      " "
+                      (string-trim (or text "")))))
+    (if (> (length normalized) limit)
+        (concat (substring normalized 0 limit) "...")
+      normalized)))
+
+(defun chat-tool-caller--notify (observer event)
+  "Send EVENT to OBSERVER."
+  (when observer
+    (funcall observer event)))
+
+(defun chat-tool-caller--tool-arguments-summary (arguments)
+  "Return a compact summary for ARGUMENTS."
+  (chat-tool-caller--compact-text (format "%S" arguments)))
+
+(defun chat-tool-caller--tool-result-summary (result)
+  "Return a compact summary for RESULT."
+  (chat-tool-caller--compact-text (chat-tool-caller--stringify-result result)))
+
+(defun chat-tool-caller--file-tool-p (tool-id)
+  "Return non-nil when TOOL-ID is a file tool."
+  (memq tool-id '(files_read files_read_lines files_grep files_find files_list
+                  files_write files_replace files_patch apply_patch)))
+
+(defun chat-tool-caller--access-denied-hint (tool-id error-message)
+  "Return ERROR-MESSAGE with a code-mode hint when useful."
+  (if (and (chat-tool-caller--file-tool-p tool-id)
+           (string-match-p "path outside allowed directories" error-message)
+           (null (chat-tool-caller--code-project-root)))
+      (concat error-message
+              ". Start code mode from the project root or switch this conversation to code mode before searching the repository")
+    error-message))
+
 (defun chat-tool-caller--shell-whitelist-approve-p (call)
   "Check if shell command in CALL is whitelisted for auto-approval."
   (let ((arguments (plist-get call :arguments))
@@ -325,7 +363,7 @@
   (or (chat-tool-caller--code-project-root)
       default-directory))
 
-(defun chat-tool-caller-execute (call &optional session)
+(defun chat-tool-caller-execute (call &optional session observer)
   "Execute one parsed tool CALL.
 Optional SESSION is the current chat session for approval context.
 If SESSION is nil, uses `chat--current-session' if bound."
@@ -344,27 +382,67 @@ If SESSION is nil, uses `chat--current-session' if bound."
               (default-directory (file-name-as-directory
                                   (chat-files--resolved-path
                                    (chat-tool-caller--execution-directory)))))
+          (chat-tool-caller--notify
+           observer
+           (list :type 'tool-call
+                 :tool name
+                 :arguments arguments))
           (if tool
               ;; Check shell whitelist first for shell_execute
               (if (and (eq tool-id 'shell_execute)
                        (chat-tool-caller--shell-whitelist-approve-p call))
                   ;; Whitelisted shell command: execute without approval
-                  (chat-tool-caller--stringify-result
-                   (chat-tool-forge-execute
-                    tool-id
-                    (chat-tool-caller--arguments-to-argv tool arguments)))
+                  (let ((result
+                         (chat-tool-caller--stringify-result
+                          (chat-tool-forge-execute
+                           tool-id
+                           (chat-tool-caller--arguments-to-argv tool arguments)))))
+                    (chat-tool-caller--notify
+                     observer
+                     (list :type 'approval
+                           :tool name
+                           :decision 'whitelisted-command
+                           :approved t))
+                    (chat-tool-caller--notify
+                     observer
+                     (list :type 'tool-result
+                           :tool name
+                           :result-summary (chat-tool-caller--tool-result-summary result)))
+                    result)
                 ;; Normal approval flow
-                (if (chat-approval-request-tool-call tool call actual-session)
-                    (chat-tool-caller--stringify-result
-                     (chat-tool-forge-execute
-                      tool-id
-                      (chat-tool-caller--arguments-to-argv tool arguments)))
-                  (format "Approval denied for tool '%s'" name)))
+                (if (chat-approval-request-tool-call tool call actual-session observer)
+                    (let ((result
+                           (chat-tool-caller--stringify-result
+                            (chat-tool-forge-execute
+                             tool-id
+                             (chat-tool-caller--arguments-to-argv tool arguments)))))
+                      (chat-tool-caller--notify
+                       observer
+                       (list :type 'tool-result
+                             :tool name
+                             :result-summary (chat-tool-caller--tool-result-summary result)))
+                      result)
+                  (let ((result (format "Approval denied for tool '%s'" name)))
+                    (chat-tool-caller--notify
+                     observer
+                     (list :type 'tool-error
+                           :tool name
+                           :result-summary result))
+                    result)))
             (format "Error: Tool '%s' not found" name)))
       (error
-       (format "Error executing tool '%s': %s"
-               name
-               (error-message-string err))))))
+       (let ((result
+              (format "Error executing tool '%s': %s"
+                      name
+                      (chat-tool-caller--access-denied-hint
+                       tool-id
+                       (error-message-string err)))))
+         (chat-tool-caller--notify
+          observer
+          (list :type 'tool-error
+                :tool name
+                :result-summary (chat-tool-caller--compact-text result)))
+         result)))))
 
 (defun chat-tool-caller-extract-content (content)
   "Extract user-facing text from CONTENT."
@@ -397,15 +475,31 @@ If SESSION is nil, uses `chat--current-session' if bound."
                         t)))
         (string-trim-right result))))))
 
-(defun chat-tool-caller-process-response-data (content &optional session)
+(defun chat-tool-caller-process-response-data (content &optional session observer)
   "Process CONTENT for SESSION and return a result plist."
   (let* ((calls (chat-tool-caller-parse content))
-         (tool-results (mapcar (lambda (call)
-                                 (chat-tool-caller-execute call session))
-                               calls)))
+         tool-results
+         tool-events)
+    (when (and observer
+               (not (string-empty-p (string-trim (chat-tool-caller-extract-content content)))))
+      (funcall observer
+               (list :type 'thinking
+                     :summary (chat-tool-caller--compact-text
+                               (chat-tool-caller-extract-content content)))))
+    (cl-loop for call in calls
+             for index from 1
+             do (push (chat-tool-caller-execute
+                       call
+                       session
+                       (lambda (event)
+                         (let ((indexed (copy-tree event)))
+                           (setq indexed (plist-put indexed :index index))
+                           (push indexed tool-events))))
+                      tool-results))
     (list :content (string-trim-right (chat-tool-caller-extract-content content))
           :tool-calls calls
-          :tool-results tool-results)))
+          :tool-results (nreverse tool-results)
+          :tool-events (nreverse tool-events))))
 
 (defun chat-tool-caller-process-response (content callback)
   "Process CONTENT then call CALLBACK."

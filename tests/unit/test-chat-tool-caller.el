@@ -125,7 +125,7 @@
           captured-tool)
      (chat-files-register-built-in-tools)
      (cl-letf (((symbol-function 'chat-approval-request-tool-call)
-                (lambda (tool _call &optional _session)
+                (lambda (tool _call &optional _session _observer)
                   (setq captured-tool (chat-forged-tool-id tool))
                   nil)))
        (let ((result (chat-tool-caller-execute
@@ -206,7 +206,7 @@
           captured-session)
      (chat-files-register-built-in-tools)
      (cl-letf (((symbol-function 'chat-approval-request-tool-call)
-                (lambda (_tool _call &optional maybe-session)
+                (lambda (_tool _call &optional maybe-session _observer)
                   (setq captured-session maybe-session)
                   t)))
        (let ((result (chat-tool-caller-process-response-data
@@ -216,6 +216,34 @@
          (should (eq captured-session session))
          (should (file-exists-p target-file))
          (should (= (length (plist-get result :tool-results)) 1)))))))
+
+(ert-deftest chat-tool-caller-process-response-data-collects-tool-events ()
+  "Test tool processing returns structured event data."
+  (chat-test-with-temp-dir
+   (let* ((source-file (expand-file-name "source.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (with-temp-file source-file
+       (insert "hello tool"))
+     (chat-files-register-built-in-tools)
+     (let ((result (chat-tool-caller-process-response-data
+                    (format "{\"function_call\":{\"name\":\"files_read\",\"arguments\":{\"path\":\"%s\"}}}"
+                            source-file))))
+       (should (= (length (plist-get result :tool-events)) 2))
+       (should (eq (plist-get (car (plist-get result :tool-events)) :type) 'tool-call))
+       (should (eq (plist-get (cadr (plist-get result :tool-events)) :type) 'tool-result))))))
+
+(ert-deftest chat-tool-caller-file-access-denied-suggests-code-mode ()
+  "Test file access denial explains how to switch to code mode."
+  (let ((chat-files-allowed-directories '("/tmp/"))
+        (chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-files-register-built-in-tools)
+    (let ((result (chat-tool-caller-execute
+                   '(:name "files_find"
+                     :arguments (("directory" . "/Users/liu/projects/demo")
+                                 ("pattern" . "StickerManager"))))))
+      (should (string-match-p "Access denied" result))
+      (should (string-match-p "code mode" result)))))
 
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

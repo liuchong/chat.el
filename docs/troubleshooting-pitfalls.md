@@ -400,6 +400,14 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: trim loaded bodies and convert empty content to nil before attempting compilation.
 
+### Plain Chat Repository Queries Can Hit Allowed Root Denials
+
+**Problem**: asking repository questions from a plain chat session can produce `Access denied: path outside allowed directories` even though the files exist inside the current project.
+
+**Cause**: plain chat sessions do not automatically carry a code session project root into the file tool allowlist, so recursive file tools only see the generic allowed directories.
+
+**Solution**: start the conversation from code mode for repository work, or surface a clear hint when file-tool access fails so the user can switch to code mode instead of retrying shell commands.
+
 ---
 
 ## Testing and Batch Mode

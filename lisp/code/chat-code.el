@@ -236,8 +236,11 @@ Inherits from chat-session with additional code-specific fields."
                        chat-code--active-request-model
                        (and (chat-code--base-session)
                             (chat-session-model-id (chat-code--base-session)))))
-         (provider-name (and model-id
-                             (chat-llm-provider-option model-id :name))))
+         (provider-name
+          (and model-id
+               (condition-case nil
+                   (chat-llm-provider-option model-id :name)
+                 (error nil)))))
     (or provider-name
         (and model-id (symbol-name model-id))
         "No model")))
@@ -378,14 +381,20 @@ Inherits from chat-session with additional code-specific fields."
 
 (defun chat-code--request-output-budget (model)
   "Return the requested output token budget for MODEL."
-  (let ((provider-limit (chat-llm-provider-option model :max-output-tokens)))
+  (let ((provider-limit
+         (condition-case nil
+             (chat-llm-provider-option model :max-output-tokens)
+           (error nil))))
     (if (and (integerp provider-limit) (> provider-limit 0))
         (min chat-code-max-output-tokens provider-limit)
       chat-code-max-output-tokens)))
 
 (defun chat-code--request-message-budget (model messages)
   "Return the total token budget for MODEL and MESSAGES."
-  (let* ((provider-window (chat-llm-provider-option model :context-window))
+  (let* ((provider-window
+          (condition-case nil
+              (chat-llm-provider-option model :context-window)
+            (error nil)))
          (system-tokens (chat-context-total-tokens
                          (seq-take-while (lambda (msg)
                                            (eq (chat-message-role msg) :system))
@@ -601,6 +610,71 @@ Returns either the block body string or a list of (LANG BODY)."
     (when parts
       (mapconcat #'identity (nreverse parts) " | "))))
 
+(defun chat-code--format-tool-events (tool-events)
+  "Format TOOL-EVENTS into readable lines."
+  (when tool-events
+    (concat
+     "Steps:\n"
+     (mapconcat
+      (lambda (event)
+        (pcase (plist-get event :type)
+          ('thinking
+           (format "- Thinking: %s"
+                   (plist-get event :summary)))
+          ('tool-call
+           (format "- Tool Call %s: %s %s"
+                   (plist-get event :index)
+                   (plist-get event :tool)
+                   (chat-tool-caller--tool-arguments-summary
+                    (plist-get event :arguments))))
+          ('approval-pending
+           (format "- Approval Pending %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :tool)))
+          ('approval
+           (format "- Approval %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :decision)))
+          ('tool-result
+           (format "- Tool Result %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :result-summary)))
+          ('tool-error
+           (format "- Tool Error %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :result-summary)))
+          (_
+           (format "- %s" event))))
+      tool-events
+      "\n"))))
+
+(defun chat-code--render-response-state (content-start content tool-events
+                                                      &optional tool-loop-limit-reached
+                                                      tool-summary)
+  "Render CONTENT, TOOL-EVENTS, TOOL-LOOP-LIMIT-REACHED, and TOOL-SUMMARY."
+  (chat-code--replace-response-slot
+   content-start
+   (lambda ()
+     (unless (string-empty-p content)
+       (chat-code--insert-formatted-response content))
+     (let ((events-text (chat-code--format-tool-events tool-events)))
+       (when events-text
+         (unless (string-empty-p content)
+           (insert "\n\n"))
+         (insert events-text)))
+     (when tool-summary
+       (unless (and (string-empty-p content)
+                    (not tool-events))
+         (insert "\n"))
+       (insert (format "Tools used: %s" tool-summary)))
+     (when tool-loop-limit-reached
+       (unless (and (string-empty-p content)
+                    (not tool-events)
+                    (not tool-summary))
+         (insert "\n"))
+       (insert "Tool loop stopped after reaching the safety limit."))
+     (insert "\n\n"))))
+
 (defun chat-code--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
   (let (lines)
@@ -636,6 +710,8 @@ Returns either the block body string or a list of (LANG BODY)."
   (list :content (plist-get extra :content)
         :tool-loop-limit-reached (or (plist-get base :tool-loop-limit-reached)
                                      (plist-get extra :tool-loop-limit-reached))
+        :tool-events (append (plist-get base :tool-events)
+                             (plist-get extra :tool-events))
         :tool-calls (append (plist-get base :tool-calls)
                             (plist-get extra :tool-calls))
         :tool-results (append (plist-get base :tool-results)
@@ -646,6 +722,7 @@ Returns either the block body string or a list of (LANG BODY)."
   (let* ((content (string-trim-right
                    (chat-tool-caller-extract-content
                     (or (plist-get processed :content) ""))))
+         (tool-events (plist-get processed :tool-events))
          (tool-calls (plist-get processed :tool-calls))
          (tool-results (plist-get processed :tool-results))
          (tool-summary (chat-code--tool-display-summary tool-calls tool-results))
@@ -656,21 +733,14 @@ Returns either the block body string or a list of (LANG BODY)."
          content-start
          (lambda ()
            (chat-code--propose-edit edit)))
-      (chat-code--replace-response-slot
+      (chat-code--render-response-state
        content-start
-       (lambda ()
-         (unless (string-empty-p content)
-           (chat-code--insert-formatted-response content))
-         (when tool-loop-limit-reached
-           (unless (string-empty-p content)
-             (insert "\n"))
-           (insert "Tool loop stopped after reaching the safety limit."))
-         (when tool-summary
-           (unless (and (string-empty-p content)
-                        (not tool-loop-limit-reached))
-             (insert "\n"))
-           (insert (format "Tools used: %s" tool-summary)))
-         (insert "\n\n"))))))
+       (if (and (string-blank-p content) tool-summary)
+           ""
+         content)
+       tool-events
+       tool-loop-limit-reached
+       tool-summary))))
 
 (defun chat-code--persist-processed-response (processed &optional raw-request raw-response)
   "Persist PROCESSED response into the current session."
@@ -1143,16 +1213,15 @@ CONTENT-START marks the assistant response body."
                     (with-current-buffer buffer
                       (chat-code--set-status 'running "Streaming response")
                       (setq full-content (concat full-content chunk))
-                      (chat-code--replace-response-slot
-                       content-start
-                       (lambda ()
-                         (let ((visible
-                                (string-trim-right
-                                 (chat-tool-caller-extract-content full-content))))
-                           (if (string-empty-p visible)
-                               (insert "Calling tools...\n\n")
-                             (insert visible)
-                             (insert "\n\n")))))
+                      (let ((visible
+                             (string-trim-right
+                              (chat-tool-caller-extract-content full-content))))
+                        (chat-code--render-response-state
+                         content-start
+                         (if (string-empty-p visible)
+                             "Calling tools..."
+                           visible)
+                         nil))
                       (redisplay t))))
                 (list :temperature 0.7
                       :stream t
