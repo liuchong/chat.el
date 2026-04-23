@@ -308,8 +308,10 @@ SESSION is a chat-session struct."
 (defun chat--reading-session-name (&optional file)
   "Return a default session name for reading workflow commands."
   (let* ((path (or file default-directory))
-         (name (file-name-nondirectory
-                (directory-file-name path))))
+         (normalized (directory-file-name path))
+         (name (file-name-nondirectory normalized)))
+    (when (string-empty-p name)
+      (setq name normalized))
     (format "Read: %s" name)))
 
 (defun chat--resolve-last-session ()

@@ -77,12 +77,14 @@
 (defun chat-reading-capture-region ()
   "Capture the active region for the reading workflow."
   (let* ((file (chat-reading--current-file))
-         (code (and (region-active-p)
-                    (buffer-substring-no-properties
-                     (region-beginning)
-                     (region-end))))
-         (line-range (chat-reading--region-line-range)))
-    (unless code
+         (start (and (region-active-p) (region-beginning)))
+         (end (and (region-active-p) (region-end)))
+         (code (and start
+                    end
+                    (> end start)
+                    (buffer-substring-no-properties start end)))
+         (line-range (and code (chat-reading--region-line-range))))
+    (unless line-range
       (user-error "No active region to quote"))
     (chat-reading--make-capture
      'region

@@ -133,6 +133,10 @@
   (let ((default-directory "/tmp/worktree/"))
     (should (string= (chat--reading-session-name nil) "Read: worktree"))))
 
+(ert-deftest chat-reading-session-name-falls-back-to-root-directory-marker ()
+  (let ((default-directory "/"))
+    (should (string= (chat--reading-session-name nil) "Read: /"))))
+
 (ert-deftest chat-resolve-last-session-returns-nil-when-missing ()
   (let ((chat--last-session-id "missing"))
     (should-not (chat--resolve-last-session))))

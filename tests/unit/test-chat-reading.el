@@ -61,6 +61,20 @@
     (activate-mark)
     (should-error (chat-reading-capture-region) :type 'user-error)))
 
+(ert-deftest chat-reading-capture-region-rejects-empty-region ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (set-mark (point))
+             (activate-mark)
+             (should-error (chat-reading-capture-region) :type 'user-error))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-reading-current-file-errors-without-file-buffer ()
   (with-temp-buffer
     (should-error (chat-reading--current-file) :type 'user-error)))
