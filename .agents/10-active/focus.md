@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Stabilize the shared reading workflow so chat mode and code mode both reuse one normalized capture path.
+Keep the shared reading workflow stable while increasing command-matrix and session-reuse coverage.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Stabilize the shared reading workflow so chat mode and code mode both reuse one 
 
 ## Immediate Next Step
 
-Increase test density around the shared reading workflow, especially chat-side command variants and session reuse edges.
+Decide whether the next stage should add more discoverability for the new plain chat reading commands or keep focusing on test density and workflow edge cases.

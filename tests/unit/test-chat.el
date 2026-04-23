@@ -174,6 +174,178 @@
              (should (string-match-p "defun demo" sent-content)))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-quote-defun-opens-chat-and-inserts-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\"))\n\n(defun beta ()\n  (message \"b\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message \"b\"")
+             (chat-quote-defun)
+             (with-current-buffer "*chat:Read: demo.el*"
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-ui--input-overlay)
+                              (point-max))))
+                 (should (string-match-p "Kind: defun" quoted))
+                 (should (string-match-p "defun beta" quoted))
+                 (should-not (string-match-p "defun alpha" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-ask-defun-sends-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\"))\n\n(defun beta ()\n  (message \"b\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message \"b\"")
+             (cl-letf (((symbol-function 'chat-ui-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-ui--input-overlay)
+                                 (point-max))))))
+               (chat-ask-defun "Why beta?"))
+             (should (string-match-p "Kind: defun" sent-content))
+             (should (string-match-p "Why beta\\?" sent-content))
+             (should (string-match-p "defun beta" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-quote-near-point-opens-chat-and-inserts-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\nline4\nline5\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (forward-line 2)
+             (chat-quote-near-point)
+             (with-current-buffer "*chat:Read: demo.el*"
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-ui--input-overlay)
+                              (point-max))))
+                 (should (string-match-p "Kind: near-point" quoted))
+                 (should (string-match-p "line3" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-ask-near-point-sends-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\nline4\nline5\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (forward-line 2)
+             (cl-letf (((symbol-function 'chat-ui-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-ui--input-overlay)
+                                 (point-max))))))
+               (chat-ask-near-point "What is nearby?"))
+             (should (string-match-p "Kind: near-point" sent-content))
+             (should (string-match-p "What is nearby\\?" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-quote-current-file-opens-chat-and-inserts-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (chat-quote-current-file)
+             (with-current-buffer "*chat:Read: demo.el*"
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-ui--input-overlay)
+                              (point-max))))
+                 (should (string-match-p "Kind: current-file" quoted))
+                 (should (string-match-p "defun demo" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-ask-region-sends-structured-reference ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message")
+             (set-mark (line-beginning-position))
+             (goto-char (line-end-position))
+             (activate-mark)
+             (cl-letf (((symbol-function 'chat-ui-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-ui--input-overlay)
+                                 (point-max))))))
+               (chat-ask-region "Why is this here?"))
+             (should (string-match-p "Kind: region" sent-content))
+             (should (string-match-p "Why is this here\\?" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-command-reuses-existing-session-buffer ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (existing (chat-session-create "Existing" 'kimi))
+          (chat--last-session-id (chat-session-id existing))
+          (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (chat--open-session existing)
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (chat-quote-current-file)
+             (should (get-buffer "*chat:Existing*"))
+             (with-current-buffer "*chat:Existing*"
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-ui--input-overlay)
+                              (point-max))))
+                 (should (string-match-p "Kind: current-file" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-quote-current-file-propagates-oversized-file-error ()
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir)
+         (chat--last-session-id nil)
+         (chat-reading-current-file-max-lines 1)
+         (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\nline2\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-quote-current-file) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
 ;; ------------------------------------------------------------------
 ;; Utility Functions
 ;; ------------------------------------------------------------------
