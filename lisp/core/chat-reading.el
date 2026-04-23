@@ -60,6 +60,12 @@
         :code code
         :language (chat-reading--language file)))
 
+(defun chat-reading--ensure-nonempty-code (code)
+  "Return CODE or signal a user error when it is empty."
+  (unless (and code (> (length code) 0))
+    (user-error "Current file does not contain readable code to quote"))
+  code)
+
 (defun chat-reading--region-line-range ()
   "Return the active region line range as a cons."
   (when (region-active-p)
@@ -124,13 +130,15 @@
          (end (save-excursion
                 (forward-line radius)
                 (line-end-position)))
-         (end-line-pos (if (> end start) (1- end) end)))
+         (end-line-pos (if (> end start) (1- end) end))
+         (code (chat-reading--ensure-nonempty-code
+                (buffer-substring-no-properties start end))))
     (chat-reading--make-capture
      'near-point
      file
      (line-number-at-pos start)
      (line-number-at-pos end-line-pos)
-     (buffer-substring-no-properties start end))))
+     code)))
 
 (defun chat-reading-capture-current-file (&optional max-lines)
   "Capture the current file for the reading workflow."
@@ -139,7 +147,9 @@
          (end (point-max))
          (end-line-pos (if (> end start) (1- end) end))
          (line-count (count-lines start end))
-         (limit (or max-lines chat-reading-current-file-max-lines)))
+         (limit (or max-lines chat-reading-current-file-max-lines))
+         (code (chat-reading--ensure-nonempty-code
+                (buffer-substring-no-properties start end))))
     (when (> line-count limit)
       (user-error "Current file is too large to quote directly; use region, defun, or near-point"))
     (chat-reading--make-capture
@@ -147,7 +157,7 @@
      file
      1
      (max 1 (line-number-at-pos end-line-pos))
-     (buffer-substring-no-properties start end))))
+     code)))
 
 (defun chat-reading-format-question (capture &optional question)
   "Format CAPTURE and QUESTION as a visible reading workflow prompt."

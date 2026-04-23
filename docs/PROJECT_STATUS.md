@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 270 regression tests discovered
-- 270 passing
+- 272 regression tests discovered
+- 272 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -109,6 +109,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - shared reading and plain-chat bootstrap paths now also have denser refusal, default-limit, and fallback-session coverage
 - region capture now correctly keeps end-line metadata stable when selections stop at the next line boundary, and reused plain-chat sessions now replace stale input before quoting or asking
 - reading captures now also reject empty regions instead of producing blank code blocks, and root-directory reading sessions now keep a visible fallback name
+- empty-file current-file and near-point captures are now rejected before they can produce blank quoted code blocks
 
 ## Known Boundaries
 
@@ -132,6 +133,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - keep growing deterministic refusal and fallback coverage before adding more reading-surface features
 - keep adding helper-level tests that can still expose real metadata and reuse bugs instead of only increasing broad end-to-end coverage
 - keep pushing helper-level refusal and naming coverage before widening the reading workflow surface again
+- keep closing blank-context edge cases before spending more effort on wider reading-surface discoverability
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow
 

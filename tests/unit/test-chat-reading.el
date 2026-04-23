@@ -156,6 +156,15 @@
                (should (= (plist-get capture :end-line) 6))))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-reading-capture-near-point-rejects-empty-file ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file)
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-reading-capture-near-point) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-reading-capture-current-file-returns-full-file ()
   (chat-test-with-temp-dir
    (let ((source-file (expand-file-name "demo.el" temp-dir)))
@@ -186,6 +195,15 @@
          (chat-reading-current-file-max-lines 2))
      (with-temp-file source-file
        (insert "line1\nline2\nline3\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (should-error (chat-reading-capture-current-file) :type 'user-error)
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-reading-capture-current-file-rejects-empty-file ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file)
      (with-current-buffer (find-file-noselect source-file)
        (unwind-protect
            (should-error (chat-reading-capture-current-file) :type 'user-error)
