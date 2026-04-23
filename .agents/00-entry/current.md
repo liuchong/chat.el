@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0024 empty capture guardrail stage is complete.
+Phase 0025 empty file guardrail stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, blank-context protection, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, empty-context protection, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 
