@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0014 reading workflow slice one is complete.
+Phase 0015 reading workflow slice two is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while landing the first executable reading workflow slice around quoted code context, AI-driven file navigation, and session command discoverability.
+Keep `chat.el` on the new `.agents/` workflow while extending the executable reading workflow from region-only capture to explicit region, defun, and near-point capture around the existing code-mode and AI-driven navigation path.
 
 ## Active Modules
 

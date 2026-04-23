@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Ship the first executable reading workflow slice so region quoting, immediate questions, safe file navigation, and session replay commands work together in code mode.
+Stabilize the richer reading workflow so region, defun, and near-point capture all reuse the same quoted code question path in code mode.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Ship the first executable reading workflow slice so region quoting, immediate qu
 
 ## Immediate Next Step
 
-Build the next slice on top of the new region workflow baseline, likely expanding from region-only capture to defun and near-point capture without breaking the current code-mode path.
+Decide whether the next reading workflow slice should add current-file capture or start exposing the same capture model outside code mode without fragmenting the command set.

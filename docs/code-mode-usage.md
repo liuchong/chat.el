@@ -112,7 +112,11 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `chat-code-for-selection` | - | 使用当前选区作为上下文 |
 | `chat-code-from-chat` | - | 从普通聊天会话切换 |
 | `chat-code-quote-region` | - | 把当前选区引用到 code-mode 输入区 |
+| `chat-code-quote-defun` | - | 把当前 defun 引用到 code-mode 输入区 |
+| `chat-code-quote-near-point` | - | 把光标附近上下文引用到 code-mode 输入区 |
 | `chat-code-ask-region` | - | 直接对当前选区提问 |
+| `chat-code-ask-defun` | - | 直接对当前 defun 提问 |
+| `chat-code-ask-near-point` | - | 直接对光标附近上下文提问 |
 
 ### Code Mode Buffer 命令
 
@@ -139,11 +143,12 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 推荐链路：
 
 ```text
-1. 在源码 buffer 中选中正在阅读的代码
-2. 执行 chat-code-quote-region
-3. 在 code-mode buffer 中补充你的问题
-4. 或直接执行 chat-code-ask-region 立即发送
-5. AI 如需切换到其他文件，可调用 open_file 在 Emacs 中直接打开相关文件
+1. 在源码 buffer 中选择最贴近当前阅读状态的入口
+2. 选中代码时执行 `chat-code-quote-region` 或 `chat-code-ask-region`
+3. 光标在函数内时执行 `chat-code-quote-defun` 或 `chat-code-ask-defun`
+4. 正在看某行附近逻辑时执行 `chat-code-quote-near-point` 或 `chat-code-ask-near-point`
+5. 在 code-mode buffer 中继续补充问题，或直接让命令立即发送
+6. AI 如需切换到其他文件，可调用 `open_file` 在 Emacs 中直接打开相关文件
 ```
 
 ### 内联编辑命令（在代码缓冲区）

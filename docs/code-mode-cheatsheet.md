@@ -11,7 +11,11 @@ M-x chat-code-for-file           针对特定文件
 M-x chat-code-for-selection      使用当前选区
 M-x chat-code-from-chat          从普通聊天切换
 M-x chat-code-quote-region       把当前选区引用到输入框
+M-x chat-code-quote-defun        把当前 defun 引用到输入框
+M-x chat-code-quote-near-point   把光标附近上下文引用到输入框
 M-x chat-code-ask-region         直接提问当前选区
+M-x chat-code-ask-defun          直接提问当前 defun
+M-x chat-code-ask-near-point     直接提问光标附近上下文
 ```
 
 ## ✏️ 内联编辑（在代码缓冲区）
@@ -50,10 +54,12 @@ C-g           取消操作
 ## 📖 阅读代码工作流
 
 ```text
-1. 在源码 buffer 里选中正在阅读的代码
-2. M-x chat-code-quote-region 或 C-c C-q
-3. 在 code-mode buffer 中补充问题，或直接用 M-x chat-code-ask-region / C-c C-SPC
-4. AI 如有需要可调用 open_file 直接打开相关文件
+1. 在源码 buffer 里选择最合适的入口
+2. 选区用 M-x chat-code-quote-region 或 C-c C-q
+3. 当前 defun 用 M-x chat-code-quote-defun
+4. 当前点附近逻辑用 M-x chat-code-quote-near-point
+5. 在 code-mode buffer 中补充问题，或直接用对应的 M-x chat-code-ask-* 命令立即发送
+6. AI 如有需要可调用 open_file 直接打开相关文件
 ```
 
 ## 🔀 多文件重构（实验性）

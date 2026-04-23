@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-04-23
+Last updated: 2026-04-24
 
 ## Summary
 
@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 205 regression tests discovered
-- 205 passing
+- 214 regression tests discovered
+- 214 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -100,6 +100,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries
 - chat mode now supports regenerating the last assistant turn and restoring the last user turn into the input area for editing
 - code mode now supports the same regenerate and edit-resend flow, and buffer rebuilds now replay persisted session history instead of only showing headers and an empty prompt
+- code mode now supports explicit reading captures for region, defun, and nearby context, all routed through the same quoted question flow
+- AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
 
 ## Known Boundaries
 
@@ -109,11 +111,13 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - some provider default remote model names are best effort defaults and may need local adjustment as vendor catalogs change
 - provider integration tests now live outside the canonical batch suite and should be run explicitly with credentials and network access
 - code mode refactor, git helper, indexing extras, and performance helpers should still be treated as experimental
+- plain chat mode still does not expose the new reading capture commands, so the in-editor reading workflow remains code-mode first
 
 ## Recommended Next Work
 
 - make true provider streaming and fallback behavior share one transport abstraction
-- improve discoverability for session editing and regeneration commands
+- extend the reading workflow from code mode into other surfaces only when the shared capture model stays intact
+- consider a current-file reading command after the new region, defun, and near-point captures settle
 - add integration coverage for approval and tool loop behavior
 - consider a richer session browser and export flow
 

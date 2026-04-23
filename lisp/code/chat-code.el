@@ -107,6 +107,11 @@ Set to 0 to never auto-apply."
   :type 'integer
   :group 'chat-code)
 
+(defcustom chat-code-reading-near-point-radius 5
+  "Number of surrounding lines to capture around point for reading workflow commands."
+  :type 'integer
+  :group 'chat-code)
+
 (defcustom chat-code-system-prompt
   "You are an expert programmer. Help the user write, understand, and modify code.
 
@@ -1318,27 +1323,34 @@ using C-x b or C-c C-v."
   (interactive)
   (unless (region-active-p)
     (user-error "No active region to quote"))
-  (let ((prompt (chat-code--quoted-region-prompt))
-        (session (chat-code--prepare-reading-session)))
-    (chat-code--open-session session)
-    (with-current-buffer (chat-code--buffer-name session)
-      (delete-region (marker-position chat-code--input-marker) (point-max))
-      (goto-char (marker-position chat-code--input-marker))
-      (insert prompt))))
+  (chat-code--quote-capture (chat-code--capture-region)))
 
 (defun chat-code-ask-region (question)
   "Ask QUESTION about the active region in code mode."
   (interactive "sQuestion: ")
   (unless (region-active-p)
     (user-error "No active region to ask about"))
-  (let ((prompt (chat-code--quoted-region-prompt question))
-        (session (chat-code--prepare-reading-session)))
-    (chat-code--open-session session)
-    (with-current-buffer (chat-code--buffer-name session)
-      (delete-region (marker-position chat-code--input-marker) (point-max))
-      (goto-char (marker-position chat-code--input-marker))
-      (insert prompt)
-      (chat-code-send-message))))
+  (chat-code--ask-capture (chat-code--capture-region) question))
+
+(defun chat-code-quote-defun ()
+  "Quote the defun at point into the current code-mode input area."
+  (interactive)
+  (chat-code--quote-capture (chat-code--capture-defun)))
+
+(defun chat-code-ask-defun (question)
+  "Ask QUESTION about the defun at point in code mode."
+  (interactive "sQuestion: ")
+  (chat-code--ask-capture (chat-code--capture-defun) question))
+
+(defun chat-code-quote-near-point ()
+  "Quote nearby context around point into the current code-mode input area."
+  (interactive)
+  (chat-code--quote-capture (chat-code--capture-near-point)))
+
+(defun chat-code-ask-near-point (question)
+  "Ask QUESTION about nearby context around point in code mode."
+  (interactive "sQuestion: ")
+  (chat-code--ask-capture (chat-code--capture-near-point) question))
 
 (defun chat-code--process-message ()
   "Process the latest user message."
@@ -1868,6 +1880,27 @@ Returns a chat-edit struct or nil."
     (cons (line-number-at-pos (region-beginning))
           (line-number-at-pos (region-end)))))
 
+(defun chat-code--current-reading-file ()
+  "Return the current file for reading workflow commands."
+  (or (buffer-file-name)
+      (user-error "Current buffer is not visiting a file")))
+
+(defun chat-code--reading-language (file)
+  "Return the language symbol for FILE."
+  (or (cdr (seq-find (lambda (entry)
+                       (string-match-p (car entry) file))
+                     chat-code-filetype-map))
+      major-mode))
+
+(defun chat-code--make-reading-capture (kind file start-line end-line code)
+  "Build a normalized reading capture."
+  (list :kind kind
+        :file file
+        :start-line start-line
+        :end-line end-line
+        :code code
+        :language (chat-code--reading-language file)))
+
 (defun chat-code--prepare-reading-session ()
   "Return a code session suitable for reading workflow commands."
   (or (and (boundp 'chat-code--current-session)
@@ -1881,22 +1914,39 @@ Returns a chat-edit struct or nil."
            default-directory)
        (buffer-file-name))))
 
-(defun chat-code--quoted-region-prompt (&optional question)
-  "Build a structured quoted prompt for the active region and QUESTION."
-  (let* ((file (or (buffer-file-name)
-                   (user-error "Current buffer is not visiting a file")))
-         (code (or (chat-code--get-selection)
-                   (user-error "No active region to quote")))
-         (line-range (chat-code--selection-line-range))
-         (lang (or (cdr (seq-find (lambda (entry)
-                                    (string-match-p (car entry) file))
-                                  chat-code-filetype-map))
-                   major-mode)))
+(defun chat-code--quote-capture (capture)
+  "Insert CAPTURE into the current code-mode input area."
+  (let ((prompt (chat-code--quoted-capture-prompt capture))
+        (session (chat-code--prepare-reading-session)))
+    (chat-code--open-session session)
+    (with-current-buffer (chat-code--buffer-name session)
+      (delete-region (marker-position chat-code--input-marker) (point-max))
+      (goto-char (marker-position chat-code--input-marker))
+      (insert prompt))))
+
+(defun chat-code--ask-capture (capture question)
+  "Send QUESTION about CAPTURE in code mode."
+  (let ((prompt (chat-code--quoted-capture-prompt capture question))
+        (session (chat-code--prepare-reading-session)))
+    (chat-code--open-session session)
+    (with-current-buffer (chat-code--buffer-name session)
+      (delete-region (marker-position chat-code--input-marker) (point-max))
+      (goto-char (marker-position chat-code--input-marker))
+      (insert prompt)
+      (chat-code-send-message))))
+
+(defun chat-code--quoted-capture-prompt (capture &optional question)
+  "Build a structured quoted prompt for CAPTURE and QUESTION."
+  (let* ((file (plist-get capture :file))
+         (code (plist-get capture :code))
+         (lang (plist-get capture :language)))
     (concat
      "Question about this code:\n\n"
      (format "File: %s\n" file)
-     (format "Lines: %d-%d\n" (car line-range) (cdr line-range))
-     "Kind: region\n\n"
+     (format "Lines: %d-%d\n"
+             (plist-get capture :start-line)
+             (plist-get capture :end-line))
+     (format "Kind: %s\n\n" (plist-get capture :kind))
      (format "```%s\n" (symbol-name lang))
      code
      (unless (string-suffix-p "\n" code)
@@ -1912,6 +1962,63 @@ Returns a chat-edit struct or nil."
       (let ((start (point)))
         (end-of-defun)
         (buffer-substring-no-properties start (point))))))
+
+(defun chat-code--capture-region ()
+  "Capture the active region for reading workflow commands."
+  (let* ((file (chat-code--current-reading-file))
+         (code (or (chat-code--get-selection)
+                   (user-error "No active region to quote")))
+         (line-range (or (chat-code--selection-line-range)
+                         (user-error "No active region to quote"))))
+    (chat-code--make-reading-capture
+     'region
+     file
+     (car line-range)
+     (cdr line-range)
+     code)))
+
+(defun chat-code--defun-bounds ()
+  "Return the start and end positions of the defun at point."
+  (save-excursion
+    (condition-case nil
+        (progn
+          (beginning-of-defun)
+          (let ((start (point)))
+            (end-of-defun)
+            (cons start (point))))
+      (error nil))))
+
+(defun chat-code--capture-defun ()
+  "Capture the defun at point for reading workflow commands."
+  (let* ((file (chat-code--current-reading-file))
+         (bounds (or (chat-code--defun-bounds)
+                     (user-error "No defun at point to quote")))
+         (start (car bounds))
+         (end (cdr bounds))
+         (end-line-pos (if (> end start) (1- end) end)))
+    (chat-code--make-reading-capture
+     'defun
+     file
+     (line-number-at-pos start)
+     (line-number-at-pos end-line-pos)
+     (buffer-substring-no-properties start end))))
+
+(defun chat-code--capture-near-point ()
+  "Capture nearby context around point for reading workflow commands."
+  (let* ((file (chat-code--current-reading-file))
+         (radius (max 0 chat-code-reading-near-point-radius))
+         (start (save-excursion
+                  (forward-line (- radius))
+                  (line-beginning-position)))
+         (end (save-excursion
+                (forward-line radius)
+                (line-end-position))))
+    (chat-code--make-reading-capture
+     'near-point
+     file
+     (line-number-at-pos start)
+     (line-number-at-pos end)
+     (buffer-substring-no-properties start end))))
 
 (defun chat-code--get-context-around-point ()
   "Get context around point (100 chars before and after)."

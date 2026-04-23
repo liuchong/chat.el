@@ -193,12 +193,114 @@
              (should (string-match-p "Kind: region" sent-content)))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-code-quote-defun-inserts-structured-reference ()
+  "Test quoting the defun at point inserts file, line, and code context."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\"))\n\n(defun beta ()\n  (message \"b\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message \"b\"")
+             (chat-code-quote-defun)
+             (with-current-buffer (chat-code--buffer-name chat-code--current-session)
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-code--input-marker)
+                              (point-max))))
+                 (should (string-match-p "Question about this code:" quoted))
+                 (should (string-match-p "File: " quoted))
+                 (should (string-match-p "Lines: 4-5" quoted))
+                 (should (string-match-p "Kind: defun" quoted))
+                 (should (string-match-p "defun beta" quoted))
+                 (should-not (string-match-p "defun alpha" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-ask-defun-sends-structured-reference ()
+  "Test asking about the defun at point sends a structured quoted message."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\"))\n\n(defun beta ()\n  (message \"b\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message \"b\"")
+             (cl-letf (((symbol-function 'chat-code-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-code--input-marker)
+                                 (point-max))))))
+               (chat-code-ask-defun "Why does beta log?"))
+             (should (string-match-p "Question about this code:" sent-content))
+             (should (string-match-p "Why does beta log\\?" sent-content))
+             (should (string-match-p "Kind: defun" sent-content))
+             (should (string-match-p "defun beta" sent-content))
+             (should-not (string-match-p "defun alpha" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-quote-near-point-inserts-structured-reference ()
+  "Test quoting nearby context inserts bounded file, line, and code context."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\")\n  (message \"aa\"))\n\n(defun beta ()\n  (message \"b\")\n  (message \"bb\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message \"b\"")
+             (chat-code-quote-near-point)
+             (with-current-buffer (chat-code--buffer-name chat-code--current-session)
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-code--input-marker)
+                              (point-max))))
+                 (should (string-match-p "Question about this code:" quoted))
+                 (should (string-match-p "File: " quoted))
+                 (should (string-match-p "Kind: near-point" quoted))
+                 (should (string-match-p "defun beta" quoted))
+                 (should (string-match-p "message \"b\"" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-code-ask-near-point-sends-structured-reference ()
+  "Test asking about nearby context sends a structured quoted message."
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir))
+         sent-content)
+     (with-temp-file source-file
+       (insert "(defun alpha ()\n  (message \"a\")\n  (message \"aa\"))\n\n(defun beta ()\n  (message \"b\")\n  (message \"bb\"))\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (search-forward "message \"b\"")
+             (cl-letf (((symbol-function 'chat-code-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-code--input-marker)
+                                 (point-max))))))
+               (chat-code-ask-near-point "What matters around here?"))
+             (should (string-match-p "Question about this code:" sent-content))
+             (should (string-match-p "What matters around here\\?" sent-content))
+             (should (string-match-p "Kind: near-point" sent-content))
+             (should (string-match-p "defun beta" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-code-mode-map-includes-reading-and-session-shortcuts ()
   "Test code mode keymap exposes reading and session workflow shortcuts."
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-e")) 'chat-code-edit-last-user-message))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-g")) 'chat-code-regenerate-last-response))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-q")) 'chat-code-quote-region))
-  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-SPC")) 'chat-code-ask-region)))
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-SPC")) 'chat-code-ask-region))
+  (should (fboundp 'chat-code-quote-defun))
+  (should (fboundp 'chat-code-ask-defun))
+  (should (fboundp 'chat-code-quote-near-point))
+  (should (fboundp 'chat-code-ask-near-point)))
 
 (ert-deftest chat-code-send-streaming-uses-current-stream-api ()
   "Test code mode streaming uses the current chat-stream API shape."
