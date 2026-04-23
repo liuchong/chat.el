@@ -24,6 +24,25 @@
                (should (eq (plist-get capture :language) 'emacs-lisp))))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-reading-capture-region-excludes-next-line-when-region-ends-at-line-start ()
+  (chat-test-with-temp-dir
+   (let ((source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "line1\nline2\nline3\n"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (goto-char (point-min))
+             (forward-line 1)
+             (set-mark (line-beginning-position))
+             (forward-line 1)
+             (activate-mark)
+             (let ((capture (chat-reading-capture-region)))
+               (should (= (plist-get capture :start-line) 2))
+               (should (= (plist-get capture :end-line) 2))
+               (should (string= (plist-get capture :code) "line2\n"))))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-reading-capture-region-requires-active-region ()
   (chat-test-with-temp-dir
    (let ((source-file (expand-file-name "demo.el" temp-dir)))

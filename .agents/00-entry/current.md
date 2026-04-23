@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0021 reading edge coverage stage is complete.
+Phase 0022 reading capture correctness stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading workflow correctness, edge-case coverage density, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture correctness, edge-case coverage density, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 

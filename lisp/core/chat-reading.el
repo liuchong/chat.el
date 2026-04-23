@@ -63,8 +63,16 @@
 (defun chat-reading--region-line-range ()
   "Return the active region line range as a cons."
   (when (region-active-p)
-    (cons (line-number-at-pos (region-beginning))
-          (line-number-at-pos (region-end)))))
+    (let* ((start (region-beginning))
+           (end (region-end))
+           (adjusted-end (if (and (> end start)
+                                  (save-excursion
+                                    (goto-char end)
+                                    (= end (line-beginning-position))))
+                             (1- end)
+                           end)))
+      (cons (line-number-at-pos start)
+            (line-number-at-pos adjusted-end)))))
 
 (defun chat-reading-capture-region ()
   "Capture the active region for the reading workflow."

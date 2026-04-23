@@ -374,6 +374,30 @@
                  (should (string-match-p "defun demo" quoted)))))
          (kill-buffer (current-buffer)))))))
 
+(ert-deftest chat-quote-current-file-replaces-existing-input-in-reused-session ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (existing (chat-session-create "Existing" 'kimi))
+          (chat--last-session-id (chat-session-id existing))
+          (source-file (expand-file-name "demo.el" temp-dir)))
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (chat--open-session existing)
+     (with-current-buffer "*chat:Existing*"
+       (goto-char (marker-position chat-ui--input-overlay))
+       (insert "stale input"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (chat-quote-current-file)
+             (with-current-buffer "*chat:Existing*"
+               (let ((quoted (buffer-substring-no-properties
+                              (marker-position chat-ui--input-overlay)
+                              (point-max))))
+                 (should-not (string-match-p "stale input" quoted))
+                 (should (string-match-p "Kind: current-file" quoted)))))
+         (kill-buffer (current-buffer)))))))
+
 (ert-deftest chat-ask-region-sends-structured-reference ()
   (chat-test-with-temp-dir
    (let ((chat-session-directory temp-dir)
@@ -399,6 +423,33 @@
                (chat-ask-region "Why is this here?"))
              (should (string-match-p "Kind: region" sent-content))
              (should (string-match-p "Why is this here\\?" sent-content)))
+         (kill-buffer (current-buffer)))))))
+
+(ert-deftest chat-ask-current-file-replaces-existing-input-before-send ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (existing (chat-session-create "Existing" 'kimi))
+          (chat--last-session-id (chat-session-id existing))
+          (source-file (expand-file-name "demo.el" temp-dir))
+          sent-content)
+     (with-temp-file source-file
+       (insert "(defun demo ()\n  (message \"hi\"))\n"))
+     (chat--open-session existing)
+     (with-current-buffer "*chat:Existing*"
+       (goto-char (marker-position chat-ui--input-overlay))
+       (insert "stale input"))
+     (with-current-buffer (find-file-noselect source-file)
+       (unwind-protect
+           (progn
+             (cl-letf (((symbol-function 'chat-ui-send-message)
+                        (lambda ()
+                          (setq sent-content
+                                (buffer-substring-no-properties
+                                 (marker-position chat-ui--input-overlay)
+                                 (point-max))))))
+               (chat-ask-current-file "What matters here?"))
+             (should-not (string-match-p "stale input" sent-content))
+             (should (string-match-p "What matters here\\?" sent-content)))
          (kill-buffer (current-buffer)))))))
 
 (ert-deftest chat-reading-command-reuses-existing-session-buffer ()

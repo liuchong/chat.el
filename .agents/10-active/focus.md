@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Keep the shared reading workflow stable while continuing to raise coverage around refusal behavior, fallback paths, and command surfaces.
+Keep the shared reading workflow stable while continuing to raise coverage around capture correctness, refusal behavior, fallback paths, and command surfaces.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Keep the shared reading workflow stable while continuing to raise coverage aroun
 
 ## Immediate Next Step
 
-Decide whether the next stage should keep pushing test density around shared reading edges or shift to another under-tested workflow.
+Decide whether the next stage should keep pushing test density around shared reading helper correctness or shift to another under-tested workflow.
