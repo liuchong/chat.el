@@ -1007,18 +1007,22 @@ Returns total size, line count, and file type distribution."
 (defun chat-files-open-file (path &optional line column)
   "Open PATH in Emacs and optionally move to LINE and COLUMN."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (buffer (find-file-noselect safe-path)))
+         (buffer (find-file-noselect safe-path))
+         actual-line
+         actual-column)
     (with-current-buffer buffer
       (goto-char (point-min))
       (when (and line (integerp line) (> line 0))
         (forward-line (1- line)))
       (when (and column (integerp column) (> column 0))
-        (move-to-column (1- column))))
+        (move-to-column (1- column)))
+      (setq actual-line (line-number-at-pos))
+      (setq actual-column (1+ (current-column))))
     (pop-to-buffer buffer)
     (list :status "opened"
           :path safe-path
-          :line (or line (line-number-at-pos (with-current-buffer buffer (point))))
-          :column (or column 1))))
+          :line actual-line
+          :column actual-column)))
 
 (defun chat-files-register-built-in-tools ()
   "Register the core file tools used by tool calling."

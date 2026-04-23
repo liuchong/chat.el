@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0026 whitespace capture guardrail stage is complete.
+Phase 0027 open file position reporting stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, whitespace-aware context protection, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, open-file landing accuracy, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 

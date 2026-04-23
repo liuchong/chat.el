@@ -199,6 +199,73 @@
                         (buffer-string))
                       "first second")))))
 
+(ert-deftest chat-files-open-file-reports-actual-eof-position ()
+  "Test open file reports the actual landing position beyond EOF."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "open.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          opened-buffer)
+     (with-temp-file test-file
+       (insert "abc\nxy\n"))
+     (unwind-protect
+         (cl-letf (((symbol-function 'pop-to-buffer)
+                    (lambda (buffer &rest _args)
+                      (setq opened-buffer buffer)
+                      buffer)))
+           (let ((result (chat-files-open-file test-file 99)))
+             (should (string= (plist-get result :status) "opened"))
+             (should (= (plist-get result :line) 3))
+             (should (= (plist-get result :column) 1))
+             (with-current-buffer opened-buffer
+               (should (= (line-number-at-pos) 3))
+               (should (= (current-column) 0)))))
+       (when (buffer-live-p opened-buffer)
+         (kill-buffer opened-buffer))))))
+
+(ert-deftest chat-files-open-file-clamps-column-to-line-end ()
+  "Test open file reports the actual landing column past line end."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "open.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          opened-buffer)
+     (with-temp-file test-file
+       (insert "abc\nxy\n"))
+     (unwind-protect
+         (cl-letf (((symbol-function 'pop-to-buffer)
+                    (lambda (buffer &rest _args)
+                      (setq opened-buffer buffer)
+                      buffer)))
+           (let ((result (chat-files-open-file test-file 2 99)))
+             (should (= (plist-get result :line) 2))
+             (should (= (plist-get result :column) 3))
+             (with-current-buffer opened-buffer
+               (should (= (line-number-at-pos) 2))
+               (should (= (current-column) 2)))))
+       (when (buffer-live-p opened-buffer)
+         (kill-buffer opened-buffer))))))
+
+(ert-deftest chat-files-open-file-without-position-reports-point-min ()
+  "Test open file defaults to the first line and first column."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "open.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          opened-buffer)
+     (with-temp-file test-file
+       (insert "abc\nxy\n"))
+     (unwind-protect
+         (cl-letf (((symbol-function 'pop-to-buffer)
+                    (lambda (buffer &rest _args)
+                      (setq opened-buffer buffer)
+                      buffer)))
+           (let ((result (chat-files-open-file test-file)))
+             (should (= (plist-get result :line) 1))
+             (should (= (plist-get result :column) 1))
+             (with-current-buffer opened-buffer
+               (should (= (line-number-at-pos) 1))
+               (should (= (current-column) 0)))))
+       (when (buffer-live-p opened-buffer)
+         (kill-buffer opened-buffer))))))
+
 (ert-deftest chat-files-replace-modifies-content ()
   "Test replacing text in file."
   (chat-test-with-temp-dir
