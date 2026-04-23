@@ -148,6 +148,17 @@ When making changes:
     "When practical, add or update tests that lock in the behavior being changed.")
   "Reusable programming best practices for code mode.")
 
+(defconst chat-code--editing-protocol-rules
+  '("When the user asks for real file changes, use tools instead of printing large code blocks in chat."
+    "Use files_write for new files or intentional whole-file rewrites."
+    "Use files_replace only when the target text is known exactly and the match can be constrained."
+    "Prefer apply_patch for existing-file edits that touch multiple hunks or need nearby context."
+    "After every successful write tool, inspect the edited file or diff before claiming success."
+    "If an edit tool fails because the match is ambiguous or stale, read the file again and choose a narrower edit strategy."
+    "Do not repeat the same failed edit command without new evidence from the files."
+    "When enough evidence exists, stop editing and summarize the actual changes made.")
+  "Editing protocol rules for code mode.")
+
 (defcustom chat-code-filetype-map
   '(("\\.py$" . python)
     ("\\.js$" . javascript)
@@ -328,6 +339,9 @@ Inherits from chat-session with additional code-specific fields."
             "- Prefer files_list, files_read, files_read_lines, and files_grep for repository inspection."
             "- Use shell_execute only for lightweight readonly inspection when file tools are not enough."
             "- Use files_find for recursive text discovery across directories, and use files_grep for a known single file."
+            "- Use files_write for new files and full rewrites."
+            "- Use files_replace for strict search/replace edits when the target text is uniquely known."
+            "- Use apply_patch for targeted existing-file edits with context."
             "- Avoid broad recursive scans unless the current question truly requires them."
             "- Prefer focused paths over climbing parent directories."
             "- If a tool returns access denied, approval denied, command not allowed, or repeated failure, do not retry the same pattern."
@@ -356,6 +370,9 @@ Inherits from chat-session with additional code-specific fields."
     (chat-code--format-rule-section
      "Programming best practices:"
      chat-code--coding-best-practices)
+    (chat-code--format-rule-section
+     "Editing protocol:"
+     chat-code--editing-protocol-rules)
     (chat-code--operation-guardrails))
    "\n\n"))
 
@@ -821,7 +838,11 @@ NAME is the session name.
 PROJECT-ROOT is the project root directory.
 FOCUS-FILE is an optional file to focus on."
   (let* ((project-root (or project-root (chat-code--detect-project-root)))
-         (base-session (chat-session-create name chat-default-model))
+         (base-session (chat-session-create
+                        name
+                        (if (boundp 'chat-default-model)
+                            chat-default-model
+                          'kimi)))
          (language (and focus-file (chat-code--detect-language focus-file)))
          (code-session (make-chat-code-session
                         :base-session base-session

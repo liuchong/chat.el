@@ -24,7 +24,20 @@
   "Execute BODY with a temporary directory that is cleaned up afterwards."
   `(let ((temp-dir (make-temp-file "chat-test-" t)))
      (unwind-protect
-         (progn ,@body)
+         (let* ((chat-state-dir (make-temp-file "chat-state-" t))
+                (chat-session-directory (expand-file-name "sessions/" chat-state-dir))
+                (chat-tool-forge-directory (expand-file-name "tools/" chat-state-dir))
+                (chat-edit-backup-directory (expand-file-name "backups/" chat-state-dir))
+                (chat-code-intel-index-directory (expand-file-name "index/" chat-state-dir))
+                (chat-log-file (expand-file-name "chat.log" chat-state-dir)))
+           (make-directory chat-session-directory t)
+           (make-directory chat-tool-forge-directory t)
+           (make-directory chat-edit-backup-directory t)
+           (make-directory chat-code-intel-index-directory t)
+           (unwind-protect
+               (progn ,@body)
+             (when (file-directory-p chat-state-dir)
+               (delete-directory chat-state-dir t))))
        (when (file-directory-p temp-dir)
          (delete-directory temp-dir t)))))
 

@@ -127,7 +127,7 @@
                 (chat-ui--insert-message user-msg)
                 (set-marker chat-ui--messages-end (point)))
               ;; Get AI response
-              (chat-ui--get-response))))))))
+              (chat-ui--get-response)))))))))
 
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."
@@ -747,43 +747,43 @@ This is an ephemeral query - the result is displayed but not persisted."
                         (set-marker chat-ui--messages-end (point)))))
                   nil)))))
         (setq chat-ui--active-stream-process stream-process)
-        (if (chat-ui--stream-started-p stream-process)
+        (if (not (chat-ui--stream-started-p stream-process))
             (progn
-              (chat-log "[STREAM] Process created successfully: %S" stream-process)
-              (funcall
-               (symbol-function 'chat-ui--set-stream-process-sentinel)
-               stream-process
-               (lambda (proc event)
-                 (chat-log "[STREAM] Sentinel event: %s" event)
-                 (when (string-match-p "finished\\|closed\\|exited" event)
-                   (setq chat-ui--active-stream-process nil)
-                   (let ((processed
-                          (chat-tool-caller-process-response-data content-acc session)))
-                     (chat-ui--resolve-tool-loop-async
-                      model
-                      messages-final
-                      processed
-                      request-json
-                      nil
-                      (lambda (resolved)
-                        (setq chat-ui--active-request-handle nil)
-                        (chat-ui--finalize-response
-                         session
-                         msg-id
-                         ui-buffer
-                         assistant-start
-                         (plist-get resolved :processed)
-                         (plist-get resolved :raw-request)
-                         (plist-get resolved :raw-response))
-                        (when (buffer-live-p (process-buffer proc))
-                          (kill-buffer (process-buffer proc)))
-                        (chat-log "[STREAM] Response complete"))
-                      (lambda (err-message)
-                        (chat-ui--render-error ui-buffer err-message))
-                      nil
-                      session)))))
-          (chat-log "[STREAM] ERROR: Process creation returned nil")
-          (chat-ui--render-stream-start-error ui-buffer))))))))
+              (chat-log "[STREAM] ERROR: Process creation returned nil")
+              (chat-ui--render-stream-start-error ui-buffer))
+          (chat-log "[STREAM] Process created successfully: %S" stream-process)
+          (funcall
+           (symbol-function 'chat-ui--set-stream-process-sentinel)
+           stream-process
+           (lambda (proc event)
+             (chat-log "[STREAM] Sentinel event: %s" event)
+             (when (string-match-p "finished\\|closed\\|exited" event)
+               (setq chat-ui--active-stream-process nil)
+               (let ((processed
+                      (chat-tool-caller-process-response-data content-acc session)))
+                 (chat-ui--resolve-tool-loop-async
+                  model
+                  messages-final
+                  processed
+                  request-json
+                  nil
+                  (lambda (resolved)
+                    (setq chat-ui--active-request-handle nil)
+                    (chat-ui--finalize-response
+                     session
+                     msg-id
+                     ui-buffer
+                     assistant-start
+                     (plist-get resolved :processed)
+                     (plist-get resolved :raw-request)
+                     (plist-get resolved :raw-response))
+                    (when (buffer-live-p (process-buffer proc))
+                      (kill-buffer (process-buffer proc)))
+                    (chat-log "[STREAM] Response complete"))
+                  (lambda (err-message)
+                    (chat-ui--render-error ui-buffer err-message))
+                  nil
+                  session))))))))))
 
 ;;;###autoload
 (defun chat-ui-cancel-response ()

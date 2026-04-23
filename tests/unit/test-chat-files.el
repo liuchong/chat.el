@@ -212,6 +212,19 @@
                         (buffer-string))
                       "new text here")))))
 
+(ert-deftest chat-files-replace-rejects-ambiguous-match-without-constraints ()
+  "Test replacing ambiguous text fails unless caller narrows the match."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "ambiguous.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (should-error (chat-files-replace test-file "repeat" "done"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\nrepeat\n")))))
+
 (ert-deftest chat-files-patch-returns-diff-preview ()
   "Test patch operations return a unified diff preview."
   (chat-test-with-temp-dir
@@ -241,6 +254,31 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "hello new world")))))
+
+(ert-deftest chat-files-apply-patch-parses-codex-style-patch-text ()
+  "Test codex-style patch text updates a file."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-beta"
+                         "+gamma"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (let ((result (chat-files-apply-patch patch-text)))
+       (should (eq (plist-get result :status) 'success))
+       (should (string-match-p "+gamma" (plist-get result :diff))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\ngamma\n")))))
 
 (ert-deftest chat-files-patch-accepts-json-style-alists ()
   "Test patch engine accepts alist patches from decoded JSON."

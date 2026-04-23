@@ -75,8 +75,11 @@
      "- `files_grep` searches one known file path. Do not use it on directories."
      "- `files_read` reads a file body. Prefer `files_read_lines` when you already know the line range."
      "- `files_read_lines` reads a specific line range and is better for large files."
-     "- `files_write` writes a full file body and is best for new files or full rewrites."
-     "- `files_patch` and `apply_patch` are better for updating existing files with targeted edits."
+     "- `files_write` writes a full file body and is best for new files or deliberate whole-file rewrites."
+     "- `files_replace` is for exact or regex search/replace when you can identify the current text precisely."
+     "- `files_replace` should usually include `expected_count` or `line_hint` when the target may be ambiguous."
+     "- `apply_patch` is for targeted multi-hunk edits to existing files using codex patch text."
+     "- `files_patch` is a legacy structured search/replace tool. Prefer `apply_patch` for complex existing-file edits."
      "- `shell_execute` is only for lightweight readonly inspection when file tools are not enough."
      "- If a write tool needs approval, wait for approval instead of printing the intended file body in chat.")
    "\n"))
@@ -97,17 +100,28 @@
          "You may then either answer normally or call one more tool.\n"
          "Some tools may require user approval before execution.\n"
          "Read files before editing them.\n"
-         "Prefer apply_patch or files_patch for existing files and use files_write mainly for new files.\n"
+         "Use `files_write` for new files or whole-file rewrites.\n"
+         "Use `files_replace` for exact text replacements with strong match constraints.\n"
+         "Use `apply_patch` for precise existing-file edits across one or more hunks.\n"
          "Use files_find for recursive directory text search and use files_grep for one known file.\n"
          "After editing, inspect the result or diff before declaring success.\n"
          (chat-tool-caller--tool-usage-guidance)
          "\n"
          "Use this exact shape:\n"
          "{\"function_call\": {\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"value\"}}}\n"
+         "For `apply_patch`, pass a single string argument named `patch` using this envelope:\n"
+         "*** Begin Patch\n"
+         "*** Update File: path/to/file\n"
+         "@@\n"
+         "-old line\n"
+         "+new line\n"
+         "*** End Patch\n"
          "Rules:\n"
          "- Use exactly one tool name from the list below.\n"
          "- Use the exact argument names shown for that tool.\n"
          "- Do not rename keys.\n"
+         "- Do not print raw file contents in chat when a write tool should be used.\n"
+         "- If editing an existing file, prefer `apply_patch` or `files_replace` over `files_write`.\n"
          "- If no tool is needed, answer normally.\n"
          "Available tools:\n"
          (mapconcat #'chat-tool-caller--format-tool-line tools "\n"))))))
@@ -318,14 +332,18 @@ If SESSION is nil, uses `chat--current-session' if bound."
   (let* ((name (plist-get call :name))
          (arguments (plist-get call :arguments))
          (tool-id (intern name))
-         (tool (chat-tool-forge-get tool-id))
+         (tool (or (chat-tool-forge-get tool-id)
+                   (when (and (eq tool-id 'shell_execute)
+                              (require 'chat-tool-shell nil t))
+                     (chat-tool-forge-get tool-id))))
          (actual-session (or session
                              (when (boundp 'chat--current-session)
                                chat--current-session))))
     (condition-case err
         (let ((chat-files-allowed-directories (chat-tool-caller--allowed-directories))
               (default-directory (file-name-as-directory
-                                  (chat-tool-caller--execution-directory))))
+                                  (chat-files--resolved-path
+                                   (chat-tool-caller--execution-directory)))))
           (if tool
               ;; Check shell whitelist first for shell_execute
               (if (and (eq tool-id 'shell_execute)

@@ -453,6 +453,14 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: prefer `-l` with explicit file paths or a checked shell wrapper.
 
+### External Process Calls Must Not Trust Ambient `default-directory`
+
+**Problem**: tests or tooling that invoke `diff` or `process-file` can fail with `Setting current directory` even though the target files and commands are valid.
+
+**Cause**: batch runners or temp HOME isolation can leave the current buffer with a stale `default-directory`, and child processes inherit that invalid path unless the caller overrides it.
+
+**Solution**: bind `default-directory` to a known existing directory before every external process call, and set the batch runner `default-directory` explicitly before loading the package.
+
 ---
 
 ## Development Hygiene

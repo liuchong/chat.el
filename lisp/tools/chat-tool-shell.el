@@ -103,9 +103,12 @@ Returns plist with :directory and optional :rest when matched."
 (defun chat-tool-shell--execute-argv (command)
   "Execute COMMAND with `process-file` in the current directory."
   (let ((argv (chat-tool-shell--split-command command)))
-    (with-output-to-string
-      (with-current-buffer standard-output
-        (apply #'process-file (car argv) nil t nil (cdr argv))))))
+    (let ((default-directory (if (file-directory-p default-directory)
+                                 (file-name-as-directory default-directory)
+                               (file-name-as-directory temporary-file-directory))))
+      (with-output-to-string
+        (with-current-buffer standard-output
+          (apply #'process-file (car argv) nil t nil (cdr argv)))))))
 
 (defun chat-tool-shell-whitelist-match-p (command)
   "Return non-nil if COMMAND matches any pattern in whitelist.

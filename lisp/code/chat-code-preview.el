@@ -145,14 +145,17 @@ Returns the preview buffer."
               (insert new))
             ;; Generate diff
             (if (executable-find "diff")
-                (with-temp-buffer
-                  (call-process "diff" nil t nil
-                                "-u"
-                                "-L" (format "a/%s" file-path)
-                                "-L" (format "b/%s" file-path)
-                                orig-file
-                                new-file)
-                  (buffer-string))
+                (let ((default-directory (file-name-as-directory
+                                          (or (file-name-directory orig-file)
+                                              temporary-file-directory))))
+                  (with-temp-buffer
+                    (call-process "diff" nil t nil
+                                  "-u"
+                                  "-L" (format "a/%s" file-path)
+                                  "-L" (format "b/%s" file-path)
+                                  orig-file
+                                  new-file)
+                    (buffer-string)))
               (chat-code-preview--generate-diff-internal original new)))
         ;; Cleanup
         (when (file-exists-p orig-file)

@@ -20,6 +20,7 @@
 (require 'cl-lib)
 (require 'diff)
 (require 'seq)
+(require 'subr-x)
 (require 'chat-tool-forge)
 
 ;; ------------------------------------------------------------------
@@ -462,28 +463,94 @@ ENCODING specifies the file encoding (default utf-8)."
           :bytes-written (length content)
           :encoding coding-system)))
 
-;;;###autoload
-(defun chat-files-replace (path search replace &optional limit)
-  "Replace SEARCH pattern with REPLACE text in file at PATH.
-If LIMIT is specified, only perform up to LIMIT replacements.
-SEARCH is matched as literal text.
+(defun chat-files--line-number-at-position (content position)
+  "Return the 1-based line number for POSITION within CONTENT."
+  (1+ (cl-count ?\n (substring content 0 position))))
 
-Returns a plist with :replacements-made, :path."
-  (let* ((safe-path (chat-files--safe-path-p path))
-         (count 0))
+(defun chat-files--collect-replace-matches (content search regexp)
+  "Collect SEARCH matches from CONTENT.
+When REGEXP is non-nil, treat SEARCH as a regular expression."
+  (with-temp-buffer
+    (insert content)
+    (goto-char (point-min))
+    (let (matches)
+      (while (if regexp
+                 (re-search-forward search nil t)
+               (search-forward search nil t))
+        (push (list :start (match-beginning 0)
+                    :end (match-end 0)
+                    :line (line-number-at-pos (match-beginning 0)))
+              matches))
+      (nreverse matches))))
+
+(defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
+  "Return updated CONTENT after replacing SEARCH with REPLACE."
+  (let* ((matches (chat-files--collect-replace-matches content search regexp))
+         (filtered (if line-hint
+                       (seq-filter (lambda (match)
+                                     (= (plist-get match :line) line-hint))
+                                   matches)
+                     matches))
+         (match-count (length filtered))
+         (selected (cond
+                    ((zerop match-count)
+                     (error "Replace failed: no matches for %S" search))
+                    (expected-count
+                     (unless (= match-count expected-count)
+                       (error "Replace failed: expected %d matches for %S but found %d"
+                              expected-count search match-count))
+                     filtered)
+                    (all
+                     filtered)
+                    ((> match-count 1)
+                     (error "Replace failed: %d matches for %S; refine the search or use expected_count/all"
+                            match-count search))
+                    (t
+                     (list (car filtered))))))
     (with-temp-buffer
-      (insert-file-contents safe-path)
-      (goto-char (point-min))
-      (let ((case-fold-search nil))
-        (while (and (or (null limit) (< count limit))
-                    (search-forward search nil t))
-          (replace-match replace t t)
-          (cl-incf count)))
-      (write-region (point-min) (point-max) safe-path))
-    (list :path safe-path
-          :replacements-made count
-          :search search
-          :replace replace)))
+      (insert content)
+      (dolist (match (reverse selected))
+        (delete-region (plist-get match :start)
+                       (plist-get match :end))
+        (goto-char (plist-get match :start))
+        (insert replace))
+      (list :content (buffer-string)
+            :replacements-made (length selected)
+            :match-count match-count))))
+
+(defun chat-files--with-diff (path original-content new-content operation &optional extra)
+  "Build a result plist for PATH from ORIGINAL-CONTENT to NEW-CONTENT."
+  (let ((diff (chat-files--diff-strings path original-content new-content)))
+    (append
+     (list :path path
+           :operation operation
+           :diff diff)
+     extra)))
+
+;;;###autoload
+(defun chat-files-replace (path search replace &optional all expected-count regexp line-hint)
+  "Replace SEARCH pattern with REPLACE text in file at PATH.
+SEARCH is matched literally unless REGEXP is non-nil.
+When ALL is non-nil, replace all matches.
+When EXPECTED-COUNT is non-nil, require exactly that many matches.
+When LINE-HINT is non-nil, only consider matches on that line."
+  (let* ((safe-path (chat-files--safe-path-p path))
+         (original-content (with-temp-buffer
+                             (insert-file-contents safe-path)
+                             (buffer-string)))
+         (result (chat-files--replace-content
+                  original-content search replace all expected-count regexp line-hint))
+         (new-content (plist-get result :content)))
+    (with-temp-file safe-path
+      (insert new-content))
+    (chat-files--with-diff
+     safe-path
+     original-content
+     new-content
+     'replace
+     (list :replacements-made (plist-get result :replacements-made)
+           :search search
+           :replace replace))))
 
 ;;;###autoload
 (defun chat-files-insert-at (path position text)
@@ -514,50 +581,279 @@ PATCHES is a list of plists with:
   :search - text/pattern to find
   :replace - replacement text
   :line - optional line number constraint
-  :count - optional max replacements for this patch
+  :count - optional exact replacement count
+  :regexp - optional regular expression flag
+  :all - optional replace-all flag.
 
-All patches are applied atomically (or none if any fails)."
+All patches are applied atomically."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (backup-path (concat safe-path ".chat-backup"))
-         diff-output)
-    ;; Create backup
-    (copy-file safe-path backup-path t)
-    (condition-case err
-        (with-temp-buffer
-          (insert-file-contents safe-path)
-          (dolist (patch patches)
-            (let* ((normalized-patch (chat-files--normalize-patch patch))
-                   (search (plist-get normalized-patch :search))
-                   (replace (plist-get normalized-patch :replace))
-                   (line (plist-get normalized-patch :line))
-                   (count (or (plist-get normalized-patch :count) 1)))
-              (unless search
-                (error "Patch is missing search text"))
-              (if line
-                  (progn
-                    (goto-char (point-min))
-                    (forward-line (1- line))
-                    (search-forward search (line-end-position) t)
-                    (replace-match replace t t))
-                (goto-char (point-min))
-                (dotimes (_ count)
-                  (when (search-forward search nil t)
-                    (replace-match replace t t))))))
-          (write-region (point-min) (point-max) safe-path)
-          (setq diff-output (chat-files-diff backup-path safe-path))
-          (delete-file backup-path)
-          (list :path safe-path
-                :patches-applied (length patches)
-                :diff diff-output
-                :status 'success))
-      (error
-       ;; Restore from backup
-       (rename-file backup-path safe-path t)
-       (error "Patch failed: %s" (error-message-string err))))))
+         (original-content (with-temp-buffer
+                             (insert-file-contents safe-path)
+                             (buffer-string)))
+         (content original-content))
+    (dolist (patch patches)
+      (let* ((normalized-patch (chat-files--normalize-patch patch))
+             (search (plist-get normalized-patch :search))
+             (replace (or (plist-get normalized-patch :replace) ""))
+             (line (plist-get normalized-patch :line))
+             (count (plist-get normalized-patch :count))
+             (regexp (plist-get normalized-patch :regexp))
+             (all (plist-get normalized-patch :all)))
+        (unless search
+          (error "Patch is missing search text"))
+        (setq content
+              (plist-get
+               (chat-files--replace-content
+                content search replace all count regexp line)
+               :content))))
+    (with-temp-file safe-path
+      (insert content))
+    (append
+     (chat-files--with-diff safe-path original-content content 'patch)
+     (list :patches-applied (length patches)
+           :status 'success))))
 
-(defun chat-files-apply-patch (path patches)
-  "Apply PATCHES to PATH using the patch engine."
-  (chat-files-patch path patches))
+(defun chat-files--split-content-lines (content)
+  "Return CONTENT as a plist with line data."
+  (let* ((ends-with-newline (string-suffix-p "\n" content))
+         (raw-lines (split-string content "\n" nil)))
+    (when (and ends-with-newline raw-lines)
+      (setq raw-lines (butlast raw-lines)))
+    (list :lines raw-lines
+          :ends-with-newline ends-with-newline)))
+
+(defun chat-files--join-content-lines (state)
+  "Join line STATE back into a string."
+  (let ((body (string-join (plist-get state :lines) "\n")))
+    (if (plist-get state :ends-with-newline)
+        (concat body "\n")
+      body)))
+
+(defun chat-files--subsequence-match-positions (haystack needle)
+  "Return all positions where NEEDLE appears in HAYSTACK."
+  (let ((haystack-length (length haystack))
+        (needle-length (length needle))
+        positions)
+    (cond
+     ((zerop needle-length)
+      (setq positions nil))
+     (t
+      (dotimes (index (1+ (- haystack-length needle-length)))
+        (when (equal (cl-subseq haystack index (+ index needle-length)) needle)
+          (push index positions)))))
+    (nreverse positions)))
+
+(defun chat-files--patch-hunk-old-lines (hunk-lines)
+  "Return the source-side lines for HUNK-LINES."
+  (let (result)
+    (dolist (line hunk-lines)
+      (let ((prefix (substring line 0 1))
+            (text (substring line 1)))
+        (when (member prefix '(" " "-"))
+          (push text result))))
+    (nreverse result)))
+
+(defun chat-files--patch-hunk-new-lines (hunk-lines)
+  "Return the destination-side lines for HUNK-LINES."
+  (let (result)
+    (dolist (line hunk-lines)
+      (let ((prefix (substring line 0 1))
+            (text (substring line 1)))
+        (when (member prefix '(" " "+"))
+          (push text result))))
+    (nreverse result)))
+
+(defun chat-files--apply-hunk-to-lines (lines hunk-lines)
+  "Apply HUNK-LINES to LINES and return updated lines."
+  (let* ((old-lines (chat-files--patch-hunk-old-lines hunk-lines))
+         (new-lines (chat-files--patch-hunk-new-lines hunk-lines))
+         (positions (chat-files--subsequence-match-positions lines old-lines)))
+    (cond
+     ((null old-lines)
+      (error "Patch hunk has no matchable source context"))
+     ((null positions)
+      (error "Patch hunk could not be applied"))
+     ((> (length positions) 1)
+      (error "Patch hunk is ambiguous"))
+     (t
+      (let ((start (car positions)))
+        (append (cl-subseq lines 0 start)
+                new-lines
+                (cl-subseq lines (+ start (length old-lines)))))))))
+
+(defun chat-files--parse-apply-patch (patch-text)
+  "Parse PATCH-TEXT in codex apply_patch format."
+  (let* ((lines (split-string patch-text "\n"))
+         (index 0)
+         operations)
+    (unless (equal (nth index lines) "*** Begin Patch")
+      (error "apply_patch verification failed: missing *** Begin Patch"))
+    (setq index (1+ index))
+    (while (< index (length lines))
+      (let ((line (nth index lines)))
+        (cond
+         ((equal line "*** End Patch")
+          (setq index (length lines)))
+         ((string-prefix-p "*** Add File: " line)
+          (let ((path (string-remove-prefix "*** Add File: " line))
+                file-lines)
+            (setq index (1+ index))
+            (while (and (< index (length lines))
+                        (not (string-prefix-p "*** " (nth index lines))))
+              (let ((payload (nth index lines)))
+                (unless (string-prefix-p "+" payload)
+                  (error "apply_patch verification failed: invalid add line"))
+                (push (substring payload 1) file-lines))
+              (setq index (1+ index)))
+            (push (list :type 'add
+                        :path path
+                        :content (string-join (nreverse file-lines) "\n"))
+                  operations)))
+         ((string-prefix-p "*** Delete File: " line)
+          (push (list :type 'delete
+                      :path (string-remove-prefix "*** Delete File: " line))
+                operations)
+          (setq index (1+ index)))
+         ((string-prefix-p "*** Update File: " line)
+          (let ((path (string-remove-prefix "*** Update File: " line))
+                move-to
+                hunks)
+            (setq index (1+ index))
+            (when (and (< index (length lines))
+                       (string-prefix-p "*** Move to: " (nth index lines)))
+              (setq move-to (string-remove-prefix "*** Move to: " (nth index lines)))
+              (setq index (1+ index)))
+            (while (and (< index (length lines))
+                        (string-prefix-p "@@" (nth index lines)))
+              (let ((header (nth index lines))
+                    hunk-lines)
+                (setq index (1+ index))
+                (while (and (< index (length lines))
+                            (not (string-prefix-p "@@" (nth index lines)))
+                            (not (string-prefix-p "*** " (nth index lines))))
+                  (push (nth index lines) hunk-lines)
+                  (setq index (1+ index)))
+                (push (list :header header
+                            :lines (nreverse hunk-lines))
+                      hunks)))
+            (push (list :type 'update
+                        :path path
+                        :move-to move-to
+                        :hunks (nreverse hunks))
+                  operations)))
+         ((string-empty-p line)
+          (setq index (1+ index)))
+         (t
+          (error "apply_patch verification failed: unexpected line %S" line)))))
+    (nreverse operations)))
+
+(defun chat-files--diff-strings (path original-content new-content)
+  "Return a unified diff for PATH from ORIGINAL-CONTENT to NEW-CONTENT."
+  (let ((old-file (make-temp-file "chat-old-"))
+        (new-file (make-temp-file "chat-new-")))
+    (unwind-protect
+        (progn
+          (with-temp-file old-file
+            (insert (or original-content "")))
+          (with-temp-file new-file
+            (insert (or new-content "")))
+          (let* ((default-directory (file-name-as-directory
+                                     (or (file-name-directory old-file)
+                                         temporary-file-directory)))
+                 (raw-diff (with-temp-buffer
+                             (call-process "diff" nil t nil "-u" old-file new-file)
+                             (buffer-string)))
+                 (lines (split-string raw-diff "\n"))
+                 (old-label (if (null original-content) "/dev/null" path))
+                 (new-label (if (null new-content) "/dev/null" path)))
+            (cond
+             ((string-empty-p raw-diff)
+              "")
+             ((>= (length lines) 2)
+              (string-join
+               (append (list (format "--- %s" old-label)
+                             (format "+++ %s" new-label))
+                       (nthcdr 2 lines))
+               "\n"))
+             (t
+              raw-diff))))
+      (delete-file old-file)
+      (delete-file new-file))))
+
+(defun chat-files--apply-update-operation (content operation)
+  "Apply update OPERATION to CONTENT."
+  (let* ((state (chat-files--split-content-lines content))
+         (lines (plist-get state :lines)))
+    (dolist (hunk (plist-get operation :hunks))
+      (setq lines (chat-files--apply-hunk-to-lines lines (plist-get hunk :lines))))
+    (chat-files--join-content-lines
+     (list :lines lines
+           :ends-with-newline (plist-get state :ends-with-newline)))))
+
+(defun chat-files--commit-apply-patch-operation (operation)
+  "Execute parsed apply_patch OPERATION."
+  (pcase (plist-get operation :type)
+    ('add
+     (let* ((target-path (chat-files--safe-path-p
+                          (expand-file-name (plist-get operation :path) default-directory)))
+            (content (concat (plist-get operation :content) "\n")))
+       (when (file-exists-p target-path)
+         (error "apply_patch verification failed: file already exists: %s" target-path))
+       (make-directory (file-name-directory target-path) t)
+       (with-temp-file target-path
+         (insert content))
+       (list :path target-path
+             :operation 'add
+             :diff (chat-files--diff-strings target-path nil content))))
+    ('delete
+     (let* ((target-path (chat-files--safe-path-p
+                          (expand-file-name (plist-get operation :path) default-directory)))
+            (original-content (with-temp-buffer
+                                (insert-file-contents target-path)
+                                (buffer-string))))
+       (delete-file target-path)
+       (list :path target-path
+             :operation 'delete
+             :diff (chat-files--diff-strings target-path original-content nil))))
+    ('update
+     (let* ((source-path (chat-files--safe-path-p
+                          (expand-file-name (plist-get operation :path) default-directory)))
+            (original-content (with-temp-buffer
+                                (insert-file-contents source-path)
+                                (buffer-string)))
+            (updated-content (chat-files--apply-update-operation original-content operation))
+            (target-path (if-let ((move-to (plist-get operation :move-to)))
+                             (chat-files--safe-path-p
+                              (expand-file-name move-to default-directory))
+                           source-path)))
+       (when (and (not (equal target-path source-path))
+                  (file-exists-p target-path))
+         (error "apply_patch verification failed: move target exists: %s" target-path))
+       (unless (equal target-path source-path)
+         (delete-file source-path))
+       (make-directory (file-name-directory target-path) t)
+       (with-temp-file target-path
+         (insert updated-content))
+       (list :path target-path
+             :operation (if (equal target-path source-path) 'update 'move)
+             :diff (chat-files--diff-strings target-path original-content updated-content))))
+    (_
+     (error "apply_patch verification failed: unsupported operation"))))
+
+(defun chat-files-apply-patch (path-or-patch &optional patches)
+  "Apply PATCHES to PATH-OR-PATCH or parse codex patch text."
+  (if patches
+      (chat-files-patch path-or-patch patches)
+    (let* ((operations (chat-files--parse-apply-patch path-or-patch))
+           results)
+      (dolist (operation operations)
+        (push (chat-files--commit-apply-patch-operation operation) results))
+      (list :operations (nreverse results)
+            :status 'success
+            :diff (mapconcat (lambda (result)
+                               (plist-get result :diff))
+                             (nreverse results)
+                             "\n")))))
 
 (defun chat-files--normalize-patch (patch)
   "Normalize PATCH from plist or JSON alist into a plist."
@@ -571,8 +867,12 @@ All patches are applied atomically (or none if any fails)."
                        (cdr (assoc "replace" patch)))
           :line (or (cdr (assoc 'line patch))
                     (cdr (assoc "line" patch)))
+          :all (or (cdr (assoc 'all patch))
+                   (cdr (assoc "all" patch)))
           :count (or (cdr (assoc 'count patch))
-                     (cdr (assoc "count" patch)))))
+                     (cdr (assoc "count" patch)))
+          :regexp (or (cdr (assoc 'regexp patch))
+                      (cdr (assoc "regexp" patch)))))
    (t
     (error "Invalid patch data: %S" patch))))
 
@@ -763,17 +1063,20 @@ Returns total size, line count, and file type distribution."
   (chat-files--register-built-in-tool
    'files_replace
    "Replace File Text"
-   "Replace text inside a file"
+   "Replace exact text or regex matches inside a file"
    '((:name "path" :type "string" :required t)
      (:name "search" :type "string" :required t)
      (:name "replace" :type "string" :required t)
-     (:name "limit" :type "integer"))
-   (lambda (path search replace &optional limit)
-     (chat-files-replace path search replace limit)))
+     (:name "all" :type "boolean")
+     (:name "expected_count" :type "integer")
+     (:name "regexp" :type "boolean")
+     (:name "line_hint" :type "integer"))
+   (lambda (path search replace &optional all expected-count regexp line-hint)
+     (chat-files-replace path search replace all expected-count regexp line-hint)))
   (chat-files--register-built-in-tool
    'files_patch
    "Patch File"
-   "Apply atomic search and replace patches to a file"
+   "Apply legacy atomic search and replace patches to a file"
    '((:name "path" :type "string" :required t)
      (:name "patches" :type "array" :required t))
    (lambda (path patches)
@@ -781,11 +1084,10 @@ Returns total size, line count, and file type distribution."
   (chat-files--register-built-in-tool
    'apply_patch
    "Apply Patch"
-   "Apply structured search and replace patches to an existing file"
-   '((:name "path" :type "string" :required t)
-     (:name "patches" :type "array" :required t))
-   (lambda (path patches)
-     (chat-files-apply-patch path patches))))
+   "Apply codex-style patch text for targeted file edits"
+   '((:name "patch" :type "string" :required t))
+   (lambda (patch)
+     (chat-files-apply-patch patch))))
 
 ;; ------------------------------------------------------------------
 ;; Tool Interface for AI
@@ -827,18 +1129,21 @@ This describes available file operations to the AI."
                        (:name "content" :type "string" :required t)
                        (:name "append" :type "boolean")))
    (list :name "files_replace"
-         :description "Replace text in a file"
+         :description "Replace exact text or regex matches in a file"
          :parameters '((:name "path" :type "string" :required t)
                        (:name "search" :type "string" :required t)
-                       (:name "replace" :type "string" :required t)))
+                       (:name "replace" :type "string" :required t)
+                       (:name "all" :type "boolean")
+                       (:name "expected_count" :type "integer")
+                       (:name "regexp" :type "boolean")
+                       (:name "line_hint" :type "integer")))
    (list :name "files_patch"
-         :description "Apply multiple patches atomically"
+         :description "Apply multiple legacy search/replace patches atomically"
          :parameters '((:name "path" :type "string" :required t)
                        (:name "patches" :type "array" :required t)))
    (list :name "apply_patch"
-         :description "Apply structured patches to an existing file"
-         :parameters '((:name "path" :type "string" :required t)
-                       (:name "patches" :type "array" :required t)))))
+         :description "Apply codex-style patch text to one or more files"
+         :parameters '((:name "patch" :type "string" :required t)))))
 
 ;; ------------------------------------------------------------------
 ;; Additional Operations (Extended)

@@ -172,6 +172,8 @@
          (should (string-match-p "Obey project instruction files" (chat-message-content system-message)))
          (should (string-match-p "Programming best practices:" (chat-message-content system-message)))
          (should (string-match-p "trust the implementation" (chat-message-content system-message)))
+         (should (string-match-p "Editing protocol:" (chat-message-content system-message)))
+         (should (string-match-p "Prefer apply_patch for existing-file edits" (chat-message-content system-message)))
          (should (string-match-p "Operational guardrails" (chat-message-content system-message)))
          (should (string-match-p "Active project root" (chat-message-content system-message)))
          (should (string-match-p "If the user asked to create or change files" (chat-message-content system-message))))
