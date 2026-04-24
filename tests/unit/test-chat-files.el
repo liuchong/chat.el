@@ -587,6 +587,24 @@
                         (buffer-string))
                       "repeat\ndone\n")))))
 
+(ert-deftest chat-files-replace-rejects-nonpositive-line-hint ()
+  "Test line_hint must be a positive line number."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "line-hint-invalid.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\n"))
+     (should
+      (string-match-p
+       "Replace failed: line_hint must be a positive integer"
+       (error-message-string
+        (should-error
+         (chat-files-replace test-file "repeat" "done" nil nil nil 0)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\n")))))
+
 (ert-deftest chat-files-replace-line-hint-participates-in-count-validation ()
   "Test expected_count validation applies after line-hint filtering."
   (chat-test-with-temp-dir
@@ -705,6 +723,24 @@
                         (buffer-string))
                       "done\ndone\n")))))
 
+(ert-deftest chat-files-replace-rejects-nonpositive-expected-count ()
+  "Test expected_count must be a positive integer."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-count-invalid.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (should
+      (string-match-p
+       "Replace failed: expected_count must be a positive integer"
+       (error-message-string
+        (should-error
+         (chat-files-replace test-file "repeat" "done" nil 0)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\nrepeat\n")))))
+
 (ert-deftest chat-files-replace-regexp-all-respects-line-hint ()
   "Test regexp replace-all still narrows through line-hint."
   (chat-test-with-temp-dir
@@ -765,6 +801,34 @@
          (chat-files-patch
           test-file
           '((:search "alpha" :replace "ALPHA" :line 2)))))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\n")))))
+
+(ert-deftest chat-files-patch-preserves-invalid-selector-errors ()
+  "Test search patches keep selector validation errors stable."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-selector-error.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (should
+      (string-match-p
+       "Replace failed: expected_count must be a positive integer"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "alpha" :replace "ALPHA" :count 0)))))))
+     (should
+      (string-match-p
+       "Replace failed: line_hint must be a positive integer"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "alpha" :replace "ALPHA" :line 0)))))))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))

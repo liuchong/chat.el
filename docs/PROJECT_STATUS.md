@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 373 regression tests discovered
-- 373 passing
+- 376 regression tests discovered
+- 376 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -150,6 +150,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_replace` and `files_patch` now refuse no-op edits instead of reporting false success when the replacement would leave file content unchanged
 - `files_patch` now also refuses multi-step patch sequences that net out to the original file content, removing another false-success path for automated edit loops
 - `files_replace` and `files_patch` now preserve `line_hint` scope in no-match, count-mismatch, and ambiguous-match diagnostics, making automated retry decisions less guessy
+- `files_replace` and `files_patch` now reject nonpositive `expected_count` and `line_hint` selectors before matching begins, keeping selector bugs out of the normal no-match error path
 
 ## Known Boundaries
 

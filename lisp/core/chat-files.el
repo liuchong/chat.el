@@ -508,9 +508,21 @@ the empty string."
       (format " on line %d" line-hint)
     ""))
 
+(defun chat-files--validate-replace-selectors (expected-count line-hint)
+  "Validate EXPECTED-COUNT and LINE-HINT selector values."
+  (when (and expected-count
+             (not (and (integerp expected-count)
+                       (> expected-count 0))))
+    (error "Replace failed: expected_count must be a positive integer"))
+  (when (and line-hint
+             (not (and (integerp line-hint)
+                       (> line-hint 0))))
+    (error "Replace failed: line_hint must be a positive integer")))
+
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
   (chat-files--validate-replace-pattern search regexp)
+  (chat-files--validate-replace-selectors expected-count line-hint)
   (let* ((matches (chat-files--collect-replace-matches content search regexp))
          (filtered (if line-hint
                        (seq-filter (lambda (match)
