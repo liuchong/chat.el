@@ -563,6 +563,102 @@
                         (buffer-string))
                       "alpha\ngamma")))))
 
+(ert-deftest chat-files-apply-patch-add-file-supports-end-of-file-marker ()
+  "Test add-file patches can omit the trailing newline."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "+hello"
+                         "*** End of File"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello")))))
+
+(ert-deftest chat-files-apply-patch-add-file-adds-trailing-newline-by-default ()
+  "Test add-file patches keep the default trailing newline."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "+hello"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-moves-updated-file ()
+  "Test move-to patches rename files and keep updated content."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "+hello world"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p source-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello world\n")))))
+
+(ert-deftest chat-files-apply-patch-move-target-exists-is-atomic ()
+  "Test move-to failure keeps both source and target unchanged."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "+hello world"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (with-temp-file target-file
+       (insert "already here\n"))
+     (should-error (chat-files-apply-patch patch-text))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents source-file)
+                        (buffer-string))
+                      "hello\n"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "already here\n")))))
+
 (ert-deftest chat-files-apply-patch-uses-hunk-header-to-resolve-duplicate-context ()
   "Test hunk headers disambiguate repeated source blocks."
   (chat-test-with-temp-dir

@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Keep the shared reading workflow stable while continuing to raise coverage around capture correctness, whitespace-aware context refusal behavior, unidiff semantics, naming fallback paths, and command surfaces.
+Keep the shared reading workflow stable while continuing to raise coverage around file-editing reliability, patch newline semantics, unidiff move paths, whitespace-aware context refusal behavior, and command surfaces.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Keep the shared reading workflow stable while continuing to raise coverage aroun
 
 ## Immediate Next Step
 
-Decide whether the next stage should keep pushing test density around patch-engine edge cases or shift to another under-tested workflow.
+Keep pushing test density around patch-engine edge cases until add, update, move, and newline semantics are no longer the easiest path to a production failure.

@@ -636,6 +636,12 @@ All patches are applied atomically."
         (concat body "\n")
       body)))
 
+(defun chat-files--patch-operation-content (operation)
+  "Return OPERATION content with patch newline semantics."
+  (chat-files--join-content-lines
+   (list :lines (split-string (plist-get operation :content) "\n")
+         :ends-with-newline (plist-get operation :ends-with-newline))))
+
 (defun chat-files--subsequence-match-positions (haystack needle)
   "Return all positions where NEEDLE appears in HAYSTACK."
   (let ((haystack-length (length haystack))
@@ -751,8 +757,10 @@ All patches are applied atomically."
           (setq index (length lines)))
          ((string-prefix-p "*** Add File: " line)
           (let ((path (string-remove-prefix "*** Add File: " line))
-                file-lines)
+                file-lines
+                ends-with-newline)
             (setq index (1+ index))
+            (setq ends-with-newline t)
             (while (and (< index (length lines))
                         (not (string-prefix-p "*** " (nth index lines))))
               (let ((payload (nth index lines)))
@@ -760,9 +768,14 @@ All patches are applied atomically."
                   (error "apply_patch verification failed: invalid add line"))
                 (push (substring payload 1) file-lines))
               (setq index (1+ index)))
+            (when (and (< index (length lines))
+                       (equal (nth index lines) "*** End of File"))
+              (setq ends-with-newline nil)
+              (setq index (1+ index)))
             (push (list :type 'add
                         :path path
-                        :content (string-join (nreverse file-lines) "\n"))
+                        :content (string-join (nreverse file-lines) "\n")
+                        :ends-with-newline ends-with-newline)
                   operations)))
          ((string-prefix-p "*** Delete File: " line)
           (push (list :type 'delete
@@ -869,7 +882,7 @@ All patches are applied atomically."
     ('add
      (let* ((target-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
-            (content (concat (plist-get operation :content) "\n")))
+            (content (chat-files--patch-operation-content operation)))
        (when (file-exists-p target-path)
          (error "apply_patch verification failed: file already exists: %s" target-path))
        (make-directory (file-name-directory target-path) t)
@@ -943,7 +956,7 @@ All patches are applied atomically."
     ('add
      (let* ((target-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
-            (content (concat (plist-get operation :content) "\n")))
+            (content (chat-files--patch-operation-content operation)))
        (when (chat-files--planned-file-exists-p target-path states)
          (error "apply_patch verification failed: file already exists: %s" target-path))
        (chat-files--planned-set-file-state target-path t content states)
