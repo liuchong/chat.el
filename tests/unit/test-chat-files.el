@@ -1531,6 +1531,106 @@
                         (buffer-string))
                       "demo\n")))))
 
+(ert-deftest chat-files-apply-patch-allows-delete-then-add-same-path ()
+  "Test delete and add can replace one file within one patch."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Delete File: demo.txt"
+                         "*** Add File: demo.txt"
+                         "+new content"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file target-file
+       (insert "old content\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "new content\n")))))
+
+(ert-deftest chat-files-apply-patch-allows-add-then-update-same-path ()
+  "Test add and update can build a file in multiple operations."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "+hello"
+                         "*** Update File: demo.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "+hello world"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello world\n")))))
+
+(ert-deftest chat-files-apply-patch-allows-move-then-update-new-path ()
+  "Test a later operation can update the path created by an earlier move."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "*** Update File: moved.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "+hello world"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p source-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello world\n")))))
+
+(ert-deftest chat-files-apply-patch-allows-move-then-add-old-path ()
+  "Test a moved source path can be recreated later in the same patch."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "*** Add File: demo.txt"
+                         "+replacement"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents source-file)
+                        (buffer-string))
+                      "replacement\n"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello\n")))))
+
 (ert-deftest chat-files-apply-patch-rejects-directory-update-path ()
   "Test update patches reject directory targets with a stable error."
   (chat-test-with-temp-dir
