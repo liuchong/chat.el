@@ -850,6 +850,56 @@
                         (buffer-string))
                       "alpha\ngamma\n")))))
 
+(ert-deftest chat-files-apply-patch-adjusts-later-hunks-after-pure-insert ()
+  "Test later hunks still land correctly after a pure insert hunk."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -2,0 +3 @@"
+                         "+inserted"
+                         "@@ -3,1 +4,1 @@"
+                         "-gamma"
+                         "+GAMMA"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\ngamma\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\ninserted\nGAMMA\n")))))
+
+(ert-deftest chat-files-apply-patch-adjusts-later-hunks-after-pure-delete ()
+  "Test later hunks still land correctly after a pure delete hunk."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -2,1 +2,0 @@"
+                         "-beta"
+                         "@@ -3,1 +2,1 @@"
+                         "-gamma"
+                         "+GAMMA"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\ngamma\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nGAMMA\n")))))
+
 (ert-deftest chat-files-apply-patch-is-atomic-across-multiple-updates ()
   "Test apply patch does not leave partial edits behind on failure."
   (chat-test-with-temp-dir
