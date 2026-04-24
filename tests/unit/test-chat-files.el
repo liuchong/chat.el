@@ -465,6 +465,19 @@
         (should-error (chat-files-insert-at target-file :end "hello")))))
      (should-not (file-exists-p target-file)))))
 
+(ert-deftest chat-files-insert-at-rejects-invalid-position-with-stable-family ()
+  "Test insert-at rejects unsupported positions without leaking internals."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "insert.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (should
+      (string-match-p
+       "Edit failed: insert position must be :beginning, :end, or a positive integer"
+       (error-message-string
+        (should-error (chat-files-insert-at test-file 0 "oops"))))))))
+
 (ert-deftest chat-files-replace-modifies-content ()
   "Test replacing text in file."
   (chat-test-with-temp-dir
@@ -741,6 +754,34 @@
                         (buffer-string))
                       "repeat\nrepeat\n")))))
 
+(ert-deftest chat-files-replace-rejects-all-with-expected-count ()
+  "Test replace rejects combining all with expected_count."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-selector-conflict.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (should
+      (string-match-p
+       "Replace failed: all and expected_count cannot be combined"
+       (error-message-string
+        (should-error
+         (chat-files-replace test-file "repeat" "done" t 2))))))))
+
+(ert-deftest chat-files-replace-expected-count-and-line-hint-select-single-line-scope ()
+  "Test expected_count still works after line_hint narrows the match set."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-line-count.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (let ((result (chat-files-replace test-file "repeat" "done" nil 1 nil 2)))
+       (should (= (plist-get result :replacements-made) 1)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\ndone\n")))))
+
 (ert-deftest chat-files-replace-regexp-all-respects-line-hint ()
   "Test regexp replace-all still narrows through line-hint."
   (chat-test-with-temp-dir
@@ -874,6 +915,51 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "alpha\nbeta\n")))))
+
+(ert-deftest chat-files-patch-rejects-missing-search-text-with-stable-family ()
+  "Test patch rejects malformed entries with a patch-specific error."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-missing-search.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\n"))
+     (should
+      (string-match-p
+       "Patch failed: patch entry is missing search text"
+       (error-message-string
+        (should-error (chat-files-patch test-file '((:replace "beta"))))))))))
+
+(ert-deftest chat-files-patch-regexp-line-hint-failure-keeps-replace-family ()
+  "Test patch line-hint failures reuse replace diagnostics."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-line-scope.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "hello\nworld\n"))
+     (should
+      (string-match-p
+       "Replace failed: no matches for \\\"hello\\\" on line 2"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "hello" :replace "hullo" :line 2))))))))))
+
+(ert-deftest chat-files-patch-rejects-conflicting-selector-combination ()
+  "Test patch rejects entries that combine all with count."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-selector-conflict.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "hello\nhello\n"))
+     (should
+      (string-match-p
+       "Replace failed: all and expected_count cannot be combined"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "hello" :replace "hullo" :all t :count 2))))))))))
 
 (ert-deftest chat-files-patch-returns-diff-preview ()
   "Test patch operations return a unified diff preview."

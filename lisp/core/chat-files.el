@@ -508,8 +508,8 @@ the empty string."
       (format " on line %d" line-hint)
     ""))
 
-(defun chat-files--validate-replace-selectors (expected-count line-hint)
-  "Validate EXPECTED-COUNT and LINE-HINT selector values."
+(defun chat-files--validate-replace-selectors (all expected-count line-hint)
+  "Validate ALL, EXPECTED-COUNT and LINE-HINT selector values."
   (when (and expected-count
              (not (and (integerp expected-count)
                        (> expected-count 0))))
@@ -517,12 +517,32 @@ the empty string."
   (when (and line-hint
              (not (and (integerp line-hint)
                        (> line-hint 0))))
-    (error "Replace failed: line_hint must be a positive integer")))
+    (error "Replace failed: line_hint must be a positive integer"))
+  (when (and expected-count all)
+    (error "Replace failed: all and expected_count cannot be combined")))
+
+(defun chat-files--signal-edit-error (format-string &rest args)
+  "Signal a stable direct-edit error using FORMAT-STRING and ARGS."
+  (error "Edit failed: %s" (apply #'format format-string args)))
+
+(defun chat-files--normalize-edit-error (err)
+  "Re-signal ERR inside the stable direct-edit error family."
+  (let ((message (error-message-string err)))
+    (if (string-prefix-p "Edit failed:" message)
+        (signal (car err) (cdr err))
+      (chat-files--signal-edit-error "%s" message))))
+
+(defmacro chat-files--with-edit-errors (&rest body)
+  "Run BODY and normalize unexpected direct-edit failures."
+  `(condition-case err
+       (progn ,@body)
+     (error
+      (chat-files--normalize-edit-error err))))
 
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
   (chat-files--validate-replace-pattern search regexp)
-  (chat-files--validate-replace-selectors expected-count line-hint)
+  (chat-files--validate-replace-selectors all expected-count line-hint)
   (let* ((matches (chat-files--collect-replace-matches content search regexp))
          (filtered (if line-hint
                        (seq-filter (lambda (match)
@@ -581,43 +601,49 @@ SEARCH is matched literally unless REGEXP is non-nil.
 When ALL is non-nil, replace all matches.
 When EXPECTED-COUNT is non-nil, require exactly that many matches.
 When LINE-HINT is non-nil, only consider matches on that line."
-  (let* ((safe-path (chat-files--safe-path-p path))
-         (original-content (chat-files--read-edit-target-content safe-path))
-         (result (chat-files--replace-content
-                  original-content search replace all expected-count regexp line-hint))
-         (new-content (plist-get result :content)))
-    (with-temp-file safe-path
-      (insert new-content))
-    (chat-files--with-diff
-     safe-path
-     original-content
-     new-content
-     'replace
-     (list :replacements-made (plist-get result :replacements-made)
-           :search search
-           :replace replace))))
+  (chat-files--with-edit-errors
+    (let* ((safe-path (chat-files--safe-path-p path))
+           (original-content (chat-files--read-edit-target-content safe-path))
+           (result (chat-files--replace-content
+                    original-content search replace all expected-count regexp line-hint))
+           (new-content (plist-get result :content)))
+      (with-temp-file safe-path
+        (insert new-content))
+      (chat-files--with-diff
+       safe-path
+       original-content
+       new-content
+       'replace
+       (list :replacements-made (plist-get result :replacements-made)
+             :search search
+             :replace replace)))))
 
 ;;;###autoload
 (defun chat-files-insert-at (path position text)
   "Insert TEXT at POSITION in file at PATH.
 POSITION can be :beginning, :end, a line number, or a character position."
-  (let ((safe-path (chat-files--safe-path-p path)))
-    (with-temp-buffer
-      (insert (chat-files--read-edit-target-content safe-path))
-      (cond
-       ((eq position :beginning)
-        (goto-char (point-min)))
-       ((eq position :end)
-        (goto-char (point-max)))
-       ((integerp position)
-        (goto-char (point-min))
-        (forward-line (1- position))))
-      (insert text)
-      (write-region (point-min) (point-max) safe-path))
-    (list :path safe-path
-          :operation 'insert
-          :position position
-          :bytes-inserted (length text))))
+  (chat-files--with-edit-errors
+    (let ((safe-path (chat-files--safe-path-p path)))
+      (with-temp-buffer
+        (insert (chat-files--read-edit-target-content safe-path))
+        (cond
+         ((eq position :beginning)
+          (goto-char (point-min)))
+         ((eq position :end)
+          (goto-char (point-max)))
+         ((and (integerp position)
+               (> position 0))
+          (goto-char (point-min))
+          (forward-line (1- position)))
+         (t
+          (chat-files--signal-edit-error
+           "insert position must be :beginning, :end, or a positive integer")))
+        (insert text)
+        (write-region (point-min) (point-max) safe-path))
+      (list :path safe-path
+            :operation 'insert
+            :position position
+            :bytes-inserted (length text)))))
 
 ;;;###autoload
 (defun chat-files-patch (path patches)
@@ -631,32 +657,33 @@ PATCHES is a list of plists with:
   :all - optional replace-all flag.
 
 All patches are applied atomically."
-  (let* ((safe-path (chat-files--safe-path-p path))
-         (original-content (chat-files--read-edit-target-content safe-path))
-         (content original-content))
-    (dolist (patch patches)
-      (let* ((normalized-patch (chat-files--normalize-patch patch))
-             (search (plist-get normalized-patch :search))
-             (replace (or (plist-get normalized-patch :replace) ""))
-             (line (plist-get normalized-patch :line))
-             (count (plist-get normalized-patch :count))
-             (regexp (plist-get normalized-patch :regexp))
-             (all (plist-get normalized-patch :all)))
-        (unless search
-          (error "Patch is missing search text"))
-        (setq content
-              (plist-get
-               (chat-files--replace-content
-                content search replace all count regexp line)
-               :content))))
-    (when (string= content original-content)
-      (error "Patch failed: patch sequence would not change file content"))
-    (with-temp-file safe-path
-      (insert content))
-    (append
-     (chat-files--with-diff safe-path original-content content 'patch)
-     (list :patches-applied (length patches)
-           :status 'success))))
+  (chat-files--with-edit-errors
+    (let* ((safe-path (chat-files--safe-path-p path))
+           (original-content (chat-files--read-edit-target-content safe-path))
+           (content original-content))
+      (dolist (patch patches)
+        (let* ((normalized-patch (chat-files--normalize-patch patch))
+               (search (plist-get normalized-patch :search))
+               (replace (or (plist-get normalized-patch :replace) ""))
+               (line (plist-get normalized-patch :line))
+               (count (plist-get normalized-patch :count))
+               (regexp (plist-get normalized-patch :regexp))
+               (all (plist-get normalized-patch :all)))
+          (unless search
+            (error "Patch failed: patch entry is missing search text"))
+          (setq content
+                (plist-get
+                 (chat-files--replace-content
+                  content search replace all count regexp line)
+                 :content))))
+      (when (string= content original-content)
+        (error "Patch failed: patch sequence would not change file content"))
+      (with-temp-file safe-path
+        (insert content))
+      (append
+       (chat-files--with-diff safe-path original-content content 'patch)
+       (list :patches-applied (length patches)
+             :status 'success)))))
 
 (defun chat-files--split-content-lines (content)
   "Return CONTENT as a plist with line data."
