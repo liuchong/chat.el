@@ -314,6 +314,23 @@ For paths that do not exist yet resolve the nearest existing ancestor first.
                    (cdr (assoc "replace" patch))))
 ```
 
+### Apply Patch Input Must Keep Full Envelope
+
+**Problem**: `apply_patch` can fail immediately on otherwise plausible patch text with a missing begin or end marker.
+
+**Cause**: the patch parser accepts only the Codex envelope format and now explicitly requires both `*** Begin Patch` and `*** End Patch`.
+
+**Solution**: always send the full envelope and keep `*** Move to:` inside an `*** Update File:` block.
+
+```text
+*** Begin Patch
+*** Update File: path/to/file
+@@
+-old line
++new line
+*** End Patch
+```
+
 ### Default File Access Can Be Too Broad
 
 **Problem**: using the home directory as the default allowed root gives the AI more read and write scope than necessary.

@@ -547,6 +547,40 @@
                         (buffer-string))
                       "foobar\n")))))
 
+(ert-deftest chat-files-replace-rejects-nonstring-search-text ()
+  "Test replace rejects non-string search values with a stable error."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "nonstring-search.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should
+      (string-match-p
+       "Replace failed: search text must be a string"
+       (error-message-string
+        (should-error (chat-files-replace test-file nil "x")))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
+
+(ert-deftest chat-files-replace-rejects-nonstring-replacement-text ()
+  "Test replace rejects non-string replacement values with a stable error."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "nonstring-replace.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should
+      (string-match-p
+       "Replace failed: replacement text must be a string"
+       (error-message-string
+        (should-error (chat-files-replace test-file "foo" nil)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
+
 (ert-deftest chat-files-replace-rejects-directory-path ()
   "Test replace rejects directory targets with a stable error."
   (chat-test-with-temp-dir
@@ -1027,6 +1061,23 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "foobar\n")))))
+
+(ert-deftest chat-files-patch-rejects-empty-patch-list ()
+  "Test patch rejects an empty patch list with a stable patch-family error."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-empty-list.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\n"))
+     (should
+      (string-match-p
+       "Patch failed: patch sequence would not change file content"
+       (error-message-string
+        (should-error (chat-files-patch test-file nil)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\n")))))
 
 (ert-deftest chat-files-patch-rejects-directory-path ()
   "Test search patching rejects directory targets with a stable error."
@@ -1650,6 +1701,71 @@
                         (buffer-string))
                       "hello\n")))))
 
+(ert-deftest chat-files-apply-patch-rejects-missing-end-envelope ()
+  "Test apply_patch requires the closing patch envelope."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-hello"
+                         "+hullo")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (should
+      (string-match-p
+       "apply_patch verification failed: missing \\*\\*\\* End Patch"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-rejects-empty-patch-text ()
+  "Test apply_patch rejects an empty patch body with the begin-envelope error."
+  (chat-test-with-temp-dir
+   (let ((chat-files-allowed-directories (list temp-dir))
+         (default-directory temp-dir))
+     (should
+      (string-match-p
+       "apply_patch verification failed: missing \\*\\*\\* Begin Patch"
+       (error-message-string
+        (should-error (chat-files-apply-patch ""))))))))
+
+(ert-deftest chat-files-apply-patch-rejects-whitespace-only-patch-text ()
+  "Test apply_patch rejects whitespace-only patch text with the begin-envelope error."
+  (chat-test-with-temp-dir
+   (let ((chat-files-allowed-directories (list temp-dir))
+         (default-directory temp-dir))
+     (should
+      (string-match-p
+       "apply_patch verification failed: missing \\*\\*\\* Begin Patch"
+       (error-message-string
+        (should-error (chat-files-apply-patch "   \n\t"))))))))
+
+(ert-deftest chat-files-apply-patch-rejects-move-line-outside-update-block ()
+  "Test move directives outside update blocks fail cleanly."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Move to: moved.txt"
+                         "*** End Patch")
+                       "\n")))
+     (should
+      (string-match-p
+       "apply_patch verification failed: unexpected line"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text))))))))
+
 (ert-deftest chat-files-apply-patch-rejects-update-without-hunks ()
   "Test update patches require at least one hunk or a move."
   (chat-test-with-temp-dir
@@ -1944,6 +2060,30 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "pre\nintro\nalpha\nkeep\nomega\nmiddle\nALPHA\nkeep\nomega\n")))))
+
+(ert-deftest chat-files-apply-patch-falls-back-to-unique-match-when-header-start-drifts ()
+  "Test a wrong preferred hunk start can still use one unique source match."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -20,2 +20,2 @@"
+                         "-alpha"
+                         "+ALPHA"
+                         " keep"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "prefix\nalpha\nkeep\nsuffix\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "prefix\nALPHA\nkeep\nsuffix\n")))))
 
 (ert-deftest chat-files-apply-patch-is-atomic-across-multiple-updates ()
   "Test apply patch does not leave partial edits behind on failure."

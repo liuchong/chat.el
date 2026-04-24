@@ -493,6 +493,8 @@ When REGEXP is non-nil, treat SEARCH as a regular expression."
   "Validate SEARCH before replace operations.
 When REGEXP is non-nil, SEARCH must be a valid regexp that cannot match
 the empty string."
+  (unless (stringp search)
+    (error "Replace failed: search text must be a string"))
   (when (string-empty-p search)
     (error "Replace failed: empty search text is not allowed"))
   (when regexp
@@ -542,6 +544,8 @@ the empty string."
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
   (chat-files--validate-replace-pattern search regexp)
+  (unless (stringp replace)
+    (error "Replace failed: replacement text must be a string"))
   (chat-files--validate-replace-selectors all expected-count line-hint)
   (let* ((matches (chat-files--collect-replace-matches content search regexp))
          (filtered (if line-hint
@@ -865,6 +869,7 @@ All patches are applied atomically."
   "Parse PATCH-TEXT in codex apply_patch format."
   (let* ((lines (split-string patch-text "\n"))
          (index 0)
+         (saw-end-patch nil)
          operations)
     (unless (equal (nth index lines) "*** Begin Patch")
       (error "apply_patch verification failed: missing *** Begin Patch"))
@@ -873,6 +878,7 @@ All patches are applied atomically."
       (let ((line (nth index lines)))
         (cond
          ((equal line "*** End Patch")
+          (setq saw-end-patch t)
           (setq index (length lines)))
          ((string-prefix-p "*** Add File: " line)
           (let ((path (string-remove-prefix "*** Add File: " line))
@@ -957,6 +963,8 @@ All patches are applied atomically."
           (setq index (1+ index)))
          (t
           (error "apply_patch verification failed: unexpected line %S" line)))))
+    (unless saw-end-patch
+      (error "apply_patch verification failed: missing *** End Patch"))
     (nreverse operations)))
 
 (defun chat-files--with-apply-patch-errors (fn)

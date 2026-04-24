@@ -151,6 +151,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_patch` now also refuses multi-step patch sequences that net out to the original file content, removing another false-success path for automated edit loops
 - `files_replace` and `files_patch` now preserve `line_hint` scope in no-match, count-mismatch, and ambiguous-match diagnostics, making automated retry decisions less guessy
 - `files_replace` and `files_patch` now reject nonpositive `expected_count` and `line_hint` selectors before matching begins, keeping selector bugs out of the normal no-match error path
+- `files_replace` now also rejects non-string `search` and `replace` inputs with stable replace-family errors instead of leaking lower-level type failures from malformed tool arguments
+- `apply_patch` now explicitly requires the closing `*** End Patch` envelope and has regression coverage for empty patch text, whitespace-only patch text, illegal top-level `*** Move to:` lines, and unique-match fallback when hunk header start positions drift
 
 ## Known Boundaries
 
