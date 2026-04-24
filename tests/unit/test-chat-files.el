@@ -806,6 +806,50 @@
                         (buffer-string))
                       "alpha\nbeta\ninserted\ngamma\n")))))
 
+(ert-deftest chat-files-apply-patch-supports-pure-insert-hunk-at-file-end ()
+  "Test unified hunks can append lines at the end of a file."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -3,0 +4 @@"
+                         "+delta"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\ngamma\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\ngamma\ndelta\n")))))
+
+(ert-deftest chat-files-apply-patch-supports-pure-delete-hunk ()
+  "Test unified hunks can delete lines without replacement text."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -2,1 +2,0 @@"
+                         "-beta"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\ngamma\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\ngamma\n")))))
+
 (ert-deftest chat-files-apply-patch-is-atomic-across-multiple-updates ()
   "Test apply patch does not leave partial edits behind on failure."
   (chat-test-with-temp-dir
