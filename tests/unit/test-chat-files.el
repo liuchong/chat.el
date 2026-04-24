@@ -522,6 +522,18 @@
         (should-error (chat-files-replace target-dir "a" "b")))))
      (should (file-directory-p target-dir)))))
 
+(ert-deftest chat-files-replace-rejects-missing-file-path ()
+  "Test replace rejects missing files with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-file (expand-file-name "missing.txt" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (should
+      (string-match-p
+       "file does not exist"
+       (error-message-string
+        (should-error (chat-files-replace target-file "a" "b")))))
+     (should-not (file-exists-p target-file)))))
+
 (ert-deftest chat-files-replace-rejects-empty-matching-regexp ()
   "Test replace rejects regexps that can match empty text."
   (chat-test-with-temp-dir
@@ -732,6 +744,19 @@
         (should-error
          (chat-files-patch target-dir '((:search "a" :replace "b")))))))
      (should (file-directory-p target-dir)))))
+
+(ert-deftest chat-files-patch-rejects-missing-file-path ()
+  "Test search patching rejects missing files with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-file (expand-file-name "missing-patch.txt" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (should
+      (string-match-p
+       "file does not exist"
+       (error-message-string
+        (should-error
+         (chat-files-patch target-file '((:search "a" :replace "b")))))))
+     (should-not (file-exists-p target-file)))))
 
 (ert-deftest chat-files-apply-patch-alias-uses-patch-engine ()
   "Test apply patch wrapper delegates to file patching."

@@ -560,10 +560,7 @@ When ALL is non-nil, replace all matches.
 When EXPECTED-COUNT is non-nil, require exactly that many matches.
 When LINE-HINT is non-nil, only consider matches on that line."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (_ (chat-files--ensure-nondirectory-path safe-path))
-         (original-content (with-temp-buffer
-                             (insert-file-contents safe-path)
-                             (buffer-string)))
+         (original-content (chat-files--read-edit-target-content safe-path))
          (result (chat-files--replace-content
                   original-content search replace all expected-count regexp line-hint))
          (new-content (plist-get result :content)))
@@ -613,10 +610,7 @@ PATCHES is a list of plists with:
 
 All patches are applied atomically."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (_ (chat-files--ensure-nondirectory-path safe-path))
-         (original-content (with-temp-buffer
-                             (insert-file-contents safe-path)
-                             (buffer-string)))
+         (original-content (chat-files--read-edit-target-content safe-path))
          (content original-content))
     (dolist (patch patches)
       (let* ((normalized-patch (chat-files--normalize-patch patch))
@@ -975,6 +969,15 @@ All patches are applied atomically."
   "Reject PATH when it points to a directory."
   (when (file-directory-p path)
     (error "apply_patch verification failed: path is a directory: %s" path)))
+
+(defun chat-files--read-edit-target-content (path)
+  "Return file content for editable PATH after stable path validation."
+  (chat-files--ensure-nondirectory-path path)
+  (unless (file-exists-p path)
+    (error "Edit failed: file does not exist: %s" path))
+  (with-temp-buffer
+    (insert-file-contents path)
+    (buffer-string)))
 
 (defun chat-files--commit-apply-patch-operation (operation)
   "Execute parsed apply_patch OPERATION."
