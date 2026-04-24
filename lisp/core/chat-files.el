@@ -630,6 +630,8 @@ All patches are applied atomically."
                (chat-files--replace-content
                 content search replace all count regexp line)
                :content))))
+    (when (string= content original-content)
+      (error "Patch failed: patch sequence would not change file content"))
     (with-temp-file safe-path
       (insert content))
     (append

@@ -744,6 +744,27 @@
                         (buffer-string))
                       "alpha\nbeta\n")))))
 
+(ert-deftest chat-files-patch-rejects-net-no-op-sequences ()
+  "Test multi-step search patches fail when they net to no file change."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-net-noop.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (should
+      (string-match-p
+       "Patch failed: patch sequence would not change file content"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "alpha" :replace "ALPHA")
+            (:search "ALPHA" :replace "alpha")))))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\n")))))
+
 (ert-deftest chat-files-patch-returns-diff-preview ()
   "Test patch operations return a unified diff preview."
   (chat-test-with-temp-dir
