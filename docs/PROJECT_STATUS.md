@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 367 regression tests discovered
-- 367 passing
+- 370 regression tests discovered
+- 370 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -147,6 +147,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `apply_patch` empty-file semantics are now covered so empty add-file output and updates that delete the entire file content no longer leave stray trailing newline bytes behind
 - chained `apply_patch` path reuse now has explicit regression coverage for add-then-delete cleanup, move-then-delete cleanup, and multi-step move chains across intermediate paths
 - `apply_patch` conflict paths now also have explicit regression coverage for add-existing refusal, delete-missing refusal, and move-missing-source refusal, keeping those verification errors stable and atomic
+- `files_replace` and `files_patch` now refuse no-op edits instead of reporting false success when the replacement would leave file content unchanged
 
 ## Known Boundaries
 

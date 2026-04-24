@@ -539,9 +539,12 @@ the empty string."
                          (plist-get match :end))
           (goto-char (plist-get match :start))
           (insert replace)))
-      (list :content (buffer-string)
-            :replacements-made (length selected)
-            :match-count match-count))))
+      (let ((updated-content (buffer-string)))
+        (when (string= updated-content content)
+          (error "Replace failed: replacement would not change file content"))
+        (list :content updated-content
+              :replacements-made (length selected)
+              :match-count match-count)))))
 
 (defun chat-files--with-diff (path original-content new-content operation &optional extra)
   "Build a result plist for PATH from ORIGINAL-CONTENT to NEW-CONTENT."

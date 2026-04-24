@@ -630,6 +630,41 @@
                         (buffer-string))
                       "done\ndone\n")))))
 
+(ert-deftest chat-files-replace-rejects-no-op-edit ()
+  "Test replace refuses edits that would not change file content."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-noop.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\n"))
+     (should
+      (string-match-p
+       "Replace failed: replacement would not change file content"
+       (error-message-string
+        (should-error (chat-files-replace test-file "repeat" "repeat")))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\n")))))
+
+(ert-deftest chat-files-replace-regexp-rejects-no-op-edit ()
+  "Test regexp replace also refuses no-op edits."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-regexp-noop.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foo1\n"))
+     (should
+      (string-match-p
+       "Replace failed: replacement would not change file content"
+       (error-message-string
+        (should-error
+         (chat-files-replace test-file "foo\\([0-9]\\)" "foo\\1" nil nil t)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foo1\n")))))
+
 (ert-deftest chat-files-replace-expected-count-succeeds-for-exact-match-set ()
   "Test expected_count can authorize a multi-match replace."
   (chat-test-with-temp-dir
@@ -684,6 +719,26 @@
        test-file
        '((:search "alpha" :replace "ALPHA")
          (:search "missing" :replace "X"))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\n")))))
+
+(ert-deftest chat-files-patch-rejects-no-op-edit-atomically ()
+  "Test no-op search patches fail without touching the file."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-noop.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (should
+      (string-match-p
+       "Replace failed: replacement would not change file content"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "alpha" :replace "alpha")))))))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))
