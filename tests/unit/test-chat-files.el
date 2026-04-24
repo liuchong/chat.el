@@ -1801,6 +1801,71 @@
                         (buffer-string))
                       "hello\n")))))
 
+(ert-deftest chat-files-apply-patch-allows-add-then-delete-same-path ()
+  "Test add then delete leaves no file behind."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "+hello"
+                         "*** Delete File: demo.txt"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p target-file)))))
+
+(ert-deftest chat-files-apply-patch-allows-move-then-delete-new-path ()
+  "Test a moved path can be deleted later in the same patch."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "*** Delete File: moved.txt"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p source-file))
+     (should-not (file-exists-p target-file)))))
+
+(ert-deftest chat-files-apply-patch-allows-chained-moves-across-intermediate-paths ()
+  "Test multiple move operations can reuse intermediate paths."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (middle-file (expand-file-name "middle.txt" temp-dir))
+          (target-file (expand-file-name "final.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: middle.txt"
+                         "*** Update File: middle.txt"
+                         "*** Move to: final.txt"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p source-file))
+     (should-not (file-exists-p middle-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello\n")))))
+
 (ert-deftest chat-files-apply-patch-rejects-directory-update-path ()
   "Test update patches reject directory targets with a stable error."
   (chat-test-with-temp-dir
