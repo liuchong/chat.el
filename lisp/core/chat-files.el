@@ -785,7 +785,9 @@ All patches are applied atomically."
          ((string-prefix-p "*** Update File: " line)
           (let ((path (string-remove-prefix "*** Update File: " line))
                 move-to
-                hunks)
+                hunks
+                ends-with-newline-specified
+                ends-with-newline)
             (setq index (1+ index))
             (when (and (< index (length lines))
                        (string-prefix-p "*** Move to: " (nth index lines)))
@@ -803,6 +805,8 @@ All patches are applied atomically."
                   (setq index (1+ index)))
                 (when (and (< index (length lines))
                            (equal (nth index lines) "*** End of File"))
+                  (setq ends-with-newline-specified t)
+                  (setq ends-with-newline nil)
                   (setq index (1+ index)))
                 (push (list :header header
                             :header-data (chat-files--parse-hunk-header header)
@@ -811,6 +815,8 @@ All patches are applied atomically."
             (push (list :type 'update
                         :path path
                         :move-to move-to
+                        :ends-with-newline-specified ends-with-newline-specified
+                        :ends-with-newline ends-with-newline
                         :hunks (nreverse hunks))
                   operations)))
          ((string-empty-p line)
@@ -874,7 +880,9 @@ All patches are applied atomically."
                       (plist-get header-data :old-count)))))))
     (chat-files--join-content-lines
      (list :lines lines
-           :ends-with-newline (plist-get state :ends-with-newline)))))
+           :ends-with-newline (if (plist-get operation :ends-with-newline-specified)
+                                  (plist-get operation :ends-with-newline)
+                                (plist-get state :ends-with-newline))))))
 
 (defun chat-files--commit-apply-patch-operation (operation)
   "Execute parsed apply_patch OPERATION."

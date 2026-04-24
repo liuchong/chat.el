@@ -466,6 +466,32 @@
                         (buffer-string))
                       "barfoo\n")))))
 
+(ert-deftest chat-files-replace-line-hint-narrows-ambiguous-match ()
+  "Test line hints allow replacing one otherwise ambiguous match."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "line-hint.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (chat-files-replace test-file "repeat" "done" nil nil nil 2)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\ndone\n")))))
+
+(ert-deftest chat-files-replace-line-hint-participates-in-count-validation ()
+  "Test expected_count validation applies after line-hint filtering."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "line-hint-count.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (should-error (chat-files-replace test-file "repeat" "done" nil 1 nil 3))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat\nrepeat\n")))))
+
 (ert-deftest chat-files-patch-returns-diff-preview ()
   "Test patch operations return a unified diff preview."
   (chat-test-with-temp-dir
@@ -558,6 +584,30 @@
        (insert "alpha\nbeta"))
      (let ((result (chat-files-apply-patch patch-text)))
        (should (eq (plist-get result :status) 'success)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\ngamma")))))
+
+(ert-deftest chat-files-apply-patch-end-of-file-marker-removes-trailing-newline ()
+  "Test EOF markers can remove a trailing newline from an updated file."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-beta"
+                         "+gamma"
+                         "*** End of File"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (chat-files-apply-patch patch-text)
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))
