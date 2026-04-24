@@ -440,6 +440,31 @@
        (when (buffer-live-p opened-buffer)
          (kill-buffer opened-buffer))))))
 
+(ert-deftest chat-files-insert-at-rejects-directory-path ()
+  "Test insert-at rejects directory targets with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-dir (expand-file-name "insert-target" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (make-directory target-dir)
+     (should
+      (string-match-p
+       "path is a directory"
+       (error-message-string
+        (should-error (chat-files-insert-at target-dir :end "hello")))))
+     (should (file-directory-p target-dir)))))
+
+(ert-deftest chat-files-insert-at-rejects-missing-file-path ()
+  "Test insert-at rejects missing files with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-file (expand-file-name "missing-insert.txt" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (should
+      (string-match-p
+       "file does not exist"
+       (error-message-string
+        (should-error (chat-files-insert-at target-file :end "hello")))))
+     (should-not (file-exists-p target-file)))))
+
 (ert-deftest chat-files-replace-modifies-content ()
   "Test replacing text in file."
   (chat-test-with-temp-dir

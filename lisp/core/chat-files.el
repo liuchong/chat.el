@@ -581,7 +581,7 @@ When LINE-HINT is non-nil, only consider matches on that line."
 POSITION can be :beginning, :end, a line number, or a character position."
   (let ((safe-path (chat-files--safe-path-p path)))
     (with-temp-buffer
-      (insert-file-contents safe-path)
+      (insert (chat-files--read-edit-target-content safe-path))
       (cond
        ((eq position :beginning)
         (goto-char (point-min)))
