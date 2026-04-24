@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 359 regression tests discovered
-- 359 passing
+- 361 regression tests discovered
+- 361 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -144,6 +144,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - multi-operation `apply_patch` flows now have explicit regression coverage for delete-then-add replacement, add-then-update composition, move-then-update composition, and move-then-recreate-source composition
 - nested `apply_patch` add and move targets now have explicit regression coverage for parent-directory creation, and failed nested add operations are covered to leave no partial directory tree behind
 - `apply_patch` now also keeps ambiguous hunk failures and invalid pure-insert locations inside the same stable `apply_patch verification failed: ...` family, reducing one more class of AI-unfriendly error drift
+- `apply_patch` empty-file semantics are now covered so empty add-file output and updates that delete the entire file content no longer leave stray trailing newline bytes behind
 
 ## Known Boundaries
 

@@ -645,15 +645,20 @@ All patches are applied atomically."
 
 (defun chat-files--join-content-lines (state)
   "Join line STATE back into a string."
-  (let ((body (string-join (plist-get state :lines) "\n")))
-    (if (plist-get state :ends-with-newline)
-        (concat body "\n")
-      body)))
+  (let ((lines (plist-get state :lines)))
+    (if (null lines)
+        ""
+      (let ((body (string-join lines "\n")))
+        (if (plist-get state :ends-with-newline)
+            (concat body "\n")
+          body)))))
 
 (defun chat-files--patch-operation-content (operation)
   "Return OPERATION content with patch newline semantics."
   (chat-files--join-content-lines
-   (list :lines (split-string (plist-get operation :content) "\n")
+   (list :lines (if (string-empty-p (plist-get operation :content))
+                    nil
+                  (split-string (plist-get operation :content) "\n"))
          :ends-with-newline (plist-get operation :ends-with-newline))))
 
 (defun chat-files--no-newline-marker-p (line)

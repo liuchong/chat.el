@@ -896,6 +896,29 @@
                         (buffer-string))
                       "alpha\ngamma")))))
 
+(ert-deftest chat-files-apply-patch-can-delete-file-content-to-empty-file ()
+  "Test update patches can rewrite a file to truly empty bytes."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -1 +0,0 @@"
+                         "-hello"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should (= (nth 7 (file-attributes test-file)) 0))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "")))))
+
 (ert-deftest chat-files-apply-patch-add-file-supports-end-of-file-marker ()
   "Test add-file patches can omit the trailing newline."
   (chat-test-with-temp-dir
@@ -954,6 +977,26 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-add-file-can-create-empty-file ()
+  "Test add-file patches can create an empty file without stray bytes."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "empty.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: empty.txt"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (file-exists-p test-file))
+     (should (= (nth 7 (file-attributes test-file)) 0))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "")))))
 
 (ert-deftest chat-files-apply-patch-rejects-invalid-add-file-line ()
   "Test add-file patches reject payload lines without a plus prefix."
