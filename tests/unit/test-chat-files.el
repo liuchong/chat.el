@@ -1322,6 +1322,60 @@
                         (buffer-string))
                       "hello\n")))))
 
+(ert-deftest chat-files-apply-patch-prefixes-ambiguous-hunk-failures ()
+  "Test ambiguous hunk failures use the verification prefix."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-alpha"
+                         "+ALPHA"
+                         " keep"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nkeep\nalpha\nkeep\n"))
+     (should
+      (string-match-p
+       "apply_patch verification failed: Patch hunk is ambiguous"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nkeep\nalpha\nkeep\n")))))
+
+(ert-deftest chat-files-apply-patch-pure-insert-invalid-location-uses-apply-family ()
+  "Test invalid pure-insert locations use the standard apply failure family."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -10,0 +10 @@"
+                         "+inserted"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\n"))
+     (should
+      (string-match-p
+       "apply_patch verification failed: Patch hunk could not be applied"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\n")))))
+
 (ert-deftest chat-files-apply-patch-supports-pure-insert-hunk-at-file-start ()
   "Test unified hunks can insert lines into an empty prefix."
   (chat-test-with-temp-dir

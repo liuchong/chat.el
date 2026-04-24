@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 357 regression tests discovered
-- 357 passing
+- 359 regression tests discovered
+- 359 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -143,6 +143,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - patch application failures that happen after parsing now also receive the `apply_patch verification failed: ...` prefix, so parser-time and apply-time patch failures now share one stable error family
 - multi-operation `apply_patch` flows now have explicit regression coverage for delete-then-add replacement, add-then-update composition, move-then-update composition, and move-then-recreate-source composition
 - nested `apply_patch` add and move targets now have explicit regression coverage for parent-directory creation, and failed nested add operations are covered to leave no partial directory tree behind
+- `apply_patch` now also keeps ambiguous hunk failures and invalid pure-insert locations inside the same stable `apply_patch verification failed: ...` family, reducing one more class of AI-unfriendly error drift
 
 ## Known Boundaries
 

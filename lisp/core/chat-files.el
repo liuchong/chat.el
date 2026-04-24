@@ -795,7 +795,7 @@ All patches are applied atomically."
           (append (cl-subseq lines 0 preferred-start)
                   new-lines
                   (cl-subseq lines preferred-start))
-        (error "Patch hunk has no matchable source context")))
+        (error "Patch hunk could not be applied")))
      ((null start)
       (error "Patch hunk could not be applied"))
      ((eq start :ambiguous)
