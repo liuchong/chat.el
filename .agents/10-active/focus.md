@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Keep the shared reading workflow stable while continuing to raise coverage around file-editing reliability, standard and codex newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, empty-update rejection, replace success semantics, invalid-regexp diagnostics, ambiguous line-hint handling, add-file validation, regexp narrowing behavior, move-only patch behavior, patch atomicity, pure insert and delete hunk compatibility, sequential hunk line-delta stability, update-patch EOF semantics, replace narrowing behavior, whitespace-aware context refusal behavior, and command surfaces.
+Keep the shared reading workflow stable while continuing to raise coverage around file-editing reliability, standard and codex newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, empty-update rejection, replace success semantics, invalid-regexp diagnostics, empty-pattern validation, empty-match regexp refusal, ambiguous line-hint handling, add-file validation, regexp narrowing behavior, move-only patch behavior, patch atomicity, pure insert and delete hunk compatibility, sequential hunk line-delta stability, update-patch EOF semantics, replace narrowing behavior, whitespace-aware context refusal behavior, and command surfaces.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Keep the shared reading workflow stable while continuing to raise coverage aroun
 
 ## Immediate Next Step
 
-Keep pushing test density around patch-engine and search-replace edge cases until add, pure insert, pure delete, sequential hunk drift, update, move, move-only updates, metadata lines, malformed hunk payloads, malformed headers, invalid add-file payloads, empty updates, replace-all success paths, expected-count success paths, invalid-regexp failure paths, ambiguous line-hint paths, regexp line-filtered success paths, patch atomicity, standard newline markers, and newline semantics are no longer the easiest path to a production failure.
+Keep pushing test density around patch-engine and search-replace edge cases until add, pure insert, pure delete, sequential hunk drift, update, move, move-only updates, metadata lines, malformed hunk payloads, malformed headers, invalid add-file payloads, empty updates, empty search text, empty-match regexps, replace-all success paths, expected-count success paths, invalid-regexp failure paths, ambiguous line-hint paths, regexp line-filtered success paths, patch atomicity, standard newline markers, and newline semantics are no longer the easiest path to a production failure.

@@ -481,6 +481,36 @@
                         (buffer-string))
                       "foobar\n")))))
 
+(ert-deftest chat-files-replace-rejects-empty-search-text ()
+  "Test replace rejects empty literal search text."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "empty-search.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should-error
+      (chat-files-replace test-file "" "x")
+      :type 'error)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
+
+(ert-deftest chat-files-replace-rejects-empty-matching-regexp ()
+  "Test replace rejects regexps that can match empty text."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "empty-regexp.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should-error
+      (chat-files-replace test-file ".*" "x" nil nil t)
+      :type 'error)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
+
 (ert-deftest chat-files-replace-line-hint-narrows-ambiguous-match ()
   "Test line hints allow replacing one otherwise ambiguous match."
   (chat-test-with-temp-dir
@@ -641,6 +671,23 @@
        '((:search "\\("
           :replace "x"
           :regexp t))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
+
+(ert-deftest chat-files-patch-rejects-empty-search-text ()
+  "Test patch rejects empty literal search text."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-empty-search.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should-error
+      (chat-files-patch
+       test-file
+       '((:search ""
+          :replace "x"))))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))

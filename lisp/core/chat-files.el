@@ -488,8 +488,22 @@ When REGEXP is non-nil, treat SEARCH as a regular expression."
     (invalid-regexp
      (error "Replace failed: invalid regexp %S" search))))
 
+(defun chat-files--validate-replace-pattern (search regexp)
+  "Validate SEARCH before replace operations.
+When REGEXP is non-nil, SEARCH must be a valid regexp that cannot match
+the empty string."
+  (when (string-empty-p search)
+    (error "Replace failed: empty search text is not allowed"))
+  (when regexp
+    (condition-case nil
+        (when (string-match-p search "")
+          (error "Replace failed: regexp %S matches empty text" search))
+      (invalid-regexp
+       (error "Replace failed: invalid regexp %S" search)))))
+
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
+  (chat-files--validate-replace-pattern search regexp)
   (let* ((matches (chat-files--collect-replace-matches content search regexp))
          (filtered (if line-hint
                        (seq-filter (lambda (match)
