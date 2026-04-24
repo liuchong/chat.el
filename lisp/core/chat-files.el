@@ -452,7 +452,7 @@ If APPEND is non-nil, append to existing content.
 ENCODING specifies the file encoding (default utf-8)."
   (let ((safe-path (chat-files--safe-path-p path))
         (coding-system (or encoding 'utf-8)))
-    (chat-files--ensure-nondirectory-path safe-path)
+    (chat-files--ensure-direct-edit-path safe-path)
     (make-directory (file-name-directory safe-path) t)
     (with-temp-buffer
       (when (and append (file-exists-p safe-path))
@@ -970,9 +970,14 @@ All patches are applied atomically."
   (when (file-directory-p path)
     (error "apply_patch verification failed: path is a directory: %s" path)))
 
+(defun chat-files--ensure-direct-edit-path (path)
+  "Reject PATH when direct edit operations cannot target it."
+  (when (file-directory-p path)
+    (error "Edit failed: path is a directory: %s" path)))
+
 (defun chat-files--read-edit-target-content (path)
   "Return file content for editable PATH after stable path validation."
-  (chat-files--ensure-nondirectory-path path)
+  (chat-files--ensure-direct-edit-path path)
   (unless (file-exists-p path)
     (error "Edit failed: file does not exist: %s" path))
   (with-temp-buffer

@@ -139,6 +139,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_write`, `files_replace`, and `files_patch` now also reject directory targets with the same stable path-level validation instead of leaking lower-level file and stream errors
 - `files_replace` and `files_patch` now also reject missing edit targets with stable edit-level errors instead of leaking raw `insert-file-contents` failures
 - `files_insert_at` now reuses the same direct-edit validation, so missing and directory targets fail with the same stable edit-level errors as the other direct editing entrypoints
+- direct edit entrypoints now use `Edit failed: ...` semantics while patch parsing and application still use `apply_patch verification failed: ...`, which keeps non-patch edit failures distinct from patch-engine failures
 
 ## Known Boundaries
 

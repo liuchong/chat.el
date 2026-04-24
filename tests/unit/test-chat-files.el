@@ -356,7 +356,7 @@
      (make-directory target-dir)
      (should
       (string-match-p
-       "path is a directory"
+       "Edit failed: path is a directory"
        (error-message-string
         (should-error (chat-files-write target-dir "hello")))))
      (should (file-directory-p target-dir)))))
@@ -448,7 +448,7 @@
      (make-directory target-dir)
      (should
       (string-match-p
-       "path is a directory"
+       "Edit failed: path is a directory"
        (error-message-string
         (should-error (chat-files-insert-at target-dir :end "hello")))))
      (should (file-directory-p target-dir)))))
@@ -542,7 +542,7 @@
      (make-directory target-dir)
      (should
       (string-match-p
-       "path is a directory"
+       "Edit failed: path is a directory"
        (error-message-string
         (should-error (chat-files-replace target-dir "a" "b")))))
      (should (file-directory-p target-dir)))))
@@ -764,7 +764,7 @@
      (make-directory target-dir)
      (should
       (string-match-p
-       "path is a directory"
+       "Edit failed: path is a directory"
        (error-message-string
         (should-error
          (chat-files-patch target-dir '((:search "a" :replace "b")))))))
