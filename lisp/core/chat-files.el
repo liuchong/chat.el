@@ -717,6 +717,20 @@ All patches are applied atomically."
           (push text result))))
     (nreverse result)))
 
+(defun chat-files--actual-hunk-counts (hunk-lines)
+  "Return actual old and new line counts for HUNK-LINES."
+  (list :old-count (length (chat-files--patch-hunk-old-lines hunk-lines))
+        :new-count (length (chat-files--patch-hunk-new-lines hunk-lines))))
+
+(defun chat-files--effective-hunk-header-data (hunk)
+  "Return HUNK header data adjusted to actual payload counts."
+  (when-let ((header-data (plist-get hunk :header-data)))
+    (let ((actual-counts (chat-files--actual-hunk-counts (plist-get hunk :lines))))
+      (list :old-start (plist-get header-data :old-start)
+            :new-start (plist-get header-data :new-start)
+            :old-count (plist-get actual-counts :old-count)
+            :new-count (plist-get actual-counts :new-count)))))
+
 (defun chat-files--apply-hunk-to-lines (lines hunk-lines)
   "Apply HUNK-LINES to LINES and return updated lines."
   (let* ((old-lines (chat-files--patch-hunk-old-lines hunk-lines))
@@ -931,7 +945,7 @@ All patches are applied atomically."
          (lines (plist-get state :lines))
          (line-delta 0))
     (dolist (hunk (plist-get operation :hunks))
-      (let* ((header-data (plist-get hunk :header-data))
+      (let* ((header-data (chat-files--effective-hunk-header-data hunk))
              (old-count (and header-data (plist-get header-data :old-count)))
              (preferred-start (and header-data
                                    (+ (if (= old-count 0)
@@ -954,6 +968,11 @@ All patches are applied atomically."
                                   (plist-get operation :ends-with-newline)
                                 (plist-get state :ends-with-newline))))))
 
+(defun chat-files--ensure-nondirectory-path (path)
+  "Reject PATH when it points to a directory."
+  (when (file-directory-p path)
+    (error "apply_patch verification failed: path is a directory: %s" path)))
+
 (defun chat-files--commit-apply-patch-operation (operation)
   "Execute parsed apply_patch OPERATION."
   (pcase (plist-get operation :type)
@@ -961,6 +980,7 @@ All patches are applied atomically."
      (let* ((target-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
             (content (chat-files--patch-operation-content operation)))
+       (chat-files--ensure-nondirectory-path target-path)
        (when (file-exists-p target-path)
          (error "apply_patch verification failed: file already exists: %s" target-path))
        (make-directory (file-name-directory target-path) t)
@@ -973,6 +993,7 @@ All patches are applied atomically."
      (let* ((target-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
             (original-content (with-temp-buffer
+                                (chat-files--ensure-nondirectory-path target-path)
                                 (insert-file-contents target-path)
                                 (buffer-string))))
        (delete-file target-path)
@@ -983,6 +1004,7 @@ All patches are applied atomically."
      (let* ((source-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
             (original-content (with-temp-buffer
+                                (chat-files--ensure-nondirectory-path source-path)
                                 (insert-file-contents source-path)
                                 (buffer-string)))
             (updated-content (chat-files--apply-update-operation original-content operation))
@@ -990,6 +1012,7 @@ All patches are applied atomically."
                              (chat-files--safe-path-p
                               (expand-file-name move-to default-directory))
                            source-path)))
+       (chat-files--ensure-nondirectory-path target-path)
        (when (and (not (equal target-path source-path))
                   (file-exists-p target-path))
          (error "apply_patch verification failed: move target exists: %s" target-path))
@@ -1007,12 +1030,17 @@ All patches are applied atomically."
 (defun chat-files--planned-file-state (path states)
   "Return the planned file state for PATH from STATES."
   (or (gethash path states)
-      (let ((state (if (file-exists-p path)
-                       (list :exists t
-                             :content (with-temp-buffer
-                                        (insert-file-contents path)
-                                        (buffer-string)))
-                     (list :exists nil :content nil))))
+      (let ((state (cond
+                    ((file-directory-p path)
+                     (list :exists t :directory t :content nil))
+                    ((file-exists-p path)
+                     (list :exists t
+                           :directory nil
+                           :content (with-temp-buffer
+                                      (insert-file-contents path)
+                                      (buffer-string))))
+                    (t
+                     (list :exists nil :directory nil :content nil)))))
         (puthash path state states)
         state)))
 
@@ -1023,6 +1051,10 @@ All patches are applied atomically."
 (defun chat-files--planned-file-content (path states)
   "Return the planned file content for PATH from STATES."
   (plist-get (chat-files--planned-file-state path states) :content))
+
+(defun chat-files--planned-file-directory-p (path states)
+  "Return non-nil when PATH is a directory in planned STATES."
+  (plist-get (chat-files--planned-file-state path states) :directory))
 
 (defun chat-files--planned-set-file-state (path exists content states)
   "Store planned EXISTS and CONTENT for PATH in STATES."
@@ -1035,6 +1067,8 @@ All patches are applied atomically."
      (let* ((target-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
             (content (chat-files--patch-operation-content operation)))
+       (when (chat-files--planned-file-directory-p target-path states)
+         (error "apply_patch verification failed: path is a directory: %s" target-path))
        (when (chat-files--planned-file-exists-p target-path states)
          (error "apply_patch verification failed: file already exists: %s" target-path))
        (chat-files--planned-set-file-state target-path t content states)
@@ -1045,6 +1079,8 @@ All patches are applied atomically."
      (let* ((target-path (chat-files--safe-path-p
                           (expand-file-name (plist-get operation :path) default-directory)))
             (original-content (chat-files--planned-file-content target-path states)))
+       (when (chat-files--planned-file-directory-p target-path states)
+         (error "apply_patch verification failed: path is a directory: %s" target-path))
        (unless (chat-files--planned-file-exists-p target-path states)
          (error "apply_patch verification failed: file does not exist: %s" target-path))
        (chat-files--planned-set-file-state target-path nil nil states)
@@ -1059,9 +1095,13 @@ All patches are applied atomically."
                              (chat-files--safe-path-p
                               (expand-file-name move-to default-directory))
                            source-path)))
+       (when (chat-files--planned-file-directory-p source-path states)
+         (error "apply_patch verification failed: path is a directory: %s" source-path))
        (unless (chat-files--planned-file-exists-p source-path states)
          (error "apply_patch verification failed: file does not exist: %s" source-path))
        (let ((updated-content (chat-files--apply-update-operation source-content operation)))
+         (when (chat-files--planned-file-directory-p target-path states)
+           (error "apply_patch verification failed: path is a directory: %s" target-path))
          (when (and (not (equal target-path source-path))
                     (chat-files--planned-file-exists-p target-path states))
            (error "apply_patch verification failed: move target exists: %s" target-path))

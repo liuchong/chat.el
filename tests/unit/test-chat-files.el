@@ -1299,6 +1299,60 @@
                         (buffer-string))
                       "alpha\nGAMMA\n")))))
 
+(ert-deftest chat-files-apply-patch-tolerates-inaccurate-header-counts ()
+  "Test patch application uses actual hunk payload counts when headers drift."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -2,99 +2,99 @@"
+                         "-beta"
+                         "+BETA"
+                         "@@ -3,50 +3,50 @@"
+                         "-gamma"
+                         "+GAMMA"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\ngamma\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nBETA\nGAMMA\n")))))
+
+(ert-deftest chat-files-apply-patch-uses-actual-hunk-delta-when-headers-drift ()
+  "Test later hunks still land when earlier header counts are wrong."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -1,9 +1,99 @@"
+                         " pre"
+                         "+intro"
+                         "@@ -6,3 +7,3 @@"
+                         "-alpha"
+                         "+ALPHA"
+                         " keep"
+                         " omega"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "pre\nalpha\nkeep\nomega\nmiddle\nalpha\nkeep\nomega\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "pre\nintro\nalpha\nkeep\nomega\nmiddle\nALPHA\nkeep\nomega\n")))))
+
 (ert-deftest chat-files-apply-patch-is-atomic-across-multiple-updates ()
   "Test apply patch does not leave partial edits behind on failure."
   (chat-test-with-temp-dir
@@ -1359,6 +1413,60 @@
                         (insert-file-contents existing-file)
                         (buffer-string))
                       "demo\n")))))
+
+(ert-deftest chat-files-apply-patch-rejects-directory-update-path ()
+  "Test update patches reject directory targets with a stable error."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-dir (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "+hullo"
+                         "*** End Patch")
+                       "\n")))
+     (make-directory target-dir)
+     (should
+      (string-match-p
+       "path is a directory"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (file-directory-p target-dir)))))
+
+(ert-deftest chat-files-apply-patch-rejects-directory-delete-path-atomically ()
+  "Test delete patches reject directory paths without touching other operations."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-dir (expand-file-name "demo.txt" temp-dir))
+          (other-file (expand-file-name "other.txt" temp-dir))
+          (new-file (expand-file-name "new.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: new.txt"
+                         "+hello"
+                         "*** Delete File: demo.txt"
+                         "*** End Patch")
+                       "\n")))
+     (make-directory target-dir)
+     (with-temp-file other-file
+       (insert "keep\n"))
+     (should
+      (string-match-p
+       "path is a directory"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (file-directory-p target-dir))
+     (should-not (file-exists-p new-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents other-file)
+                        (buffer-string))
+                      "keep\n")))))
 
 (ert-deftest chat-files-patch-accepts-json-style-alists ()
   "Test patch engine accepts alist patches from decoded JSON."
