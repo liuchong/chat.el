@@ -326,19 +326,6 @@ For paths that do not exist yet resolve the nearest existing ancestor first.
 '("./" "/tmp/" "/var/tmp/")
 ```
 
-### Selector Conflicts Cause Retry Loops
-
-**Problem**: AI-generated edit requests can bounce between `all` and `expected_count` and keep retrying without converging.
-
-**Cause**: those selectors both describe match cardinality and become ambiguous when combined in one request.
-
-**Solution**: reject the combination with stable wording and let the caller pick one selector strategy before retrying.
-
-```elisp
-(when (and expected-count all)
-  (error "Replace failed: all and expected_count cannot be combined"))
-```
-
 ---
 
 ## Tool Calling and Tool Forging

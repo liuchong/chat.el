@@ -5,10 +5,10 @@ alwaysApply: true
 
 # Documentation Maintenance
 
-- Update `docs/ai-contexts/` at the end of each development session
-- Use the required ai-context sections from `docs/ai-contexts/README.md`
-- Update `docs/troubleshooting-pitfalls.md` when a new failure mode or durable fix pattern is discovered
-- Keep `docs/troubleshooting-pitfalls.md` in its existing topic structure
+- Update `.agents/30-records/logs/` at the end of each development session
+- Follow `AGENTS.md` and `.agents/README.md` for the current agent record workflow
+- Update `docs/troubleshooting-pitfalls.md` only when a new human-facing failure mode or durable fix pattern should be preserved for users
+- Keep `docs/troubleshooting-pitfalls.md` in its existing topic structure when it needs an update
 - Add troubleshooting entries under the closest `##` topic section
 - Use the exact field order `Problem` `Cause` `Solution`
 - Merge duplicate troubleshooting entries instead of appending near copies
