@@ -1091,6 +1091,68 @@
                         (buffer-string))
                       "already here\n")))))
 
+(ert-deftest chat-files-apply-patch-add-existing-file-is-atomic ()
+  "Test add-file refuses existing targets without touching them."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "+replacement"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file target-file
+       (insert "original\n"))
+     (should
+      (string-match-p
+       "apply_patch verification failed: file already exists"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "original\n")))))
+
+(ert-deftest chat-files-apply-patch-delete-missing-file-fails-cleanly ()
+  "Test delete-file refuses missing targets with a stable error."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Delete File: missing.txt"
+                         "*** End Patch")
+                       "\n")))
+     (should
+      (string-match-p
+       "apply_patch verification failed: file does not exist"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text))))))))
+
+(ert-deftest chat-files-apply-patch-move-missing-source-fails-cleanly ()
+  "Test move-only updates refuse missing source files with a stable error."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "*** End Patch")
+                       "\n")))
+     (should
+      (string-match-p
+       "apply_patch verification failed: file does not exist"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should-not (file-exists-p target-file)))))
+
 (ert-deftest chat-files-apply-patch-supports-move-only-update ()
   "Test update patches can rename a file without content hunks."
   (chat-test-with-temp-dir
