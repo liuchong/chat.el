@@ -522,6 +522,34 @@
                         (buffer-string))
                       "done\ndone\n")))))
 
+(ert-deftest chat-files-replace-regexp-all-respects-line-hint ()
+  "Test regexp replace-all still narrows through line-hint."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-regexp-line.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foo1\nfoo2\nfoo3\n"))
+     (let ((result (chat-files-replace test-file "foo\\([0-9]\\)" "bar\\1" t nil t 2)))
+       (should (= (plist-get result :replacements-made) 1)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foo1\nbar2\nfoo3\n")))))
+
+(ert-deftest chat-files-replace-regexp-expected-count-can-authorize-line-filtered-matches ()
+  "Test regexp expected_count succeeds after line filtering."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-regexp-count.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foo1\nfoo2\nfoo3\n"))
+     (let ((result (chat-files-replace test-file "foo\\([0-9]\\)" "bar\\1" nil 1 t 3)))
+       (should (= (plist-get result :replacements-made) 1)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foo1\nfoo2\nbar3\n")))))
+
 (ert-deftest chat-files-patch-is-atomic-when-later-search-fails ()
   "Test multi-search patch leaves the file unchanged on later failure."
   (chat-test-with-temp-dir
@@ -799,6 +827,29 @@
                         (insert-file-contents target-file)
                         (buffer-string))
                       "already here\n")))))
+
+(ert-deftest chat-files-apply-patch-supports-move-only-update ()
+  "Test update patches can rename a file without content hunks."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: moved.txt"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p source-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello\n")))))
 
 (ert-deftest chat-files-apply-patch-uses-hunk-header-to-resolve-duplicate-context ()
   "Test hunk headers disambiguate repeated source blocks."
