@@ -1251,6 +1251,33 @@
                         (buffer-string))
                       "hello\n")))))
 
+(ert-deftest chat-files-apply-patch-prefixes-hunk-application-failures ()
+  "Test hunk application failures use the apply_patch verification prefix."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -1 +1 @@"
+                         "-missing"
+                         "+hullo"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (should
+      (string-match-p
+       "apply_patch verification failed: Patch hunk could not be applied"
+       (error-message-string
+        (should-error (chat-files-apply-patch patch-text)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
 (ert-deftest chat-files-apply-patch-supports-pure-insert-hunk-at-file-start ()
   "Test unified hunks can insert lines into an empty prefix."
   (chat-test-with-temp-dir

@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 349 regression tests discovered
-- 349 passing
+- 350 regression tests discovered
+- 350 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -140,6 +140,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_replace` and `files_patch` now also reject missing edit targets with stable edit-level errors instead of leaking raw `insert-file-contents` failures
 - `files_insert_at` now reuses the same direct-edit validation, so missing and directory targets fail with the same stable edit-level errors as the other direct editing entrypoints
 - direct edit entrypoints now use `Edit failed: ...` semantics while patch parsing and application still use `apply_patch verification failed: ...`, which keeps non-patch edit failures distinct from patch-engine failures
+- patch application failures that happen after parsing now also receive the `apply_patch verification failed: ...` prefix, so parser-time and apply-time patch failures now share one stable error family
 
 ## Known Boundaries
 

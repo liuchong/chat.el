@@ -903,6 +903,16 @@ All patches are applied atomically."
           (error "apply_patch verification failed: unexpected line %S" line)))))
     (nreverse operations)))
 
+(defun chat-files--with-apply-patch-errors (fn)
+  "Run FN and normalize patch application errors."
+  (condition-case err
+      (funcall fn)
+    (error
+     (let ((message (error-message-string err)))
+       (if (string-prefix-p "apply_patch verification failed:" message)
+           (signal (car err) (cdr err))
+         (error "apply_patch verification failed: %s" message))))))
+
 (defun chat-files--diff-strings (path original-content new-content)
   "Return a unified diff for PATH from ORIGINAL-CONTENT to NEW-CONTENT."
   (let ((old-file (make-temp-file "chat-old-"))
@@ -1142,18 +1152,20 @@ All patches are applied atomically."
   "Apply PATCHES to PATH-OR-PATCH or parse codex patch text."
   (if patches
       (chat-files-patch path-or-patch patches)
-    (let* ((operations (chat-files--parse-apply-patch path-or-patch))
-           (states (make-hash-table :test 'equal))
-           results)
-      (dolist (operation operations)
-        (push (chat-files--plan-apply-patch-operation operation states) results))
-      (chat-files--commit-planned-file-states states)
-      (list :operations (nreverse results)
-            :status 'success
-            :diff (mapconcat (lambda (result)
-                               (plist-get result :diff))
-                             (nreverse results)
-                             "\n")))))
+    (chat-files--with-apply-patch-errors
+     (lambda ()
+       (let* ((operations (chat-files--parse-apply-patch path-or-patch))
+              (states (make-hash-table :test 'equal))
+              results)
+         (dolist (operation operations)
+           (push (chat-files--plan-apply-patch-operation operation states) results))
+         (chat-files--commit-planned-file-states states)
+         (list :operations (nreverse results)
+               :status 'success
+               :diff (mapconcat (lambda (result)
+                                  (plist-get result :diff))
+                                (nreverse results)
+                                "\n")))))))
 
 (defun chat-files--normalize-patch (patch)
   "Normalize PATCH from plist or JSON alist into a plist."
