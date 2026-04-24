@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 333 regression tests discovered
-- 333 passing
+- 335 regression tests discovered
+- 335 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -132,6 +132,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_replace` and `files_patch` now also have explicit regression coverage for replace-all success, exact expected-count success, and atomic refusal when a later search patch fails
 - `files_replace` now also has explicit regression coverage for regexp replace-all and exact expected-count success after line filtering, and `apply_patch` now has explicit regression coverage for move-only rename patches
 - invalid regexp input in `files_replace` and `files_patch` now fails with a stable replace-specific error instead of leaking raw regexp exceptions, and both paths are covered to leave files unchanged
+- `files_replace` now also has explicit regression coverage showing that `line_hint` still refuses ambiguous same-line matches, and `apply_patch` add-file parsing now has explicit regression coverage for rejecting unprefixed payload lines
 
 ## Known Boundaries
 

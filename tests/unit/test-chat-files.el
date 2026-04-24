@@ -507,6 +507,20 @@
                         (buffer-string))
                       "repeat\nrepeat\n")))))
 
+(ert-deftest chat-files-replace-line-hint-still-rejects-multiple-matches-on-one-line ()
+  "Test line hints do not silently choose among multiple same-line matches."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "line-hint-ambiguous.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat repeat\nother\n"))
+     (should-error
+      (chat-files-replace test-file "repeat" "done" nil nil nil 1))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat repeat\nother\n")))))
+
 (ert-deftest chat-files-replace-all-updates-every-match ()
   "Test replace-all updates every matching occurrence."
   (chat-test-with-temp-dir
@@ -803,6 +817,22 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-rejects-invalid-add-file-line ()
+  "Test add-file patches reject payload lines without a plus prefix."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "hello"
+                         "*** End Patch")
+                       "\n")))
+     (should-error (chat-files-apply-patch patch-text))
+     (should-not (file-exists-p test-file)))))
 
 (ert-deftest chat-files-apply-patch-moves-updated-file ()
   "Test move-to patches rename files and keep updated content."
