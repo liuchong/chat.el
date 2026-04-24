@@ -502,6 +502,12 @@ the empty string."
       (invalid-regexp
        (error "Replace failed: invalid regexp %S" search)))))
 
+(defun chat-files--replace-scope-label (line-hint)
+  "Return a human-readable scope label for LINE-HINT."
+  (if line-hint
+      (format " on line %d" line-hint)
+    ""))
+
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
   (chat-files--validate-replace-pattern search regexp)
@@ -512,19 +518,20 @@ the empty string."
                                    matches)
                      matches))
          (match-count (length filtered))
+         (scope-label (chat-files--replace-scope-label line-hint))
          (selected (cond
                     ((zerop match-count)
-                     (error "Replace failed: no matches for %S" search))
+                     (error "Replace failed: no matches for %S%s" search scope-label))
                     (expected-count
                      (unless (= match-count expected-count)
-                       (error "Replace failed: expected %d matches for %S but found %d"
-                              expected-count search match-count))
+                       (error "Replace failed: expected %d matches for %S%s but found %d"
+                              expected-count search scope-label match-count))
                      filtered)
                     (all
                      filtered)
                     ((> match-count 1)
-                     (error "Replace failed: %d matches for %S; refine the search or use expected_count/all"
-                            match-count search))
+                     (error "Replace failed: %d matches for %S%s; refine the search or use expected_count/all"
+                            match-count search scope-label))
                     (t
                      (list (car filtered))))))
     (with-temp-buffer

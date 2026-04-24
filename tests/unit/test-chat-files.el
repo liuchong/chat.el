@@ -594,7 +594,11 @@
           (chat-files-allowed-directories (list temp-dir)))
      (with-temp-file test-file
        (insert "repeat\nrepeat\n"))
-     (should-error (chat-files-replace test-file "repeat" "done" nil 1 nil 3))
+     (should
+      (string-match-p
+       "Replace failed: no matches for \"repeat\" on line 3"
+       (error-message-string
+        (should-error (chat-files-replace test-file "repeat" "done" nil 1 nil 3)))))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))
@@ -607,8 +611,30 @@
           (chat-files-allowed-directories (list temp-dir)))
      (with-temp-file test-file
        (insert "repeat repeat\nother\n"))
-     (should-error
-      (chat-files-replace test-file "repeat" "done" nil nil nil 1))
+     (should
+      (string-match-p
+       "Replace failed: 2 matches for \"repeat\" on line 1; refine the search or use expected_count/all"
+       (error-message-string
+        (should-error
+         (chat-files-replace test-file "repeat" "done" nil nil nil 1)))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "repeat repeat\nother\n")))))
+
+(ert-deftest chat-files-replace-line-hint-reports-line-scoped-count-mismatches ()
+  "Test expected_count mismatches preserve line-hint scope in the error."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "line-hint-count-mismatch.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat repeat\nother\n"))
+     (should
+      (string-match-p
+       "Replace failed: expected 1 matches for \"repeat\" on line 1 but found 2"
+       (error-message-string
+        (should-error
+         (chat-files-replace test-file "repeat" "done" nil 1 nil 1)))))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))
@@ -719,6 +745,26 @@
        test-file
        '((:search "alpha" :replace "ALPHA")
          (:search "missing" :replace "X"))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\n")))))
+
+(ert-deftest chat-files-patch-preserves-line-scoped-replace-errors ()
+  "Test search patches keep line-hint failure details stable."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-line-hint-error.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (should
+      (string-match-p
+       "Replace failed: no matches for \"alpha\" on line 2"
+       (error-message-string
+        (should-error
+         (chat-files-patch
+          test-file
+          '((:search "alpha" :replace "ALPHA" :line 2)))))))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))
