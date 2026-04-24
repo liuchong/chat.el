@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0039 unified diff metadata compatibility stage is complete.
+Phase 0040 hunk line validation stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk coverage, and sequential hunk stability.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk coverage, and sequential hunk stability.
 
 ## Active Modules
 

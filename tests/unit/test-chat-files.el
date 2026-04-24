@@ -858,6 +858,56 @@
                         (buffer-string))
                       "alpha\nBETA\n")))))
 
+(ert-deftest chat-files-apply-patch-rejects-invalid-hunk-lines ()
+  "Test update patches reject malformed hunk payload lines."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -1 +1 @@"
+                         "hello world"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (should-error
+      (chat-files-apply-patch patch-text)
+      :type 'error)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-rejects-ndiff-style-helper-lines ()
+  "Test update patches reject non-unified helper lines."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "?     ^"
+                         "+hullo"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (should-error
+      (chat-files-apply-patch patch-text)
+      :type 'error)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
 (ert-deftest chat-files-apply-patch-supports-pure-insert-hunk-at-file-start ()
   "Test unified hunks can insert lines into an empty prefix."
   (chat-test-with-temp-dir

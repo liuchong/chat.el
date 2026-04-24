@@ -661,6 +661,11 @@ All patches are applied atomically."
       (string-prefix-p "rename from " line)
       (string-prefix-p "rename to " line)))
 
+(defun chat-files--valid-hunk-line-p (line)
+  "Return non-nil when LINE is a valid unified diff hunk payload line."
+  (and (> (length line) 0)
+       (member (substring line 0 1) '(" " "+" "-"))))
+
 (defun chat-files--subsequence-match-positions (haystack needle)
   "Return all positions where NEEDLE appears in HAYSTACK."
   (let ((haystack-length (length haystack))
@@ -831,7 +836,10 @@ All patches are applied atomically."
                             (not (string-prefix-p "@@" (nth index lines)))
                             (not (string-prefix-p "*** " (nth index lines)))
                             (not (chat-files--no-newline-marker-p (nth index lines))))
-                  (push (nth index lines) hunk-lines)
+                  (let ((hunk-line (nth index lines)))
+                    (unless (chat-files--valid-hunk-line-p hunk-line)
+                      (error "apply_patch verification failed: invalid hunk line %S" hunk-line))
+                    (push hunk-line hunk-lines))
                   (setq index (1+ index)))
                 (when (and (< index (length lines))
                            (chat-files--no-newline-marker-p (nth index lines)))
