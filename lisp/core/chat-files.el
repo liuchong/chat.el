@@ -718,6 +718,11 @@ All patches are applied atomically."
                 new-lines
                 (cl-subseq lines (+ start (length old-lines)))))))))
 
+(defun chat-files--valid-hunk-header-p (header)
+  "Return non-nil when HEADER is a supported unified diff hunk header."
+  (or (equal header "@@")
+      (chat-files--parse-hunk-header header)))
+
 (defun chat-files--parse-hunk-header (header)
   "Parse unified diff HUNK HEADER."
   (when (string-match
@@ -829,8 +834,12 @@ All patches are applied atomically."
               (setq index (1+ index)))
             (while (and (< index (length lines))
                         (string-prefix-p "@@" (nth index lines)))
-              (let ((header (nth index lines))
-                    hunk-lines)
+                (let ((header (nth index lines))
+                    hunk-lines
+                    header-data)
+                (unless (chat-files--valid-hunk-header-p header)
+                  (error "apply_patch verification failed: invalid hunk header %S" header))
+                (setq header-data (chat-files--parse-hunk-header header))
                 (setq index (1+ index))
                 (while (and (< index (length lines))
                             (not (string-prefix-p "@@" (nth index lines)))
@@ -847,9 +856,12 @@ All patches are applied atomically."
                   (setq ends-with-newline nil)
                   (setq index (1+ index)))
                 (push (list :header header
-                            :header-data (chat-files--parse-hunk-header header)
+                            :header-data header-data
                             :lines (nreverse hunk-lines))
                       hunks)))
+            (when (and (null hunks)
+                       (null move-to))
+              (error "apply_patch verification failed: update file requires at least one hunk"))
             (push (list :type 'update
                         :path path
                         :move-to move-to

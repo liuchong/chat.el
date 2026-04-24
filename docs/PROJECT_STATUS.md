@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 323 regression tests discovered
-- 323 passing
+- 325 regression tests discovered
+- 325 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -128,6 +128,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `apply_patch` now accepts both codex-style `*** End of File` and standard unified-diff `\\ No newline at end of file` markers for add-file and update paths
 - `apply_patch` now tolerates optional unified-diff metadata such as `diff --git`, `index`, and `---`/`+++` file labels before update hunks
 - `apply_patch` now rejects malformed hunk payload lines early instead of trying to interpret non-unified helper output as valid patch data
+- `apply_patch` now rejects malformed hunk headers and metadata-only update blocks while still accepting bare `@@` shorthand headers that are common in AI-generated codex patches
 
 ## Known Boundaries
 
