@@ -492,6 +492,53 @@
                         (buffer-string))
                       "repeat\nrepeat\n")))))
 
+(ert-deftest chat-files-replace-all-updates-every-match ()
+  "Test replace-all updates every matching occurrence."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-all.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (let ((result (chat-files-replace test-file "repeat" "done" t)))
+       (should (= (plist-get result :replacements-made) 2))
+       (should (string-match-p "-repeat" (plist-get result :diff)))
+       (should (string-match-p "+done" (plist-get result :diff))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "done\ndone\n")))))
+
+(ert-deftest chat-files-replace-expected-count-succeeds-for-exact-match-set ()
+  "Test expected_count can authorize a multi-match replace."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "replace-count.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "repeat\nrepeat\n"))
+     (let ((result (chat-files-replace test-file "repeat" "done" nil 2)))
+       (should (= (plist-get result :replacements-made) 2)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "done\ndone\n")))))
+
+(ert-deftest chat-files-patch-is-atomic-when-later-search-fails ()
+  "Test multi-search patch leaves the file unchanged on later failure."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-atomic.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (should-error
+      (chat-files-patch
+       test-file
+       '((:search "alpha" :replace "ALPHA")
+         (:search "missing" :replace "X"))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nbeta\n")))))
+
 (ert-deftest chat-files-patch-returns-diff-preview ()
   "Test patch operations return a unified diff preview."
   (chat-test-with-temp-dir

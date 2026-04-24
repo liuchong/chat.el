@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0041 hunk header and empty-update validation stage is complete.
+Phase 0042 search-replace success and atomicity coverage stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, empty-update rejection, hunk coverage, and sequential hunk stability.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, empty-update rejection, replace success semantics, patch atomicity, hunk coverage, and sequential hunk stability.
 
 ## Active Modules
 
