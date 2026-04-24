@@ -538,6 +538,84 @@
                         (buffer-string))
                       "alpha\ngamma\n")))))
 
+(ert-deftest chat-files-apply-patch-supports-end-of-file-marker ()
+  "Test codex patches can include an EOF marker."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-beta"
+                         "+gamma"
+                         "*** End of File"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta"))
+     (let ((result (chat-files-apply-patch patch-text)))
+       (should (eq (plist-get result :status) 'success)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\ngamma")))))
+
+(ert-deftest chat-files-apply-patch-uses-hunk-header-to-resolve-duplicate-context ()
+  "Test hunk headers disambiguate repeated source blocks."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -4,3 +4,3 @@"
+                         "-alpha"
+                         "+ALPHA"
+                         " keep"
+                         " omega"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nkeep\nomega\nalpha\nkeep\nomega\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nkeep\nomega\nALPHA\nkeep\nomega\n")))))
+
+(ert-deftest chat-files-apply-patch-handles-multiple-hunks-in-one-file ()
+  "Test multiple hunks update one file in sequence."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@ -2,2 +2,2 @@"
+                         "-beta"
+                         "+BETA"
+                         " gamma"
+                         "@@ -5,2 +5,2 @@"
+                         "-epsilon"
+                         "+EPSILON"
+                         " zeta"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nBETA\ngamma\ndelta\nEPSILON\nzeta\n")))))
+
 (ert-deftest chat-files-apply-patch-is-atomic-across-multiple-updates ()
   "Test apply patch does not leave partial edits behind on failure."
   (chat-test-with-temp-dir

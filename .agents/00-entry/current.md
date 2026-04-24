@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0031 file editing robustness stage is complete.
+Phase 0032 unidiff compatibility stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, file-editing robustness, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 

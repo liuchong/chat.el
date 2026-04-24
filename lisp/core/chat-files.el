@@ -688,6 +688,54 @@ All patches are applied atomically."
                 new-lines
                 (cl-subseq lines (+ start (length old-lines)))))))))
 
+(defun chat-files--parse-hunk-header (header)
+  "Parse unified diff HUNK HEADER."
+  (when (string-match
+         "^@@ -\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)? +\\+\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)? @@"
+         header)
+    (list :old-start (string-to-number (match-string 1 header))
+          :old-count (if (match-string 2 header)
+                         (string-to-number (match-string 2 header))
+                       1)
+          :new-start (string-to-number (match-string 3 header))
+          :new-count (if (match-string 4 header)
+                         (string-to-number (match-string 4 header))
+                       1))))
+
+(defun chat-files--choose-hunk-position (positions preferred-start)
+  "Choose from POSITIONS using PREFERRED-START when possible."
+  (cond
+   ((null positions)
+    nil)
+   ((null preferred-start)
+    (if (= (length positions) 1)
+        (car positions)
+      :ambiguous))
+   ((member preferred-start positions)
+    preferred-start)
+   ((= (length positions) 1)
+    (car positions))
+   (t
+    :ambiguous)))
+
+(defun chat-files--apply-hunk-to-lines-at-position (lines hunk-lines preferred-start)
+  "Apply HUNK-LINES to LINES using PREFERRED-START when possible."
+  (let* ((old-lines (chat-files--patch-hunk-old-lines hunk-lines))
+         (new-lines (chat-files--patch-hunk-new-lines hunk-lines))
+         (positions (chat-files--subsequence-match-positions lines old-lines))
+         (start (chat-files--choose-hunk-position positions preferred-start)))
+    (cond
+     ((null old-lines)
+      (error "Patch hunk has no matchable source context"))
+     ((null start)
+      (error "Patch hunk could not be applied"))
+     ((eq start :ambiguous)
+      (error "Patch hunk is ambiguous"))
+     (t
+      (append (cl-subseq lines 0 start)
+              new-lines
+              (cl-subseq lines (+ start (length old-lines))))))))
+
 (defun chat-files--parse-apply-patch (patch-text)
   "Parse PATCH-TEXT in codex apply_patch format."
   (let* ((lines (split-string patch-text "\n"))
@@ -740,7 +788,11 @@ All patches are applied atomically."
                             (not (string-prefix-p "*** " (nth index lines))))
                   (push (nth index lines) hunk-lines)
                   (setq index (1+ index)))
+                (when (and (< index (length lines))
+                           (equal (nth index lines) "*** End of File"))
+                  (setq index (1+ index)))
                 (push (list :header header
+                            :header-data (chat-files--parse-hunk-header header)
                             :lines (nreverse hunk-lines))
                       hunks)))
             (push (list :type 'update
@@ -790,9 +842,23 @@ All patches are applied atomically."
 (defun chat-files--apply-update-operation (content operation)
   "Apply update OPERATION to CONTENT."
   (let* ((state (chat-files--split-content-lines content))
-         (lines (plist-get state :lines)))
+         (lines (plist-get state :lines))
+         (line-delta 0))
     (dolist (hunk (plist-get operation :hunks))
-      (setq lines (chat-files--apply-hunk-to-lines lines (plist-get hunk :lines))))
+      (let* ((header-data (plist-get hunk :header-data))
+             (preferred-start (and header-data
+                                   (+ (1- (plist-get header-data :old-start))
+                                      line-delta))))
+        (setq lines
+              (chat-files--apply-hunk-to-lines-at-position
+               lines
+               (plist-get hunk :lines)
+               preferred-start))
+        (when header-data
+          (setq line-delta
+                (+ line-delta
+                   (- (plist-get header-data :new-count)
+                      (plist-get header-data :old-count)))))))
     (chat-files--join-content-lines
      (list :lines lines
            :ends-with-newline (plist-get state :ends-with-newline)))))

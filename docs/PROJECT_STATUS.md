@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 301 regression tests discovered
-- 301 passing
+- 304 regression tests discovered
+- 304 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -117,6 +117,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_read_lines` now normalizes invalid start lines and keeps empty line ranges coherent when callers ask beyond EOF
 - session helpers now have denser regression coverage for clearing history, missing message ids, default last-message lookup, and invalid saved-session files
 - file editing helpers now create missing parent directories on write, allow append-to-new-file flows, keep `apply_patch` atomic across multiple operations, and support regexp capture-group replacements
+- `apply_patch` now uses hunk headers to resolve repeated source blocks and accepts the codex-compatible `*** End of File` marker
 
 ## Known Boundaries
 
