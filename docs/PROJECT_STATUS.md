@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 319 regression tests discovered
-- 319 passing
+- 321 regression tests discovered
+- 321 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -126,6 +126,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `apply_patch` now has explicit regression coverage for pure deletion hunks and end-of-file pure insertion hunks, covering two more high-frequency AI patch shapes
 - `apply_patch` now also has explicit regression coverage for later hunks landing correctly after earlier pure insert and pure delete hunks, reducing the risk of header-drift regressions
 - `apply_patch` now accepts both codex-style `*** End of File` and standard unified-diff `\\ No newline at end of file` markers for add-file and update paths
+- `apply_patch` now tolerates optional unified-diff metadata such as `diff --git`, `index`, and `---`/`+++` file labels before update hunks
 
 ## Known Boundaries
 

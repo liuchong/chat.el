@@ -806,6 +806,58 @@
                         (buffer-string))
                       "alpha\nBETA\ngamma\ndelta\nEPSILON\nzeta\n")))))
 
+(ert-deftest chat-files-apply-patch-accepts-unified-diff-file-labels ()
+  "Test update patches can include standard unified-diff file labels."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "--- a/demo.txt"
+                         "+++ b/demo.txt"
+                         "@@ -1 +1 @@"
+                         "-hello"
+                         "+hello world"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello world\n")))))
+
+(ert-deftest chat-files-apply-patch-accepts-git-diff-metadata-before-hunks ()
+  "Test update patches can include git-style diff metadata before hunks."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "diff --git a/demo.txt b/demo.txt"
+                         "index 1111111..2222222 100644"
+                         "--- a/demo.txt"
+                         "+++ b/demo.txt"
+                         "@@ -2 +2 @@"
+                         "-beta"
+                         "+BETA"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta\n"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\nBETA\n")))))
+
 (ert-deftest chat-files-apply-patch-supports-pure-insert-hunk-at-file-start ()
   "Test unified hunks can insert lines into an empty prefix."
   (chat-test-with-temp-dir

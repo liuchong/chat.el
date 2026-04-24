@@ -647,6 +647,20 @@ All patches are applied atomically."
   (or (equal line "*** End of File")
       (equal line "\\ No newline at end of file")))
 
+(defun chat-files--patch-metadata-line-p (line)
+  "Return non-nil when LINE is ignorable patch metadata."
+  (or (string-prefix-p "diff --git " line)
+      (string-prefix-p "index " line)
+      (string-prefix-p "--- " line)
+      (string-prefix-p "+++ " line)
+      (string-prefix-p "old mode " line)
+      (string-prefix-p "new mode " line)
+      (string-prefix-p "deleted file mode " line)
+      (string-prefix-p "new file mode " line)
+      (string-prefix-p "similarity index " line)
+      (string-prefix-p "rename from " line)
+      (string-prefix-p "rename to " line)))
+
 (defun chat-files--subsequence-match-positions (haystack needle)
   "Return all positions where NEEDLE appears in HAYSTACK."
   (let ((haystack-length (length haystack))
@@ -804,6 +818,9 @@ All patches are applied atomically."
             (when (and (< index (length lines))
                        (string-prefix-p "*** Move to: " (nth index lines)))
               (setq move-to (string-remove-prefix "*** Move to: " (nth index lines)))
+              (setq index (1+ index)))
+            (while (and (< index (length lines))
+                        (chat-files--patch-metadata-line-p (nth index lines)))
               (setq index (1+ index)))
             (while (and (< index (length lines))
                         (string-prefix-p "@@" (nth index lines)))
