@@ -466,6 +466,21 @@
                         (buffer-string))
                       "barfoo\n")))))
 
+(ert-deftest chat-files-replace-invalid-regexp-fails-cleanly ()
+  "Test invalid regexp replacement errors without touching the file."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "regexp-invalid.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should-error
+      (chat-files-replace test-file "\\(" "x" nil nil t)
+      :type 'error)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
+
 (ert-deftest chat-files-replace-line-hint-narrows-ambiguous-match ()
   "Test line hints allow replacing one otherwise ambiguous match."
   (chat-test-with-temp-dir
@@ -598,6 +613,24 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "barfoo\n")))))
+
+(ert-deftest chat-files-patch-invalid-regexp-fails-atomically ()
+  "Test invalid regexp search leaves the file unchanged."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-invalid-regexp.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (should-error
+      (chat-files-patch
+       test-file
+       '((:search "\\("
+          :replace "x"
+          :regexp t))))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "foobar\n")))))
 
 (ert-deftest chat-files-apply-patch-alias-uses-patch-engine ()
   "Test apply patch wrapper delegates to file patching."

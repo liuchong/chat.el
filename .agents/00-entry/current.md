@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0043 regexp narrowing and move-only patch coverage stage is complete.
+Phase 0044 invalid regexp diagnostics stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, empty-update rejection, replace success semantics, regexp narrowing behavior, move-only patch behavior, patch atomicity, hunk coverage, and sequential hunk stability.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, empty-update rejection, replace success semantics, invalid-regexp diagnostics, regexp narrowing behavior, move-only patch behavior, patch atomicity, hunk coverage, and sequential hunk stability.
 
 ## Active Modules
 

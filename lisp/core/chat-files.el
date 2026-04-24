@@ -472,18 +472,21 @@ ENCODING specifies the file encoding (default utf-8)."
 (defun chat-files--collect-replace-matches (content search regexp)
   "Collect SEARCH matches from CONTENT.
 When REGEXP is non-nil, treat SEARCH as a regular expression."
-  (with-temp-buffer
-    (insert content)
-    (goto-char (point-min))
-    (let (matches)
-      (while (if regexp
-                 (re-search-forward search nil t)
-               (search-forward search nil t))
-        (push (list :start (match-beginning 0)
-                    :end (match-end 0)
-                    :line (line-number-at-pos (match-beginning 0)))
-              matches))
-      (nreverse matches))))
+  (condition-case err
+      (with-temp-buffer
+        (insert content)
+        (goto-char (point-min))
+        (let (matches)
+          (while (if regexp
+                     (re-search-forward search nil t)
+                   (search-forward search nil t))
+            (push (list :start (match-beginning 0)
+                        :end (match-end 0)
+                        :line (line-number-at-pos (match-beginning 0)))
+                  matches))
+          (nreverse matches)))
+    (invalid-regexp
+     (error "Replace failed: invalid regexp %S" search))))
 
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
