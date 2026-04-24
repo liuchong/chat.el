@@ -452,8 +452,9 @@ If APPEND is non-nil, append to existing content.
 ENCODING specifies the file encoding (default utf-8)."
   (let ((safe-path (chat-files--safe-path-p path))
         (coding-system (or encoding 'utf-8)))
+    (make-directory (file-name-directory safe-path) t)
     (with-temp-buffer
-      (when append
+      (when (and append (file-exists-p safe-path))
         (insert-file-contents safe-path))
       (goto-char (point-max))
       (insert content)
@@ -511,10 +512,15 @@ When REGEXP is non-nil, treat SEARCH as a regular expression."
     (with-temp-buffer
       (insert content)
       (dolist (match (reverse selected))
-        (delete-region (plist-get match :start)
-                       (plist-get match :end))
         (goto-char (plist-get match :start))
-        (insert replace))
+        (if regexp
+            (progn
+              (re-search-forward search (plist-get match :end) t)
+              (replace-match replace nil nil))
+          (delete-region (plist-get match :start)
+                         (plist-get match :end))
+          (goto-char (plist-get match :start))
+          (insert replace)))
       (list :content (buffer-string)
             :replacements-made (length selected)
             :match-count match-count))))
@@ -841,14 +847,99 @@ All patches are applied atomically."
     (_
      (error "apply_patch verification failed: unsupported operation"))))
 
+(defun chat-files--planned-file-state (path states)
+  "Return the planned file state for PATH from STATES."
+  (or (gethash path states)
+      (let ((state (if (file-exists-p path)
+                       (list :exists t
+                             :content (with-temp-buffer
+                                        (insert-file-contents path)
+                                        (buffer-string)))
+                     (list :exists nil :content nil))))
+        (puthash path state states)
+        state)))
+
+(defun chat-files--planned-file-exists-p (path states)
+  "Return non-nil when PATH exists in the planned STATES."
+  (plist-get (chat-files--planned-file-state path states) :exists))
+
+(defun chat-files--planned-file-content (path states)
+  "Return the planned file content for PATH from STATES."
+  (plist-get (chat-files--planned-file-state path states) :content))
+
+(defun chat-files--planned-set-file-state (path exists content states)
+  "Store planned EXISTS and CONTENT for PATH in STATES."
+  (puthash path (list :exists exists :content content) states))
+
+(defun chat-files--plan-apply-patch-operation (operation states)
+  "Plan parsed apply_patch OPERATION against STATES."
+  (pcase (plist-get operation :type)
+    ('add
+     (let* ((target-path (chat-files--safe-path-p
+                          (expand-file-name (plist-get operation :path) default-directory)))
+            (content (concat (plist-get operation :content) "\n")))
+       (when (chat-files--planned-file-exists-p target-path states)
+         (error "apply_patch verification failed: file already exists: %s" target-path))
+       (chat-files--planned-set-file-state target-path t content states)
+       (list :path target-path
+             :operation 'add
+             :diff (chat-files--diff-strings target-path nil content))))
+    ('delete
+     (let* ((target-path (chat-files--safe-path-p
+                          (expand-file-name (plist-get operation :path) default-directory)))
+            (original-content (chat-files--planned-file-content target-path states)))
+       (unless (chat-files--planned-file-exists-p target-path states)
+         (error "apply_patch verification failed: file does not exist: %s" target-path))
+       (chat-files--planned-set-file-state target-path nil nil states)
+       (list :path target-path
+             :operation 'delete
+             :diff (chat-files--diff-strings target-path original-content nil))))
+    ('update
+     (let* ((source-path (chat-files--safe-path-p
+                          (expand-file-name (plist-get operation :path) default-directory)))
+            (source-content (chat-files--planned-file-content source-path states))
+            (target-path (if-let ((move-to (plist-get operation :move-to)))
+                             (chat-files--safe-path-p
+                              (expand-file-name move-to default-directory))
+                           source-path)))
+       (unless (chat-files--planned-file-exists-p source-path states)
+         (error "apply_patch verification failed: file does not exist: %s" source-path))
+       (let ((updated-content (chat-files--apply-update-operation source-content operation)))
+         (when (and (not (equal target-path source-path))
+                    (chat-files--planned-file-exists-p target-path states))
+           (error "apply_patch verification failed: move target exists: %s" target-path))
+         (unless (equal target-path source-path)
+           (chat-files--planned-set-file-state source-path nil nil states))
+         (chat-files--planned-set-file-state target-path t updated-content states)
+         (list :path target-path
+               :operation (if (equal target-path source-path) 'update 'move)
+               :diff (chat-files--diff-strings target-path source-content updated-content)))))
+    (_
+     (error "apply_patch verification failed: unsupported operation"))))
+
+(defun chat-files--commit-planned-file-states (states)
+  "Commit planned file STATES to disk."
+  (maphash
+   (lambda (path state)
+     (if (plist-get state :exists)
+         (progn
+           (make-directory (file-name-directory path) t)
+           (with-temp-file path
+             (insert (or (plist-get state :content) ""))))
+       (when (file-exists-p path)
+         (delete-file path))))
+   states))
+
 (defun chat-files-apply-patch (path-or-patch &optional patches)
   "Apply PATCHES to PATH-OR-PATCH or parse codex patch text."
   (if patches
       (chat-files-patch path-or-patch patches)
     (let* ((operations (chat-files--parse-apply-patch path-or-patch))
+           (states (make-hash-table :test 'equal))
            results)
       (dolist (operation operations)
-        (push (chat-files--commit-apply-patch-operation operation) results))
+        (push (chat-files--plan-apply-patch-operation operation states) results))
+      (chat-files--commit-planned-file-states states)
       (list :operations (nreverse results)
             :status 'success
             :diff (mapconcat (lambda (result)

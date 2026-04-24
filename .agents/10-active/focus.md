@@ -8,7 +8,7 @@
 
 ## Doing Now
 
-Keep the shared reading workflow stable while continuing to raise coverage around capture correctness, whitespace-aware context refusal behavior, session and file-tool edge semantics, naming fallback paths, and command surfaces.
+Keep the shared reading workflow stable while continuing to raise coverage around capture correctness, whitespace-aware context refusal behavior, file-editing semantics, naming fallback paths, and command surfaces.
 
 ## Not Doing Now
 
@@ -23,4 +23,4 @@ Keep the shared reading workflow stable while continuing to raise coverage aroun
 
 ## Immediate Next Step
 
-Decide whether the next stage should keep pushing test density around session and lifecycle helpers or shift to another under-tested workflow.
+Decide whether the next stage should keep pushing test density around remaining file-tool surfaces or shift to another under-tested workflow.

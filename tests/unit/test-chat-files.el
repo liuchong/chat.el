@@ -324,6 +324,18 @@
                         (buffer-string))
                       "new content")))))
 
+(ert-deftest chat-files-write-creates-parent-directories ()
+  "Test writing a new file also creates missing parent directories."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "nested/path/write.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (chat-files-write test-file "new content")
+     (should (file-exists-p test-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "new content")))))
+
 (ert-deftest chat-files-write-appends-content ()
   "Test appending content to file."
   (chat-test-with-temp-dir
@@ -335,6 +347,18 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "first second")))))
+
+(ert-deftest chat-files-write-append-creates-missing-file ()
+  "Test append mode can create a new file when none exists yet."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "nested/append.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (chat-files-write test-file "first" t)
+     (should (file-exists-p test-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "first")))))
 
 (ert-deftest chat-files-open-file-reports-actual-eof-position ()
   "Test open file reports the actual landing position beyond EOF."
@@ -429,6 +453,19 @@
                         (buffer-string))
                       "repeat\nrepeat\n")))))
 
+(ert-deftest chat-files-replace-regexp-supports-capture-groups ()
+  "Test regexp replacement expands backreferences."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "regexp.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (chat-files-replace test-file "\\(foo\\)\\(bar\\)" "\\2\\1" nil nil t)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "barfoo\n")))))
+
 (ert-deftest chat-files-patch-returns-diff-preview ()
   "Test patch operations return a unified diff preview."
   (chat-test-with-temp-dir
@@ -443,6 +480,23 @@
        (should (stringp (plist-get result :diff)))
        (should (string-match-p "-beta" (plist-get result :diff)))
        (should (string-match-p "+gamma" (plist-get result :diff)))))))
+
+(ert-deftest chat-files-patch-regexp-supports-capture-groups ()
+  "Test patch regexp replacements expand backreferences."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "patch-regexp.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "foobar\n"))
+     (chat-files-patch
+      test-file
+      '((:search "\\(foo\\)\\(bar\\)"
+         :replace "\\2\\1"
+         :regexp t)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "barfoo\n")))))
 
 (ert-deftest chat-files-apply-patch-alias-uses-patch-engine ()
   "Test apply patch wrapper delegates to file patching."
@@ -483,6 +537,67 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "alpha\ngamma\n")))))
+
+(ert-deftest chat-files-apply-patch-is-atomic-across-multiple-updates ()
+  "Test apply patch does not leave partial edits behind on failure."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (file-a (expand-file-name "a.txt" temp-dir))
+          (file-b (expand-file-name "b.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: a.txt"
+                         "@@"
+                         "-alpha"
+                         "+ALPHA"
+                         "*** Update File: b.txt"
+                         "@@"
+                         "-missing"
+                         "+X"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file file-a
+       (insert "alpha\n"))
+     (with-temp-file file-b
+       (insert "beta\n"))
+     (should-error (chat-files-apply-patch patch-text))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents file-a)
+                        (buffer-string))
+                      "alpha\n"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents file-b)
+                        (buffer-string))
+                      "beta\n")))))
+
+(ert-deftest chat-files-apply-patch-is-atomic-when-add-followed-by-failure ()
+  "Test apply patch does not leave newly added files behind on failure."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (existing-file (expand-file-name "demo.txt" temp-dir))
+          (new-file (expand-file-name "new.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: new.txt"
+                         "+hello"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-missing"
+                         "+X"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file existing-file
+       (insert "demo\n"))
+     (should-error (chat-files-apply-patch patch-text))
+     (should-not (file-exists-p new-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents existing-file)
+                        (buffer-string))
+                      "demo\n")))))
 
 (ert-deftest chat-files-patch-accepts-json-style-alists ()
   "Test patch engine accepts alist patches from decoded JSON."

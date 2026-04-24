@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0030 session helper coverage stage is complete.
+Phase 0031 file editing robustness stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, session-helper coverage, and alignment between plain chat and code mode entry points.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, file-editing robustness, and alignment between plain chat and code mode entry points.
 
 ## Active Modules
 
