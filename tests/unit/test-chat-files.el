@@ -971,6 +971,26 @@
      (should-error (chat-files-apply-patch patch-text))
      (should-not (file-exists-p test-file)))))
 
+(ert-deftest chat-files-apply-patch-add-file-creates-parent-directories ()
+  "Test add-file patches can create nested parent directories."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "nested/path/demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: nested/path/demo.txt"
+                         "+hello"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (file-exists-p test-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
 (ert-deftest chat-files-apply-patch-moves-updated-file ()
   "Test move-to patches rename files and keep updated content."
   (chat-test-with-temp-dir
@@ -1046,6 +1066,30 @@
        (insert "hello\n"))
      (chat-files-apply-patch patch-text)
      (should-not (file-exists-p source-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target-file)
+                        (buffer-string))
+                      "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-move-creates-parent-directories ()
+  "Test move-only updates can create nested target directories."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source-file (expand-file-name "demo.txt" temp-dir))
+          (target-file (expand-file-name "nested/path/moved.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "*** Move to: nested/path/moved.txt"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file source-file
+       (insert "hello\n"))
+     (chat-files-apply-patch patch-text)
+     (should-not (file-exists-p source-file))
+     (should (file-exists-p target-file))
      (should (string= (with-temp-buffer
                         (insert-file-contents target-file)
                         (buffer-string))
@@ -1526,6 +1570,35 @@
        (insert "demo\n"))
      (should-error (chat-files-apply-patch patch-text))
      (should-not (file-exists-p new-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents existing-file)
+                        (buffer-string))
+                      "demo\n")))))
+
+(ert-deftest chat-files-apply-patch-failure-does-not-create-nested-add-paths ()
+  "Test failed patches do not leave nested add directories behind."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (existing-file (expand-file-name "demo.txt" temp-dir))
+          (new-file (expand-file-name "nested/path/new.txt" temp-dir))
+          (new-dir (file-name-directory new-file))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: nested/path/new.txt"
+                         "+hello"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-missing"
+                         "+X"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file existing-file
+       (insert "demo\n"))
+     (should-error (chat-files-apply-patch patch-text))
+     (should-not (file-exists-p new-file))
+     (should-not (file-directory-p new-dir))
      (should (string= (with-temp-buffer
                         (insert-file-contents existing-file)
                         (buffer-string))
