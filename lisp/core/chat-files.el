@@ -452,6 +452,7 @@ If APPEND is non-nil, append to existing content.
 ENCODING specifies the file encoding (default utf-8)."
   (let ((safe-path (chat-files--safe-path-p path))
         (coding-system (or encoding 'utf-8)))
+    (chat-files--ensure-nondirectory-path safe-path)
     (make-directory (file-name-directory safe-path) t)
     (with-temp-buffer
       (when (and append (file-exists-p safe-path))
@@ -559,6 +560,7 @@ When ALL is non-nil, replace all matches.
 When EXPECTED-COUNT is non-nil, require exactly that many matches.
 When LINE-HINT is non-nil, only consider matches on that line."
   (let* ((safe-path (chat-files--safe-path-p path))
+         (_ (chat-files--ensure-nondirectory-path safe-path))
          (original-content (with-temp-buffer
                              (insert-file-contents safe-path)
                              (buffer-string)))
@@ -611,6 +613,7 @@ PATCHES is a list of plists with:
 
 All patches are applied atomically."
   (let* ((safe-path (chat-files--safe-path-p path))
+         (_ (chat-files--ensure-nondirectory-path safe-path))
          (original-content (with-temp-buffer
                              (insert-file-contents safe-path)
                              (buffer-string)))

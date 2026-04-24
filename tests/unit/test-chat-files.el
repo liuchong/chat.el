@@ -348,6 +348,19 @@
                         (buffer-string))
                       "first second")))))
 
+(ert-deftest chat-files-write-rejects-directory-path ()
+  "Test writes reject directory targets with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-dir (expand-file-name "target" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (make-directory target-dir)
+     (should
+      (string-match-p
+       "path is a directory"
+       (error-message-string
+        (should-error (chat-files-write target-dir "hello")))))
+     (should (file-directory-p target-dir)))))
+
 (ert-deftest chat-files-write-append-creates-missing-file ()
   "Test append mode can create a new file when none exists yet."
   (chat-test-with-temp-dir
@@ -495,6 +508,19 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "foobar\n")))))
+
+(ert-deftest chat-files-replace-rejects-directory-path ()
+  "Test replace rejects directory targets with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-dir (expand-file-name "replace-target" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (make-directory target-dir)
+     (should
+      (string-match-p
+       "path is a directory"
+       (error-message-string
+        (should-error (chat-files-replace target-dir "a" "b")))))
+     (should (file-directory-p target-dir)))))
 
 (ert-deftest chat-files-replace-rejects-empty-matching-regexp ()
   "Test replace rejects regexps that can match empty text."
@@ -692,6 +718,20 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "foobar\n")))))
+
+(ert-deftest chat-files-patch-rejects-directory-path ()
+  "Test search patching rejects directory targets with a stable error."
+  (chat-test-with-temp-dir
+   (let ((target-dir (expand-file-name "patch-target" temp-dir))
+         (chat-files-allowed-directories (list temp-dir)))
+     (make-directory target-dir)
+     (should
+      (string-match-p
+       "path is a directory"
+       (error-message-string
+        (should-error
+         (chat-files-patch target-dir '((:search "a" :replace "b")))))))
+     (should (file-directory-p target-dir)))))
 
 (ert-deftest chat-files-apply-patch-alias-uses-patch-engine ()
   "Test apply patch wrapper delegates to file patching."
