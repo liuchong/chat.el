@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0034 patch eof update and replace narrowing stage is complete.
+Phase 0035 pure insert hunk compatibility stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics.
 
 ## Active Modules
 

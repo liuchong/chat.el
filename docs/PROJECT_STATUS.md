@@ -63,8 +63,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 311 regression tests discovered
-- 311 passing
+- 313 regression tests discovered
+- 313 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -122,6 +122,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `apply_patch` move paths now have explicit regression coverage for both successful renames and atomic refusal when the move target already exists
 - update-style `apply_patch` operations now also honor EOF markers when removing a trailing newline from the rewritten file
 - `files_replace` now has explicit regression coverage showing that `line_hint` narrows ambiguous matches and participates in post-filter count validation
+- `apply_patch` now supports pure insertion hunks such as `@@ -0,0 +1 @@` and `@@ -N,0 +M @@`, which are common in AI-generated unidiff output
 
 ## Known Boundaries
 

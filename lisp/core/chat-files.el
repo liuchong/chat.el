@@ -732,7 +732,13 @@ All patches are applied atomically."
          (start (chat-files--choose-hunk-position positions preferred-start)))
     (cond
      ((null old-lines)
-      (error "Patch hunk has no matchable source context"))
+      (if (and (integerp preferred-start)
+               (>= preferred-start 0)
+               (<= preferred-start (length lines)))
+          (append (cl-subseq lines 0 preferred-start)
+                  new-lines
+                  (cl-subseq lines preferred-start))
+        (error "Patch hunk has no matchable source context")))
      ((null start)
       (error "Patch hunk could not be applied"))
      ((eq start :ambiguous)
@@ -865,8 +871,11 @@ All patches are applied atomically."
          (line-delta 0))
     (dolist (hunk (plist-get operation :hunks))
       (let* ((header-data (plist-get hunk :header-data))
+             (old-count (and header-data (plist-get header-data :old-count)))
              (preferred-start (and header-data
-                                   (+ (1- (plist-get header-data :old-start))
+                                   (+ (if (= old-count 0)
+                                          (plist-get header-data :old-start)
+                                        (1- (plist-get header-data :old-start)))
                                       line-delta))))
         (setq lines
               (chat-files--apply-hunk-to-lines-at-position
