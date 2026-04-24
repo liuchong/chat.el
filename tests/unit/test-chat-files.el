@@ -589,6 +589,30 @@
                         (buffer-string))
                       "alpha\ngamma")))))
 
+(ert-deftest chat-files-apply-patch-supports-standard-no-newline-marker ()
+  "Test unified patches can use the standard no-newline marker."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: demo.txt"
+                         "@@"
+                         "-beta"
+                         "+gamma"
+                         "\\ No newline at end of file"
+                         "*** End Patch")
+                       "\n")))
+     (with-temp-file test-file
+       (insert "alpha\nbeta"))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "alpha\ngamma")))))
+
 (ert-deftest chat-files-apply-patch-end-of-file-marker-removes-trailing-newline ()
   "Test EOF markers can remove a trailing newline from an updated file."
   (chat-test-with-temp-dir
@@ -625,6 +649,26 @@
                          "*** Add File: demo.txt"
                          "+hello"
                          "*** End of File"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello")))))
+
+(ert-deftest chat-files-apply-patch-add-file-supports-standard-no-newline-marker ()
+  "Test add-file patches accept the standard no-newline marker."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: demo.txt"
+                         "+hello"
+                         "\\ No newline at end of file"
                          "*** End Patch")
                        "\n")))
      (chat-files-apply-patch patch-text)

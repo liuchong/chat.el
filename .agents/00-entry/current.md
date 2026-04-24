@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Phase 0037 hunk line-delta coverage stage is complete.
+Phase 0038 standard no-newline marker compatibility stage is complete.
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, hunk coverage, and sequential hunk stability.
+Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, hunk coverage, and sequential hunk stability.
 
 ## Active Modules
 
