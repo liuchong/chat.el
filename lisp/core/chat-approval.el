@@ -13,8 +13,8 @@
 (declare-function chat-forged-tool-id "chat-tool-forge" (tool))
 (declare-function chat-session-auto-approve-p "chat-session" (session))
 (declare-function chat-session-set-auto-approve "chat-session" (session value))
-(declare-function chat-files--parse-apply-patch "chat-files" (patch-text))
 (declare-function chat-files--resolved-path "chat-files" (path))
+(declare-function chat-files--tool-target-paths "chat-files" (tool-id arguments))
 (defgroup chat-approval nil
   "Approval handling for chat.el."
   :group 'chat)
@@ -130,35 +130,11 @@ Only file writing tools with a clear directory scope can use this whitelist."
 
 (defun chat-approval--tool-target-directories (tool-id arguments)
   "Return canonical target directories for TOOL-ID and ARGUMENTS."
-  (pcase tool-id
-    ((or 'files_write 'files_replace 'files_patch)
-     (when-let ((path (cdr (assoc "path" arguments))))
-       (list (file-name-directory
-              (if (fboundp 'chat-files--resolved-path)
-                  (chat-files--resolved-path path)
-                (expand-file-name path))))))
-    ('apply_patch
-     (when-let* ((patch-text (cdr (assoc "patch" arguments)))
-                 ((fboundp 'chat-files--parse-apply-patch)))
-       (condition-case nil
-           (let (directories)
-             (dolist (operation (chat-files--parse-apply-patch patch-text))
-               (let ((path (plist-get operation :path))
-                     (move-to (plist-get operation :move-to)))
-                 (when path
-                   (push (file-name-directory
-                          (if (fboundp 'chat-files--resolved-path)
-                              (chat-files--resolved-path (expand-file-name path default-directory))
-                            (expand-file-name path default-directory)))
-                         directories))
-                 (when move-to
-                   (push (file-name-directory
-                          (if (fboundp 'chat-files--resolved-path)
-                              (chat-files--resolved-path (expand-file-name move-to default-directory))
-                            (expand-file-name move-to default-directory)))
-                         directories))))
-             (delete-dups (nreverse directories)))
-         (error nil))))))
+  (condition-case nil
+      (when-let ((paths (chat-files--tool-target-paths tool-id arguments)))
+        (delete-dups
+         (mapcar #'file-name-directory paths)))
+    (error nil)))
 
 (defun chat-approval--directory-scope (tool-id arguments)
   "Return the directory scope for TOOL-ID and ARGUMENTS, or nil."

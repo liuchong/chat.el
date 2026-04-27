@@ -283,6 +283,7 @@ These commands exist in the repository but are still being repaired and validate
 - **Native prompt guidance** - approval prompts and pending-approval messages teach the same shortcut flow without inserting extra transcript noise
 - **Persistent approval status** - pending approvals also surface in code mode `header-line` / mode line and in the chat buffer status line
 - **Path-aware input** - code-mode input now auto-suggests absolute and project-relative file paths while you type
+- **Sticky single-file focus** - after code-mode reads or edits one concrete file, short follow-up requests can keep working against that same target instead of rediscovering it
 - **Multiline input** - `S-RET` inserts a newline in the code-mode input area without sending the message
 - **Streaming auto-follow** - code-mode follows live output while you stay near the response edge, without force-scrolling if you manually move away
 - **Status discipline** - persistent status surfaces are reserved for blocking states; transient activity stays in the request panel or echo area

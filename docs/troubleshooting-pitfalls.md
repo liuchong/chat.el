@@ -209,6 +209,14 @@ Required field order:
 
 **Solution**: validate diagnostics semantically by checking phase and searching the event timeline for the expected response event instead of asserting that one exact event must be last.
 
+### Vague Code-Mode Follow-Ups Can Drift Away From The Reviewed File
+
+**Problem**: after reviewing one file, a short follow-up such as "do one round of optimization" can time out or continue analyzing without editing the intended file.
+
+**Cause**: the session did not automatically promote the most recently inspected single-file tool target into `focus-file`, so the next request lost its strongest document target and the model had to rediscover it.
+
+**Solution**: track file-specific tool targets, keep the latest single-file target as `focus-file`, add it back into context for the next request, and give tool-loop follow-up requests their own timeout budget.
+
 ---
 
 ## Session and Persistence

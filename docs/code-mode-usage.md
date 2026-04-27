@@ -158,6 +158,7 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 request panel 现在也会把 directory 级审批范围直接显示出来，方便确认放行边界。
 对于 streaming 响应，request panel 现在还会显示 live state、last chunk 和 recent activity，方便判断模型是否还在持续工作。
 主对话区里的当前 assistant 槽位也会显示一条临时的 `[Live] ...` 叙事行，用真实的 waiting、streaming、tool-loop 和 approval 状态解释后台正在发生什么。
+当 AI 用单文件工具读过或改过某个文件后，code-mode 现在会把它自动当成后续 vague follow-up 的默认 focus，这样像“再优化一轮”这类短指令不会轻易丢目标。
 
 ### 阅读代码时直接提问
 
@@ -183,6 +184,7 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 3. 新文件用 files_write，已有文档的小改动优先 apply_patch 或 files_replace
 4. 如果 quote-current-file 因文件太大而拒绝，就退回到 region 或 near-point
 5. 始终把 preview 和 git diff 当最终审查面
+6. 如果上一轮已经 review 或修改过某个单文件，下一轮可以直接说“继续改”或“优化一轮”，code-mode 会优先沿用那个 focus
 ```
 
 如果你正在持续编辑同一个文档目录，审批提示里的 directory 级放行通常比 tool 级放行更稳妥。

@@ -101,6 +101,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - request diagnostics now support observers, code-mode uses them to refresh live status surfaces during streaming, and the request panel now shows live state, chunk freshness, and recent activity while a response is still running
 - code-mode streaming output now follows the live response edge when the user is still near the active output, which makes long-running generation less visually stale without hijacking manual navigation
 - code-mode transcript now shows a transient live narrative line in the active assistant slot, driven by diagnostics and tool events so waiting, tool-loop, and approval states stay visible during long requests
+- code-mode now promotes the most recently inspected single-file tool target into session focus, which makes vague follow-up edit requests like "optimize it" more likely to continue on the intended file instead of broad rescanning
+- code-mode tool-loop follow-up requests now use a dedicated timeout budget instead of sharing the shorter generic non-streaming request timeout
 - persistent native status surfaces are now explicitly limited to blocking states, while transient activity stays out of header and mode lines
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 - sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries

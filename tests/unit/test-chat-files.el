@@ -2411,6 +2411,46 @@
                         (buffer-string))
                       "one\nthree\n")))))
 
+(ert-deftest chat-files-tool-target-paths-resolves-single-path-tools ()
+  "Test tool target path extraction resolves canonical file paths."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "docs/spec.md" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (make-directory (file-name-directory target-file) t)
+     (with-temp-file target-file
+       (insert "# Spec\n"))
+     (should (equal (chat-files--tool-target-paths
+                     'files_read
+                     `(("path" . ,target-file)))
+                    (list (file-truename target-file)))))))
+
+(ert-deftest chat-files-tool-target-paths-parses-apply-patch-targets ()
+  "Test tool target path extraction covers apply_patch source and destination files."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (target-file (expand-file-name "docs/spec.md" temp-dir))
+          (moved-file (expand-file-name "docs/spec-v2.md" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Update File: docs/spec.md"
+                         "*** Move to: docs/spec-v2.md"
+                         "@@"
+                         "-old"
+                         "+new"
+                         "*** End Patch")
+                       "\n")))
+     (make-directory (file-name-directory target-file) t)
+     (with-temp-file target-file
+       (insert "old\n"))
+     (should (equal (chat-files--tool-target-paths
+                     'apply_patch
+                     `(("patch" . ,patch-text)))
+                    (list (file-truename target-file)
+                          (file-truename moved-file)))))))
+
 ;; ------------------------------------------------------------------
 ;; Statistics
 ;; ------------------------------------------------------------------

@@ -92,6 +92,11 @@
   :type 'integer
   :group 'chat-code)
 
+(defcustom chat-code-tool-followup-timeout 300
+  "Timeout in seconds for code-mode tool follow-up requests."
+  :type 'integer
+  :group 'chat-code)
+
 (defcustom chat-code-request-safety-margin 2048
   "Safety margin kept free in the model context window."
   :type 'integer
@@ -158,6 +163,7 @@ Documentation Workflow:
   - For long documents, work section by section instead of asking for one giant response.
   - Use files_write for new doc files or intentional whole-document rewrites.
   - Use apply_patch or files_replace for targeted edits to existing documents.
+  - Short follow-up requests reuse the latest single-file focus when possible.
   - Quote a region or one heading block when revising an existing document.
   - If quote-current-file refuses a large file, switch to region, defun, or near-point style capture."
   "Help text displayed for code mode commands."
@@ -195,6 +201,7 @@ When making changes:
     "Do not invent unsupported behavior, hidden files, or tool results."
     "Stay inside the active project root unless the user explicitly asks to go elsewhere."
     "If a tool request was blocked or denied, do not retry the same pattern without new evidence."
+    "If the user gives a short follow-up without restating the path, prefer the current focus file or the most recently inspected file before broad scanning."
     "Once enough evidence exists to answer, stop exploring and answer directly.")
   "Non-negotiable rules always sent in code mode.")
 
@@ -213,6 +220,7 @@ When making changes:
     "Use files_write for new files or intentional whole-file rewrites."
     "Use files_replace only when the target text is known exactly and the match can be constrained."
     "Prefer apply_patch for existing-file edits that touch multiple hunks or need nearby context."
+    "After reading or editing one specific file, keep that file as the default target for the next vague follow-up unless the user redirects you."
     "After every successful write tool, inspect the edited file or diff before claiming success."
     "If an edit tool fails because the match is ambiguous or stale, read the file again and choose a narrower edit strategy."
     "Do not repeat the same failed edit command without new evidence from the files."
@@ -303,6 +311,9 @@ Inherits from chat-session with additional code-specific fields."
 (defvar-local chat-code--live-response-content ""
   "Latest visible assistant content for the live response slot.")
 
+(defvar-local chat-code--last-tracked-tool-paths nil
+  "Last canonical file paths tracked from tool activity.")
+
 (defun chat-code--pending-approval-event ()
   "Return the current pending approval event when present."
   (chat-status-persistent-event chat-code--request-tool-events))
@@ -386,6 +397,46 @@ Inherits from chat-session with additional code-specific fields."
 (defun chat-code--set-window-point (window position)
   "Set WINDOW point to POSITION."
   (set-window-point window position))
+
+(defun chat-code--remember-focus-file (file-path &optional silent)
+  "Store FILE-PATH as the current focus file.
+When SILENT is non-nil, do not show minibuffer feedback."
+  (when (and chat-code--current-session file-path)
+    (let* ((resolved (chat-files--resolved-path file-path))
+           (current-focus (chat-code-session-focus-file chat-code--current-session))
+           (context-files (chat-code-session-context-files chat-code--current-session)))
+      (setf (chat-code-session-focus-file chat-code--current-session) resolved)
+      (setf (chat-code-session-context-files chat-code--current-session)
+            (delete-dups (cons resolved context-files)))
+      (unless (or silent (equal current-focus resolved))
+        (message "Focus set to: %s" (file-name-nondirectory resolved))))))
+
+(defun chat-code--track-tool-targets (tool-events)
+  "Update session target state from TOOL-EVENTS."
+  (when chat-code--current-session
+    (let (all-paths latest-single-target)
+      (dolist (event tool-events)
+        (when (eq (plist-get event :type) 'tool-call)
+          (let* ((tool-id (intern (plist-get event :tool)))
+                 (arguments (plist-get event :arguments))
+                 (paths (and arguments
+                             (condition-case nil
+                                 (chat-files--tool-target-paths tool-id arguments)
+                               (error nil)))))
+            (when paths
+              (setq all-paths (append all-paths paths))
+              (when (= (length paths) 1)
+                (setq latest-single-target (car paths)))))))
+      (when all-paths
+        (setq all-paths (delete-dups all-paths))
+        (unless (equal all-paths chat-code--last-tracked-tool-paths)
+          (setq chat-code--last-tracked-tool-paths all-paths)
+          (setf (chat-code-session-context-files chat-code--current-session)
+                (delete-dups
+                 (append all-paths
+                         (chat-code-session-context-files chat-code--current-session)))))
+        (when latest-single-target
+          (chat-code--remember-focus-file latest-single-target t))))))
 
 (defun chat-code--request-live-detail (&optional snapshot)
   "Return a compact live request label from SNAPSHOT."
@@ -472,6 +523,7 @@ Inherits from chat-session with additional code-specific fields."
     (setq chat-code--request-hint-shown nil))
   (setq chat-code--request-tool-events nil)
   (setq chat-code--last-approval-hint nil)
+  (setq chat-code--last-tracked-tool-paths nil)
   (setq chat-code--live-response-start nil)
   (setq chat-code--live-response-content "")
   (setq chat-code--current-request-id nil))
@@ -986,6 +1038,7 @@ Returns either the block body string or a list of (LANG BODY)."
     (setq chat-code--request-tool-events tool-events)
     (setq chat-code--live-response-start content-start)
     (setq chat-code--live-response-content content)
+    (chat-code--track-tool-targets tool-events)
     (chat-code--maybe-announce-approval-shortcuts tool-events)
     (when (or (and chat-request-panel-auto-show
                    chat-code--current-request-id)
@@ -1210,7 +1263,7 @@ Returns either the block body string or a list of (LANG BODY)."
                (append
                 (list :temperature 0.7
                       :max-tokens (chat-code--request-output-budget model)
-                      :timeout chat-code-request-timeout)
+                      :timeout chat-code-tool-followup-timeout)
                 (when chat-code--current-request-id
                   (list :request-id chat-code--current-request-id)))))))))
 
@@ -1414,6 +1467,7 @@ Optional PROJECT-ROOT overrides the detected project root."
     (setq-local chat-code--active-request-handle nil)
     (setq-local chat-code--active-stream-process nil)
     (setq-local chat-code--pending-edit nil)
+    (setq-local chat-code--last-tracked-tool-paths nil)
     (setq-local chat-code--live-response-start nil)
     (setq-local chat-code--live-response-content "")
     ;; Header line with context info
@@ -2104,9 +2158,7 @@ Returns a chat-edit struct or nil."
                           chat-code--current-session)
                          nil t)))
   (when chat-code--current-session
-    (setf (chat-code-session-focus-file chat-code--current-session) file-path)
-    (push file-path (chat-code-session-context-files chat-code--current-session))
-    (message "Focus set to: %s" (file-name-nondirectory file-path))))
+    (chat-code--remember-focus-file file-path)))
 
 (defun chat-code-refresh-context ()
   "Refresh context for current session."

@@ -102,6 +102,28 @@ Returns nil if path matches deny patterns or is outside allowed directories."
     (error "File too large: %s exceeds %d bytes"
            path chat-files-max-size)))
 
+(defun chat-files--tool-target-paths (tool-id arguments)
+  "Return canonical file targets for TOOL-ID and ARGUMENTS.
+Returns nil when TOOL-ID does not point at specific files."
+  (pcase tool-id
+    ((or 'files_read 'files_read_lines 'files_grep 'open_file
+         'files_write 'files_replace 'files_patch)
+     (when-let ((path (cdr (assoc "path" arguments))))
+       (list (chat-files--resolved-path path))))
+    ('apply_patch
+     (when-let ((patch-text (cdr (assoc "patch" arguments))))
+       (let (paths)
+         (dolist (operation (chat-files--parse-apply-patch patch-text))
+           (when-let ((path (plist-get operation :path)))
+             (push (chat-files--resolved-path
+                    (expand-file-name path default-directory))
+                   paths))
+           (when-let ((move-to (plist-get operation :move-to)))
+             (push (chat-files--resolved-path
+                    (expand-file-name move-to default-directory))
+                   paths)))
+         (delete-dups (nreverse paths)))))))
+
 ;; ------------------------------------------------------------------
 ;; Basic File Operations
 ;; ------------------------------------------------------------------

@@ -705,6 +705,41 @@
          (goto-char (point-min))
         (should (search-forward "Tool finished successfully." nil t)))))))
 
+(ert-deftest chat-code-resolve-tool-loop-async-uses-followup-timeout ()
+  "Test tool-loop follow-up requests use the dedicated timeout."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (processed '(:content ""
+                      :tool-calls ((:name "demo-tool"
+                                    :arguments (("input" . "hello"))))
+                      :tool-results ("ran:hello")
+                      :tool-events ((:type tool-call
+                                     :tool "demo-tool"
+                                     :arguments (("input" . "hello"))))))
+          captured-timeout)
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session
+                   (chat-code-session-create "Timeout Session" temp-dir))
+       (setq-local chat-code--live-response-start (point-marker))
+       (cl-letf (((symbol-function 'chat-llm-request-async)
+                  (lambda (_model _messages _success _error options)
+                    (setq captured-timeout (plist-get options :timeout))
+                    'followup-handle)))
+         (chat-code--resolve-tool-loop-async
+          'kimi-code
+          (list (make-chat-message
+                 :id "user-1"
+                 :role :user
+                 :content "Optimize it"
+                 :timestamp (current-time)))
+          processed
+          nil
+          nil
+          (lambda (_resolved))
+          (lambda (_err))))
+       (should (= captured-timeout chat-code-tool-followup-timeout))))))
+
 (ert-deftest chat-code-display-processed-response-hides-tool-json-at-loop-limit ()
   "Test code mode hides raw tool JSON when the tool loop hits its safety limit."
   (chat-test-with-temp-dir
@@ -878,6 +913,27 @@
         (chat-code--handle-request-diagnostics-update "req-code" nil nil)
         (goto-char content-start)
         (should (search-forward "[Live] Resolving tool step 1" nil t))))))
+
+(ert-deftest chat-code-track-tool-targets-promotes-single-file-focus ()
+  "Test tool activity promotes a single file target into the current focus."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (target-file (expand-file-name "docs/spec.md" temp-dir))
+          (session (chat-code-session-create "Track Session" temp-dir)))
+     (make-directory (file-name-directory target-file) t)
+     (with-temp-file target-file
+       (insert "# Spec\n"))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--track-tool-targets
+        `((:type tool-call
+           :tool "files_read"
+           :arguments (("path" . ,target-file)))))
+       (should (equal (chat-code-session-focus-file session)
+                      (file-truename target-file)))
+       (should (member (file-truename target-file)
+                       (chat-code-session-context-files session)))))))
 
 (ert-deftest chat-code-render-response-state-follows-live-output-near-input ()
   "Test code mode auto-follows rendered output when the window is at the live edge."
