@@ -152,6 +152,9 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `C-c C-h` | `chat-code-show-help` | 打开 code-mode 原生帮助缓冲区 |
 | `C-g` | `chat-code-cancel` | 取消当前操作 |
 
+当文件写工具触发审批时，原生审批提示除了单次、session、tool 级放行外，还会在可判定目录范围时提供 directory 级放行。
+这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。
+
 ### 阅读代码时直接提问
 
 推荐链路：
@@ -177,6 +180,9 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 4. 如果 quote-current-file 因文件太大而拒绝，就退回到 region 或 near-point
 5. 始终把 preview 和 git diff 当最终审查面
 ```
+
+如果你正在持续编辑同一个文档目录，审批提示里的 directory 级放行通常比 tool 级放行更稳妥。
+它只对白名单目录内的文件写工具生效，不会放大到 shell 或其他无目录语义的工具。
 
 ### 内联编辑命令（在代码缓冲区）
 

@@ -170,6 +170,7 @@ Built in tools currently focus on coding assistance:
 
 Risky tools require approval before execution.
 Generated tools also require approval before registration.
+File writing tools can also be whitelisted by directory, so future writes under an approved directory can run without repeated prompts.
 
 Generated elisp tools must be a single top level `lambda` form.
 This prevents compile time side effects from arbitrary wrapper forms.
@@ -276,7 +277,7 @@ These commands exist in the repository but are still being repaired and validate
 - **Streaming responses** - Real-time code generation toggle exists
 - **Visible run state** - Header line shows running, success, failed, cancelled, or stopped
 - **Structured request panel** - `C-c C-p` opens a dedicated panel for phases, approvals, tool calls, whitelist changes, and stalled-request context
-- **Fast approval shortcuts** - pending approval prompts accept `C-c C-a` once, `C-c C-s` session, `C-c C-t` tool, `C-c C-c` command, and `C-c C-d` deny
+- **Fast approval shortcuts** - pending approval prompts accept `C-c C-a` once, `C-c C-s` session, `C-c C-t` tool, `C-c C-f` directory for file writes, `C-c C-c` command, and `C-c C-d` deny
 - **Native prompt guidance** - approval prompts and pending-approval messages teach the same shortcut flow without inserting extra transcript noise
 - **Persistent approval status** - pending approvals also surface in code mode `header-line` / mode line and in the chat buffer status line
 - **Status discipline** - persistent status surfaces are reserved for blocking states; transient activity stays in the request panel or echo area

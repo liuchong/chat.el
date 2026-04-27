@@ -6,12 +6,15 @@
 ;; This module centralizes approval checks for risky tool calls.
 ;;; Code:
 (require 'cl-lib)
+(require 'seq)
 (require 'subr-x)
 
 ;; Forward declarations
 (declare-function chat-forged-tool-id "chat-tool-forge" (tool))
 (declare-function chat-session-auto-approve-p "chat-session" (session))
 (declare-function chat-session-set-auto-approve "chat-session" (session value))
+(declare-function chat-files--parse-apply-patch "chat-files" (patch-text))
+(declare-function chat-files--resolved-path "chat-files" (path))
 (defgroup chat-approval nil
   "Approval handling for chat.el."
   :group 'chat)
@@ -67,6 +70,12 @@ Note: shell_execute is excluded by default for security."
   :type '(repeat symbol)
   :group 'chat-approval)
 
+(defcustom chat-approval-always-approve-directories nil
+  "Directories whose file-write tool calls are always approved.
+Only file writing tools with a clear directory scope can use this whitelist."
+  :type '(repeat directory)
+  :group 'chat-approval)
+
 (defcustom chat-approval-decision-function nil
   "Optional function that returns an approval decision symbol."
   :type '(choice (const :tag "Default prompt" nil)
@@ -79,14 +88,105 @@ Note: shell_execute is excluded by default for security."
 (defvar chat-approval--pending-decision nil
   "Current approval decision selected through a command shortcut.")
 
+(defun chat-approval--write-file-tool-p (tool-id)
+  "Return non-nil when TOOL-ID is a file-writing tool."
+  (memq tool-id '(files_write files_replace files_patch apply_patch)))
+
+(defun chat-approval--normalize-directory (dir)
+  "Return canonical directory path for DIR."
+  (file-name-as-directory
+   (if (fboundp 'chat-files--resolved-path)
+       (chat-files--resolved-path dir)
+     (expand-file-name dir))))
+
+(defun chat-approval--directory-prefix-p (root dir)
+  "Return non-nil when ROOT contains DIR."
+  (let ((normalized-root (chat-approval--normalize-directory root))
+        (normalized-dir (chat-approval--normalize-directory dir)))
+    (string-prefix-p normalized-root normalized-dir)))
+
+(defun chat-approval--directory-parent (dir)
+  "Return the parent directory for DIR, or nil at filesystem root."
+  (let* ((trimmed (directory-file-name (chat-approval--normalize-directory dir)))
+         (parent (file-name-directory trimmed)))
+    (when (and parent
+               (not (string= trimmed "/"))
+               (not (string= (chat-approval--normalize-directory parent)
+                             (chat-approval--normalize-directory dir))))
+      parent)))
+
+(defun chat-approval--common-directory (dirs)
+  "Return the narrowest shared ancestor directory for DIRS."
+  (when dirs
+    (let ((common (chat-approval--normalize-directory (car dirs))))
+      (dolist (dir (cdr dirs))
+        (let ((candidate (chat-approval--normalize-directory dir)))
+          (while (and common
+                      (not (chat-approval--directory-prefix-p common candidate)))
+            (setq common (chat-approval--directory-parent common)))))
+      (unless (or (null common)
+                  (string= common "/"))
+        common))))
+
+(defun chat-approval--tool-target-directories (tool-id arguments)
+  "Return canonical target directories for TOOL-ID and ARGUMENTS."
+  (pcase tool-id
+    ((or 'files_write 'files_replace 'files_patch)
+     (when-let ((path (cdr (assoc "path" arguments))))
+       (list (file-name-directory
+              (if (fboundp 'chat-files--resolved-path)
+                  (chat-files--resolved-path path)
+                (expand-file-name path))))))
+    ('apply_patch
+     (when-let* ((patch-text (cdr (assoc "patch" arguments)))
+                 ((fboundp 'chat-files--parse-apply-patch)))
+       (condition-case nil
+           (let (directories)
+             (dolist (operation (chat-files--parse-apply-patch patch-text))
+               (let ((path (plist-get operation :path))
+                     (move-to (plist-get operation :move-to)))
+                 (when path
+                   (push (file-name-directory
+                          (if (fboundp 'chat-files--resolved-path)
+                              (chat-files--resolved-path (expand-file-name path default-directory))
+                            (expand-file-name path default-directory)))
+                         directories))
+                 (when move-to
+                   (push (file-name-directory
+                          (if (fboundp 'chat-files--resolved-path)
+                              (chat-files--resolved-path (expand-file-name move-to default-directory))
+                            (expand-file-name move-to default-directory)))
+                         directories))))
+             (delete-dups (nreverse directories)))
+         (error nil))))))
+
+(defun chat-approval--directory-scope (tool-id arguments)
+  "Return the directory scope for TOOL-ID and ARGUMENTS, or nil."
+  (when (chat-approval--write-file-tool-p tool-id)
+    (chat-approval--common-directory
+     (chat-approval--tool-target-directories tool-id arguments))))
+
+(defun chat-approval--whitelisted-directory-match (tool-id arguments)
+  "Return a matching whitelisted directory for TOOL-ID and ARGUMENTS, or nil."
+  (let ((directories (chat-approval--tool-target-directories tool-id arguments)))
+    (when directories
+      (seq-find
+       (lambda (root)
+         (let ((normalized-root (chat-approval--normalize-directory root)))
+           (seq-every-p
+            (lambda (dir)
+              (chat-approval--directory-prefix-p normalized-root dir))
+            directories)))
+       chat-approval-always-approve-directories))))
+
 (defun chat-approval-tool-required-p (tool-id)
   "Return non-nil when TOOL-ID requires approval."
   (memq tool-id chat-approval-required-tools))
 
-(defun chat-approval-shortcut-summary (tool-id)
-  "Return a human-readable shortcut summary for TOOL-ID."
+(defun chat-approval-shortcut-summary (tool-id &optional directory)
+  "Return a human-readable shortcut summary for TOOL-ID and DIRECTORY."
   (mapconcat #'identity
-             (chat-approval--action-hints tool-id)
+             (chat-approval--action-hints tool-id directory)
              ", "))
 
 (defun chat-approval-pending-message (tool actions)
@@ -116,13 +216,13 @@ Note: shell_execute is excluded by default for security."
   "Return the configured risk level for TOOL-ID."
   (or (alist-get tool-id chat-approval-risk-levels)
       'medium))
-(defun chat-approval--prompt (tool-id arguments)
-  "Build an approval prompt for TOOL-ID with ARGUMENTS."
+(defun chat-approval--prompt (tool-id arguments &optional directory)
+  "Build an approval prompt for TOOL-ID with ARGUMENTS and DIRECTORY."
   (format "Approve %s risk tool %s with %s? Shortcuts: %s. "
           (chat-approval--risk-level tool-id)
           tool-id
           (chat-approval--summarize-arguments arguments)
-          (chat-approval-shortcut-summary tool-id)))
+          (chat-approval-shortcut-summary tool-id directory)))
 
 (defun chat-approval--allow-noninteractive-p ()
   "Return non nil when the current noninteractive policy allows execution."
@@ -149,6 +249,15 @@ Check global settings and SESSION-specific settings."
              (and global-auto-approve in-auto-approve-list))
          t)))
 
+(defun chat-approval--auto-approval-decision (tool-id arguments &optional session)
+  "Return auto-approval metadata for TOOL-ID, ARGUMENTS, and SESSION."
+  (cond
+   ((chat-approval--auto-approve-p tool-id session)
+    (list :decision 'auto))
+   ((when-let ((directory (chat-approval--whitelisted-directory-match tool-id arguments)))
+      (list :decision 'whitelisted-directory
+            :directory directory)))))
+
 (defun chat-approval--notify (observer event)
   "Send EVENT to OBSERVER."
   (when observer
@@ -158,32 +267,40 @@ Check global settings and SESSION-specific settings."
   "Return shell command string from ARGUMENTS when present."
   (cdr (assoc "command" arguments)))
 
-(defun chat-approval--decision-options (tool-id)
-  "Return available decisions for TOOL-ID."
+(defun chat-approval--decision-options (tool-id &optional directory)
+  "Return available decisions for TOOL-ID and DIRECTORY."
   (append
    '(("allow once" . allow-once)
      ("allow for session" . allow-session)
      ("always allow this tool" . allow-tool))
+   (when directory
+     (list (cons (format "always allow this directory (%s)" directory)
+                 'allow-directory)))
    (when (eq tool-id 'shell_execute)
      '(("always allow this command" . allow-command)))
    '(("deny" . deny))))
 
-(defun chat-approval--action-hints (tool-id)
-  "Return display strings for TOOL-ID approval shortcuts."
+(defun chat-approval--action-hints (tool-id &optional directory)
+  "Return display strings for TOOL-ID approval shortcuts and DIRECTORY."
   (append
    '("C-c C-a once"
      "C-c C-s session"
      "C-c C-t tool")
+   (when directory
+     '("C-c C-f directory"))
    (when (eq tool-id 'shell_execute)
      '("C-c C-c command"))
    '("C-c C-d deny")))
 
 (defun chat-approval--event-context (tool-id arguments)
   "Return shared event context for TOOL-ID and ARGUMENTS."
-  (let ((command (chat-approval--command-from-arguments arguments)))
+  (let ((command (chat-approval--command-from-arguments arguments))
+        (directory (chat-approval--directory-scope tool-id arguments)))
     (append
      (list :risk (chat-approval--risk-level tool-id))
-     (list :actions (chat-approval--action-hints tool-id))
+     (list :actions (chat-approval--action-hints tool-id directory))
+     (when directory
+       (list :directory directory))
      (when command
        (list :command command)))))
 
@@ -215,6 +332,11 @@ Check global settings and SESSION-specific settings."
   (interactive)
   (chat-approval--set-pending-decision 'allow-command))
 
+(defun chat-approval-allow-directory ()
+  "Always approve the current pending directory for file-write tools."
+  (interactive)
+  (chat-approval--set-pending-decision 'allow-directory))
+
 (defun chat-approval-deny ()
   "Deny the current pending approval request."
   (interactive)
@@ -226,16 +348,21 @@ Check global settings and SESSION-specific settings."
   (local-set-key (kbd "C-c C-a") #'chat-approval-allow-once)
   (local-set-key (kbd "C-c C-s") #'chat-approval-allow-session)
   (local-set-key (kbd "C-c C-t") #'chat-approval-allow-tool)
+  (local-set-key (kbd "C-c C-f") #'chat-approval-allow-directory)
   (local-set-key (kbd "C-c C-c") #'chat-approval-allow-command)
   (local-set-key (kbd "C-c C-d") #'chat-approval-deny))
 
 (defun chat-approval--prompt-for-decision (tool-id arguments)
   "Prompt for TOOL-ID with ARGUMENTS and return a decision symbol."
-  (let* ((choices (chat-approval--decision-options tool-id))
+  (let* ((directory (chat-approval--directory-scope tool-id arguments))
          (chat-approval--pending-request
           (list :tool-id tool-id
                 :arguments arguments
-                :options choices))
+                :directory directory))
+         (choices (chat-approval--decision-options tool-id directory))
+         (chat-approval--pending-request
+          (append chat-approval--pending-request
+                  (list :options choices)))
          (chat-approval--pending-decision nil)
          choice)
     (unwind-protect
@@ -244,7 +371,7 @@ Check global settings and SESSION-specific settings."
                 (minibuffer-with-setup-hook
                     #'chat-approval--install-minibuffer-bindings
                   (completing-read
-                   (chat-approval--prompt tool-id arguments)
+                   (chat-approval--prompt tool-id arguments directory)
                    (mapcar #'car choices)
                    nil
                    t
@@ -278,6 +405,11 @@ Check global settings and SESSION-specific settings."
      (unless (memq tool-id chat-approval-always-approve-tools)
        (push tool-id chat-approval-always-approve-tools))
      t)
+    ('allow-directory
+     (when-let ((directory (chat-approval--directory-scope tool-id arguments)))
+       (unless (member directory chat-approval-always-approve-directories)
+         (push directory chat-approval-always-approve-directories))
+       t))
     ('allow-command
      (let ((command (cdr (assoc "command" arguments))))
        (when (and command
@@ -294,18 +426,23 @@ Optional SESSION is the current chat session for context.
 Returns non-nil when execution should proceed."
   (let* ((tool-id (chat-forged-tool-id tool))
          (arguments (plist-get call :arguments))
-         (prompt (chat-approval--prompt tool-id arguments)))
+         (directory (chat-approval--directory-scope tool-id arguments))
+         (prompt (chat-approval--prompt tool-id arguments directory))
+         (auto-decision (chat-approval--auto-approval-decision
+                         tool-id arguments session)))
     (cond
      ((not chat-approval-enabled) t)
      ((not (chat-approval-tool-required-p tool-id)) t)
-     ((chat-approval--auto-approve-p tool-id session)
+     (auto-decision
       (chat-approval--notify
        observer
        (append
         (list :type 'approval
               :tool (symbol-name tool-id)
-              :decision 'auto
+              :decision (plist-get auto-decision :decision)
               :approved t)
+        (when-let ((directory (plist-get auto-decision :directory)))
+          (list :directory directory))
         (chat-approval--event-context tool-id arguments)))
       t)
      ((chat-approval--allow-noninteractive-p)
@@ -319,7 +456,7 @@ Returns non-nil when execution should proceed."
         (list :type 'approval-pending
               :tool (symbol-name tool-id)
               :prompt prompt
-              :options (chat-approval--decision-options tool-id))
+              :options (chat-approval--decision-options tool-id directory))
         (chat-approval--event-context tool-id arguments)))
       (let* ((decision (chat-approval--decide tool-id arguments session))
              (approved (chat-approval--apply-decision
@@ -332,6 +469,15 @@ Returns non-nil when execution should proceed."
                    :tool (symbol-name tool-id)
                    :scope 'command
                    :pattern command
+                   :approved t))))
+        (when (eq decision 'allow-directory)
+          (when-let ((directory (chat-approval--directory-scope tool-id arguments)))
+            (chat-approval--notify
+             observer
+             (list :type 'whitelist-update
+                   :tool (symbol-name tool-id)
+                   :scope 'directory
+                   :pattern directory
                    :approved t))))
         (chat-approval--notify
          observer

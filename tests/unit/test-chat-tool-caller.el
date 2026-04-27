@@ -136,6 +136,37 @@
          (should (string-match-p "Approval denied" result))
          (should-not (file-exists-p target-file)))))))
 
+(ert-deftest chat-tool-caller-directory-whitelist-auto-approves-file-write ()
+  "Test directory whitelists let file writes execute without a fresh prompt."
+  (chat-test-with-temp-dir
+   (let* ((target-file (expand-file-name "docs/guide.md" temp-dir))
+          (target-dir (chat-approval--normalize-directory
+                       (file-name-directory target-file)))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-approval-always-approve-directories (list target-dir))
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (chat-approval-decision-function
+           (lambda (&rest _args)
+             (ert-fail "directory whitelist should bypass approval prompt")))
+          events)
+     (chat-files-register-built-in-tools)
+     (let ((result (chat-tool-caller-execute
+                    `(:name "files_write"
+                      :arguments (("path" . ,target-file)
+                                  ("content" . "hello docs")))
+                    nil
+                    (lambda (event)
+                      (push event events)))))
+       (should (string-match-p "hello docs" (with-temp-buffer
+                                              (insert-file-contents target-file)
+                                              (buffer-string))))
+       (should (string-match-p ":path" result))
+       (let ((approval (seq-find (lambda (event)
+                                   (eq (plist-get event :type) 'approval))
+                                 events)))
+         (should (eq (plist-get approval :decision) 'whitelisted-directory))
+         (should (equal (plist-get approval :directory) target-dir)))))))
+
 (ert-deftest chat-tool-caller-stringifies-built-in-file-results ()
   "Test that file tool results are converted to strings for follow up prompts."
   (chat-test-with-temp-dir

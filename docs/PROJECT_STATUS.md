@@ -95,6 +95,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - approval prompts now support direct shortcut decisions that match the request panel action hints
 - approval shortcut guidance now also appears in native prompt text and first-occurrence minibuffer feedback in chat mode and code mode
 - pending approvals now remain visible in persistent native status surfaces instead of only transient prompts
+- file-write approvals now also support directory-level whitelisting, so repeated edits under one approved subtree can run without repeated prompts while shell and non-directory tools remain outside that scope
 - persistent native status surfaces are now explicitly limited to blocking states, while transient activity stays out of header and mode lines
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 - sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries
