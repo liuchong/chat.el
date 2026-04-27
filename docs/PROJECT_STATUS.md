@@ -105,6 +105,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - plain chat now exposes the same shared reading capture model for region, defun, near-point, and bounded current-file questions
 - AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
+- code mode now also has a native help buffer and `C-c C-h` shortcut so reading commands, preview flow, request-panel usage, and regenerate/edit-resend are discoverable inside the main coding surface
 - shared reading helpers now have denser regression coverage around naming, fallback behavior, minimal captures, and help-buffer behavior
 - shared reading and plain-chat bootstrap paths now also have denser refusal, default-limit, and fallback-session coverage
 - region capture now correctly keeps end-line metadata stable when selections stop at the next line boundary, and reused plain-chat sessions now replace stale input before quoting or asking

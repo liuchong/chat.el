@@ -113,6 +113,42 @@ Set to 0 to never auto-apply."
   :type 'integer
   :group 'chat-code)
 
+(defcustom chat-code-commands-help
+  "Code Mode Commands:
+  RET                   - Send message
+  C-c C-a               - Accept last edit
+  C-c C-k               - Reject last edit
+  C-c C-v               - View preview buffer
+  C-c C-f               - Focus another file
+  C-c C-r               - Refresh context
+  C-c C-q               - Quote active region into input
+  C-c C-SPC             - Ask about active region immediately
+  C-c C-s               - Show current request diagnostics
+  C-c C-p               - Toggle request panel
+  C-c C-e               - Edit and resend last user message
+  C-c C-g               - Regenerate last assistant response
+  C-c C-h               - Open this help buffer
+  C-g                   - Cancel current operation
+
+Reading Workflow:
+  M-x chat-code-quote-region       - Quote active region into code mode
+  M-x chat-code-quote-defun        - Quote defun at point into code mode
+  M-x chat-code-quote-near-point   - Quote nearby context into code mode
+  M-x chat-code-quote-current-file - Quote current file into code mode
+  M-x chat-code-ask-region         - Ask about active region immediately
+  M-x chat-code-ask-defun          - Ask about defun at point immediately
+  M-x chat-code-ask-near-point     - Ask about nearby context immediately
+  M-x chat-code-ask-current-file   - Ask about current file immediately
+
+Workflow Notes:
+  - Quote commands fill the input area so you can refine the question.
+  - Ask commands send the quoted context immediately.
+  - The request panel shows execution details without polluting the transcript.
+  - Preview edits in *chat-preview* before accepting file changes."
+  "Help text displayed for code mode commands."
+  :type 'string
+  :group 'chat-code)
+
 (defcustom chat-code-system-prompt
   "You are an expert programmer. Help the user write, understand, and modify code.
 
@@ -1262,6 +1298,7 @@ Optional PROJECT-ROOT overrides the detected project root."
     (define-key map (kbd "C-c C-p") 'chat-code-toggle-request-panel)
     (define-key map (kbd "C-c C-e") 'chat-code-edit-last-user-message)
     (define-key map (kbd "C-c C-g") 'chat-code-regenerate-last-response)
+    (define-key map (kbd "C-c C-h") 'chat-code-show-help)
     ;; Cancel
     (define-key map (kbd "C-g") 'chat-code-cancel)
     map)
@@ -1283,6 +1320,7 @@ Key bindings:
   C-c C-p    - Toggle request panel
   C-c C-e    - Edit and resend last user message
   C-c C-g    - Regenerate last assistant response
+  C-c C-h    - Open code mode help
   C-g        - Cancel current operation
 
 In this mode, all operations use a single buffer design.
@@ -1317,7 +1355,18 @@ using C-x b or C-c C-v."
                            :timestamp (current-time))))
             (chat-session-add-message (chat-code--base-session) user-msg)
             (chat-code--display-user-message content)
-            (chat-code--process-message)))))))
+          (chat-code--process-message)))))))
+
+(defun chat-code-show-help ()
+  "Display the code-mode help buffer."
+  (interactive)
+  (with-current-buffer (get-buffer-create "*Chat Code Help*")
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert chat-code-commands-help)
+      (goto-char (point-min))
+      (view-mode 1))
+    (pop-to-buffer (current-buffer))))
 
 (defun chat-code-quote-region ()
   "Quote the active region into the current code-mode input area."

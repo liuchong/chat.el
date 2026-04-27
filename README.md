@@ -217,6 +217,7 @@ Refactoring, git assistance, indexing extras, and performance helpers are still 
 | `M-x chat-code-ask-defun` | Ask AI about the defun at point immediately |
 | `M-x chat-code-ask-near-point` | Ask AI about nearby context immediately |
 | `M-x chat-code-ask-current-file` | Ask AI about the current file immediately |
+| `M-x chat-code-show-help` | Open the native code-mode help buffer |
 
 ### Inline Editing Commands
 

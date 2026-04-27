@@ -360,6 +360,7 @@
   "Test code mode keymap exposes reading and session workflow shortcuts."
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-e")) 'chat-code-edit-last-user-message))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-g")) 'chat-code-regenerate-last-response))
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-h")) 'chat-code-show-help))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-q")) 'chat-code-quote-region))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-SPC")) 'chat-code-ask-region))
   (should (fboundp 'chat-code-quote-defun))
@@ -368,6 +369,27 @@
   (should (fboundp 'chat-code-ask-near-point))
   (should (fboundp 'chat-code-quote-current-file))
   (should (fboundp 'chat-code-ask-current-file)))
+
+(ert-deftest chat-code-show-help-command-is-bound ()
+  "Test code mode exposes a native help command."
+  (should (commandp 'chat-code-show-help))
+  (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-h")) 'chat-code-show-help)))
+
+(ert-deftest chat-code-show-help-renders-reading-workflow-section ()
+  "Test code-mode help renders the key reading and session commands."
+  (chat-code-show-help)
+  (with-current-buffer "*Chat Code Help*"
+    (should (string-match-p "Reading Workflow:" (buffer-string)))
+    (should (string-match-p "chat-code-quote-region" (buffer-string)))
+    (should (string-match-p "chat-code-ask-current-file" (buffer-string)))
+    (should (string-match-p "C-c C-e" (buffer-string)))
+    (should (string-match-p "C-c C-g" (buffer-string)))))
+
+(ert-deftest chat-code-show-help-enables-view-mode ()
+  "Test code-mode help uses view-mode like chat help."
+  (chat-code-show-help)
+  (with-current-buffer "*Chat Code Help*"
+    (should view-mode)))
 
 (ert-deftest chat-code-send-streaming-uses-current-stream-api ()
   "Test code mode streaming uses the current chat-stream API shape."

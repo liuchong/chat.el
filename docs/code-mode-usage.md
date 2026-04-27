@@ -138,6 +138,7 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `C-c C-p` | `chat-code-toggle-request-panel` | 切换请求过程面板 |
 | `C-c C-e` | `chat-code-edit-last-user-message` | 编辑并重发最后一条用户消息 |
 | `C-c C-g` | `chat-code-regenerate-last-response` | 重新生成最后一条 AI 回复 |
+| `C-c C-h` | `chat-code-show-help` | 打开 code-mode 原生帮助缓冲区 |
 | `C-g` | `chat-code-cancel` | 取消当前操作 |
 
 ### 阅读代码时直接提问
