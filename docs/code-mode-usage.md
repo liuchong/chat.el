@@ -156,6 +156,7 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 当文件写工具触发审批时，原生审批提示除了单次、session、tool 级放行外，还会在可判定目录范围时提供 directory 级放行。
 这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。
 request panel 现在也会把 directory 级审批范围直接显示出来，方便确认放行边界。
+对于 streaming 响应，request panel 现在还会显示 live state、last chunk 和 recent activity，方便判断模型是否还在持续工作。
 
 ### 阅读代码时直接提问
 
@@ -196,6 +197,18 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 3. 当当前 token 看起来像路径时，会自动触发文件补全
 4. 继续输入以缩小候选，或用你的 completion 前端直接选择
 5. 需要多行提示词时，用 S-RET 插入换行，不会直接发送
+```
+
+### Streaming 可见性
+
+如果模型正在长时间生成内容：
+
+```text
+1. 用 C-c C-p 打开 request panel
+2. 看 Live、Chunks、Last chunk、Last event
+3. 如果你仍停留在响应尾部附近，code-mode 会自动跟随最新输出
+4. 如果你手动滚走，auto-follow 不会继续抢你的视图
+5. 如果长时间没有新 chunk，再结合 stall 提示判断是否真的卡住
 ```
 
 ### 内联编辑命令（在代码缓冲区）

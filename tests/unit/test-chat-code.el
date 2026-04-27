@@ -508,7 +508,7 @@
        (funcall captured-callback "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")
        (goto-char (point-min))
        (should-not (search-forward "{\"function_call\"" nil t))
-       (should (search-forward "Calling tools..." nil t))
+       (should (search-forward "Waiting for response..." nil t))
        (should sentinel-installed)))))
 
 (ert-deftest chat-code-handle-response-persists-assistant-message ()
@@ -819,6 +819,54 @@
         (should (bufferp shown-buffer))
         (with-current-buffer shown-buffer
           (should (search-forward "Request: req-code" nil t)))))))
+
+(ert-deftest chat-code-request-live-detail-reflects-stream-chunks ()
+  "Test code mode builds a useful live label from stream diagnostics."
+  (let* ((now (current-time))
+         (label (chat-code--request-live-detail
+                 (list :phase 'streaming
+                       :stream-chunk-count 5
+                       :last-chunk-at now))))
+    (should (string-match-p "Streaming 5 chunks" label))))
+
+(ert-deftest chat-code-handle-request-diagnostics-update-refreshes-status ()
+  "Test diagnostics updates refresh code-mode live status."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal)))
+    (puthash "req-code"
+             (make-chat-request-trace
+              :id "req-code"
+              :mode 'code
+              :provider 'kimi-code
+              :model 'kimi-code
+              :phase 'streaming
+              :started-at (current-time)
+              :updated-at (current-time)
+              :stream-chunk-count 3
+              :last-chunk-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (chat-code-mode)
+      (setq-local chat-code--current-request-id "req-code")
+      (setq-local chat-code--status-state 'running)
+      (setq-local chat-code--status-detail "Waiting")
+      (chat-code--handle-request-diagnostics-update "req-code" nil nil)
+      (should (string-match-p "Streaming 3 chunks" chat-code--status-detail)))))
+
+(ert-deftest chat-code-render-response-state-follows-live-output-near-input ()
+  "Test code mode auto-follows rendered output when the window is at the live edge."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (chat-code-mode)
+      (setq-local chat-code--messages-end (point-max-marker))
+      (setq-local chat-code--input-marker (point-max-marker))
+      (insert "placeholder")
+      (setq chat-code--messages-end (copy-marker (point)))
+      (insert "\n> ")
+      (setq chat-code--input-marker (point-marker))
+      (goto-char (marker-position chat-code--input-marker))
+      (chat-code--render-response-state (point-min) "Streaming body" nil)
+      (should (= (point) (marker-position chat-code--messages-end))))))
 
 (ert-deftest chat-code-render-response-state-announces-approval-shortcuts ()
   "Test code mode surfaces approval shortcuts in minibuffer feedback."

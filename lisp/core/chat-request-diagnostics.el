@@ -34,6 +34,19 @@
   events)
 
 (defvar chat-request-diagnostics--traces (make-hash-table :test 'equal))
+(defvar chat-request-diagnostics--observers (make-hash-table :test 'equal))
+
+(defun chat-request-diagnostics--handle-live-p (handle)
+  "Return non-nil when HANDLE is a live buffer handle."
+  (and handle
+       (bufferp handle)
+       (buffer-live-p handle)))
+
+(defun chat-request-diagnostics--process-live-p (process)
+  "Return non-nil when PROCESS is a live process."
+  (and process
+       (processp process)
+       (process-live-p process)))
 
 (defun chat-request-diagnostics--generate-id ()
   "Return a fresh request id."
@@ -81,7 +94,25 @@
 
 (defun chat-request-diagnostics-clear (id)
   "Remove request trace ID."
+  (remhash id chat-request-diagnostics--observers)
   (remhash id chat-request-diagnostics--traces))
+
+(defun chat-request-diagnostics-subscribe (id observer)
+  "Subscribe OBSERVER to updates for request ID."
+  (puthash id
+           (cons observer (gethash id chat-request-diagnostics--observers))
+           chat-request-diagnostics--observers)
+  observer)
+
+(defun chat-request-diagnostics-unsubscribe (id observer)
+  "Unsubscribe OBSERVER from request ID."
+  (let ((observers (gethash id chat-request-diagnostics--observers)))
+    (if observers
+        (let ((remaining (delq observer (copy-sequence observers))))
+          (if remaining
+              (puthash id remaining chat-request-diagnostics--observers)
+            (remhash id chat-request-diagnostics--observers)))
+      nil)))
 
 (defun chat-request-diagnostics-record (id event-type &rest props)
   "Append EVENT-TYPE with PROPS to request trace ID."
@@ -111,6 +142,8 @@
           (setf (chat-request-trace-last-chunk-at trace) now))
         (setf (chat-request-trace-events trace)
               (append (chat-request-trace-events trace) (list event)))
+        (dolist (observer (gethash id chat-request-diagnostics--observers))
+          (funcall observer id trace event))
         trace))))
 
 (defun chat-request-diagnostics-snapshot (id)
@@ -131,14 +164,10 @@
        :last-chunk-at (chat-request-trace-last-chunk-at trace)
        :last-error (chat-request-trace-last-error trace)
        :last-event (chat-request-trace-last-event trace)
-       :handle-live-p (let ((handle (chat-request-trace-handle trace)))
-                        (and handle
-                             (bufferp handle)
-                             (buffer-live-p handle)))
-       :process-live-p (let ((process (chat-request-trace-process trace)))
-                         (and process
-                              (processp process)
-                              (process-live-p process)))
+       :handle-live-p (chat-request-diagnostics--handle-live-p
+                       (chat-request-trace-handle trace))
+       :process-live-p (chat-request-diagnostics--process-live-p
+                        (chat-request-trace-process trace))
        :events (chat-request-trace-events trace)))))
 
 (defun chat-request-diagnostics-latest ()

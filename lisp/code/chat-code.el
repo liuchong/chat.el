@@ -291,6 +291,12 @@ Inherits from chat-session with additional code-specific fields."
 (defvar-local chat-code--auto-path-completion-active nil
   "Guard flag to avoid recursive path completion in the input area.")
 
+(defvar-local chat-code--request-refresh-timer nil
+  "Timer used to refresh live request surfaces in code mode.")
+
+(defvar-local chat-code--request-diagnostics-observer nil
+  "Observer function subscribed to request diagnostics updates.")
+
 (defun chat-code--pending-approval-event ()
   "Return the current pending approval event when present."
   (chat-status-persistent-event chat-code--request-tool-events))
@@ -335,6 +341,121 @@ Inherits from chat-session with additional code-specific fields."
     (cancel-timer chat-code--request-hint-timer))
   (setq chat-code--request-hint-timer nil))
 
+(defun chat-code--clear-request-refresh-timer ()
+  "Cancel and clear the live request refresh timer."
+  (when (timerp chat-code--request-refresh-timer)
+    (cancel-timer chat-code--request-refresh-timer))
+  (setq chat-code--request-refresh-timer nil))
+
+(defun chat-code--unsubscribe-request-diagnostics ()
+  "Remove the current request diagnostics observer."
+  (when (and chat-code--current-request-id
+             chat-code--request-diagnostics-observer)
+    (chat-request-diagnostics-unsubscribe
+     chat-code--current-request-id
+     chat-code--request-diagnostics-observer))
+  (setq chat-code--request-diagnostics-observer nil))
+
+(defun chat-code--window-near-live-edge-p (window)
+  "Return non-nil when WINDOW is already near the live response edge."
+  (and (window-live-p window)
+       (eq (window-buffer window) (current-buffer))
+       (or (chat-code--point-in-input-p (window-point window))
+           (>= (window-end window t)
+               (max (point-min) (- (point-max) 80))))))
+
+(defun chat-code--active-live-windows ()
+  "Return windows that should follow active streamed output."
+  (seq-filter #'chat-code--window-near-live-edge-p
+              (get-buffer-window-list (current-buffer) nil t)))
+
+(defun chat-code--follow-live-output (windows)
+  "Move WINDOWS to the latest response edge."
+  (dolist (window windows)
+    (when (window-live-p window)
+      (chat-code--set-window-point
+       window
+       (marker-position chat-code--messages-end)))))
+
+(defun chat-code--set-window-point (window position)
+  "Set WINDOW point to POSITION."
+  (set-window-point window position))
+
+(defun chat-code--request-live-detail (&optional snapshot)
+  "Return a compact live request label from SNAPSHOT."
+  (let* ((state (or snapshot
+                    (and chat-code--current-request-id
+                         (chat-request-diagnostics-snapshot
+                          chat-code--current-request-id))))
+         (phase (plist-get state :phase))
+         (chunk-count (plist-get state :stream-chunk-count))
+         (last-chunk-at (plist-get state :last-chunk-at))
+         (chunk-age (and last-chunk-at
+                         (truncate
+                          (float-time
+                           (time-subtract (current-time) last-chunk-at)))))
+         (stalled (and state
+                       chat-code--current-request-id
+                       (chat-request-diagnostics-stall-message
+                        chat-code--current-request-id))))
+    (cond
+     (stalled stalled)
+     ((eq phase 'streaming)
+      (if (> chunk-count 0)
+          (format "Streaming %d chunks, last %ss ago" chunk-count (or chunk-age 0))
+        "Streaming, waiting for first chunk"))
+     ((eq phase 'tool-loop) "Resolving tool follow-up")
+     ((eq phase 'waiting) "Waiting for provider response")
+     ((eq phase 'processing) "Processing streamed response")
+     (t chat-code--status-detail))))
+
+(defun chat-code--live-placeholder (&optional snapshot)
+  "Return a user-facing streaming placeholder from SNAPSHOT."
+  (let* ((state (or snapshot
+                    (and chat-code--current-request-id
+                         (chat-request-diagnostics-snapshot
+                          chat-code--current-request-id))))
+         (phase (plist-get state :phase)))
+    (pcase phase
+      ('streaming (chat-code--request-live-detail state))
+      ('tool-loop "Resolving tool calls...")
+      ('processing "Processing response...")
+      (_ "Waiting for response..."))))
+
+(defun chat-code--refresh-live-surfaces (&optional snapshot)
+  "Refresh panel and status text from SNAPSHOT."
+  (when (and chat-code--current-request-id
+             (eq chat-code--status-state 'running))
+    (chat-code--set-status 'running (chat-code--request-live-detail snapshot))
+    (when (or (and chat-request-panel-auto-show
+                   chat-code--current-request-id)
+              (get-buffer-window
+               (chat-request-panel--buffer-name (current-buffer)) t))
+      (chat-request-panel-update
+       (current-buffer)
+       chat-code--current-request-id
+       chat-code--request-tool-events))))
+
+(defun chat-code--handle-request-diagnostics-update (id _trace _event)
+  "Handle diagnostics update for request ID."
+  (when (equal id chat-code--current-request-id)
+    (chat-code--refresh-live-surfaces
+     (chat-request-diagnostics-snapshot id))))
+
+(defun chat-code--start-request-refresh-timer (buffer)
+  "Start the live request refresh timer for BUFFER."
+  (chat-code--clear-request-refresh-timer)
+  (setq chat-code--request-refresh-timer
+        (run-at-time
+         1
+         1
+         (lambda ()
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (if chat-code--current-request-id
+                   (chat-code--refresh-live-surfaces)
+                 (chat-code--clear-request-refresh-timer))))))))
+
 (defun chat-code--cleanup-request-state (&optional phase summary)
   "Clear current request diagnostics and optionally record PHASE and SUMMARY."
   (when chat-code--current-request-id
@@ -345,8 +466,10 @@ Inherits from chat-session with additional code-specific fields."
        :handle chat-code--active-request-handle
        :process chat-code--active-stream-process
        :summary summary))
+    (chat-code--unsubscribe-request-diagnostics)
+    (chat-code--clear-request-refresh-timer)
     (chat-code--clear-request-hint-timer)
-  (setq chat-code--request-hint-shown nil))
+    (setq chat-code--request-hint-shown nil))
   (setq chat-code--request-tool-events nil)
   (setq chat-code--last-approval-hint nil)
   (setq chat-code--current-request-id nil))
@@ -397,6 +520,7 @@ Inherits from chat-session with additional code-specific fields."
 (defun chat-code--begin-request (model transport)
   "Create diagnostics state for MODEL and TRANSPORT."
   (let* ((session chat-code--current-session)
+         (source-buffer (current-buffer))
          (base-session (and session (chat-code-session-base-session session)))
          (request-id
           (chat-request-diagnostics-create
@@ -412,11 +536,21 @@ Inherits from chat-session with additional code-specific fields."
      'request-created
      :transport transport
      :summary (format "Preparing %s request" transport))
-  (setq chat-code--request-tool-events nil)
-  (setq chat-code--last-approval-hint nil)
-  (when chat-request-panel-auto-show
-      (chat-request-panel-open (current-buffer) request-id nil))
-    (chat-code--start-request-hint-timer (current-buffer))
+    (setq chat-code--request-tool-events nil)
+    (setq chat-code--last-approval-hint nil)
+    (setq chat-code--request-diagnostics-observer
+          (lambda (id trace event)
+            (ignore trace event)
+            (when (buffer-live-p source-buffer)
+              (with-current-buffer source-buffer
+                (chat-code--handle-request-diagnostics-update id nil nil)))))
+    (chat-request-diagnostics-subscribe
+     request-id
+     chat-code--request-diagnostics-observer)
+    (when chat-request-panel-auto-show
+      (chat-request-panel-open source-buffer request-id nil))
+    (chat-code--start-request-hint-timer source-buffer)
+    (chat-code--start-request-refresh-timer source-buffer)
     request-id))
 
 (defun chat-code-show-current-request-status ()
@@ -845,33 +979,35 @@ Returns either the block body string or a list of (LANG BODY)."
                                                       &optional tool-loop-limit-reached
                                                       tool-summary)
   "Render CONTENT, TOOL-EVENTS, TOOL-LOOP-LIMIT-REACHED, and TOOL-SUMMARY."
-  (setq chat-code--request-tool-events tool-events)
-  (chat-code--maybe-announce-approval-shortcuts tool-events)
-  (when (or (and chat-request-panel-auto-show
-                 chat-code--current-request-id)
-            (get-buffer-window
-             (chat-request-panel--buffer-name (current-buffer)) t))
-    (chat-request-panel-update
-     (current-buffer)
-     chat-code--current-request-id
-     tool-events))
-  (chat-code--replace-response-slot
-   content-start
-   (lambda ()
-     (unless (string-empty-p content)
-       (chat-code--insert-formatted-response content))
-     (when tool-summary
-       (unless (and (string-empty-p content)
-                    (not tool-events))
-         (insert "\n"))
-       (insert (format "Tools used: %s" tool-summary)))
-     (when tool-loop-limit-reached
-       (unless (and (string-empty-p content)
-                    (not tool-events)
-                    (not tool-summary))
-         (insert "\n"))
-       (insert "Tool loop stopped after reaching the safety limit."))
-     (insert "\n\n"))))
+  (let ((follow-windows (chat-code--active-live-windows)))
+    (setq chat-code--request-tool-events tool-events)
+    (chat-code--maybe-announce-approval-shortcuts tool-events)
+    (when (or (and chat-request-panel-auto-show
+                   chat-code--current-request-id)
+              (get-buffer-window
+               (chat-request-panel--buffer-name (current-buffer)) t))
+      (chat-request-panel-update
+       (current-buffer)
+       chat-code--current-request-id
+       tool-events))
+    (chat-code--replace-response-slot
+     content-start
+     (lambda ()
+       (unless (string-empty-p content)
+         (chat-code--insert-formatted-response content))
+       (when tool-summary
+         (unless (and (string-empty-p content)
+                      (not tool-events))
+           (insert "\n"))
+         (insert (format "Tools used: %s" tool-summary)))
+       (when tool-loop-limit-reached
+         (unless (and (string-empty-p content)
+                      (not tool-events)
+                      (not tool-summary))
+           (insert "\n"))
+         (insert "Tool loop stopped after reaching the safety limit."))
+       (insert "\n\n")))
+    (chat-code--follow-live-output follow-windows)))
 
 (defun chat-code--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
@@ -1608,7 +1744,7 @@ CONTENT-START marks the assistant response body."
                         (chat-code--render-response-state
                          content-start
                          (if (string-empty-p visible)
-                             "Calling tools..."
+                             (chat-code--live-placeholder)
                            visible)
                          nil))
                       (redisplay t))))

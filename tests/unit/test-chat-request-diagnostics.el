@@ -39,4 +39,17 @@
              "no chunks"
              (chat-request-diagnostics-stall-message id)))))
 
+(ert-deftest chat-request-diagnostics-notifies-subscribed-observers ()
+  "Test request diagnostics observers receive recorded events."
+  (let* ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+         (chat-request-diagnostics--observers (make-hash-table :test 'equal))
+         (id (chat-request-diagnostics-create 'chat 'kimi-code 'kimi-code))
+         captured)
+    (chat-request-diagnostics-subscribe
+     id
+     (lambda (request-id _trace event)
+       (setq captured (list request-id (plist-get event :type)))))
+    (chat-request-diagnostics-record id 'stream-chunk :summary "Chunk")
+    (should (equal captured (list id 'stream-chunk)))))
+
 (provide 'test-chat-request-diagnostics)

@@ -98,6 +98,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - file-write approvals now also support directory-level whitelisting, so repeated edits under one approved subtree can run without repeated prompts while shell and non-directory tools remain outside that scope
 - request panel now also shows directory-scoped approval context for file-write whitelists, making the approval boundary visible before and after acceptance
 - code-mode input now supports path-aware completion for absolute and project-relative file paths, and `S-RET` now inserts a newline without submitting the current prompt
+- request diagnostics now support observers, code-mode uses them to refresh live status surfaces during streaming, and the request panel now shows live state, chunk freshness, and recent activity while a response is still running
+- code-mode streaming output now follows the live response edge when the user is still near the active output, which makes long-running generation less visually stale without hijacking manual navigation
 - persistent native status surfaces are now explicitly limited to blocking states, while transient activity stays out of header and mode lines
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 - sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries

@@ -94,6 +94,30 @@
   (when time
     (float-time (time-subtract (current-time) time))))
 
+(defun chat-request-panel--format-seconds (seconds)
+  "Return a short readable string for SECONDS."
+  (if seconds
+      (format "%.1fs" seconds)
+    "n/a"))
+
+(defun chat-request-panel--live-state (snapshot)
+  "Return a user-facing live state label for SNAPSHOT."
+  (let* ((phase (plist-get snapshot :phase))
+         (process-live-p (plist-get snapshot :process-live-p))
+         (stall (and snapshot
+                     (chat-request-diagnostics-stall-message
+                      (plist-get snapshot :id)))))
+    (cond
+     ((and stall (not (string-empty-p stall))) "stalled")
+     ((and (eq phase 'streaming) process-live-p) "streaming")
+     ((and (eq phase 'waiting) process-live-p) "waiting")
+     ((eq phase 'tool-loop) "tool-loop")
+     ((eq phase 'completed) "completed")
+     ((eq phase 'failed) "failed")
+     ((eq phase 'cancelled) "cancelled")
+     (process-live-p "active")
+     (t "idle"))))
+
 (defun chat-request-panel--render (source-buffer request-id tool-events)
   "Render panel for SOURCE-BUFFER, REQUEST-ID, and TOOL-EVENTS."
   (let* ((snapshot (and request-id
@@ -120,6 +144,8 @@
                               (or (plist-get snapshot :transport) "n/a")))
               (insert (format "Timeout: %s\n"
                               (or (plist-get snapshot :timeout) "n/a")))
+              (insert (format "Live: %s\n"
+                              (chat-request-panel--live-state snapshot)))
               (insert (format "Elapsed: %ss\n"
                               (if elapsed
                                   (truncate elapsed)
@@ -130,6 +156,19 @@
                               (if (plist-get snapshot :process-live-p) "live" "dead")))
               (insert (format "Chunks: %s\n"
                               (plist-get snapshot :stream-chunk-count)))
+              (insert (format "Last chunk: %s\n"
+                              (if-let ((last-chunk-at (plist-get snapshot :last-chunk-at)))
+                                  (format-time-string "%H:%M:%S" last-chunk-at)
+                                "n/a")))
+              (insert (format "Chunk age: %s\n"
+                              (chat-request-panel--format-seconds
+                               (chat-request-panel--seconds-since
+                                (plist-get snapshot :last-chunk-at)))))
+              (when-let ((last-event (plist-get snapshot :last-event)))
+                (insert (format "Last event: %s\n"
+                                (or (plist-get last-event :summary)
+                                    (plist-get last-event :type)
+                                    "n/a"))))
               (when-let ((last-error (plist-get snapshot :last-error)))
                 (insert (format "Error: %s\n" last-error))))
           (insert "No active request\n"))

@@ -277,11 +277,13 @@ These commands exist in the repository but are still being repaired and validate
 - **Streaming responses** - Real-time code generation toggle exists
 - **Visible run state** - Header line shows running, success, failed, cancelled, or stopped
 - **Structured request panel** - `C-c C-p` opens a dedicated panel for phases, approvals, tool calls, whitelist changes, and stalled-request context
+- **Live streaming diagnostics** - the request panel now shows live state, recent chunk freshness, and recent request activity while a response is still running
 - **Fast approval shortcuts** - pending approval prompts accept `C-c C-a` once, `C-c C-s` session, `C-c C-t` tool, `C-c C-f` directory for file writes, `C-c C-c` command, and `C-c C-d` deny
 - **Native prompt guidance** - approval prompts and pending-approval messages teach the same shortcut flow without inserting extra transcript noise
 - **Persistent approval status** - pending approvals also surface in code mode `header-line` / mode line and in the chat buffer status line
 - **Path-aware input** - code-mode input now auto-suggests absolute and project-relative file paths while you type
 - **Multiline input** - `S-RET` inserts a newline in the code-mode input area without sending the message
+- **Streaming auto-follow** - code-mode follows live output while you stay near the response edge, without force-scrolling if you manually move away
 - **Status discipline** - persistent status surfaces are reserved for blocking states; transient activity stays in the request panel or echo area
 - **Detailed request diagnostics** - `C-c C-s` opens the full current-request status buffer
 - **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root

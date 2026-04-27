@@ -167,4 +167,39 @@
         (should (search-forward "Approval 1: allow-directory" nil t))
         (should (search-forward "Whitelist 1: directory /tmp/project/docs/" nil t))))))
 
+(ert-deftest chat-request-panel-renders-live-stream-summary ()
+  "Test the request panel shows live stream freshness and recent activity."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-diagnostics-stall-threshold 60)
+        panel-buffer
+        (now (current-time)))
+    (puthash "req-panel"
+             (make-chat-request-trace
+              :id "req-panel"
+              :mode 'code
+              :provider 'kimi-code
+              :model 'kimi-code
+              :phase 'streaming
+              :started-at now
+              :updated-at now
+              :transport 'stream
+              :process 'proc
+              :stream-chunk-count 7
+              :last-chunk-at now
+              :last-event '(:type stream-chunk :summary "Received 7 streamed chunks")
+              :events '((:type stream-chunk :summary "Received 7 streamed chunks")))
+             chat-request-diagnostics--traces)
+    (cl-letf (((symbol-function 'chat-request-diagnostics--process-live-p)
+               (lambda (_obj) t)))
+      (with-temp-buffer
+        (setq panel-buffer
+              (chat-request-panel--buffer (current-buffer)))
+        (chat-request-panel-update (current-buffer) "req-panel" nil)
+        (with-current-buffer panel-buffer
+          (goto-char (point-min))
+          (should (search-forward "Live: streaming" nil t))
+          (should (search-forward "Chunks: 7" nil t))
+          (should (search-forward "Chunk age:" nil t))
+          (should (search-forward "Last event: Received 7 streamed chunks" nil t)))))))
+
 (provide 'test-chat-request-panel)
