@@ -52,4 +52,20 @@
     (chat-request-diagnostics-record id 'stream-chunk :summary "Chunk")
     (should (equal captured (list id 'stream-chunk)))))
 
+(ert-deftest chat-request-diagnostics-live-detail-prefers-approval-context ()
+  "Test live detail surfaces pending approvals before generic phases."
+  (should (string=
+           (chat-request-diagnostics-live-detail
+            '(:phase tool-loop)
+            '((:type approval-pending :tool "files_write")))
+           "Approval pending for files_write")))
+
+(ert-deftest chat-request-diagnostics-live-detail-summarizes-streaming ()
+  "Test live detail summarizes streaming chunk progress."
+  (let ((detail (chat-request-diagnostics-live-detail
+                 (list :phase 'streaming
+                       :stream-chunk-count 4
+                       :last-chunk-at (current-time)))))
+    (should (string-match-p "Receiving response (4 chunks" detail))))
+
 (provide 'test-chat-request-diagnostics)

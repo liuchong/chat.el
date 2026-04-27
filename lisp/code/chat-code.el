@@ -297,6 +297,12 @@ Inherits from chat-session with additional code-specific fields."
 (defvar-local chat-code--request-diagnostics-observer nil
   "Observer function subscribed to request diagnostics updates.")
 
+(defvar-local chat-code--live-response-start nil
+  "Marker for the pending live assistant response slot.")
+
+(defvar-local chat-code--live-response-content ""
+  "Latest visible assistant content for the live response slot.")
+
 (defun chat-code--pending-approval-event ()
   "Return the current pending approval event when present."
   (chat-status-persistent-event chat-code--request-tool-events))
@@ -383,50 +389,44 @@ Inherits from chat-session with additional code-specific fields."
 
 (defun chat-code--request-live-detail (&optional snapshot)
   "Return a compact live request label from SNAPSHOT."
-  (let* ((state (or snapshot
-                    (and chat-code--current-request-id
-                         (chat-request-diagnostics-snapshot
-                          chat-code--current-request-id))))
-         (phase (plist-get state :phase))
-         (chunk-count (plist-get state :stream-chunk-count))
-         (last-chunk-at (plist-get state :last-chunk-at))
-         (chunk-age (and last-chunk-at
-                         (truncate
-                          (float-time
-                           (time-subtract (current-time) last-chunk-at)))))
-         (stalled (and state
-                       chat-code--current-request-id
-                       (chat-request-diagnostics-stall-message
-                        chat-code--current-request-id))))
-    (cond
-     (stalled stalled)
-     ((eq phase 'streaming)
-      (if (> chunk-count 0)
-          (format "Streaming %d chunks, last %ss ago" chunk-count (or chunk-age 0))
-        "Streaming, waiting for first chunk"))
-     ((eq phase 'tool-loop) "Resolving tool follow-up")
-     ((eq phase 'waiting) "Waiting for provider response")
-     ((eq phase 'processing) "Processing streamed response")
-     (t chat-code--status-detail))))
+  (chat-request-diagnostics-live-detail
+   (or snapshot
+       (and chat-code--current-request-id
+            (chat-request-diagnostics-snapshot
+             chat-code--current-request-id)))
+   chat-code--request-tool-events
+   chat-code--status-detail))
 
 (defun chat-code--live-placeholder (&optional snapshot)
   "Return a user-facing streaming placeholder from SNAPSHOT."
-  (let* ((state (or snapshot
-                    (and chat-code--current-request-id
-                         (chat-request-diagnostics-snapshot
-                          chat-code--current-request-id))))
-         (phase (plist-get state :phase)))
-    (pcase phase
-      ('streaming (chat-code--request-live-detail state))
-      ('tool-loop "Resolving tool calls...")
-      ('processing "Processing response...")
-      (_ "Waiting for response..."))))
+  (or (chat-code--request-live-detail snapshot)
+      "Waiting for response..."))
+
+(defun chat-code--live-narrative-line (&optional detail)
+  "Return a transient live narrative line for DETAIL."
+  (when-let ((detail (or detail
+                         (chat-code--request-live-detail))))
+    (propertize (format "[Live] %s" detail) 'face 'shadow)))
+
+(defun chat-code--refresh-live-response (&optional snapshot)
+  "Refresh the transcript live response slot from SNAPSHOT."
+  (when (and chat-code--live-response-start
+             (marker-buffer chat-code--live-response-start)
+             (eq chat-code--status-state 'running))
+    (chat-code--render-response-state
+     chat-code--live-response-start
+     chat-code--live-response-content
+     chat-code--request-tool-events
+     nil
+     nil
+     (chat-code--request-live-detail snapshot))))
 
 (defun chat-code--refresh-live-surfaces (&optional snapshot)
   "Refresh panel and status text from SNAPSHOT."
   (when (and chat-code--current-request-id
              (eq chat-code--status-state 'running))
     (chat-code--set-status 'running (chat-code--request-live-detail snapshot))
+    (chat-code--refresh-live-response snapshot)
     (when (or (and chat-request-panel-auto-show
                    chat-code--current-request-id)
               (get-buffer-window
@@ -472,6 +472,8 @@ Inherits from chat-session with additional code-specific fields."
     (setq chat-code--request-hint-shown nil))
   (setq chat-code--request-tool-events nil)
   (setq chat-code--last-approval-hint nil)
+  (setq chat-code--live-response-start nil)
+  (setq chat-code--live-response-content "")
   (setq chat-code--current-request-id nil))
 
 (defun chat-code--maybe-announce-approval-shortcuts (tool-events)
@@ -977,10 +979,13 @@ Returns either the block body string or a list of (LANG BODY)."
 
 (defun chat-code--render-response-state (content-start content tool-events
                                                       &optional tool-loop-limit-reached
-                                                      tool-summary)
+                                                      tool-summary
+                                                      live-detail)
   "Render CONTENT, TOOL-EVENTS, TOOL-LOOP-LIMIT-REACHED, and TOOL-SUMMARY."
   (let ((follow-windows (chat-code--active-live-windows)))
     (setq chat-code--request-tool-events tool-events)
+    (setq chat-code--live-response-start content-start)
+    (setq chat-code--live-response-content content)
     (chat-code--maybe-announce-approval-shortcuts tool-events)
     (when (or (and chat-request-panel-auto-show
                    chat-code--current-request-id)
@@ -995,13 +1000,19 @@ Returns either the block body string or a list of (LANG BODY)."
      (lambda ()
        (unless (string-empty-p content)
          (chat-code--insert-formatted-response content))
+       (when live-detail
+         (unless (string-empty-p content)
+           (insert "\n"))
+         (insert (chat-code--live-narrative-line live-detail)))
        (when tool-summary
          (unless (and (string-empty-p content)
+                      (not live-detail)
                       (not tool-events))
            (insert "\n"))
          (insert (format "Tools used: %s" tool-summary)))
        (when tool-loop-limit-reached
          (unless (and (string-empty-p content)
+                      (not live-detail)
                       (not tool-events)
                       (not tool-summary))
            (insert "\n"))
@@ -1132,9 +1143,10 @@ Returns either the block body string or a list of (LANG BODY)."
                          (plist-get processed :tool-calls)
                          (plist-get processed :tool-results))
                :timestamp (current-time)))
-             (next-messages (chat-code--prepare-request-messages
-                             model
-                             (append messages (list followup-message)))))
+             (next-messages
+              (chat-code--prepare-request-messages
+               model
+               (append messages (list followup-message)))))
         (chat-code--set-status
          'running
          (format "Resolving tools (%d/%d)" (1+ step) chat-code-tool-loop-max-steps))
@@ -1151,10 +1163,27 @@ Returns either the block body string or a list of (LANG BODY)."
                (lambda (next-result)
                  (when (buffer-live-p ui-buffer)
                    (with-current-buffer ui-buffer
-                     (let ((next-processed
-                           (chat-tool-caller-process-response-data
-                            (plist-get next-result :content)
-                            (chat-code--base-session))))
+                     (let* ((next-tool-events nil)
+                            (next-content
+                             (string-trim-right
+                              (chat-tool-caller-extract-content
+                               (plist-get next-result :content))))
+                            (next-processed
+                             (chat-tool-caller-process-response-data
+                              (plist-get next-result :content)
+                              (chat-code--base-session)
+                              (lambda (event)
+                                (push event next-tool-events)
+                                (when (and chat-code--live-response-start
+                                           (marker-buffer chat-code--live-response-start))
+                                  (chat-code--render-response-state
+                                   chat-code--live-response-start
+                                   next-content
+                                   (append (plist-get processed :tool-events)
+                                           (reverse next-tool-events))
+                                   nil
+                                   nil
+                                   (chat-code--request-live-detail)))))))
                        (chat-code--resolve-tool-loop-async
                         model
                         next-messages
@@ -1187,9 +1216,22 @@ Returns either the block body string or a list of (LANG BODY)."
 
 (defun chat-code--finalize-response (content content-start &optional raw-request raw-response)
   "Finalize assistant CONTENT starting at CONTENT-START."
-  (let ((processed (chat-tool-caller-process-response-data
-                    content
-                    (chat-code--base-session)))
+  (let* ((tool-events nil)
+         (processed
+          (chat-tool-caller-process-response-data
+           content
+           (chat-code--base-session)
+           (lambda (event)
+             (push event tool-events)
+             (when (marker-buffer content-start)
+               (chat-code--render-response-state
+                content-start
+                (string-trim-right
+                 (chat-tool-caller-extract-content content))
+                (reverse tool-events)
+                nil
+                nil
+                (chat-code--request-live-detail))))))
         (model chat-code--active-request-model)
         (messages chat-code--active-request-messages)
         (ui-buffer (current-buffer)))
@@ -1372,6 +1414,8 @@ Optional PROJECT-ROOT overrides the detected project root."
     (setq-local chat-code--active-request-handle nil)
     (setq-local chat-code--active-stream-process nil)
     (setq-local chat-code--pending-edit nil)
+    (setq-local chat-code--live-response-start nil)
+    (setq-local chat-code--live-response-content "")
     ;; Header line with context info
     (chat-code--insert-header code-session)
     ;; Initial context summary
@@ -1727,7 +1771,13 @@ CONTENT-START marks the assistant response body."
   (let ((buffer (current-buffer))
         (full-content ""))
     (chat-code--set-status 'running "Starting stream")
-    (chat-code--render-progress content-start "Starting response")
+    (chat-code--render-response-state
+     content-start
+     ""
+     nil
+     nil
+     nil
+     (chat-code--live-placeholder))
     (let ((stream-process
            (condition-case err
                (chat-stream-request
@@ -1743,10 +1793,11 @@ CONTENT-START marks the assistant response body."
                               (chat-tool-caller-extract-content full-content))))
                         (chat-code--render-response-state
                          content-start
-                         (if (string-empty-p visible)
-                             (chat-code--live-placeholder)
-                           visible)
-                         nil))
+                         visible
+                         nil
+                         nil
+                         nil
+                         (chat-code--live-placeholder)))
                       (redisplay t))))
                 (append
                  (list :temperature 0.7

@@ -157,6 +157,7 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。
 request panel 现在也会把 directory 级审批范围直接显示出来，方便确认放行边界。
 对于 streaming 响应，request panel 现在还会显示 live state、last chunk 和 recent activity，方便判断模型是否还在持续工作。
+主对话区里的当前 assistant 槽位也会显示一条临时的 `[Live] ...` 叙事行，用真实的 waiting、streaming、tool-loop 和 approval 状态解释后台正在发生什么。
 
 ### 阅读代码时直接提问
 
@@ -206,8 +207,9 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 ```text
 1. 用 C-c C-p 打开 request panel
 2. 看 Live、Chunks、Last chunk、Last event
-3. 如果你仍停留在响应尾部附近，code-mode 会自动跟随最新输出
-4. 如果你手动滚走，auto-follow 不会继续抢你的视图
+3. 主对话区当前 assistant 槽位会显示 `[Live] ...`，包括等待首个 chunk、持续 streaming、tool follow-up、pending approval
+4. 如果你仍停留在响应尾部附近，code-mode 会自动跟随最新输出
+5. 如果你手动滚走，auto-follow 不会继续抢你的视图
 5. 如果长时间没有新 chunk，再结合 stall 提示判断是否真的卡住
 ```
 

@@ -278,6 +278,7 @@ These commands exist in the repository but are still being repaired and validate
 - **Visible run state** - Header line shows running, success, failed, cancelled, or stopped
 - **Structured request panel** - `C-c C-p` opens a dedicated panel for phases, approvals, tool calls, whitelist changes, and stalled-request context
 - **Live streaming diagnostics** - the request panel now shows live state, recent chunk freshness, and recent request activity while a response is still running
+- **Live transcript narrative** - code-mode now shows a transient `[Live] ...` line inside the active assistant slot so waiting, streaming, tool follow-up, and approval states stay visible without fabricating hidden reasoning
 - **Fast approval shortcuts** - pending approval prompts accept `C-c C-a` once, `C-c C-s` session, `C-c C-t` tool, `C-c C-f` directory for file writes, `C-c C-c` command, and `C-c C-d` deny
 - **Native prompt guidance** - approval prompts and pending-approval messages teach the same shortcut flow without inserting extra transcript noise
 - **Persistent approval status** - pending approvals also surface in code mode `header-line` / mode line and in the chat buffer status line

@@ -36,6 +36,21 @@
 (defvar chat-request-diagnostics--traces (make-hash-table :test 'equal))
 (defvar chat-request-diagnostics--observers (make-hash-table :test 'equal))
 
+(defun chat-request-diagnostics--pending-approval-event (tool-events)
+  "Return the first pending approval event from TOOL-EVENTS."
+  (seq-find
+   (lambda (event)
+     (eq (plist-get event :type) 'approval-pending))
+   tool-events))
+
+(defun chat-request-diagnostics--latest-tool-event (tool-events)
+  "Return the latest notable tool event from TOOL-EVENTS."
+  (car (last (seq-filter
+              (lambda (event)
+                (memq (plist-get event :type)
+                      '(tool-call tool-result tool-error approval approval-pending)))
+              tool-events))))
+
 (defun chat-request-diagnostics--handle-live-p (handle)
   "Return non-nil when HANDLE is a live buffer handle."
   (and handle
@@ -206,6 +221,65 @@
         ('tool-loop
          "Waiting for tool follow-up resolution.")
         (_ nil)))))
+
+(defun chat-request-diagnostics-live-detail (snapshot &optional tool-events fallback)
+  "Return a concise live status string for SNAPSHOT and TOOL-EVENTS.
+FALLBACK is used when SNAPSHOT does not provide a better detail."
+  (let* ((request-id (plist-get snapshot :id))
+         (phase (plist-get snapshot :phase))
+         (chunk-count (plist-get snapshot :stream-chunk-count))
+         (last-chunk-at (plist-get snapshot :last-chunk-at))
+         (chunk-age (and last-chunk-at
+                         (truncate
+                          (chat-request-diagnostics--seconds-since last-chunk-at))))
+         (last-event (plist-get snapshot :last-event))
+         (last-summary (plist-get last-event :summary))
+         (stalled (and request-id
+                       (chat-request-diagnostics-stall-message request-id)))
+         (pending-approval
+          (chat-request-diagnostics--pending-approval-event tool-events))
+         (latest-tool-event
+          (chat-request-diagnostics--latest-tool-event tool-events)))
+    (cond
+     (pending-approval
+      (format "Approval pending for %s"
+              (plist-get pending-approval :tool)))
+     (stalled stalled)
+     ((eq phase 'streaming)
+      (if (> chunk-count 0)
+          (format "Receiving response (%d chunks, last %ss ago)"
+                  chunk-count
+                  (or chunk-age 0))
+        "Streaming, waiting for first chunk"))
+     ((eq phase 'tool-loop)
+      (or last-summary
+          (pcase (plist-get latest-tool-event :type)
+            ('tool-call
+             (format "Running %s"
+                     (plist-get latest-tool-event :tool)))
+            ('tool-result
+             (format "Received result from %s"
+                     (plist-get latest-tool-event :tool)))
+            ('tool-error
+             (format "Tool failed: %s"
+                     (plist-get latest-tool-event :tool)))
+            (_ nil))
+          "Resolving tool follow-up"))
+     ((eq phase 'waiting)
+      (or last-summary "Waiting for provider response"))
+     ((eq phase 'processing)
+      (or last-summary "Processing response"))
+     ((eq phase 'created)
+      (or last-summary "Preparing request"))
+     ((eq phase 'completed)
+      (or last-summary "Completed"))
+     ((eq phase 'cancelled)
+      (or last-summary "Cancelled"))
+     ((eq phase 'failed)
+      (or (plist-get snapshot :last-error)
+          last-summary
+          "Request failed"))
+     (t (or last-summary fallback)))))
 
 (defun chat-request-diagnostics--format-time (time)
   "Return a readable TIME string."

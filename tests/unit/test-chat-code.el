@@ -508,7 +508,7 @@
        (funcall captured-callback "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")
        (goto-char (point-min))
        (should-not (search-forward "{\"function_call\"" nil t))
-       (should (search-forward "Waiting for response..." nil t))
+       (should (search-forward "[Live] Streaming response" nil t))
        (should sentinel-installed)))))
 
 (ert-deftest chat-code-handle-response-persists-assistant-message ()
@@ -827,7 +827,7 @@
                  (list :phase 'streaming
                        :stream-chunk-count 5
                        :last-chunk-at now))))
-    (should (string-match-p "Streaming 5 chunks" label))))
+    (should (string-match-p "Receiving response (5 chunks" label))))
 
 (ert-deftest chat-code-handle-request-diagnostics-update-refreshes-status ()
   "Test diagnostics updates refresh code-mode live status."
@@ -850,7 +850,34 @@
       (setq-local chat-code--status-state 'running)
       (setq-local chat-code--status-detail "Waiting")
       (chat-code--handle-request-diagnostics-update "req-code" nil nil)
-      (should (string-match-p "Streaming 3 chunks" chat-code--status-detail)))))
+      (should (string-match-p "Receiving response (3 chunks" chat-code--status-detail)))))
+
+(ert-deftest chat-code-handle-request-diagnostics-update-refreshes-live-transcript ()
+  "Test diagnostics updates refresh the transient live narrative in the transcript."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal)))
+    (puthash "req-code"
+             (make-chat-request-trace
+              :id "req-code"
+              :mode 'code
+              :provider 'kimi-code
+              :model 'kimi-code
+              :phase 'tool-loop
+              :started-at (current-time)
+              :updated-at (current-time)
+              :last-event '(:type tool-loop-step :summary "Resolving tool step 1"))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (chat-code-mode)
+      (insert "Assistant:\n")
+      (setq-local chat-code--messages-end (point-max-marker))
+      (let ((content-start (point-marker)))
+        (setq-local chat-code--live-response-start content-start)
+        (setq-local chat-code--live-response-content "")
+        (setq-local chat-code--current-request-id "req-code")
+        (setq-local chat-code--status-state 'running)
+        (chat-code--handle-request-diagnostics-update "req-code" nil nil)
+        (goto-char content-start)
+        (should (search-forward "[Live] Resolving tool step 1" nil t))))))
 
 (ert-deftest chat-code-render-response-state-follows-live-output-near-input ()
   "Test code mode auto-follows rendered output when the window is at the live edge."
