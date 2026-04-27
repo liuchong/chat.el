@@ -101,6 +101,17 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 6. 人工审查后再决定后续 git 操作
 ```
 
+### 场景 5: 写长文档
+
+```text
+1. M-x chat-code-start
+2. 先让 AI 生成文档提纲和第一节
+3. 新文档先按 section 写，不要一次要求完整长文
+4. 修改现有文档时优先选中一个标题块后执行 quote-region 或 ask-region
+5. AI 产出修改后先看 preview
+6. 用 git diff 或 Magit 审查后再继续下一节
+```
+
 ## 命令参考
 
 ### 启动命令
@@ -153,6 +164,18 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 5. 当前文件整体不大时执行 `chat-code-quote-current-file` 或 `chat-code-ask-current-file`
 6. 在 code-mode buffer 中继续补充问题，或直接让命令立即发送
 7. AI 如需切换到其他文件，可调用 `open_file` 在 Emacs 中直接打开相关文件
+```
+
+### 写长文档时的建议
+
+推荐做法：
+
+```text
+1. 先列出章节结构
+2. 每次只让 AI 处理一个标题或一个 section
+3. 新文件用 files_write，已有文档的小改动优先 apply_patch 或 files_replace
+4. 如果 quote-current-file 因文件太大而拒绝，就退回到 region 或 near-point
+5. 始终把 preview 和 git diff 当最终审查面
 ```
 
 ### 内联编辑命令（在代码缓冲区）

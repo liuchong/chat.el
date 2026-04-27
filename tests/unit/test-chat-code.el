@@ -380,8 +380,10 @@
   (chat-code-show-help)
   (with-current-buffer "*Chat Code Help*"
     (should (string-match-p "Reading Workflow:" (buffer-string)))
+    (should (string-match-p "Documentation Workflow:" (buffer-string)))
     (should (string-match-p "chat-code-quote-region" (buffer-string)))
     (should (string-match-p "chat-code-ask-current-file" (buffer-string)))
+    (should (string-match-p "section by section" (buffer-string)))
     (should (string-match-p "C-c C-e" (buffer-string)))
     (should (string-match-p "C-c C-g" (buffer-string)))))
 

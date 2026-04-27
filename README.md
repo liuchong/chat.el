@@ -230,6 +230,8 @@ Refactoring, git assistance, indexing extras, and performance helpers are still 
 | `M-x chat-edit-tests` | Generate unit tests |
 | `M-x chat-edit-complete` | Complete code at point |
 
+For section-by-section documentation drafting and revision, see [docs/tips/long-document-workflow.md](docs/tips/long-document-workflow.md).
+
 ### Experimental Advanced Commands
 
 These commands exist in the repository but are still being repaired and validated:

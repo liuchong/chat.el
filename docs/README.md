@@ -11,6 +11,12 @@ Code Mode 是 chat.el 的 AI 编程功能，提供代码生成、重构、测试
 | [code-mode-usage.md](code-mode-usage.md) | **完整使用指南** - 安装、配置、示例、故障排除 |
 | [code-mode-cheatsheet.md](code-mode-cheatsheet.md) | **快速参考卡** - 一页速查，适合打印 |
 
+### Tips
+
+| 文档 | 说明 |
+|------|------|
+| [tips/long-document-workflow.md](tips/long-document-workflow.md) | **长文档工作流** - 如何分段起草、修改和审查较长文档 |
+
 ### 设计文档
 
 | 文档 | 说明 |

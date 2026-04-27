@@ -144,7 +144,14 @@ Workflow Notes:
   - Quote commands fill the input area so you can refine the question.
   - Ask commands send the quoted context immediately.
   - The request panel shows execution details without polluting the transcript.
-  - Preview edits in *chat-preview* before accepting file changes."
+  - Preview edits in *chat-preview* before accepting file changes.
+
+Documentation Workflow:
+  - For long documents, work section by section instead of asking for one giant response.
+  - Use files_write for new doc files or intentional whole-document rewrites.
+  - Use apply_patch or files_replace for targeted edits to existing documents.
+  - Quote a region or one heading block when revising an existing document.
+  - If quote-current-file refuses a large file, switch to region, defun, or near-point style capture."
   "Help text displayed for code mode commands."
   :type 'string
   :group 'chat-code)

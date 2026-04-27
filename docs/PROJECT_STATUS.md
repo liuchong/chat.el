@@ -154,6 +154,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_replace` and `files_patch` now reject nonpositive `expected_count` and `line_hint` selectors before matching begins, keeping selector bugs out of the normal no-match error path
 - `files_replace` now also rejects non-string `search` and `replace` inputs with stable replace-family errors instead of leaking lower-level type failures from malformed tool arguments
 - `apply_patch` now explicitly requires the closing `*** End Patch` envelope and has regression coverage for empty patch text, whitespace-only patch text, illegal top-level `*** Move to:` lines, and unique-match fallback when hunk header start positions drift
+- code-mode help and docs now include a documented long-document workflow that recommends section-by-section drafting, targeted existing-file edits, and preview-plus-git review for larger writing tasks
 
 ## Known Boundaries
 
