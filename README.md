@@ -280,6 +280,8 @@ These commands exist in the repository but are still being repaired and validate
 - **Fast approval shortcuts** - pending approval prompts accept `C-c C-a` once, `C-c C-s` session, `C-c C-t` tool, `C-c C-f` directory for file writes, `C-c C-c` command, and `C-c C-d` deny
 - **Native prompt guidance** - approval prompts and pending-approval messages teach the same shortcut flow without inserting extra transcript noise
 - **Persistent approval status** - pending approvals also surface in code mode `header-line` / mode line and in the chat buffer status line
+- **Path-aware input** - code-mode input now auto-suggests absolute and project-relative file paths while you type
+- **Multiline input** - `S-RET` inserts a newline in the code-mode input area without sending the message
 - **Status discipline** - persistent status surfaces are reserved for blocking states; transient activity stays in the request panel or echo area
 - **Detailed request diagnostics** - `C-c C-s` opens the full current-request status buffer
 - **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root

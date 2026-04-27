@@ -361,6 +361,7 @@
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-e")) 'chat-code-edit-last-user-message))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-g")) 'chat-code-regenerate-last-response))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-h")) 'chat-code-show-help))
+  (should (eq (lookup-key chat-code-mode-map (kbd "<S-return>")) 'chat-code-insert-newline))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-q")) 'chat-code-quote-region))
   (should (eq (lookup-key chat-code-mode-map (kbd "C-c C-SPC")) 'chat-code-ask-region))
   (should (fboundp 'chat-code-quote-defun))
@@ -381,11 +382,88 @@
   (with-current-buffer "*Chat Code Help*"
     (should (string-match-p "Reading Workflow:" (buffer-string)))
     (should (string-match-p "Documentation Workflow:" (buffer-string)))
+    (should (string-match-p "C-c C-f" (buffer-string)))
+    (should (string-match-p "S-RET" (buffer-string)))
     (should (string-match-p "chat-code-quote-region" (buffer-string)))
     (should (string-match-p "chat-code-ask-current-file" (buffer-string)))
     (should (string-match-p "section by section" (buffer-string)))
     (should (string-match-p "C-c C-e" (buffer-string)))
     (should (string-match-p "C-c C-g" (buffer-string)))))
+
+(ert-deftest chat-code-insert-newline-keeps-input-open ()
+  "Test S-RET style newline insertion does not send the message."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Newline Session" temp-dir))
+          sent)
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (goto-char (point-max))
+       (insert "first line")
+       (cl-letf (((symbol-function 'chat-code--process-message)
+                  (lambda ()
+                    (setq sent t))))
+         (chat-code-insert-newline))
+       (insert "second line")
+       (should-not sent)
+       (should (string= (buffer-substring-no-properties
+                         (marker-position chat-code--input-marker)
+                         (point-max))
+                        "first line\nsecond line"))))))
+
+(ert-deftest chat-code-path-completion-at-point-detects-relative-path-token ()
+  "Test input completion returns file candidates for relative path fragments."
+  (chat-test-with-temp-dir
+   (let* ((project-root temp-dir)
+          (doc-dir (expand-file-name "docs" project-root))
+          (session (chat-code-session-create "Path Session" project-root)))
+     (make-directory doc-dir t)
+     (with-temp-file (expand-file-name "guide.md" doc-dir)
+       (insert "hello"))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (goto-char (point-max))
+       (insert "See docs/gu")
+       (let* ((capf (chat-code--path-completion-at-point))
+              (start (nth 0 capf))
+              (end (nth 1 capf))
+              (table (nth 2 capf))
+              (candidates (all-completions "docs/gu" table)))
+         (should capf)
+         (should (string= (buffer-substring-no-properties start end) "docs/gu"))
+         (should (member "docs/guide.md" candidates)))))))
+
+(ert-deftest chat-code-auto-path-completion-only-triggers-for-path-like-input ()
+  "Test post-self-insert auto completion only runs for path-like tokens."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-code-session-create "Auto Path Session" temp-dir))
+          path-triggered
+          plain-triggered)
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (goto-char (point-max))
+       (insert "docs/gu")
+       (let ((last-command-event ?u))
+         (cl-letf (((symbol-function 'completion-at-point)
+                    (lambda ()
+                      (setq path-triggered t))))
+           (chat-code--maybe-complete-path-after-insert)))
+       (delete-region (marker-position chat-code--input-marker) (point-max))
+       (goto-char (point-max))
+       (insert "plainword")
+       (let ((last-command-event ?d))
+         (cl-letf (((symbol-function 'completion-at-point)
+                    (lambda ()
+                      (setq plain-triggered t))))
+           (chat-code--maybe-complete-path-after-insert))))
+     (should path-triggered)
+     (should-not plain-triggered))))
 
 (ert-deftest chat-code-show-help-enables-view-mode ()
   "Test code-mode help uses view-mode like chat help."

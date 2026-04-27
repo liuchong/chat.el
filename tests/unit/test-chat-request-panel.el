@@ -115,4 +115,56 @@
         (should (search-forward "Approval 1: allow-command" nil t))
         (should (search-forward "Whitelist 1: command rg -n StickerManager ." nil t))))))
 
+(ert-deftest chat-request-panel-renders-directory-approval-context ()
+  "Test the request panel renders directory-scoped approval context."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        panel-buffer
+        (directory "/tmp/project/docs/"))
+    (puthash "req-panel"
+             (make-chat-request-trace
+              :id "req-panel"
+              :mode 'chat
+              :provider 'kimi
+              :model 'kimi
+              :phase 'tool-loop
+              :started-at (current-time)
+              :updated-at (current-time))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (setq panel-buffer
+            (chat-request-panel--buffer (current-buffer)))
+      (chat-request-panel-update
+       (current-buffer)
+       "req-panel"
+       `((:type approval-pending
+          :index 1
+          :tool "files_write"
+          :directory ,directory
+          :actions ("C-c C-a once"
+                    "C-c C-s session"
+                    "C-c C-t tool"
+                    "C-c C-f directory"
+                    "C-c C-d deny")
+          :options (("allow once" . allow-once)
+                    ("allow for session" . allow-session)
+                    ("always allow this tool" . allow-tool)
+                    ("always allow this directory (/tmp/project/docs/)" . allow-directory)
+                    ("deny" . deny)))
+         (:type approval
+          :index 1
+          :tool "files_write"
+          :directory ,directory
+          :decision allow-directory)
+         (:type whitelist-update
+          :index 1
+          :tool "files_write"
+          :scope directory
+          :pattern ,directory)))
+      (with-current-buffer panel-buffer
+        (goto-char (point-min))
+        (should (search-forward "Directory: /tmp/project/docs/" nil t))
+        (should (search-forward "always allow this directory (/tmp/project/docs/)" nil t))
+        (should (search-forward "Approval 1: allow-directory" nil t))
+        (should (search-forward "Whitelist 1: directory /tmp/project/docs/" nil t))))))
+
 (provide 'test-chat-request-panel)

@@ -47,6 +47,8 @@
                     (or (plist-get event :tool) "")))
       (when-let ((command (plist-get event :command)))
         (list (format "  Command: %s" command)))
+      (when-let ((directory (plist-get event :directory)))
+        (list (format "  Directory: %s" directory)))
       (when-let ((options (plist-get event :options)))
         (list (format "  Choices: %s"
                       (mapconcat #'car options ", "))))
@@ -58,6 +60,8 @@
       (list (format "- Approval %s: %s"
                     (or (plist-get event :index) "?")
                     (or (plist-get event :decision) "")))
+      (when-let ((directory (plist-get event :directory)))
+        (list (format "  Directory: %s" directory)))
       (when-let ((command (plist-get event :command)))
         (list (format "  Command: %s" command)))))
     ('whitelist-update

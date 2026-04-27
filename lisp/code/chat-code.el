@@ -113,6 +113,11 @@ Set to 0 to never auto-apply."
   :type 'integer
   :group 'chat-code)
 
+(defcustom chat-code-auto-path-completion t
+  "Whether to auto-trigger path completion in the code-mode input area."
+  :type 'boolean
+  :group 'chat-code)
+
 (defcustom chat-code-commands-help
   "Code Mode Commands:
   RET                   - Send message
@@ -128,6 +133,7 @@ Set to 0 to never auto-apply."
   C-c C-e               - Edit and resend last user message
   C-c C-g               - Regenerate last assistant response
   C-c C-h               - Open this help buffer
+  S-RET                 - Insert newline without sending
   C-g                   - Cancel current operation
 
 Reading Workflow:
@@ -145,6 +151,8 @@ Workflow Notes:
   - Ask commands send the quoted context immediately.
   - The request panel shows execution details without polluting the transcript.
   - Preview edits in *chat-preview* before accepting file changes.
+  - File write approvals can also allow one directory subtree with C-c C-f.
+  - Type a path-like token in the input area to trigger file completion.
 
 Documentation Workflow:
   - For long documents, work section by section instead of asking for one giant response.
@@ -279,6 +287,9 @@ Inherits from chat-session with additional code-specific fields."
 
 (defvar-local chat-code--last-approval-hint nil
   "Last approval hint signature shown in this buffer.")
+
+(defvar-local chat-code--auto-path-completion-active nil
+  "Guard flag to avoid recursive path completion in the input area.")
 
 (defun chat-code--pending-approval-event ()
   "Return the current pending approval event when present."
@@ -1284,6 +1295,98 @@ Optional PROJECT-ROOT overrides the detected project root."
   (insert "> ")
   (setq chat-code--input-marker (point-marker)))
 
+(defun chat-code--point-in-input-p (&optional position)
+  "Return non-nil when POSITION is inside the editable input area."
+  (let ((pos (or position (point))))
+    (and chat-code--input-marker
+         (>= pos (marker-position chat-code--input-marker)))))
+
+(defun chat-code--input-token-bounds ()
+  "Return bounds of the current token in the input area, or nil."
+  (when (chat-code--point-in-input-p)
+    (save-excursion
+      (let ((end (point)))
+        (skip-chars-backward "^ \t\n\"'`()[]{}<>")
+        (let ((start (point)))
+          (when (<= (marker-position chat-code--input-marker) start)
+            (cons start end)))))))
+
+(defun chat-code--path-token-p (token)
+  "Return non-nil when TOKEN looks like a file path fragment."
+  (and (stringp token)
+       (not (string-empty-p token))
+       (or (string-prefix-p "/" token)
+           (string-prefix-p "~/" token)
+           (string-prefix-p "./" token)
+           (string-prefix-p "../" token)
+           (string-match-p "/" token))))
+
+(defun chat-code--path-completion-root ()
+  "Return the base directory for relative input path completion."
+  (file-name-as-directory
+   (or (and chat-code--current-session
+            (chat-code-session-project-root chat-code--current-session))
+       default-directory)))
+
+(defun chat-code--path-completion-candidates (token base-directory)
+  "Return completion candidates for TOKEN relative to BASE-DIRECTORY."
+  (let* ((directory-prefix (or (file-name-directory token) ""))
+         (file-prefix (file-name-nondirectory token))
+         (completion-root (if (or (string-prefix-p "/" token)
+                                  (string-prefix-p "~/" token))
+                              (expand-file-name directory-prefix)
+                            (expand-file-name directory-prefix base-directory)))
+         (default-directory (file-name-as-directory completion-root)))
+    (mapcar (lambda (candidate)
+              (concat directory-prefix candidate))
+            (file-name-all-completions file-prefix default-directory))))
+
+(defun chat-code--path-completion-at-point ()
+  "Return a completion data form for path-like input tokens."
+  (when-let* ((bounds (chat-code--input-token-bounds))
+              (token (buffer-substring-no-properties (car bounds) (cdr bounds)))
+              ((chat-code--path-token-p token)))
+    (let ((base-directory (chat-code--path-completion-root)))
+      (list
+       (car bounds)
+       (cdr bounds)
+       (lambda (string predicate action)
+         (if (eq action 'metadata)
+             '(metadata (category . file))
+           (complete-with-action
+            action
+            (chat-code--path-completion-candidates string base-directory)
+            string
+            predicate)))
+       :exclusive 'no
+       :company-kind (lambda (_candidate) 'file)))))
+
+(defun chat-code--maybe-complete-path-after-insert ()
+  "Auto-trigger file completion for path-like tokens in the input area."
+  (when (and chat-code-auto-path-completion
+             (not chat-code--auto-path-completion-active)
+             (chat-code--point-in-input-p)
+             (not (minibufferp))
+             (let ((char last-command-event))
+               (or (eq char ?/)
+                   (eq char ?.)
+                   (eq char ?~)
+                   (and (characterp char)
+                        (or (and (>= char ?0) (<= char ?9))
+                            (and (>= char ?A) (<= char ?Z))
+                            (and (>= char ?a) (<= char ?z))
+                            (memq char '(?_ ?-)))))))
+    (when (chat-code--path-completion-at-point)
+      (let ((chat-code--auto-path-completion-active t))
+        (completion-at-point)))))
+
+(defun chat-code-insert-newline ()
+  "Insert a newline in the input area without sending the message."
+  (interactive)
+  (unless (chat-code--point-in-input-p)
+    (goto-char (point-max)))
+  (insert "\n"))
+
 ;; ------------------------------------------------------------------
 ;; Mode Definition
 ;; ------------------------------------------------------------------
@@ -1292,6 +1395,7 @@ Optional PROJECT-ROOT overrides the detected project root."
   (let ((map (make-sparse-keymap)))
     ;; Send message
     (define-key map (kbd "RET") 'chat-code-send-message)
+    (define-key map (kbd "<S-return>") 'chat-code-insert-newline)
     ;; Accept/Reject changes
     (define-key map (kbd "C-c C-a") 'chat-code-accept-last-edit)
     (define-key map (kbd "C-c C-k") 'chat-code-reject-last-edit)
@@ -1328,6 +1432,7 @@ Key bindings:
   C-c C-e    - Edit and resend last user message
   C-c C-g    - Regenerate last assistant response
   C-c C-h    - Open code mode help
+  S-RET      - Insert newline without sending
   C-g        - Cancel current operation
 
 In this mode, all operations use a single buffer design.
@@ -1335,7 +1440,13 @@ Preview is shown in a separate buffer that you can switch to manually
 using C-x b or C-c C-v."
   :group 'chat-code
   (setq buffer-read-only nil)
-  (setq truncate-lines nil))
+  (setq truncate-lines nil)
+  (setq-local completion-at-point-functions
+              '(chat-code--path-completion-at-point))
+  (add-hook 'post-self-insert-hook
+            #'chat-code--maybe-complete-path-after-insert
+            nil
+            t))
 
 ;; ------------------------------------------------------------------
 ;; Core Commands

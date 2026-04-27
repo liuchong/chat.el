@@ -150,10 +150,12 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `C-c C-e` | `chat-code-edit-last-user-message` | 编辑并重发最后一条用户消息 |
 | `C-c C-g` | `chat-code-regenerate-last-response` | 重新生成最后一条 AI 回复 |
 | `C-c C-h` | `chat-code-show-help` | 打开 code-mode 原生帮助缓冲区 |
+| `S-RET` | `chat-code-insert-newline` | 在输入区插入换行而不直接发送 |
 | `C-g` | `chat-code-cancel` | 取消当前操作 |
 
 当文件写工具触发审批时，原生审批提示除了单次、session、tool 级放行外，还会在可判定目录范围时提供 directory 级放行。
 这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。
+request panel 现在也会把 directory 级审批范围直接显示出来，方便确认放行边界。
 
 ### 阅读代码时直接提问
 
@@ -183,6 +185,18 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 
 如果你正在持续编辑同一个文档目录，审批提示里的 directory 级放行通常比 tool 级放行更稳妥。
 它只对白名单目录内的文件写工具生效，不会放大到 shell 或其他无目录语义的工具。
+
+### 输入区路径补全
+
+在 `*chat:code:<session>*` 底部输入区里：
+
+```text
+1. 输入绝对路径，例如 /tmp/demo.md
+2. 或输入相对项目根目录的路径，例如 docs/guide.md
+3. 当当前 token 看起来像路径时，会自动触发文件补全
+4. 继续输入以缩小候选，或用你的 completion 前端直接选择
+5. 需要多行提示词时，用 S-RET 插入换行，不会直接发送
+```
 
 ### 内联编辑命令（在代码缓冲区）
 
