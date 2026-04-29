@@ -29,6 +29,15 @@
 ;; Chat Buffer Management
 ;; ------------------------------------------------------------------
 
+(defvar chat--current-session nil
+  "Current chat session bound by chat buffers.")
+
+(defvar chat-ui-use-streaming nil
+  "Whether chat UI should use streaming responses.")
+
+(defvar chat-ui--active-stream-process nil
+  "Currently active stream process for cancellation.")
+
 (defvar chat-ui--input-overlay nil
   "Overlay for the input area in chat buffer.")
 
@@ -47,11 +56,26 @@
 (defvar-local chat-ui--request-hint-shown nil
   "Whether a stalled request hint has already been shown.")
 
+(defvar-local chat-ui--request-refresh-timer nil
+  "Timer used to refresh live request surfaces.")
+
+(defvar-local chat-ui--request-diagnostics-observer nil
+  "Observer callback registered for live diagnostics updates.")
+
 (defvar-local chat-ui--request-tool-events nil
   "Current structured tool events for the request panel.")
 
 (defvar-local chat-ui--last-approval-hint nil
   "Last approval hint signature shown in this buffer.")
+
+(defvar-local chat-ui--last-tracked-tool-paths nil
+  "Most recent file targets seen in this chat buffer.")
+
+(defvar-local chat-ui--live-response-start nil
+  "Marker at the current assistant response body.")
+
+(defvar-local chat-ui--live-response-content ""
+  "Accumulated visible content for the current live response.")
 
 (defun chat-ui--pending-approval-event ()
   "Return the current pending approval event when present."
@@ -59,7 +83,7 @@
 
 (defun chat-ui--status-line (session)
   "Return top status line text for SESSION."
-  (let ((model (chat-session-model-id session)))
+  (let ((model (and session (chat-session-model-id session))))
     (if-let ((label (chat-status-persistent-label chat-ui--request-tool-events)))
         (format "Model: %s | %s" model label)
       (format "Model: %s" model))))
@@ -75,6 +99,117 @@
   (when (timerp chat-ui--request-hint-timer)
     (cancel-timer chat-ui--request-hint-timer))
   (setq chat-ui--request-hint-timer nil))
+
+(defun chat-ui--clear-request-refresh-timer ()
+  "Cancel and clear the live request refresh timer."
+  (when (timerp chat-ui--request-refresh-timer)
+    (cancel-timer chat-ui--request-refresh-timer))
+  (setq chat-ui--request-refresh-timer nil))
+
+(defun chat-ui--unsubscribe-request-diagnostics ()
+  "Remove the current request diagnostics observer."
+  (when (and chat-ui--current-request-id
+             chat-ui--request-diagnostics-observer)
+    (chat-request-diagnostics-unsubscribe
+     chat-ui--current-request-id
+     chat-ui--request-diagnostics-observer))
+  (setq chat-ui--request-diagnostics-observer nil))
+
+(defun chat-ui--session-metadata-get (key)
+  "Return current session metadata entry for KEY."
+  (and chat--current-session
+       (plist-get (chat-session-metadata chat--current-session) key)))
+
+(defun chat-ui--session-metadata-set (key value)
+  "Store VALUE under KEY in the current session metadata."
+  (when chat--current-session
+    (setf (chat-session-metadata chat--current-session)
+          (plist-put (chat-session-metadata chat--current-session) key value))
+    (when chat-session-auto-save
+      (chat-session-save chat--current-session))))
+
+(defun chat-ui--track-tool-targets (tool-events)
+  "Update recent file target state from TOOL-EVENTS."
+  (let (all-paths latest-single-target)
+    (dolist (event tool-events)
+      (when (eq (plist-get event :type) 'tool-call)
+        (let* ((tool-id (intern (plist-get event :tool)))
+               (arguments (plist-get event :arguments))
+               (paths (and arguments
+                           (condition-case nil
+                               (chat-files--tool-target-paths tool-id arguments)
+                             (error nil)))))
+          (when paths
+            (setq all-paths (append all-paths paths))
+            (when (= (length paths) 1)
+              (setq latest-single-target (car paths)))))))
+    (when all-paths
+      (setq all-paths (delete-dups all-paths))
+      (setq chat-ui--last-tracked-tool-paths all-paths)
+      (chat-ui--session-metadata-set :chat-ui-recent-target-paths all-paths)
+      (when latest-single-target
+        (chat-ui--session-metadata-set
+         :chat-ui-preferred-target-path
+         (chat-files--resolved-path latest-single-target))))))
+
+(defun chat-ui--request-live-detail (&optional snapshot)
+  "Return a compact live request label from SNAPSHOT."
+  (chat-request-diagnostics-live-detail
+   (or snapshot
+       (and chat-ui--current-request-id
+            (chat-request-diagnostics-snapshot
+             chat-ui--current-request-id)))
+   chat-ui--request-tool-events))
+
+(defun chat-ui--live-narrative-line (&optional detail)
+  "Return a transient live narrative line for DETAIL."
+  (when-let ((detail (or detail
+                         (chat-ui--request-live-detail))))
+    (propertize (format "[Live] %s" detail) 'face 'shadow)))
+
+(defun chat-ui--refresh-live-response (&optional snapshot)
+  "Refresh the transcript live response slot from SNAPSHOT."
+  (when (and chat-ui--live-response-start
+             (marker-buffer chat-ui--live-response-start))
+    (chat-ui--render-response-state
+     (current-buffer)
+     chat-ui--live-response-start
+     chat-ui--live-response-content
+     chat-ui--request-tool-events
+     (chat-ui--request-live-detail snapshot))))
+
+(defun chat-ui--refresh-live-surfaces (&optional snapshot)
+  "Refresh transcript and panel surfaces from SNAPSHOT."
+  (when chat-ui--current-request-id
+    (chat-ui--refresh-live-response snapshot)
+    (when (or (and chat-request-panel-auto-show
+                   chat-ui--current-request-id)
+              (get-buffer-window
+               (chat-request-panel--buffer-name (current-buffer)) t))
+      (chat-request-panel-update
+       (current-buffer)
+       chat-ui--current-request-id
+       chat-ui--request-tool-events))))
+
+(defun chat-ui--handle-request-diagnostics-update (id _trace _event)
+  "Handle diagnostics update for request ID."
+  (when (equal id chat-ui--current-request-id)
+    (chat-ui--refresh-live-surfaces
+     (chat-request-diagnostics-snapshot id))))
+
+(defun chat-ui--start-request-refresh-timer (buffer)
+  "Start the live request refresh timer for BUFFER."
+  (chat-ui--clear-request-refresh-timer)
+  (setq chat-ui--request-refresh-timer
+        (run-at-time
+         1
+         1
+         (lambda ()
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (if chat-ui--current-request-id
+                   (chat-ui--refresh-live-surfaces)
+                 (chat-ui--clear-request-refresh-timer))))))))
 
 (defun chat-ui--cleanup-request-state (&optional phase summary)
   "Clear current request state and optionally record PHASE and SUMMARY."
@@ -95,10 +230,15 @@
        :handle chat-ui--active-request-handle
        :process chat-ui--active-stream-process
        :summary summary))
+    (chat-ui--unsubscribe-request-diagnostics)
+    (chat-ui--clear-request-refresh-timer)
     (chat-ui--clear-request-hint-timer)
     (setq chat-ui--request-hint-shown nil))
   (setq chat-ui--request-tool-events nil)
   (setq chat-ui--last-approval-hint nil)
+  (setq chat-ui--last-tracked-tool-paths nil)
+  (setq chat-ui--live-response-start nil)
+  (setq chat-ui--live-response-content "")
   (setq chat-ui--current-request-id nil))
 
 (defun chat-ui--maybe-announce-approval-shortcuts (tool-events)
@@ -160,9 +300,17 @@
      :transport transport
      :summary (format "Preparing %s request" transport))
     (setq chat-ui--request-tool-events nil)
+    (setq chat-ui--live-response-content "")
+    (setq chat-ui--request-diagnostics-observer
+          (lambda (id trace event)
+            (chat-ui--handle-request-diagnostics-update id trace event)))
+    (chat-request-diagnostics-subscribe
+     request-id
+     chat-ui--request-diagnostics-observer)
     (when chat-request-panel-auto-show
       (chat-request-panel-open (current-buffer) request-id nil))
     (chat-ui--start-request-hint-timer (current-buffer))
+    (chat-ui--start-request-refresh-timer (current-buffer))
     request-id))
 
 (defun chat-show-current-request-status ()
@@ -183,10 +331,15 @@
 (defun chat-ui-setup-buffer (session)
   "Setup chat buffer for SESSION."
   (chat-ui--clear-request-hint-timer)
+  (chat-ui--clear-request-refresh-timer)
+  (chat-ui--unsubscribe-request-diagnostics)
   (setq chat-ui--current-request-id nil)
   (setq chat-ui--request-hint-shown nil)
   (setq chat-ui--request-tool-events nil)
   (setq chat-ui--last-approval-hint nil)
+  (setq chat-ui--last-tracked-tool-paths nil)
+  (setq chat-ui--live-response-start nil)
+  (setq chat-ui--live-response-content "")
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
@@ -274,14 +427,25 @@
               ;; Get AI response
               (chat-ui--get-response)))))))))
 
+(defun chat-ui--followup-target-note ()
+  "Return a system note about the most recent file target."
+  (when-let ((target (chat-ui--session-metadata-get :chat-ui-preferred-target-path)))
+    (format
+     "Recent file target for follow-up requests: %s\nUse it only when the user refers implicitly to the same file or asks to continue the last file task."
+     target)))
+
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."
   (if (not chat-tool-caller-enabled)
       (progn
         (chat-log "[TOOLS] Tool calling disabled, using original messages")
         messages)
-    (let ((system-prompt (chat-tool-caller-build-system-prompt
-                          "You are a helpful AI assistant.")))
+    (let* ((base-prompt "You are a helpful AI assistant.")
+           (target-note (chat-ui--followup-target-note))
+           (system-prompt (chat-tool-caller-build-system-prompt
+                           (if target-note
+                               (format "%s\n\n%s" base-prompt target-note)
+                             base-prompt))))
       (chat-log "[TOOLS] System prompt: %s" system-prompt)
       (chat-log "[TOOLS] Adding system message to %d user messages" (length messages))
       (cons (make-chat-message
@@ -334,11 +498,13 @@
       tool-events
       "\n"))))
 
-(defun chat-ui--render-response-state (ui-buffer content-start content tool-events)
-  "Render CONTENT and TOOL-EVENTS at CONTENT-START in UI-BUFFER."
+(defun chat-ui--render-response-state (ui-buffer content-start content tool-events
+                                                 &optional live-detail)
+  "Render CONTENT, TOOL-EVENTS, and optional LIVE-DETAIL at CONTENT-START."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (setq chat-ui--request-tool-events tool-events)
+      (chat-ui--track-tool-targets tool-events)
       (chat-ui--maybe-announce-approval-shortcuts tool-events)
       (when (or (and chat-request-panel-auto-show
                      chat-ui--current-request-id)
@@ -354,12 +520,18 @@
           (forward-line 1)
           (delete-region (line-beginning-position) (line-end-position))
           (insert (propertize
-                   (chat-ui--status-line chat--current-session)
+                   (chat-ui--status-line
+                    (and (boundp 'chat--current-session)
+                         chat--current-session))
                    'face 'shadow))
           (delete-region content-start chat-ui--messages-end)
           (goto-char content-start)
           (unless (string-empty-p content)
             (insert content))
+          (when-let ((line (chat-ui--live-narrative-line live-detail)))
+            (unless (string-empty-p content)
+              (insert "\n"))
+            (insert line))
           (insert "\n\n")
           (set-marker chat-ui--messages-end (point)))))))
 
@@ -478,6 +650,9 @@
            'tool-loop-step
            :handle chat-ui--active-request-handle
            :summary (format "Resolving tool step %d" (1+ step))))
+        (setq chat-ui--live-response-content
+              (or (plist-get processed :content) ""))
+        (chat-ui--refresh-live-surfaces)
         (setq chat-ui--active-request-handle
               (chat-llm-request-async
                model
@@ -555,18 +730,26 @@
   (let* ((raw-content (plist-get result :content))
          (visible-content (string-trim-right
                            (chat-tool-caller-extract-content raw-content)))
-         (tool-events nil)
-         (processed (chat-tool-caller-process-response-data
+        (tool-events nil)
+        (processed (chat-tool-caller-process-response-data
                      raw-content
                      session
                      (lambda (event)
                        (push event tool-events)
+                       (setq chat-ui--live-response-content visible-content)
                        (chat-ui--render-response-state
                         ui-buffer
                         content-start
                         visible-content
-                        (nreverse tool-events))))))
-    (chat-ui--render-response-state ui-buffer content-start visible-content (nreverse tool-events))
+                        (nreverse tool-events)
+                        (chat-ui--request-live-detail))))))
+    (setq chat-ui--live-response-content visible-content)
+    (chat-ui--render-response-state
+     ui-buffer
+     content-start
+     visible-content
+     (nreverse tool-events)
+     (chat-ui--request-live-detail))
     (chat-ui--resolve-tool-loop-async
      model
      messages
@@ -633,6 +816,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
       (set-marker chat-ui--messages-end (point))
       (setq assistant-start (copy-marker (point))))
+    (setq chat-ui--live-response-start assistant-start)
     
     ;; Prepare messages with context management and tool calling
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
@@ -759,7 +943,6 @@ This is an ephemeral query - the result is displayed but not persisted."
       ;; Get AI response asynchronously
       (let* ((session chat--current-session)
              (model (chat-session-model-id session))
-             (msg `((role . "user") (content . ,trimmed)))
              (buffer (current-buffer)))
         (chat-llm-request-async
          model
@@ -885,10 +1068,8 @@ This is an ephemeral query - the result is displayed but not persisted."
 (defun chat-ui--get-message-at-point ()
   "Get the message struct at point."
   (when (boundp 'chat--current-session)
-    (let* ((pos (point))
-           (session chat--current-session)
+    (let* ((session chat--current-session)
            (messages (chat-session-messages session))
-           (current-pos (point-min))
            found-msg)
       (save-excursion
         (goto-char (point-min))
@@ -961,9 +1142,6 @@ This is an ephemeral query - the result is displayed but not persisted."
   :type 'boolean
   :group 'chat)
 
-(defvar chat-ui--active-stream-process nil
-  "Currently active stream process for cancellation.")
-
 (defun chat-ui--stream-started-p (handle)
   "Return non-nil when HANDLE means stream startup succeeded."
   (not (null handle)))
@@ -997,6 +1175,7 @@ This is an ephemeral query - the result is displayed but not persisted."
       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
       (set-marker chat-ui--messages-end (point))
       (setq assistant-start (copy-marker (point))))
+    (setq chat-ui--live-response-start assistant-start)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
            (messages-final (chat-context-prepare-messages messages-with-tools))
            (request-json
@@ -1019,10 +1198,15 @@ This is an ephemeral query - the result is displayed but not persisted."
                       (when (buffer-live-p ui-buffer)
                         (with-current-buffer ui-buffer
                           (setq content-acc (concat content-acc chunk))
-                          (save-excursion
-                            (goto-char chat-ui--messages-end)
-                            (insert chunk)
-                            (set-marker chat-ui--messages-end (point)))
+                          (setq chat-ui--live-response-content
+                                (string-trim-right
+                                 (chat-tool-caller-extract-content content-acc)))
+                          (chat-ui--render-response-state
+                           ui-buffer
+                           assistant-start
+                           chat-ui--live-response-content
+                           chat-ui--request-tool-events
+                           (chat-ui--request-live-detail))
                           (redisplay t)))))
                   (append
                    (list :temperature 0.7 :stream t)
@@ -1067,11 +1251,13 @@ This is an ephemeral query - the result is displayed but not persisted."
                         session
                         (lambda (event)
                           (push event tool-events)
+                          (setq chat-ui--live-response-content visible-content)
                           (chat-ui--render-response-state
                            ui-buffer
                            assistant-start
                            visible-content
-                           (nreverse tool-events))))))
+                           (nreverse tool-events)
+                           (chat-ui--request-live-detail))))))
                  (chat-ui--resolve-tool-loop-async
                   model
                   messages-final

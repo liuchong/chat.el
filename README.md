@@ -290,6 +290,12 @@ These commands exist in the repository but are still being repaired and validate
 - **Detailed request diagnostics** - `C-c C-s` opens the full current-request status buffer
 - **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root
 - **Project rules in context** - `AGENTS.md` is injected into code mode context when present
+
+### Chat Mode Updates
+
+- **Live request narrative** - plain chat now shows the same transient `[Live] ...` request state inside the active assistant slot, so waiting, streaming, tool follow-up, and approval states stay visible without opening a separate panel
+- **Shared live request panel** - plain chat request panels now refresh from the same diagnostics observer flow as code-mode, so chunk freshness and recent activity stay current during long requests
+- **Sticky file follow-up hints** - after plain chat reads or edits one concrete file, later vague follow-up requests can reuse that recent file target instead of rediscovering it from scratch
 - **LSP integration** - Optional integration points exist
 - **Experimental modules** - Refactor, git, indexing extras, and perf helpers are under repair
 

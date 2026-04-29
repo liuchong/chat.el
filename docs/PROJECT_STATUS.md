@@ -103,6 +103,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - code-mode transcript now shows a transient live narrative line in the active assistant slot, driven by diagnostics and tool events so waiting, tool-loop, and approval states stay visible during long requests
 - code-mode now promotes the most recently inspected single-file tool target into session focus, which makes vague follow-up edit requests like "optimize it" more likely to continue on the intended file instead of broad rescanning
 - code-mode tool-loop follow-up requests now use a dedicated timeout budget instead of sharing the shorter generic non-streaming request timeout
+- plain chat now refreshes its transcript and request panel from the same diagnostics observer path, so streaming state and tool-loop progress stay visible while a request is still active
+- plain chat now also tracks recent single-file tool targets and feeds them back into later vague follow-up requests, which reduces rediscovery when the user says things like "optimize it" after a file-specific review
 - persistent native status surfaces are now explicitly limited to blocking states, while transient activity stays out of header and mode lines
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
 - sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries

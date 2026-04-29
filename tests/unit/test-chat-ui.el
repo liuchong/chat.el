@@ -432,5 +432,78 @@
                      (:type tool-call :index 1 :tool "files_find")))
        (should (string= (chat-ui--status-line session) "Model: kimi"))))))
 
+(ert-deftest chat-ui-request-live-detail-reflects-stream-chunks ()
+  "Test chat UI builds a useful live label from stream diagnostics."
+  (let* ((now (current-time))
+         (label (chat-ui--request-live-detail
+                 (list :phase 'streaming
+                       :stream-chunk-count 3
+                       :last-chunk-at now))))
+    (should (string-match-p "Receiving response (3 chunks" label))))
+
+(ert-deftest chat-ui-handle-request-diagnostics-update-refreshes-live-transcript ()
+  "Test diagnostics updates refresh the transient live narrative in transcript."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal)))
+    (puthash "req-ui"
+             (make-chat-request-trace
+              :id "req-ui"
+              :mode 'chat
+              :provider 'kimi
+              :model 'kimi
+              :phase 'tool-loop
+              :started-at (current-time)
+              :updated-at (current-time)
+              :last-event '(:type tool-loop-step :summary "Resolving tool step 1"))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (insert "Assistant:\n")
+      (setq-local chat-ui--messages-end (point-max-marker))
+      (let ((content-start (point-marker)))
+        (setq-local chat-ui--live-response-start content-start)
+        (setq-local chat-ui--live-response-content "")
+        (setq-local chat-ui--current-request-id "req-ui")
+        (chat-ui--handle-request-diagnostics-update "req-ui" nil nil)
+        (goto-char content-start)
+        (should (search-forward "[Live] Resolving tool step 1" nil t))))))
+
+(ert-deftest chat-ui-track-tool-targets-promotes-single-file-followup ()
+  "Test tool activity stores a single file target for later follow-up requests."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (target-file (expand-file-name "docs/spec.md" temp-dir))
+          (session (chat-session-create "Track Session" 'kimi)))
+     (make-directory (file-name-directory target-file) t)
+     (with-temp-file target-file
+       (insert "# Spec\n"))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui--track-tool-targets
+        `((:type tool-call
+           :tool "files_read"
+           :arguments (("path" . ,target-file)))))
+       (should (equal (chat-ui--session-metadata-get :chat-ui-preferred-target-path)
+                      (file-truename target-file)))
+       (should (member (file-truename target-file)
+                       (chat-ui--session-metadata-get
+                        :chat-ui-recent-target-paths)))))))
+
+(ert-deftest chat-ui-prepare-messages-with-tools-includes-followup-target-note ()
+  "Test tool prompt carries the recent file target hint for vague follow-ups."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (target-file (expand-file-name "docs/spec.md" temp-dir))
+          (session (chat-session-create "Prompt Session" 'kimi))
+          captured-prompt)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui--session-metadata-set :chat-ui-preferred-target-path target-file)
+       (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
+                  (lambda (prompt)
+                    (setq captured-prompt prompt)
+                    prompt)))
+         (chat-ui--prepare-messages-with-tools nil))
+       (should (string-match-p "Recent file target for follow-up requests" captured-prompt))
+       (should (string-match-p (regexp-quote target-file) captured-prompt))))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here
