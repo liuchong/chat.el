@@ -51,6 +51,9 @@
 ;; Customization
 ;; ------------------------------------------------------------------
 
+(defvar chat--current-session nil
+  "Current chat session bound by chat buffers.")
+
 (defgroup chat-code nil
   "AI code editing for chat.el."
   :group 'chat
@@ -115,7 +118,8 @@ Set to 0 to never auto-apply."
   :group 'chat-code)
 
 (defcustom chat-code-reading-near-point-radius 5
-  "Number of surrounding lines to capture around point for reading workflow commands."
+  "Number of surrounding lines to capture around point.
+Used by reading workflow commands."
   :type 'integer
   :group 'chat-code)
 

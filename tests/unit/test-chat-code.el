@@ -79,6 +79,25 @@
        (should-not sent)
        (should-not (chat-session-messages (chat-code-session-base-session session)))))))
 
+(ert-deftest chat-code-from-chat-reuses-current-chat-session ()
+  "Test converting from chat mode reuses the currently bound base session."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (base-session (chat-session-create "Chat Session" 'kimi))
+          opened-session)
+     (with-temp-buffer
+       (setq-local chat--current-session base-session)
+       (cl-letf (((symbol-function 'chat-code--open-session)
+                  (lambda (session)
+                    (setq opened-session session))))
+         (chat-code-from-chat))
+       (should (chat-code-session-p opened-session))
+       (should (eq (chat-code-session-base-session opened-session)
+                   base-session))
+       (should (string= (chat-session-name
+                         (chat-code-session-base-session opened-session))
+                        "Chat Session"))))))
+
 (ert-deftest chat-code-regenerate-last-response-replays-last-user-turn ()
   "Test code mode regenerates by dropping the trailing assistant turn."
   (chat-test-with-temp-dir
