@@ -45,6 +45,7 @@
 (require 'chat-tool-caller)
 (require 'chat-request-diagnostics)
 (require 'chat-request-panel)
+(require 'chat-request-surface)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -414,20 +415,9 @@ When SILENT is non-nil, do not show minibuffer feedback."
 (defun chat-code--track-tool-targets (tool-events)
   "Update session target state from TOOL-EVENTS."
   (when chat-code--current-session
-    (let (all-paths latest-single-target)
-      (dolist (event tool-events)
-        (when (eq (plist-get event :type) 'tool-call)
-          (let* ((tool-id (intern (plist-get event :tool)))
-                 (arguments (plist-get event :arguments))
-                 (paths (and arguments
-                             (condition-case nil
-                                 (chat-files--tool-target-paths tool-id arguments)
-                               (error nil)))))
-            (when paths
-              (setq all-paths (append all-paths paths))
-              (when (= (length paths) 1)
-                (setq latest-single-target (car paths)))))))
-      (when all-paths
+    (when-let ((target-data (chat-request-surface-tool-targets tool-events)))
+      (let ((all-paths (plist-get target-data :paths))
+            (latest-single-target (plist-get target-data :latest-single-target)))
         (setq all-paths (delete-dups all-paths))
         (unless (equal all-paths chat-code--last-tracked-tool-paths)
           (setq chat-code--last-tracked-tool-paths all-paths)
@@ -455,9 +445,9 @@ When SILENT is non-nil, do not show minibuffer feedback."
 
 (defun chat-code--live-narrative-line (&optional detail)
   "Return a transient live narrative line for DETAIL."
-  (when-let ((detail (or detail
-                         (chat-code--request-live-detail))))
-    (propertize (format "[Live] %s" detail) 'face 'shadow)))
+  (chat-request-surface-live-narrative-line
+   (or detail
+       (chat-code--request-live-detail))))
 
 (defun chat-code--refresh-live-response (&optional snapshot)
   "Refresh the transcript live response slot from SNAPSHOT."
@@ -478,14 +468,10 @@ When SILENT is non-nil, do not show minibuffer feedback."
              (eq chat-code--status-state 'running))
     (chat-code--set-status 'running (chat-code--request-live-detail snapshot))
     (chat-code--refresh-live-response snapshot)
-    (when (or (and chat-request-panel-auto-show
-                   chat-code--current-request-id)
-              (get-buffer-window
-               (chat-request-panel--buffer-name (current-buffer)) t))
-      (chat-request-panel-update
-       (current-buffer)
-       chat-code--current-request-id
-       chat-code--request-tool-events))))
+    (chat-request-surface-update-panel-if-visible
+     (current-buffer)
+     chat-code--current-request-id
+     chat-code--request-tool-events)))
 
 (defun chat-code--handle-request-diagnostics-update (id _trace _event)
   "Handle diagnostics update for request ID."
@@ -497,15 +483,11 @@ When SILENT is non-nil, do not show minibuffer feedback."
   "Start the live request refresh timer for BUFFER."
   (chat-code--clear-request-refresh-timer)
   (setq chat-code--request-refresh-timer
-        (run-at-time
-         1
-         1
-         (lambda ()
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (if chat-code--current-request-id
-                   (chat-code--refresh-live-surfaces)
-                 (chat-code--clear-request-refresh-timer))))))))
+        (chat-request-surface-start-refresh-timer
+         buffer
+         (lambda () chat-code--current-request-id)
+         #'chat-code--refresh-live-surfaces
+         #'chat-code--clear-request-refresh-timer)))
 
 (defun chat-code--cleanup-request-state (&optional phase summary)
   "Clear current request diagnostics and optionally record PHASE and SUMMARY."
@@ -530,18 +512,13 @@ When SILENT is non-nil, do not show minibuffer feedback."
 
 (defun chat-code--maybe-announce-approval-shortcuts (tool-events)
   "Show one native approval hint for TOOL-EVENTS when needed."
-  (when-let* ((pending (seq-find
-                        (lambda (event)
-                          (eq (plist-get event :type) 'approval-pending))
-                        tool-events))
-              (tool (plist-get pending :tool))
-              (actions (plist-get pending :actions)))
-    (let ((signature (list tool actions (plist-get pending :command))))
-      (unless (equal signature chat-code--last-approval-hint)
-        (setq chat-code--last-approval-hint signature)
-        (let ((text (chat-approval-pending-message tool actions)))
-          (message "%s" text)
-          text))))) 
+  (when-let ((hint (chat-request-surface-approval-hint
+                    tool-events
+                    chat-code--last-approval-hint)))
+    (setq chat-code--last-approval-hint (plist-get hint :signature))
+    (let ((text (plist-get hint :text)))
+      (message "%s" text)
+      text))) 
 
 (defun chat-code--maybe-show-request-hint (buffer)
   "Show one stalled request hint in BUFFER if needed."
@@ -553,7 +530,7 @@ When SILENT is non-nil, do not show minibuffer feedback."
                        (chat-request-diagnostics-stall-message
                         chat-code--current-request-id))))
         (setq chat-code--request-hint-shown t)
-        (chat-request-panel-update
+        (chat-request-surface-update-panel-if-visible
          buffer
          chat-code--current-request-id
          chat-code--request-tool-events)
@@ -593,11 +570,10 @@ When SILENT is non-nil, do not show minibuffer feedback."
     (setq chat-code--request-tool-events nil)
     (setq chat-code--last-approval-hint nil)
     (setq chat-code--request-diagnostics-observer
-          (lambda (id trace event)
-            (ignore trace event)
-            (when (buffer-live-p source-buffer)
-              (with-current-buffer source-buffer
-                (chat-code--handle-request-diagnostics-update id nil nil)))))
+          (chat-request-surface-buffer-observer
+           source-buffer
+           (lambda (id _trace _event)
+             (chat-code--handle-request-diagnostics-update id nil nil))))
     (chat-request-diagnostics-subscribe
      request-id
      chat-code--request-diagnostics-observer)

@@ -23,6 +23,7 @@
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-request-panel)
+(require 'chat-request-surface)
 (require 'chat-status)
 
 ;; ------------------------------------------------------------------
@@ -130,21 +131,9 @@
 
 (defun chat-ui--track-tool-targets (tool-events)
   "Update recent file target state from TOOL-EVENTS."
-  (let (all-paths latest-single-target)
-    (dolist (event tool-events)
-      (when (eq (plist-get event :type) 'tool-call)
-        (let* ((tool-id (intern (plist-get event :tool)))
-               (arguments (plist-get event :arguments))
-               (paths (and arguments
-                           (condition-case nil
-                               (chat-files--tool-target-paths tool-id arguments)
-                             (error nil)))))
-          (when paths
-            (setq all-paths (append all-paths paths))
-            (when (= (length paths) 1)
-              (setq latest-single-target (car paths)))))))
-    (when all-paths
-      (setq all-paths (delete-dups all-paths))
+  (when-let ((target-data (chat-request-surface-tool-targets tool-events)))
+    (let ((all-paths (plist-get target-data :paths))
+          (latest-single-target (plist-get target-data :latest-single-target)))
       (setq chat-ui--last-tracked-tool-paths all-paths)
       (chat-ui--session-metadata-set :chat-ui-recent-target-paths all-paths)
       (when latest-single-target
@@ -163,9 +152,9 @@
 
 (defun chat-ui--live-narrative-line (&optional detail)
   "Return a transient live narrative line for DETAIL."
-  (when-let ((detail (or detail
-                         (chat-ui--request-live-detail))))
-    (propertize (format "[Live] %s" detail) 'face 'shadow)))
+  (chat-request-surface-live-narrative-line
+   (or detail
+       (chat-ui--request-live-detail))))
 
 (defun chat-ui--refresh-live-response (&optional snapshot)
   "Refresh the transcript live response slot from SNAPSHOT."
@@ -182,14 +171,10 @@
   "Refresh transcript and panel surfaces from SNAPSHOT."
   (when chat-ui--current-request-id
     (chat-ui--refresh-live-response snapshot)
-    (when (or (and chat-request-panel-auto-show
-                   chat-ui--current-request-id)
-              (get-buffer-window
-               (chat-request-panel--buffer-name (current-buffer)) t))
-      (chat-request-panel-update
-       (current-buffer)
-       chat-ui--current-request-id
-       chat-ui--request-tool-events))))
+    (chat-request-surface-update-panel-if-visible
+     (current-buffer)
+     chat-ui--current-request-id
+     chat-ui--request-tool-events)))
 
 (defun chat-ui--handle-request-diagnostics-update (id _trace _event)
   "Handle diagnostics update for request ID."
@@ -201,27 +186,19 @@
   "Start the live request refresh timer for BUFFER."
   (chat-ui--clear-request-refresh-timer)
   (setq chat-ui--request-refresh-timer
-        (run-at-time
-         1
-         1
-         (lambda ()
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (if chat-ui--current-request-id
-                   (chat-ui--refresh-live-surfaces)
-                 (chat-ui--clear-request-refresh-timer))))))))
+        (chat-request-surface-start-refresh-timer
+         buffer
+         (lambda () chat-ui--current-request-id)
+         #'chat-ui--refresh-live-surfaces
+         #'chat-ui--clear-request-refresh-timer)))
 
 (defun chat-ui--cleanup-request-state (&optional phase summary)
   "Clear current request state and optionally record PHASE and SUMMARY."
   (let ((source-buffer (current-buffer)))
-    (when (and (or chat-request-panel-auto-show
-                   (get-buffer-window
-                    (chat-request-panel--buffer-name source-buffer) t))
-               chat-ui--current-request-id)
-      (chat-request-panel-update
-       source-buffer
-       chat-ui--current-request-id
-       chat-ui--request-tool-events)))
+    (chat-request-surface-update-panel-if-visible
+     source-buffer
+     chat-ui--current-request-id
+     chat-ui--request-tool-events))
   (when chat-ui--current-request-id
     (when phase
       (chat-request-diagnostics-record
@@ -243,18 +220,13 @@
 
 (defun chat-ui--maybe-announce-approval-shortcuts (tool-events)
   "Show one native approval hint for TOOL-EVENTS when needed."
-  (when-let* ((pending (seq-find
-                        (lambda (event)
-                          (eq (plist-get event :type) 'approval-pending))
-                        tool-events))
-              (tool (plist-get pending :tool))
-              (actions (plist-get pending :actions)))
-    (let ((signature (list tool actions (plist-get pending :command))))
-      (unless (equal signature chat-ui--last-approval-hint)
-        (setq chat-ui--last-approval-hint signature)
-        (let ((text (chat-approval-pending-message tool actions)))
-          (message "%s" text)
-          text)))))
+  (when-let ((hint (chat-request-surface-approval-hint
+                    tool-events
+                    chat-ui--last-approval-hint)))
+    (setq chat-ui--last-approval-hint (plist-get hint :signature))
+    (let ((text (plist-get hint :text)))
+      (message "%s" text)
+      text)))
 
 (defun chat-ui--maybe-show-request-hint (buffer)
   "Show one stalled request hint in BUFFER if needed."
@@ -266,7 +238,7 @@
                        (chat-request-diagnostics-stall-message
                         chat-ui--current-request-id))))
         (setq chat-ui--request-hint-shown t)
-        (chat-request-panel-update
+        (chat-request-surface-update-panel-if-visible
          buffer
          chat-ui--current-request-id
          chat-ui--request-tool-events)
@@ -302,8 +274,9 @@
     (setq chat-ui--request-tool-events nil)
     (setq chat-ui--live-response-content "")
     (setq chat-ui--request-diagnostics-observer
-          (lambda (id trace event)
-            (chat-ui--handle-request-diagnostics-update id trace event)))
+          (chat-request-surface-buffer-observer
+           (current-buffer)
+           #'chat-ui--handle-request-diagnostics-update))
     (chat-request-diagnostics-subscribe
      request-id
      chat-ui--request-diagnostics-observer)
