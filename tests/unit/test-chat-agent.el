@@ -248,5 +248,27 @@ car collects the messages of every request."
     (should (string-match-p "files_read" text))
     (should (string-match-p (make-string 50 ?x) text))))
 
+(ert-deftest chat-agent-uses-followup-request-options-after-first-turn ()
+  "Test follow-up turns merge the dedicated request options."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (exec-counter (list 0))
+        (seen-options nil))
+    (chat-agent-test--register-demo-tool exec-counter)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_model _messages success _error options)
+                 (push options seen-options)
+                 (funcall success (if (= (length seen-options) 1)
+                                      (list :content chat-agent-test--tool-call-json)
+                                    '(:content "done")))
+                 'stub-handle)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :request-options '(:timeout 60 :temperature 0.7)
+             :followup-request-options '(:timeout 300)))
+      (should (= (plist-get (car seen-options) :timeout) 300))
+      (should (= (plist-get (cadr seen-options) :timeout) 60))
+      (should (equal (plist-get (car seen-options) :temperature) 0.7)))))
+
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here

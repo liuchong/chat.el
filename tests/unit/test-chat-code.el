@@ -490,47 +490,31 @@
   (with-current-buffer "*Chat Code Help*"
     (should view-mode)))
 
-(ert-deftest chat-code-send-streaming-uses-current-stream-api ()
-  "Test code mode streaming uses the current chat-stream API shape."
+(ert-deftest chat-code-start-agent-run-uses-stream-transport ()
+  "Test code mode streaming goes through the agent stream transport."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-code-session-create "Stream Session" temp-dir))
-          captured-model
-          captured-messages
-          captured-callback
-          captured-options
-          sentinel-installed)
+          captured-config)
      (with-temp-buffer
        (chat-code-mode)
        (setq-local chat-code--current-session session)
        (chat-code--setup-buffer session)
        (let ((content-start (chat-code--show-assistant-indicator)))
-         (cl-letf (((symbol-function 'chat-stream-request)
-                    (lambda (model messages callback options)
-                      (setq captured-model model)
-                      (setq captured-messages messages)
-                      (setq captured-callback callback)
-                      (setq captured-options options)
-                      'stream-handle))
-                   ((symbol-function 'chat-code--set-stream-process-sentinel)
-                    (lambda (_process _sentinel)
-                      (setq sentinel-installed t))))
-           (chat-code--send-streaming 'kimi '(message-a message-b) content-start)))
-       (should (eq captured-model 'kimi))
-       (should (equal captured-messages '(message-a message-b)))
-       (should (functionp captured-callback))
-       (should (equal captured-options
-                      (list :temperature 0.7
-                            :stream t
-                            :max-tokens (chat-code--request-output-budget 'kimi))))
-       (should (eq chat-code--active-stream-process 'stream-handle))
-       (funcall captured-callback "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")
-       (goto-char (point-min))
-       (should-not (search-forward "{\"function_call\"" nil t))
-       (should (search-forward "[Live] Streaming response" nil t))
-       (should sentinel-installed)))))
+         (cl-letf (((symbol-function 'chat-agent-start)
+                    (lambda (config)
+                      (setq captured-config config)
+                      nil)))
+           (chat-code--start-agent-run
+            'stream 'kimi '(message-a message-b) content-start)))
+       (should (eq (plist-get captured-config :transport) 'stream))
+       (should (equal (plist-get captured-config :messages)
+                      '(message-a message-b)))
+       (should (plist-get captured-config :on-event))
+       (should (= (plist-get captured-config :max-steps)
+                  chat-code-tool-loop-max-steps))))))
 
-(ert-deftest chat-code-handle-response-persists-assistant-message ()
+(ert-deftest chat-code-agent-run-persists-assistant-message ()
   "Test code mode stores assistant replies and keeps the prompt ready."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
@@ -540,11 +524,19 @@
        (setq-local chat-code--current-session session)
        (chat-code--setup-buffer session)
        (let ((content-start (chat-code--show-assistant-indicator)))
-         (setq-local chat-code--active-request-handle 'request-handle)
-         (chat-code--handle-llm-response '(:content "Here is the answer.") content-start))
-       (should-not chat-code--active-request-handle)
-       (should (= (length (chat-session-messages (chat-code-session-base-session session))) 1))
-       (let ((saved (car (chat-session-messages (chat-code-session-base-session session)))))
+         (cl-letf (((symbol-function 'chat-llm-request-async)
+                    (lambda (_model _messages success _error _options)
+                      (funcall success '(:content "Here is the answer."
+                                         :raw-request "{}"
+                                         :raw-response "{}"))
+                      'request-handle)))
+           (chat-code--start-agent-run 'sync 'kimi '(message-a) content-start)))
+       (should-not (chat-agent-active-p chat-code--active-agent-run))
+       (should (= (length (chat-session-messages
+                           (chat-code-session-base-session session)))
+                  1))
+       (let ((saved (car (chat-session-messages
+                          (chat-code-session-base-session session)))))
          (should (eq (chat-message-role saved) :assistant))
          (should (string= (chat-message-content saved) "Here is the answer.")))
        (should (eq chat-code--status-state 'success))
@@ -571,8 +563,9 @@
                     (lambda (_context) "Context body"))
                    ((symbol-function 'chat-code-lsp-available-p)
                     (lambda () nil))
-                   ((symbol-function 'chat-code--send-non-streaming)
-                    (lambda (_model messages _content-start)
+                   ((symbol-function 'chat-code--start-agent-run)
+                    (lambda (transport _model messages _content-start)
+                      (setq captured-transport transport)
                       (setq captured-messages messages))))
            (chat-code--send-to-llm)))
        (should captured-messages)
@@ -589,6 +582,7 @@
          (should (string-match-p "Operational guardrails" (chat-message-content system-message)))
          (should (string-match-p "Active project root" (chat-message-content system-message)))
          (should (string-match-p "If the user asked to create or change files" (chat-message-content system-message))))
+       (should (eq captured-transport 'sync))
        (should (eq chat-code--status-state 'running))
        (should (string= chat-code--status-detail "Waiting for model"))))))
 
@@ -621,8 +615,9 @@
                     (lambda (_context) "Context body"))
                    ((symbol-function 'chat-code-lsp-available-p)
                     (lambda () nil))
-                   ((symbol-function 'chat-code--send-non-streaming)
-                    (lambda (_model messages _content-start)
+                   ((symbol-function 'chat-code--start-agent-run)
+                    (lambda (transport _model messages _content-start)
+                      (setq captured-transport transport)
                       (setq captured-messages messages))))
            (chat-code--send-to-llm)))
        (should captured-messages)
@@ -677,7 +672,7 @@ file contents instead of only a short summary."
     (should (string-match-p "msg.go" summary))
     (should (string-match-p "package cmd" summary))))
 
-(ert-deftest chat-code-finalize-response-resolves-json-tool-call ()
+(ert-deftest chat-code-agent-run-resolves-json-tool-call ()
   "Test code mode executes JSON tool calls and stores the follow-up answer."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
@@ -697,70 +692,56 @@ file contents instead of only a short summary."
      (with-temp-buffer
        (chat-code-mode)
        (setq-local chat-code--current-session session)
-       (setq-local chat-code--active-request-model 'kimi-code)
-       (setq-local chat-code--active-request-messages
-                   (list (make-chat-message
-                          :id "user-1"
-                          :role :user
-                          :content "Run a tool"
-                          :timestamp (current-time))))
        (chat-code--setup-buffer session)
-       (let ((content-start (chat-code--show-assistant-indicator)))
+       (let ((content-start (chat-code--show-assistant-indicator))
+             (responses (list "{\"function_call\":{\"name\":\"demo-tool\",\"arguments\":{\"input\":\"hello\"}}}"
+                              "Tool finished successfully.")))
          (cl-letf (((symbol-function 'chat-approval-request-tool-call)
                     (lambda (_tool _call &optional _session _observer) t))
                    ((symbol-function 'chat-llm-request-async)
                     (lambda (_model _messages success _error _options)
-                      (with-temp-buffer
-                        (funcall success '(:content "Tool finished successfully."
-                                           :raw-request "{\"step\":2}"
-                                           :raw-response "{\"done\":true}")))
-                      'followup-handle)))
-           (chat-code--finalize-response
-            "{\"function_call\":{\"name\":\"demo-tool\",\"arguments\":{\"input\":\"hello\"}}}"
-            content-start
-            "{\"step\":1}"
-            "{\"tool\":true}")))
-       (let ((saved (car (last (chat-session-messages (chat-code-session-base-session session))))))
+                      (funcall success (list :content (pop responses)
+                                             :raw-request "{}"
+                                             :raw-response "{}"))
+                      'request-handle)))
+           (chat-code--start-agent-run
+            'sync
+            'kimi-code
+            (list (make-chat-message
+                   :id "user-1"
+                   :role :user
+                   :content "Run a tool"
+                   :timestamp (current-time)))
+            content-start)))
+       (let ((saved (car (last (chat-session-messages
+                                (chat-code-session-base-session session))))))
          (should (string= (chat-message-content saved) "Tool finished successfully."))
          (should (equal (chat-message-tool-results saved) '("ran:hello")))
-         (should (equal (plist-get (car (chat-message-tool-calls saved)) :name) "demo-tool"))
+         (should (equal (plist-get (car (chat-message-tool-calls saved)) :name)
+                        "demo-tool"))
          (goto-char (point-min))
-        (should (search-forward "Tool finished successfully." nil t)))))))
+         (should (search-forward "Tool finished successfully." nil t)))))))
 
-(ert-deftest chat-code-resolve-tool-loop-async-uses-followup-timeout ()
-  "Test tool-loop follow-up requests use the dedicated timeout."
+(ert-deftest chat-code-start-agent-run-uses-followup-timeout ()
+  "Test code mode passes the follow-up timeout to the agent kernel."
   (chat-test-with-temp-dir
-   (let* ((chat-session-directory temp-dir)
-          (processed '(:content ""
-                      :tool-calls ((:name "demo-tool"
-                                    :arguments (("input" . "hello"))))
-                      :tool-results ("ran:hello")
-                      :tool-events ((:type tool-call
-                                     :tool "demo-tool"
-                                     :arguments (("input" . "hello"))))))
-          captured-timeout)
+   (let ((session (chat-code-session-create "Timeout Session" temp-dir nil))
+         captured-config)
      (with-temp-buffer
        (chat-code-mode)
-       (setq-local chat-code--current-session
-                   (chat-code-session-create "Timeout Session" temp-dir))
-       (setq-local chat-code--live-response-start (point-marker))
-       (cl-letf (((symbol-function 'chat-llm-request-async)
-                  (lambda (_model _messages _success _error options)
-                    (setq captured-timeout (plist-get options :timeout))
-                    'followup-handle)))
-         (chat-code--resolve-tool-loop-async
-          'kimi-code
-          (list (make-chat-message
-                 :id "user-1"
-                 :role :user
-                 :content "Optimize it"
-                 :timestamp (current-time)))
-          processed
-          nil
-          nil
-          (lambda (_resolved))
-          (lambda (_err))))
-       (should (= captured-timeout chat-code-tool-followup-timeout))))))
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (let ((content-start (chat-code--show-assistant-indicator)))
+         (cl-letf (((symbol-function 'chat-agent-start)
+                    (lambda (config)
+                      (setq captured-config config)
+                      nil)))
+           (chat-code--start-agent-run 'sync 'kimi-code '(message-a) content-start)))
+       (should (equal (plist-get captured-config :followup-request-options)
+                      (list :timeout chat-code-tool-followup-timeout)))
+       (should (= (plist-get (plist-get captured-config :request-options)
+                             :timeout)
+                  chat-code-request-timeout))))))
 
 (ert-deftest chat-code-display-processed-response-hides-tool-json-at-loop-limit ()
   "Test code mode hides raw tool JSON when the tool loop hits its safety limit."
@@ -808,8 +789,8 @@ file contents instead of only a short summary."
        (should (eq chat-code--status-state 'cancelled))
        (should (string= chat-code--status-detail "Cancelled by user"))))))
 
-(ert-deftest chat-code-send-non-streaming-attaches-request-diagnostics ()
-  "Test code mode passes a request id into non-streaming requests."
+(ert-deftest chat-code-start-agent-run-attaches-request-diagnostics ()
+  "Test code mode passes a request id into agent run requests."
   (chat-test-with-temp-dir
    (let ((session (chat-code-session-create "Diag Session" temp-dir nil))
          captured-options)
@@ -818,11 +799,12 @@ file contents instead of only a short summary."
        (setq-local chat-code--current-session session)
        (chat-code--setup-buffer session)
        (setq-local chat-code--current-request-id "req-code")
-       (cl-letf (((symbol-function 'chat-llm-request-async)
-                  (lambda (_model _messages _success _error options)
-                    (setq captured-options options)
-                    'request-handle)))
-         (chat-code--send-non-streaming 'kimi '(message-a) (point-min)))
+       (let ((content-start (chat-code--show-assistant-indicator)))
+         (cl-letf (((symbol-function 'chat-llm-request-async)
+                    (lambda (_model _messages _success _error options)
+                      (setq captured-options options)
+                      'request-handle)))
+           (chat-code--start-agent-run 'sync 'kimi '(message-a) content-start)))
        (should (equal (plist-get captured-options :request-id) "req-code"))))))
 
 (ert-deftest chat-code-show-current-request-status-opens-diagnostics-buffer ()

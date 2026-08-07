@@ -41,6 +41,7 @@
 (require 'chat-code-intel)
 (require 'chat-status)
 (require 'chat-stream)
+(require 'chat-agent)
 (require 'chat-code-lsp)
 (require 'chat-tool-caller)
 (require 'chat-request-diagnostics)
@@ -285,6 +286,8 @@ Inherits from chat-session with additional code-specific fields."
   "Currently active stream process.")
 (defvar-local chat-code--pending-edit nil
   "Currently pending edit waiting for user confirmation.")
+(defvar-local chat-code--active-agent-run nil
+  "Currently active agent run state, or nil.")
 (defvar-local chat-code--active-request-model nil
   "Model used by the current or most recent code-mode request.")
 (defvar-local chat-code--active-request-messages nil
@@ -353,7 +356,8 @@ Inherits from chat-session with additional code-specific fields."
 
 (defun chat-code--response-active-p ()
   "Return non nil when a response is already in progress."
-  (or chat-code--active-request-handle
+  (or (chat-agent-active-p chat-code--active-agent-run)
+      chat-code--active-request-handle
       (and (processp chat-code--active-stream-process)
            (process-live-p chat-code--active-stream-process))))
 
@@ -1084,19 +1088,6 @@ Returns either the block body string or a list of (LANG BODY)."
    "If another tool is needed, call one tool as JSON.\n"
    "Otherwise answer normally."))
 
-(defun chat-code--merge-processed-results (base extra)
-  "Merge processed tool data from BASE and EXTRA."
-  (list :content (plist-get extra :content)
-        :tool-loop-limit-reached (or (plist-get base :tool-loop-limit-reached)
-                                     (plist-get extra :tool-loop-limit-reached))
-        :tool-events (append (plist-get base :tool-events)
-                             (plist-get extra :tool-events))
-        :tool-calls (append (plist-get base :tool-calls)
-                            (plist-get extra :tool-calls))
-        :tool-results (append (plist-get base :tool-results)
-                              (plist-get extra :tool-results))
-        :parse-error (plist-get extra :parse-error)))
-
 (defun chat-code--display-processed-response (processed content-start)
   "Render PROCESSED response starting at CONTENT-START."
   (let* ((content (string-trim-right
@@ -1153,159 +1144,6 @@ Returns either the block body string or a list of (LANG BODY)."
       :tool-results tool-results
       :raw-request raw-request
       :raw-response raw-response))))
-
-(defun chat-code--resolve-tool-loop-async (model messages processed raw-request raw-response
-                                                 callback error-callback &optional depth)
-  "Resolve tool calls asynchronously for code mode."
-  (let ((step (or depth 0))
-        (ui-buffer (current-buffer)))
-    (if (or (and (null (plist-get processed :tool-calls))
-                 (not (plist-get processed :parse-error)))
-            (>= step chat-code-tool-loop-max-steps))
-        (funcall callback
-                 (list :processed (if (and (or (plist-get processed :tool-calls)
-                                               (plist-get processed :parse-error))
-                                           (>= step chat-code-tool-loop-max-steps))
-                                      (plist-put (copy-tree processed)
-                                                 :tool-loop-limit-reached
-                                                 t)
-                                    processed)
-                       :raw-request raw-request
-                       :raw-response raw-response))
-      (let* ((parse-error-only
-              (and (null (plist-get processed :tool-calls))
-                   (plist-get processed :parse-error)))
-             (followup-message
-              (make-chat-message
-               :id (chat-session-new-message-id (format "code-tool-step-%d" step))
-               :role :system
-               :content (if parse-error-only
-                            chat-tool-caller-parse-error-followup-text
-                          (chat-code--tool-followup-message
-                           (plist-get processed :tool-calls)
-                           (plist-get processed :tool-results)))
-               :timestamp (current-time)))
-             (next-messages
-              (chat-code--prepare-request-messages
-               model
-               (append messages (list followup-message)))))
-        (chat-code--set-status
-         'running
-         (format "Resolving tools (%d/%d)" (1+ step) chat-code-tool-loop-max-steps))
-        (when chat-code--current-request-id
-          (chat-request-diagnostics-record
-           chat-code--current-request-id
-           'tool-loop-step
-           :handle chat-code--active-request-handle
-           :summary (format "Resolving tool step %d" (1+ step))))
-        (setq chat-code--active-request-handle
-              (chat-llm-request-async
-               model
-               next-messages
-               (lambda (next-result)
-                 (when (buffer-live-p ui-buffer)
-                   (with-current-buffer ui-buffer
-                     (let* ((next-tool-events nil)
-                            (next-content
-                             (string-trim-right
-                              (chat-tool-caller-extract-content
-                               (plist-get next-result :content))))
-                            (next-processed
-                             (chat-tool-caller-process-response-data
-                              (plist-get next-result :content)
-                              (chat-code--base-session)
-                              (lambda (event)
-                                (push event next-tool-events)
-                                (when (and chat-code--live-response-start
-                                           (marker-buffer chat-code--live-response-start))
-                                  (chat-code--render-response-state
-                                   chat-code--live-response-start
-                                   next-content
-                                   (append (plist-get processed :tool-events)
-                                           (reverse next-tool-events))
-                                   nil
-                                   nil
-                                   (chat-code--request-live-detail)))))))
-                       (chat-code--resolve-tool-loop-async
-                        model
-                        next-messages
-                        next-processed
-                        (plist-get next-result :raw-request)
-                        (plist-get next-result :raw-response)
-                        (lambda (resolved)
-                          (funcall callback
-                                   (list :processed
-                                         (chat-code--merge-processed-results
-                                          processed
-                                          (plist-get resolved :processed))
-                                         :raw-request (plist-get resolved :raw-request)
-                                         :raw-response (plist-get resolved :raw-response))))
-                        (lambda (err)
-                          (when (buffer-live-p ui-buffer)
-                            (with-current-buffer ui-buffer
-                              (funcall error-callback err))))
-                        (1+ step))))))
-               (lambda (err)
-                 (when (buffer-live-p ui-buffer)
-                   (with-current-buffer ui-buffer
-                     (funcall error-callback err))))
-               (append
-                (list :temperature 0.7
-                      :max-tokens (chat-code--request-output-budget model)
-                      :timeout chat-code-tool-followup-timeout)
-                (when chat-code--current-request-id
-                  (list :request-id chat-code--current-request-id)))))))))
-
-(defun chat-code--finalize-response (content content-start &optional raw-request raw-response)
-  "Finalize assistant CONTENT starting at CONTENT-START."
-  (let* ((tool-events nil)
-         (processed
-          (chat-tool-caller-process-response-data
-           content
-           (chat-code--base-session)
-           (lambda (event)
-             (push event tool-events)
-             (when (marker-buffer content-start)
-               (chat-code--render-response-state
-                content-start
-                (string-trim-right
-                 (chat-tool-caller-extract-content content))
-                (reverse tool-events)
-                nil
-                nil
-                (chat-code--request-live-detail))))))
-        (model chat-code--active-request-model)
-        (messages chat-code--active-request-messages)
-        (ui-buffer (current-buffer)))
-    (chat-code--resolve-tool-loop-async
-     model
-     messages
-     processed
-     raw-request
-     raw-response
-     (lambda (resolved)
-       (when (buffer-live-p ui-buffer)
-         (with-current-buffer ui-buffer
-           (chat-code--cleanup-request-state 'completed "Request completed")
-           (setq chat-code--active-request-handle nil)
-           (chat-code--set-status
-            (if (plist-get (plist-get resolved :processed) :tool-loop-limit-reached)
-                'stopped
-              'success)
-            (if (plist-get (plist-get resolved :processed) :tool-loop-limit-reached)
-                (format "Stopped after tool loop limit (%d)" chat-code-tool-loop-max-steps)
-              "Completed"))
-           (chat-code--persist-processed-response
-            (plist-get resolved :processed)
-            (plist-get resolved :raw-request)
-            (plist-get resolved :raw-response))
-           (chat-code--display-processed-response
-            (plist-get resolved :processed)
-            content-start))))
-     (lambda (err)
-       (when (buffer-live-p ui-buffer)
-         (with-current-buffer ui-buffer
-           (chat-code--handle-llm-error err content-start)))))))
 
 (defun chat-code--detect-language (file-path)
   "Detect programming language for FILE-PATH."
@@ -1763,6 +1601,141 @@ using C-x b or C-c C-v."
   :type 'boolean
   :group 'chat-code)
 
+(defun chat-code--make-agent-event-handler (content-start ui-buffer)
+  "Return an agent event handler rendering into UI-BUFFER at CONTENT-START."
+  (let ((tool-events nil)
+        (visible-content ""))
+    (lambda (event)
+      (let ((type (plist-get event :type)))
+        (cond
+         ((eq type 'turn-start)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (chat-code--set-status
+               'running
+               (if (> (plist-get event :step) 1)
+                   (format "Resolving tools (%d/%d)"
+                           (1- (plist-get event :step))
+                           chat-code-tool-loop-max-steps)
+                 "Waiting for model")))))
+         ((eq type 'stream-chunk)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (chat-code--set-status 'running "Streaming response")
+              (setq visible-content
+                    (string-trim-right
+                     (chat-tool-caller-extract-content
+                      (or (plist-get event :content) ""))))
+              (chat-code--render-response-state
+               content-start
+               visible-content
+               tool-events
+               nil
+               nil
+               (chat-code--live-placeholder))
+              (redisplay t))))
+         ((eq type 'tool-event)
+          (setq tool-events (append tool-events
+                                    (list (plist-get event :event))))
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (setq chat-code--request-tool-events tool-events)
+              (chat-code--render-response-state
+               content-start
+               visible-content
+               tool-events
+               nil
+               nil
+               (chat-code--request-live-detail)))))
+         ((eq type 'response)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (setq visible-content
+                    (or (plist-get (plist-get event :processed) :content) ""))
+              (chat-code--render-response-state
+               content-start
+               visible-content
+               tool-events
+               nil
+               nil
+               (chat-code--request-live-detail)))))
+         ((eq type 'followup)
+          (when chat-code--current-request-id
+            (chat-request-diagnostics-record
+             chat-code--current-request-id
+             'tool-loop-step
+             :summary (format "Resolving tool step %d"
+                              (plist-get event :step)))))
+         ((eq type 'agent-end)
+          (setq chat-code--active-agent-run nil)
+          (setq chat-code--active-request-handle nil)
+          (setq chat-code--active-stream-process nil)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (let ((status (plist-get event :status)))
+                (pcase status
+                  ((or 'completed 'stopped)
+                   (chat-code--cleanup-request-state
+                    'completed "Request completed")
+                   (chat-code--set-status
+                    (if (eq status 'stopped) 'stopped 'success)
+                    (if (eq status 'stopped)
+                        (format "Stopped after tool loop limit (%d)"
+                                chat-code-tool-loop-max-steps)
+                      "Completed"))
+                   (let ((processed
+                          (list :content (plist-get event :content)
+                                :tool-calls (plist-get event :tool-calls)
+                                :tool-results (plist-get event :tool-results)
+                                :tool-events (plist-get event :tool-events)
+                                :tool-loop-limit-reached
+                                (eq status 'stopped))))
+                     (chat-code--persist-processed-response
+                      processed
+                      (plist-get event :raw-request)
+                      (plist-get event :raw-response))
+                     (chat-code--display-processed-response
+                      processed content-start)))
+                  ('cancelled
+                   (chat-code--cleanup-request-state
+                    'cancelled "Cancelled by user")
+                   (chat-code--set-status 'cancelled "Cancelled by user"))
+                  ('error
+                   (chat-code--handle-llm-error
+                    (or (plist-get event :reason) "Unknown error")
+                    content-start))))))))))))
+
+(defun chat-code--start-agent-run (transport model prepared-messages content-start)
+  "Start an agent run for TRANSPORT with MODEL and PREPARED-MESSAGES.
+CONTENT-START marks the assistant response body."
+  (setq chat-code--active-agent-run
+        (chat-agent-start
+         (list :model model
+               :messages prepared-messages
+               :session (chat-code--base-session)
+               :transport transport
+               :max-steps chat-code-tool-loop-max-steps
+               :followup-fn
+               (lambda (processed)
+                 (if (and (null (plist-get processed :tool-calls))
+                          (plist-get processed :parse-error))
+                     chat-tool-caller-parse-error-followup-text
+                   (chat-code--tool-followup-message
+                    (plist-get processed :tool-calls)
+                    (plist-get processed :tool-results))))
+               :request-options
+               (append
+                (list :temperature 0.7
+                      :max-tokens (chat-code--request-output-budget model)
+                      :timeout chat-code-request-timeout)
+                (when chat-code--current-request-id
+                  (list :request-id chat-code--current-request-id)))
+               :followup-request-options
+               (list :timeout chat-code-tool-followup-timeout)
+               :on-event
+               (chat-code--make-agent-event-handler
+                content-start (current-buffer))))))
+
 (defun chat-code--send-to-llm ()
   "Send the current code-mode conversation to the LLM."
   (chat-code--set-status 'running "Building context")
@@ -1800,94 +1773,15 @@ using C-x b or C-c C-v."
     (chat-code--render-progress content-start
                                 (format "Running with %s"
                                         (chat-code--model-label model)))
-    (if chat-code-use-streaming
-        (chat-code--send-streaming model prepared-messages content-start)
-      (chat-code--send-non-streaming model prepared-messages content-start))
+    (chat-code--start-agent-run
+     (if chat-code-use-streaming 'stream 'sync)
+     model
+     prepared-messages
+     content-start)
     ;; Update context
     (setf (chat-code-session-context-files chat-code--current-session)
           (mapcar #'chat-code-file-context-path
                   (chat-code-context-files context)))))
-
-(defun chat-code--send-streaming (model messages content-start)
-  "Send streaming request to MODEL with MESSAGES.
-CONTENT-START marks the assistant response body."
-  (let ((buffer (current-buffer))
-        (full-content ""))
-    (chat-code--set-status 'running "Starting stream")
-    (chat-code--render-response-state
-     content-start
-     ""
-     nil
-     nil
-     nil
-     (chat-code--live-placeholder))
-    (let ((stream-process
-           (condition-case err
-               (chat-stream-request
-                model
-                messages
-                (lambda (chunk)
-                  (when (and chunk (> (length chunk) 0) (buffer-live-p buffer))
-                    (with-current-buffer buffer
-                      (chat-code--set-status 'running "Streaming response")
-                      (setq full-content (concat full-content chunk))
-                      (let ((visible
-                             (string-trim-right
-                              (chat-tool-caller-extract-content full-content))))
-                        (chat-code--render-response-state
-                         content-start
-                         visible
-                         nil
-                         nil
-                         nil
-                         (chat-code--live-placeholder)))
-                      (redisplay t))))
-                (append
-                 (list :temperature 0.7
-                       :stream t
-                       :max-tokens (chat-code--request-output-budget model))
-                 (when chat-code--current-request-id
-                   (list :request-id chat-code--current-request-id))))
-             (error
-              (chat-code--handle-llm-error (error-message-string err) content-start)
-              nil))))
-      (setq chat-code--active-stream-process stream-process)
-      (if (chat-code--stream-started-p stream-process)
-          (chat-code--set-stream-process-sentinel
-           stream-process
-           (lambda (proc event)
-             (when (and (buffer-live-p buffer)
-                        (string-match-p "finished\\|closed\\|exited" event))
-               (with-current-buffer buffer
-                 (when chat-code--current-request-id
-                   (chat-request-diagnostics-record
-                    chat-code--current-request-id
-                    'response-received
-                    :process proc
-                    :summary "Streaming response finished"))
-                 (setq chat-code--active-stream-process nil)
-                 (chat-code--finalize-response full-content content-start))
-               (when (buffer-live-p (process-buffer proc))
-                 (kill-buffer (process-buffer proc))))))
-        (chat-code--handle-llm-error "Failed to start stream" content-start)))))
-
-(defun chat-code--send-non-streaming (model messages content-start)
-  "Send non-streaming request to MODEL with MESSAGES.
-CONTENT-START marks the assistant response body."
-  (setq chat-code--active-request-handle
-        (chat-llm-request-async
-         model
-         messages
-         (lambda (response)
-           (chat-code--handle-llm-response response content-start))
-         (lambda (error-msg)
-           (chat-code--handle-llm-error error-msg content-start))
-         (append
-          (list :temperature 0.7
-                :max-tokens (chat-code--request-output-budget model)
-                :timeout chat-code-request-timeout)
-          (when chat-code--current-request-id
-            (list :request-id chat-code--current-request-id))))))
 
 (defun chat-code--display-user-message (content)
   "Display user message CONTENT in buffer."
@@ -1937,16 +1831,6 @@ CONTENT-START marks the assistant response body."
        (setq content-start (copy-marker (point)))
        (insert "Preparing request...\n\n")))
     content-start))
-
-(defun chat-code--handle-llm-response (response content-start)
-  "Handle LLM RESPONSE starting at CONTENT-START."
-  (setq chat-code--active-request-handle nil)
-  (chat-code--set-status 'running "Processing response")
-  (chat-code--finalize-response
-   (plist-get response :content)
-   content-start
-   (plist-get response :raw-request)
-   (plist-get response :raw-response)))
 
 (defun chat-code--handle-llm-error (error-msg &optional content-start)
   "Handle LLM error ERROR-MSG.
@@ -2164,6 +2048,8 @@ Returns a chat-edit struct or nil."
 (defun chat-code-cancel ()
   "Cancel current operation."
   (interactive)
+  (when (chat-agent-active-p chat-code--active-agent-run)
+    (chat-agent-cancel chat-code--active-agent-run))
   (when chat-code--active-request-handle
     (chat-llm-cancel-request chat-code--active-request-handle)
     (setq chat-code--active-request-handle nil))

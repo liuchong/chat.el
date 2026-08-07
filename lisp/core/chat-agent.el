@@ -65,7 +65,7 @@
                (:constructor chat-agent--run-create)
                (:copier nil))
   model messages session transport on-event should-stop-fn steering-fn
-  followup-fn max-steps request-options
+  followup-fn max-steps request-options followup-request-options
   (step 0)
   content tool-events tool-calls tool-results
   raw-request raw-response
@@ -95,6 +95,10 @@ CONFIG is a plist with these keys:
   :followup-fn     optional (lambda (processed)) returning follow-up text
   :max-steps       step limit, default `chat-agent-max-steps'
   :request-options extra plist passed to the transport
+  :followup-request-options
+                   options merged over :request-options from the
+                   second turn on, so follow-up requests can use a
+                   different timeout or budget
 
 Events are delivered synchronously through :on-event.  The final
 `agent-end' event carries :status one of `completed', `stopped',
@@ -111,7 +115,9 @@ Events are delivered synchronously through :on-event.  The final
               :followup-fn (plist-get config :followup-fn)
               :max-steps (or (plist-get config :max-steps)
                              chat-agent-max-steps)
-              :request-options (plist-get config :request-options))))
+              :request-options (plist-get config :request-options)
+              :followup-request-options
+              (plist-get config :followup-request-options))))
     (chat-agent--emit run 'agent-start)
     (chat-agent--turn run)
     run))
@@ -198,6 +204,17 @@ Events are delivered synchronously through :on-event.  The final
 ;; Transports
 ;; ------------------------------------------------------------------
 
+(defun chat-agent--options-for-turn (run)
+  "Return the transport options for the current turn of RUN."
+  (let ((base (chat-agent-run-state-request-options run))
+        (followup (chat-agent-run-state-followup-request-options run)))
+    (if (and (> (chat-agent-run-state-step run) 1) followup)
+        (let ((merged (copy-tree base)))
+          (cl-loop for (key value) on followup by #'cddr
+                   do (setq merged (plist-put merged key value)))
+          merged)
+      base)))
+
 (defun chat-agent--dispatch (run)
   "Send the current RUN messages through the configured transport."
   (condition-case err
@@ -221,7 +238,7 @@ Events are delivered synchronously through :on-event.  The final
            (unless (chat-agent-run-state-cancelled run)
              (chat-agent--emit run 'error :message err-message)
              (chat-agent--finish run 'error err-message)))
-         (chat-agent-run-state-request-options run))))
+         (chat-agent--options-for-turn run))))
 
 (defun chat-agent--dispatch-stream (run)
   "Dispatch RUN through the streaming transport."
@@ -237,7 +254,7 @@ Events are delivered synchronously through :on-event.  The final
                                   :text chunk
                                   :content content-acc)))
             (append (list :stream t)
-                    (chat-agent-run-state-request-options run)))))
+                    (chat-agent--options-for-turn run)))))
       (setf (chat-agent-run-state-handle run) proc)
       (let ((inner (process-sentinel proc)))
         (set-process-sentinel

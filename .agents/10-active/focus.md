@@ -13,9 +13,12 @@ Executing the approved unified agent kernel plan
 
 - Phase 1 done: `lisp/core/chat-agent.el` kernel with event stream,
   callback stop conditions, steering, cancellation, truncation refusal,
-  and finish-reason plumbing. 453 tests passing.
-- Phase 2 next: migrate plain chat (chat-ui) onto the kernel, delete
-  the old loops, cap diagnostics traces per request.
+  and finish-reason plumbing.
+- Phase 2 done: plain chat migrated onto the kernel; diagnostics
+  traces bounded by `chat-request-diagnostics-max-events`.
+- Phase 3 done: code mode migrated onto the kernel; kernel learned
+  `:followup-request-options`. 454 tests passing.
+- Phase 4 next: async shell tool with timeout and output spill.
 
 ## Not Doing Now
 
@@ -27,7 +30,7 @@ Executing the approved unified agent kernel plan
 
 ## Immediate Next Step
 
-Phase 2: rewrite chat-ui send paths (`chat-ui--get-response-sync`,
-`chat-ui--get-response-streaming`, `chat-ui--resolve-tool-loop-async`)
-as a view over `chat-agent-start`, rewrite the loop contract tests as
-kernel plus thin view tests, and bound per-request diagnostics traces.
+Phase 4: async shell execution. Port the kimi-cli/pi design into
+`chat-tool-shell.el`: `make-process` based execution, default 60s
+timeout (foreground capped at 300s), output truncation with spill to
+a temp file, and reuse of the same executor for the `!` prefix path.
