@@ -454,6 +454,18 @@ ERROR receives a string message."
     (_
      (chat-llm--post-async url headers body success error timeout-secs))))
 
+(defun chat-llm--extract-finish-reason (json-data)
+  "Extract the OpenAI style finish reason from JSON-DATA, or nil."
+  (let* ((choices (cdr (assoc 'choices json-data)))
+         (first-choice (and choices
+                            (if (vectorp choices)
+                                (and (> (length choices) 0)
+                                     (aref choices 0))
+                              (car choices))))
+         (reason (and first-choice
+                      (cdr (assoc 'finish_reason first-choice)))))
+    (and (stringp reason) reason)))
+
 (defun chat-llm--decode-response (config raw-request raw-response status-code)
   "Decode one response using CONFIG and request metadata."
   (let ((parser (chat-llm--response-parser config)))
@@ -463,6 +475,7 @@ ERROR receives a string message."
         (error "HTTP error %d: %s" status-code raw-response)
       (let ((json-data (json-read-from-string raw-response)))
         (list :content (funcall parser json-data)
+              :finish-reason (chat-llm--extract-finish-reason json-data)
               :raw-request raw-request
               :raw-response raw-response)))))
 

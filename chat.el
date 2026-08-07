@@ -91,6 +91,9 @@
 (chat-files-register-built-in-tools)
 (require 'chat-tool-shell)
 
+;; Load the agent kernel after transports and tooling.
+(require 'chat-agent)
+
 ;; Load UI after tooling has been registered.
 (require 'chat-request-panel)
 (require 'chat-ui)

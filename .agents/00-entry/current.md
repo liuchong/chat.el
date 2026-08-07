@@ -8,16 +8,25 @@
 
 ## Current Phase
 
-Phase 0063 replace selector validation stage is complete.
+Agent kernel phase 1 is complete (2026-08-07).
 
 ## Main Objective
 
-Keep `chat.el` on the new `.agents/` workflow while improving shared reading capture guardrails, unidiff compatibility, and file-editing reliability under AI-generated patch and search-replace inputs, especially around production-grade patch semantics, newline-marker compatibility, unified-diff metadata compatibility, hunk validation, hunk-header validation, header-drift tolerance, empty-update rejection, replace success semantics, replace no-op semantics, patch net no-op semantics, line-scoped replace diagnostics, replace selector validation, invalid-regexp diagnostics, empty-pattern validation, empty-match regexp refusal, directory-path validation across patch and non-patch editing flows, missing-target validation across direct edit flows including insert operations, direct-edit error semantics, patch application error prefix normalization, patch failure-family normalization, patch empty-file semantics, patch conflict semantics, chained patch path reliability, ambiguous line-hint handling, add-file validation, regexp narrowing behavior, move-only patch behavior, patch atomicity, hunk coverage, sequential hunk stability, multi-operation patch composition reliability, and nested patch path reliability.
+Execute the approved plan "unified event-driven kernel" (pi agent-loop
+port): replace the duplicated chat-ui/chat-code request and tool loops
+with the new `lisp/core/chat-agent.el` kernel, then land the borrowed
+designs from pi, kimi-cli, and opencode: async shell execution with
+timeout and output spill, edit replacer cascade with unified diff
+display, append-only JSONL sessions, AGENTS.md ancestor stacking, and
+differential UI rendering.
 
 ## Active Modules
 
 - `AGENTS.md`
 - `.agents/`
+- `lisp/core/chat-agent.el`
+- `lisp/ui/chat-ui.el`
+- `lisp/code/chat-code.el`
 - `lisp/`
 - `tests/`
 - `docs/troubleshooting-pitfalls.md`
@@ -26,6 +35,8 @@ Keep `chat.el` on the new `.agents/` workflow while improving shared reading cap
 
 - `../10-active/focus.md`
 - `../10-active/risks.md`
+- `../30-records/logs/conversation-2026-08-07-deep-project-review.md`
+- `../30-records/logs/stage-2026-08-07-functional-fix-pack.md`
+- `../30-records/logs/stage-2026-08-07-agent-kernel-phase1.md`
 - `../20-reference/decisions/0001-agent-knowledge-layout.md`
 - `../20-reference/decisions/0002-json-structured-protocols.md`
-- `../20-reference/knowledge/request-diagnostics-lifecycle.md`

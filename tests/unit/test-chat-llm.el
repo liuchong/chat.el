@@ -276,5 +276,14 @@
                                  (or (plist-get event :summary) "")))
                (plist-get snapshot :events))))))
 
+(ert-deftest chat-llm-extracts-finish-reason ()
+  "Test finish_reason extraction from OpenAI style responses."
+  (should (string= (chat-llm--extract-finish-reason
+                    '((choices . [((message . ((content . "x")))
+                                  (finish_reason . "length"))])))
+                   "length"))
+  (should-not (chat-llm--extract-finish-reason '((choices . []))))
+  (should-not (chat-llm--extract-finish-reason nil)))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here
