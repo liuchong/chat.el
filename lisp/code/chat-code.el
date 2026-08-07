@@ -1060,7 +1060,8 @@ Returns either the block body string or a list of (LANG BODY)."
       (let* ((call (car tool-calls))
              (name (plist-get call :name))
              (arguments (plist-get call :arguments))
-             (result (chat-code--tool-result-summary (car tool-results))))
+             (result (chat-tool-caller-truncate-result
+                      (string-trim-right (or (car tool-results) "")))))
         (push (format "- %s %s => %s"
                       name
                       (chat-code--tool-arguments-summary arguments)
@@ -1093,7 +1094,8 @@ Returns either the block body string or a list of (LANG BODY)."
         :tool-calls (append (plist-get base :tool-calls)
                             (plist-get extra :tool-calls))
         :tool-results (append (plist-get base :tool-results)
-                              (plist-get extra :tool-results))))
+                              (plist-get extra :tool-results))
+        :parse-error (plist-get extra :parse-error)))
 
 (defun chat-code--display-processed-response (processed content-start)
   "Render PROCESSED response starting at CONTENT-START."
@@ -1143,7 +1145,7 @@ Returns either the block body string or a list of (LANG BODY)."
     (chat-session-add-message
      (chat-code--base-session)
      (make-chat-message
-      :id (format "msg-%s" (random 10000))
+      :id (chat-session-new-message-id)
       :role :assistant
       :content history-content
       :timestamp (current-time)
@@ -1157,10 +1159,12 @@ Returns either the block body string or a list of (LANG BODY)."
   "Resolve tool calls asynchronously for code mode."
   (let ((step (or depth 0))
         (ui-buffer (current-buffer)))
-    (if (or (null (plist-get processed :tool-calls))
+    (if (or (and (null (plist-get processed :tool-calls))
+                 (not (plist-get processed :parse-error)))
             (>= step chat-code-tool-loop-max-steps))
         (funcall callback
-                 (list :processed (if (and (plist-get processed :tool-calls)
+                 (list :processed (if (and (or (plist-get processed :tool-calls)
+                                               (plist-get processed :parse-error))
                                            (>= step chat-code-tool-loop-max-steps))
                                       (plist-put (copy-tree processed)
                                                  :tool-loop-limit-reached
@@ -1168,13 +1172,18 @@ Returns either the block body string or a list of (LANG BODY)."
                                     processed)
                        :raw-request raw-request
                        :raw-response raw-response))
-      (let* ((followup-message
+      (let* ((parse-error-only
+              (and (null (plist-get processed :tool-calls))
+                   (plist-get processed :parse-error)))
+             (followup-message
               (make-chat-message
-               :id (format "code-tool-step-%s-%s" (random 10000) step)
+               :id (chat-session-new-message-id (format "code-tool-step-%d" step))
                :role :system
-               :content (chat-code--tool-followup-message
-                         (plist-get processed :tool-calls)
-                         (plist-get processed :tool-results))
+               :content (if parse-error-only
+                            chat-tool-caller-parse-error-followup-text
+                          (chat-code--tool-followup-message
+                           (plist-get processed :tool-calls)
+                           (plist-get processed :tool-results)))
                :timestamp (current-time)))
              (next-messages
               (chat-code--prepare-request-messages
@@ -1681,7 +1690,7 @@ using C-x b or C-c C-v."
           (delete-region input-start input-end)
           (goto-char input-start)
           (let ((user-msg (make-chat-message
-                           :id (format "msg-%s" (random 10000))
+                           :id (chat-session-new-message-id)
                            :role :user
                            :content content
                            :timestamp (current-time))))

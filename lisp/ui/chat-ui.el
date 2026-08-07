@@ -387,7 +387,7 @@
            ;; Normal message flow
            (t
             (let ((user-msg (make-chat-message
-                            :id (format "msg-%s" (random 10000))
+                            :id (chat-session-new-message-id)
                             :role :user
                             :content content
                             :timestamp (current-time))))
@@ -515,7 +515,8 @@
       (let* ((call (car tool-calls))
              (name (plist-get call :name))
              (arguments (plist-get call :arguments))
-             (result (string-trim-right (or (car tool-results) ""))))
+             (result (chat-tool-caller-truncate-result
+                      (string-trim-right (or (car tool-results) "")))))
         (push (format "- %s %S => %s" name arguments result) lines))
       (setq tool-calls (cdr tool-calls))
       (setq tool-results (cdr tool-results)))
@@ -541,7 +542,8 @@
         :tool-calls (append (plist-get base :tool-calls)
                             (plist-get extra :tool-calls))
         :tool-results (append (plist-get base :tool-results)
-                              (plist-get extra :tool-results))))
+                              (plist-get extra :tool-results))
+        :parse-error (plist-get extra :parse-error)))
 
 (defcustom chat-ui-tool-loop-max-steps 100
   "Maximum number of tool loop follow-up requests."
@@ -559,7 +561,7 @@
               :raw-response raw-response)
       (let* ((followup-message
               (make-chat-message
-               :id (format "tool-step-%s-%s" (random 10000) step)
+               :id (chat-session-new-message-id (format "tool-step-%d" step))
                :role :system
                :content (chat-ui--tool-followup-message
                          (plist-get processed :tool-calls)
@@ -600,19 +602,25 @@
                                                callback error-callback &optional depth session)
   "Resolve tool use asynchronously before calling CALLBACK."
   (let ((step (or depth 0)))
-    (if (or (null (plist-get processed :tool-calls))
+    (if (or (and (null (plist-get processed :tool-calls))
+                 (not (plist-get processed :parse-error)))
             (>= step chat-ui-tool-loop-max-steps))
         (funcall callback
                  (list :processed processed
                        :raw-request raw-request
                        :raw-response raw-response))
-      (let* ((followup-message
+      (let* ((parse-error-only
+              (and (null (plist-get processed :tool-calls))
+                   (plist-get processed :parse-error)))
+             (followup-message
               (make-chat-message
-               :id (format "tool-step-%s-%s" (random 10000) step)
+               :id (chat-session-new-message-id (format "tool-step-%d" step))
                :role :system
-               :content (chat-ui--tool-followup-message
-                         (plist-get processed :tool-calls)
-                         (plist-get processed :tool-results))
+               :content (if parse-error-only
+                            chat-tool-caller-parse-error-followup-text
+                          (chat-ui--tool-followup-message
+                           (plist-get processed :tool-calls)
+                           (plist-get processed :tool-results)))
                :timestamp (current-time)))
              (next-messages (if (chat-ui--message-exists-p followup-message messages)
                                 messages
@@ -775,7 +783,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
   (let* ((session chat--current-session)
          (model (chat-session-model-id session))
          (messages (chat-session-messages session))
-         (msg-id (format "msg-%s" (random 10000)))
+         (msg-id (chat-session-new-message-id))
          (buffer (current-buffer))
          assistant-start
          (request-id (chat-ui--begin-request session model 'async)))
@@ -848,7 +856,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
              (chat-session-add-message
               chat--current-session
               (make-chat-message
-               :id (format "msg-%s" (random 10000))
+               :id (chat-session-new-message-id)
                :role :system
                :content (format "Created tool: %s" (chat-forged-tool-name tool))
                :timestamp (current-time))))
@@ -867,8 +875,9 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
   "Execute shell COMMAND and display result in chat buffer.
 Handles special case: cd <dir> changes default-directory."
   (let* ((trimmed (string-trim command))
-         (is-cd (string-match-p "^cd\\s-+" trimmed)))
-    (if (and is-cd (not (string-match-p ";\|&&\|||" trimmed)))
+         ;; `string-match' (not -p) so `match-end' below sees this match.
+         (is-cd (string-match "^cd\\s-+" trimmed)))
+    (if (and is-cd (not (string-match-p ";\\|&&\\|||" trimmed)))
         ;; Handle cd specially
         (let ((dir (substring trimmed (match-end 0))))
           (setq dir (string-trim dir))
@@ -920,7 +929,7 @@ This is an ephemeral query - the result is displayed but not persisted."
         (chat-llm-request-async
          model
          (list (make-chat-message
-                :id (format "ephemeral-%s" (random 10000))
+                :id (chat-session-new-message-id "ephemeral")
                 :role :user
                 :content trimmed
                 :timestamp (current-time)))
@@ -1138,7 +1147,7 @@ This is an ephemeral query - the result is displayed but not persisted."
   (let* ((session chat--current-session)
          (model (chat-session-model-id session))
          (messages (chat-session-messages session))
-         (msg-id (format "msg-%s" (random 10000)))
+         (msg-id (chat-session-new-message-id))
          (ui-buffer (current-buffer))
          (content-acc "")
          assistant-start

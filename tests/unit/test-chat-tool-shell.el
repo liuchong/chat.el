@@ -58,5 +58,23 @@
                         (format "cd %s && pwd" (shell-quote-argument temp-dir))))
                       (file-truename temp-dir))))))
 
+(ert-deftest chat-tool-shell-split-preserves-single-quoted-args ()
+  "Test that single-quoted arguments survive command splitting."
+  (should (equal (chat-tool-shell--split-command
+                  "awk 'BEGIN{system(\"touch /tmp/x\")}' /etc/hostname")
+                 '("awk" "BEGIN{system(\"touch /tmp/x\")}" "/etc/hostname")))
+  (should (equal (chat-tool-shell--split-command
+                  "sed -i -e 's/a/b/' file")
+                 '("sed" "-i" "-e" "s/a/b/" "file"))))
+
+(ert-deftest chat-tool-shell-split-handles-quotes-and-escapes ()
+  "Test that double quotes and backslash escapes group arguments."
+  (should (equal (chat-tool-shell--split-command "echo \"a b\" c")
+                 '("echo" "a b" "c")))
+  (should (equal (chat-tool-shell--split-command "ls -la /tmp")
+                 '("ls" "-la" "/tmp")))
+  (should (equal (chat-tool-shell--split-command "echo a\\ b")
+                 '("echo" "a b"))))
+
 (provide 'test-chat-tool-shell)
 ;;; test-chat-tool-shell.el ends here

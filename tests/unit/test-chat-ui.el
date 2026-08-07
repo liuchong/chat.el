@@ -231,6 +231,48 @@
        (should-not (search-forward "Second draft\n\nAssistant" nil t))
        (should-not (search-forward "Answer 2" nil t))))))
 
+(ert-deftest chat-ui-resolve-tool-loop-async-retries-parse-error ()
+  "Test async tool loop asks the model to retry after a tool call parse error."
+  (let* ((initial-messages
+          (list (make-chat-message
+                 :id "user-1"
+                 :role :user
+                 :content "读一下文件"
+                 :timestamp (current-time))))
+         (processed '(:content ""
+                      :tool-calls nil
+                      :tool-results nil
+                      :parse-error t))
+         captured-messages
+         final-result)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_model messages success _error _options)
+                 (setq captured-messages messages)
+                 (funcall success
+                          '(:content "修复后的回答"
+                            :raw-request "{\"step\":2}"
+                            :raw-response "{\"answer\":true}"))
+                 'request-handle))
+              ((symbol-function 'chat-tool-caller-process-response-data)
+               (lambda (_content &optional _session)
+                 '(:content "修复后的回答"))))
+      (chat-ui--resolve-tool-loop-async
+       'kimi-code
+       initial-messages
+       processed
+       "{\"step\":1}"
+       nil
+       (lambda (resolved)
+         (setq final-result resolved))
+       (lambda (_err)
+         (should nil)))
+      (let ((followup (car (last captured-messages))))
+        (should (eq (chat-message-role followup) :system))
+        (should (string-match-p "could not be parsed"
+                                (chat-message-content followup))))
+      (should (string= (plist-get (plist-get final-result :processed) :content)
+                       "修复后的回答")))))
+
 (ert-deftest chat-ui-resolve-tool-loop-async-requests-followup-answer ()
   "Test async tool loop requests the next model turn correctly."
   (let* ((initial-messages
@@ -504,6 +546,29 @@
          (chat-ui--prepare-messages-with-tools nil))
        (should (string-match-p "Recent file target for follow-up requests" captured-prompt))
        (should (string-match-p (regexp-quote target-file) captured-prompt))))))
+
+(ert-deftest chat-ui-handle-shell-command-cd-special-case ()
+  "Test that a plain cd takes the directory-change path, not the shell."
+  (chat-test-with-temp-dir
+   (let (shell-ran)
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message) #'ignore)
+                 ((symbol-function 'chat-ui--execute-shell-safe)
+                  (lambda (_cmd) (setq shell-ran t) "out")))
+         (chat-ui--handle-shell-command (concat "cd " temp-dir))
+         (should-not shell-ran)
+         (should (string= default-directory
+                          (file-name-as-directory (expand-file-name temp-dir))))
+         (chat-ui--handle-shell-command (concat "cd " temp-dir " && ls"))
+         (should shell-ran))))))
+
+(ert-deftest chat-ui-tool-result-lines-truncate-long-results ()
+  "Test oversized tool results are truncated with an omission marker."
+  (let* ((chat-tool-caller-result-max-chars 20)
+         (lines (chat-ui--tool-result-lines
+                 '((:name "files_read" :arguments (("path" . "/tmp/x"))))
+                 (list (make-string 50 ?x)))))
+    (should (string-match-p "truncated, 30 chars omitted" (car lines)))))
 
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

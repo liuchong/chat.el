@@ -307,5 +307,25 @@
        (should (= (length sessions) 1))
        (should (string= (chat-session-name (car sessions)) "Valid Session"))))))
 
+(ert-deftest chat-session-message-ids-are-unique ()
+  "Test generated message ids never repeat."
+  (let ((ids (cl-loop repeat 2000 collect (chat-session-new-message-id))))
+    (should (= (length ids) (length (delete-dups ids))))))
+
+(ert-deftest chat-session-load-returns-nil-on-corrupt-file ()
+  "Test a corrupt session file loads as nil instead of signaling."
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir))
+     (with-temp-file (expand-file-name "broken.json" temp-dir)
+       (insert "{not json"))
+     (should-not (chat-session-load "broken")))))
+
+(ert-deftest chat-session-save-leaves-no-temp-files ()
+  "Test atomic save cleans up its temporary file."
+  (chat-test-with-temp-dir
+   (let ((chat-session-directory temp-dir))
+     (chat-session-save (chat-session-create "atomic" 'kimi))
+     (should (null (directory-files temp-dir nil "^\\.session-"))))))
+
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here

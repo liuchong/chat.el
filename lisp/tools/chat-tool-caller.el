@@ -31,6 +31,23 @@
   :type 'boolean
   :group 'chat)
 
+(defcustom chat-tool-caller-result-max-chars 8000
+  "Maximum characters of one tool result fed back to the model.
+Results longer than this are truncated with an omission marker so the
+model knows content is missing."
+  :type 'integer
+  :group 'chat)
+
+(defun chat-tool-caller-truncate-result (result &optional max-chars)
+  "Keep RESULT within MAX-CHARS, appending an omission marker when cut."
+  (let* ((text (or result ""))
+         (limit (or max-chars chat-tool-caller-result-max-chars)))
+    (if (> (length text) limit)
+        (format "%s\n... [truncated, %d chars omitted]"
+                (substring text 0 limit)
+                (- (length text) limit))
+      text)))
+
 (defun chat-tool-caller--tool-available-p (tool)
   "Return non-nil when TOOL should be exposed to the model."
   (cond
@@ -153,11 +170,12 @@
     (while (string-match "```json" content pos)
       (let* ((start (match-end 0))
              (end (string-match "```" content start)))
-        (unless end
-          (setq start nil))
-        (when start
-          (push (substring content start end) blocks)
-          (setq pos (+ end 3)))))
+        (if end
+            (progn
+              (push (substring content start end) blocks)
+              (setq pos (+ end 3)))
+          ;; Unclosed fence: skip past the opener so the loop terminates.
+          (setq pos start))))
     (nreverse blocks)))
 
 (defun chat-tool-caller--extract-inline-json-fragments (content)
@@ -235,6 +253,21 @@
     (when (and (stringp name) (listp arguments))
       (list :name name
             :arguments arguments))))
+
+(defun chat-tool-caller--attempted-tool-call-p (content)
+  "Return non-nil when CONTENT looks like a failed tool call attempt.
+The heuristic keys on explicit function_call markers so ordinary JSON
+examples in prose do not count as attempts."
+  (string-match-p "function_call\\|\"_call\"" content))
+
+(defconst chat-tool-caller-parse-error-followup-text
+  (concat
+   "Your previous response looked like a tool call, but the tool call JSON "
+   "could not be parsed.\n"
+   "Respond with exactly one valid JSON object of the form "
+   "{\"function_call\": {\"name\": \"<tool>\", \"arguments\": {...}}}, "
+   "or answer normally without any JSON.")
+  "Follow-up text sent when a tool call attempt fails to parse.")
 
 (defun chat-tool-caller-parse (content)
   "Parse tool calls from CONTENT."
@@ -487,6 +520,8 @@ If SESSION is nil, uses `chat--current-session' if bound."
 (defun chat-tool-caller-process-response-data (content &optional session observer)
   "Process CONTENT for SESSION and return a result plist."
   (let* ((calls (chat-tool-caller-parse content))
+         (parse-error (and (null calls)
+                           (chat-tool-caller--attempted-tool-call-p content)))
          tool-results
          tool-events)
     (when (and observer
@@ -508,7 +543,8 @@ If SESSION is nil, uses `chat--current-session' if bound."
     (list :content (string-trim-right (chat-tool-caller-extract-content content))
           :tool-calls calls
           :tool-results (nreverse tool-results)
-          :tool-events (nreverse tool-events))))
+          :tool-events (nreverse tool-events)
+          :parse-error parse-error)))
 
 (defun chat-tool-caller-process-response (content callback)
   "Process CONTENT then call CALLBACK."

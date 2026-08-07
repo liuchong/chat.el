@@ -107,35 +107,59 @@ Returns the newly created chat-session struct."
       (chat-session-save session))
     session))
 
+(defvar chat-session--message-counter 0
+  "Monotonic counter for unique message identifiers.")
+
+(defun chat-session-new-message-id (&optional prefix)
+  "Return a message id that is unique within this Emacs process.
+PREFIX defaults to \"msg\"."
+  (format "%s-%s-%d"
+          (or prefix "msg")
+          (format-time-string "%Y%m%d%H%M%S")
+          (cl-incf chat-session--message-counter)))
+
 (defun chat-session-save (session)
   "Save SESSION to disk.
 
 SESSION is a chat-session struct.
+The write is atomic: content goes to a temporary file first and is
+renamed over the target, so a crash mid-save cannot corrupt the
+previous session file.
 Returns t on success, nil on failure."
   (chat-session--ensure-directory)
   (let* ((id (chat-session-id session))
          (filename (expand-file-name
                     (format "%s.json" id)
                     chat-session-directory))
-         (data (chat-session--serialize session)))
-    (with-temp-file filename
-      (insert (json-encode data)))
-    t))
+         (data (chat-session--serialize session))
+         (temp-file (make-temp-file
+                     (expand-file-name ".session-" chat-session-directory)
+                     nil ".json")))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-file
+            (insert (json-encode data)))
+          (rename-file temp-file filename t)
+          t)
+      (when (file-exists-p temp-file)
+        (delete-file temp-file)))))
 
 (defun chat-session-load (session-id)
   "Load session with SESSION-ID from disk.
 
 SESSION-ID is a string identifying the session.
-Returns the chat-session struct, or nil if not found."
+Returns the chat-session struct, or nil if not found or unreadable."
   (let ((filename (expand-file-name
                    (format "%s.json" session-id)
                    chat-session-directory)))
     (when (file-exists-p filename)
-      (with-temp-buffer
-        (insert-file-contents filename)
-        (chat-session--deserialize
-         (json-read-from-string
-          (buffer-string)))))))
+      (condition-case nil
+          (with-temp-buffer
+            (insert-file-contents filename)
+            (chat-session--deserialize
+             (json-read-from-string
+              (buffer-string))))
+        (error nil)))))
 
 (defun chat-session-delete (session-id)
   "Delete session with SESSION-ID from disk.
@@ -172,11 +196,12 @@ descending."
                    chat-session-directory
                    t
                    "\\.json$"))
-      (condition-case nil
-          (push (chat-session-load
-                 (file-name-base file))
-                sessions)
-        (error nil)))
+      (let ((session (condition-case nil
+                         (chat-session-load
+                          (file-name-base file))
+                       (error nil))))
+        (when session
+          (push session sessions))))
     (sort sessions
           (lambda (a b)
             (time-less-p

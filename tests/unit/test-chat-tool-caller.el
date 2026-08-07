@@ -346,5 +346,40 @@
       (should (string-match-p "Access denied" result))
       (should (string-match-p "code mode" result)))))
 
+(ert-deftest chat-tool-caller-unclosed-fence-does-not-hang ()
+  "Test that an unclosed ```json fence terminates instead of looping forever."
+  (let ((response "```json\n{\"function_call\":{\"name\":\"demo\",\"arguments\":{"))
+    (should (null (chat-tool-caller--extract-fenced-json response)))
+    (should (null (chat-tool-caller-parse response)))))
+
+(ert-deftest chat-tool-caller-unclosed-fence-keeps-earlier-blocks ()
+  "Test that complete blocks before an unclosed fence are still extracted."
+  (let* ((response (concat "```json\n{\"function_call\":{\"name\":\"demo\",\"arguments\":{}}}\n```\n"
+                           "```json\n{\"function_call\":{\"name\":\"broken\""))
+         (calls (chat-tool-caller-parse response)))
+    (should (= (length calls) 1))
+    (should (string= (plist-get (car calls) :name) "demo"))))
+
+(ert-deftest chat-tool-caller-detects-failed-tool-call-attempt ()
+  "Test that broken function_call content is flagged as a parse error."
+  (should (chat-tool-caller--attempted-tool-call-p
+           "```json\n{\"function_call\":{\"name\":\"demo\""))
+  (should (chat-tool-caller--attempted-tool-call-p
+           "{\"_call\":{\"name\":\"demo\"}"))
+  (should-not (chat-tool-caller--attempted-tool-call-p "Just a normal answer."))
+  (should-not (chat-tool-caller--attempted-tool-call-p
+               "Example JSON: ```json\n{\"a\":1}\n```")))
+
+(ert-deftest chat-tool-caller-process-response-flags-parse-error ()
+  "Test that process-response-data reports parse errors for failed attempts."
+  (let ((broken (chat-tool-caller-process-response-data
+                 "```json\n{\"function_call\":{\"name\":\"demo\",\"arguments\":{"))
+        (plain (chat-tool-caller-process-response-data "All done."))
+        (valid (chat-tool-caller-process-response-data
+                "{\"function_call\":{\"name\":\"demo\",\"arguments\":{}}}")))
+    (should (plist-get broken :parse-error))
+    (should-not (plist-get plain :parse-error))
+    (should-not (plist-get valid :parse-error))))
+
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

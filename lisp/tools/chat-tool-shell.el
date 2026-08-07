@@ -65,8 +65,53 @@ to these defaults."
   "Pattern for shell metacharacters that are not allowed.")
 
 (defun chat-tool-shell--split-command (command)
-  "Parse COMMAND into an argv list."
-  (split-string-and-unquote command))
+  "Parse COMMAND into an argv list.
+Unlike `split-string-and-unquote', single quotes group anywhere in a
+word, so commands like awk 'BEGIN{...}' file survive intact."
+  (let ((len (length command))
+        (idx 0)
+        (args nil)
+        (current nil)
+        (in-token nil))
+    (while (< idx len)
+      (let ((ch (aref command idx)))
+        (cond
+         ((memq ch '(?\s ?\t ?\n))
+          (when in-token
+            (push (apply #'string (nreverse current)) args)
+            (setq current nil
+                  in-token nil)))
+         ((eq ch ?\\)
+          (setq in-token t)
+          (when (< (1+ idx) len)
+            (setq idx (1+ idx))
+            (push (aref command idx) current)))
+         ((eq ch ?')
+          (setq in-token t)
+          (setq idx (1+ idx))
+          (while (and (< idx len) (not (eq (aref command idx) ?')))
+            (push (aref command idx) current)
+            (setq idx (1+ idx))))
+         ((eq ch ?\")
+          (setq in-token t)
+          (setq idx (1+ idx))
+          (while (and (< idx len) (not (eq (aref command idx) ?\")))
+            (let ((inner (aref command idx)))
+              (if (and (eq inner ?\\)
+                       (< (1+ idx) len)
+                       (memq (aref command (1+ idx)) '(?\" ?\\)))
+                  (progn
+                    (setq idx (1+ idx))
+                    (push (aref command idx) current))
+                (push inner current)))
+            (setq idx (1+ idx))))
+         (t
+          (setq in-token t)
+          (push ch current))))
+      (setq idx (1+ idx)))
+    (when in-token
+      (push (apply #'string (nreverse current)) args))
+    (nreverse args)))
 
 (defun chat-tool-shell--whitelist-patterns ()
   "Return all whitelist patterns."

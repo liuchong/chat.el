@@ -274,6 +274,14 @@ Required field order:
 
 **Solution**: finish the load path at the same time as the save path or explicitly disable the feature until both directions are implemented and covered by tests.
 
+### Mid-Save Crashes Must Not Brick Sessions
+
+**Problem**: a session disappears from the list and cannot be resumed after Emacs is killed during a save.
+
+**Cause**: session files were truncated and rewritten in place, and load signaled on the partially written JSON.
+
+**Solution**: write to a temporary file and rename it over the target atomically, make `chat-session-load` return nil on unreadable files, and never push nil sessions into `chat-session-list`.
+
 ---
 
 ## File Tools and Security
@@ -441,6 +449,38 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: start the conversation from code mode for repository work, or surface a clear hint when file-tool access fails so the user can switch to code mode instead of retrying shell commands.
 
+### Unclosed JSON Fence Hangs The Parser
+
+**Problem**: a truncated model response with an unclosed ```json fence hangs Emacs until C-g.
+
+**Cause**: the fenced block extractor never advanced its scan position when no closing fence existed, so the same opener matched forever.
+
+**Solution**: skip past the opener when no closing fence exists and cover truncated responses with a regression test.
+
+### Silent Tool Call Parse Failures End The Loop
+
+**Problem**: a malformed tool call JSON is shown to the user as if it were a final answer and the tool loop stops.
+
+**Cause**: parse failures were swallowed with no feedback signal to the model.
+
+**Solution**: flag `:parse-error` in `chat-tool-caller-process-response-data` when content looks like a tool call attempt, and let both tool loops send a parse error follow-up so the model retries within the loop limit.
+
+### Summarized Tool Results Blind The Model
+
+**Problem**: code mode answered as if it had not read the file right after `files_read` succeeded.
+
+**Cause**: tool follow-up messages carried only a 240 character whitespace-collapsed summary of each result.
+
+**Solution**: feed real result content back up to `chat-tool-caller-result-max-chars` (default 8000) with an explicit omission marker beyond the cap.
+
+### `split-string-and-unquote` Mangles Single Quotes
+
+**Problem**: model generated commands like `awk 'BEGIN{...}' file` fail with confusing errors and the model retries until the loop limit.
+
+**Cause**: `split-string-and-unquote` does not group single quoted segments inside a word.
+
+**Solution**: tokenize shell commands with `chat-tool-shell--split-command`, which handles single quotes, double quotes, and backslash escapes.
+
 ---
 
 ## Testing and Batch Mode
@@ -521,6 +561,22 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 **Cause**: external APIs and transport details are easy to misread from docs alone.
 
 **Solution**: validate the critical path with a small prototype in `tests/prototypes/` before formal integration.
+
+### `string-match-p` Does Not Expose Match Data
+
+**Problem**: `match-end` after a `string-match-p` call reads stale data from an unrelated earlier match, so position logic works only by luck.
+
+**Cause**: `string-match-p` deliberately preserves the caller's match data instead of publishing its own.
+
+**Solution**: use `string-match` when the code needs `match-beginning` or `match-end`, and keep `string-match-p` only for pure predicates.
+
+### Stale `.elc` Files Shadow Source Fixes
+
+**Problem**: a fresh source fix appears to do nothing in probes, and `byte-code-function-p` unexpectedly returns t for a just edited function.
+
+**Cause**: stray `.elc` files next to the sources are loaded preferentially over newer `.el` files.
+
+**Solution**: delete stray `.elc` files before investigating surprising behavior and keep them out of version control.
 
 ## Quick Reference
 

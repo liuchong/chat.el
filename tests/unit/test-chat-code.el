@@ -636,13 +636,16 @@
                         "latest question"))))))
 
 (ert-deftest chat-code-tool-followup-summarizes-structured-results ()
-  "Test tool follow-up messages keep summaries instead of raw plist dumps."
+  "Test tool follow-up messages carry real tool result content.
+Structured results are fed back verbatim up to
+`chat-tool-caller-result-max-chars', so the model can actually see
+file contents instead of only a short summary."
   (let* ((tool-calls '((:name "files_read"
                        :arguments (("path" . "/tmp/demo.el")))))
          (tool-results '("(:path \"/tmp/demo.el\" :content \"(message \\\"hello\\\")\\n(second-line)\" :size 24)"))
          (message (chat-code--tool-followup-message tool-calls tool-results)))
-    (should (string-match-p (regexp-quote "demo.el: (message") message))
-    (should-not (string-match-p ":content" message))))
+    (should (string-match-p (regexp-quote "(message \\\"hello\\\")") message))
+    (should (string-match-p (regexp-quote "(second-line)") message))))
 
 (ert-deftest chat-code-tool-summary-keeps-short-directory-lists-readable ()
   "Test short directory listings keep all visible file names."
@@ -1037,6 +1040,21 @@
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
   "Test code mode tool loop default is production sized."
   (should (= chat-code-tool-loop-max-steps 100)))
+
+(ert-deftest chat-code-tool-result-lines-keep-real-content ()
+  "Test follow-up lines carry real multi-line tool results."
+  (let ((lines (chat-code--tool-result-lines
+                '((:name "files_read" :arguments (("path" . "/tmp/x"))))
+                (list "line one\nline two\nline three"))))
+    (should (string-match-p "line one\nline two" (car lines)))))
+
+(ert-deftest chat-code-tool-result-lines-truncate-long-results ()
+  "Test oversized tool results are truncated with an omission marker."
+  (let* ((chat-tool-caller-result-max-chars 10)
+         (lines (chat-code--tool-result-lines
+                 '((:name "files_read" :arguments (("path" . "/tmp/x"))))
+                 (list (make-string 40 ?y)))))
+    (should (string-match-p "truncated, 30 chars omitted" (car lines)))))
 
 (provide 'test-chat-code)
 ;;; test-chat-code.el ends here
