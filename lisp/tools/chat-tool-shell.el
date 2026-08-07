@@ -9,6 +9,7 @@
 (require 'chat-files)
 (require 'chat-tool-forge)
 (require 'seq)
+(require 'subr-x)
 
 (defcustom chat-tool-shell-enabled nil
   "Enable shell command execution tool.
@@ -145,15 +146,116 @@ Returns plist with :directory and optional :rest when matched."
          (path (or unquoted directory)))
     (chat-files--safe-path-p path)))
 
-(defun chat-tool-shell--execute-argv (command)
-  "Execute COMMAND with `process-file` in the current directory."
-  (let ((argv (chat-tool-shell--split-command command)))
-    (let ((default-directory (if (file-directory-p default-directory)
-                                 (file-name-as-directory default-directory)
-                               (file-name-as-directory temporary-file-directory))))
-      (with-output-to-string
-        (with-current-buffer standard-output
-          (apply #'process-file (car argv) nil t nil (cdr argv)))))))
+(defcustom chat-tool-shell-timeout 60
+  "Default timeout in seconds for foreground shell commands."
+  :type 'integer
+  :group 'chat)
+
+(defcustom chat-tool-shell-max-timeout 300
+  "Maximum timeout in seconds for foreground shell commands."
+  :type 'integer
+  :group 'chat)
+
+(defcustom chat-tool-shell-output-max-lines 2000
+  "Maximum lines of shell output kept in a tool result."
+  :type 'integer
+  :group 'chat)
+
+(defcustom chat-tool-shell-output-max-chars 50000
+  "Maximum characters of shell output kept in a tool result."
+  :type 'integer
+  :group 'chat)
+
+(defun chat-tool-shell--truncate-output (output)
+  "Return (TEXT . NOTE) after applying output limits to OUTPUT.
+NOTE is nil when nothing was truncated.  Truncated output spills into
+a temporary file and NOTE reports its path."
+  (let* ((lines (split-string output "\n"))
+         (kept-lines (if (> (length lines) chat-tool-shell-output-max-lines)
+                         (seq-take lines chat-tool-shell-output-max-lines)
+                       lines))
+         (kept (string-join kept-lines "\n"))
+         (kept (if (> (length kept) chat-tool-shell-output-max-chars)
+                  (substring kept 0 chat-tool-shell-output-max-chars)
+                kept))
+         (omitted (- (length output) (length kept))))
+    (if (<= omitted 0)
+        (cons output nil)
+      (let ((spill (make-temp-file "chat-shell-output-" nil ".log")))
+        (with-temp-file spill
+          (insert output))
+        (cons kept
+              (format "[output truncated: %d chars omitted; full output saved to %s]"
+                      omitted spill))))))
+
+(defun chat-tool-shell--format-result (stdout stderr exit-status timed-out timeout)
+  "Format subprocess STDOUT and STDERR into a tool result string."
+  (let* ((pair (chat-tool-shell--truncate-output stdout))
+         (text (string-trim-right (car pair)))
+         (stderr-note (unless (string-empty-p (string-trim (or stderr "")))
+                        (format "[stderr]\n%s" (string-trim-right stderr))))
+         (notes (delq nil
+                      (list (cdr pair)
+                            (and timed-out
+                                 (format "[timed out after %d seconds]" timeout))
+                            (and (not timed-out)
+                                 (integerp exit-status)
+                                 (not (zerop exit-status))
+                                 (format "[exit status %d]" exit-status))))))
+    (string-join (delq nil (list (unless (string-empty-p text) text)
+                                 stderr-note
+                                 (and notes (string-join notes "\n"))))
+                 "\n")))
+
+(defun chat-tool-shell--execute-argv (command &optional timeout)
+  "Execute COMMAND as a subprocess with TIMEOUT and output limits.
+The wait pumps `accept-process-output', so Emacs stays responsive
+while the command runs.  Output beyond the configured limits is
+truncated and spills into a temporary file."
+  (let* ((argv (chat-tool-shell--split-command command))
+         (default-directory (if (file-directory-p default-directory)
+                                (file-name-as-directory default-directory)
+                              (file-name-as-directory temporary-file-directory)))
+         (timeout (min (or timeout chat-tool-shell-timeout)
+                       chat-tool-shell-max-timeout))
+         (buffer (generate-new-buffer " *chat-shell*"))
+         (stderr-buffer (generate-new-buffer " *chat-shell-stderr*"))
+         (proc nil)
+         (timed-out nil))
+    (unwind-protect
+        (progn
+          (setq proc (make-process
+                      :name "chat-shell"
+                      :buffer buffer
+                      :command argv
+                      :stderr stderr-buffer
+                      :noquery t
+                      :sentinel #'ignore))
+          (let ((deadline (+ (float-time) timeout)))
+            (while (and (process-live-p proc)
+                        (< (float-time) deadline))
+              (accept-process-output proc 0.2)))
+          (when (process-live-p proc)
+            (setq timed-out t)
+            (delete-process proc))
+          (chat-tool-shell--format-result
+           (with-current-buffer buffer (buffer-string))
+           ;; The default stderr sentinel appends a status line such as
+           ;; "Process chat-shell stderr finished"; drop it.  The process
+           ;; name may carry a <N> suffix when instances overlap.
+           (replace-regexp-in-string
+            "\n?Process chat-shell\\(<[0-9]+>\\)? stderr [^\n]*\n?\\'"
+            ""
+            (with-current-buffer stderr-buffer (buffer-string)))
+           (and (not timed-out) (process-exit-status proc))
+           timed-out
+           timeout))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer))
+      (when (buffer-live-p stderr-buffer)
+        (kill-buffer stderr-buffer)))))
 
 (defun chat-tool-shell-whitelist-match-p (command)
   "Return non-nil if COMMAND matches any pattern in whitelist.
@@ -205,8 +307,10 @@ Matching rules:
              (not (string-match-p chat-tool-shell--unsafe-pattern command))
              (member (car argv) chat-tool-shell-allowed-commands))))))
 
-(defun chat-tool-shell-execute (command)
-  "Execute shell COMMAND and return output."
+(defun chat-tool-shell-execute (command &optional timeout)
+  "Execute shell COMMAND and return output.
+Optional TIMEOUT (seconds) overrides `chat-tool-shell-timeout' and is
+capped by `chat-tool-shell-max-timeout'."
   (if (not chat-tool-shell-enabled)
       "Error: Shell tool is disabled"
     (if (not (chat-tool-shell-validate command))
@@ -219,9 +323,9 @@ Matching rules:
                       (rest (plist-get cd-prefix :rest)))
                   (if rest
                       (let ((default-directory (file-name-as-directory safe-dir)))
-                        (chat-tool-shell-execute rest))
+                        (chat-tool-shell-execute rest timeout))
                     (concat safe-dir "\n")))
-              (chat-tool-shell--execute-argv command)))
+              (chat-tool-shell--execute-argv command timeout)))
         (error (format "Error executing command: %s" (error-message-string err)))))))
 
 ;; Register the tool
@@ -231,7 +335,8 @@ Matching rules:
   :name "Shell Execute"
   :description "Execute a shell command and return the output. Available commands: ls, cat, pwd, echo, head, tail, grep, find, wc, which, type, du, stat, sort, uniq, cut, sed, awk, tr"
   :language 'elisp
-  :parameters '((:name "command" :type "string" :required t))
+  :parameters '((:name "command" :type "string" :required t)
+                (:name "timeout" :type "number" :required nil))
   :compiled-function #'chat-tool-shell-execute
   :is-active t
   :usage-count 0

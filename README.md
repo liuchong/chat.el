@@ -337,8 +337,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 453 regression tests discovered
-- 453 passing
+- 457 regression tests discovered
+- 457 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

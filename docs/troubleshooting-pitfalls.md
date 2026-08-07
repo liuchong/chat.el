@@ -578,6 +578,14 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: delete stray `.elc` files before investigating surprising behavior and keep them out of version control.
 
+### Stderr Buffers Collect Sentinel Status Lines
+
+**Problem**: subprocess results captured from a `:stderr` buffer contain a trailing `Process <name> stderr finished` line that was never written by the command.
+
+**Cause**: Emacs attaches a default sentinel to the stderr pseudo process, and that sentinel appends a status line to the buffer. The process name may also carry a `<N>` suffix when instances overlap.
+
+**Solution**: strip the status line when reading the buffer, allowing an optional `<N>` suffix and trailing newline, or install a no-op sentinel.
+
 ## Quick Reference
 
 | Area | Rule |

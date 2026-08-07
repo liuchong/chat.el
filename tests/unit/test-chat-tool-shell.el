@@ -25,7 +25,8 @@
     (should tool)
     (should (chat-forged-tool-is-active tool))
     (should (equal (chat-forged-tool-parameters tool)
-                   '((:name "command" :type "string" :required t))))))
+                   '((:name "command" :type "string" :required t)
+                     (:name "timeout" :type "number" :required nil))))))
 
 (ert-deftest chat-tool-shell-allows-directory-size-command ()
   "Test that common directory inspection commands are allowed."
@@ -75,6 +76,33 @@
                  '("ls" "-la" "/tmp")))
   (should (equal (chat-tool-shell--split-command "echo a\\ b")
                  '("echo" "a b"))))
+
+(ert-deftest chat-tool-shell-reports-nonzero-exit-status ()
+  "Test failing commands return output with an exit status note."
+  (let ((result (chat-tool-shell--execute-argv "ls /nonexistent-dir-xyz")))
+    (should (string-match-p "\\[exit status [0-9]+\\]" result))
+    (should (string-match-p "\\[stderr\\]" result))))
+
+(ert-deftest chat-tool-shell-enforces-timeout ()
+  "Test commands running past the timeout are killed and reported."
+  (let ((result (chat-tool-shell--execute-argv "sleep 5" 1)))
+    (should (string-match-p "\\[timed out after 1 seconds\\]" result))))
+
+(ert-deftest chat-tool-shell-truncates-long-output-with-spill-file ()
+  "Test oversized output is truncated and spills into a file."
+  (let ((chat-tool-shell-output-max-lines 3)
+        (chat-tool-shell-output-max-chars 50000))
+    (let ((result (chat-tool-shell--execute-argv "seq 1 10")))
+      (should (string-match-p "1\n2\n3" result))
+      (should-not (string-match-p "\n9\n" result))
+      (should (string-match-p "\\[output truncated:" result))
+      (let ((path (and (string-match "saved to \\([^]]+\\)\\]" result)
+                       (match-string 1 result))))
+        (should path)
+        (should (file-exists-p path))
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "\n10" (buffer-string))))))))
 
 (provide 'test-chat-tool-shell)
 ;;; test-chat-tool-shell.el ends here
