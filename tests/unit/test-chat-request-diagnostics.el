@@ -68,4 +68,17 @@
                        :last-chunk-at (current-time)))))
     (should (string-match-p "Receiving response (4 chunks" detail))))
 
+(ert-deftest chat-request-diagnostics-caps-retained-events ()
+  "Test old events are dropped once the per trace limit is exceeded."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-diagnostics-max-events 5))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (dotimes (index 10)
+        (chat-request-diagnostics-record id 'custom :n index))
+      (let ((events (plist-get (chat-request-diagnostics-snapshot id) :events)))
+        (should (= (length events) 5))
+        ;; Snapshot order stays chronological, newest retained.
+        (should (= (plist-get (car events) :n) 5))
+        (should (= (plist-get (car (last events)) :n) 9))))))
+
 (provide 'test-chat-request-diagnostics)

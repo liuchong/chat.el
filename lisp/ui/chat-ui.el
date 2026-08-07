@@ -25,6 +25,7 @@
 (require 'chat-request-panel)
 (require 'chat-request-surface)
 (require 'chat-status)
+(require 'chat-agent)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -47,6 +48,9 @@
 
 (defvar chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
+
+(defvar chat-ui--active-agent-run nil
+  "Currently active agent run state, or nil.")
 
 (defvar-local chat-ui--current-request-id nil
   "Diagnostics request id for the current chat buffer.")
@@ -91,7 +95,8 @@
 
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
-  (or chat-ui--active-request-handle
+  (or (chat-agent-active-p chat-ui--active-agent-run)
+      chat-ui--active-request-handle
       (and chat-ui--active-stream-process
            (process-live-p chat-ui--active-stream-process))))
 
@@ -534,137 +539,136 @@
    "If another tool is needed, call one tool as JSON.\n"
    "Otherwise answer normally."))
 
-(defun chat-ui--merge-processed-results (base extra)
-  "Merge processed tool data from BASE and EXTRA."
-  (list :content (plist-get extra :content)
-        :tool-events (append (plist-get base :tool-events)
-                             (plist-get extra :tool-events))
-        :tool-calls (append (plist-get base :tool-calls)
-                            (plist-get extra :tool-calls))
-        :tool-results (append (plist-get base :tool-results)
-                              (plist-get extra :tool-results))
-        :parse-error (plist-get extra :parse-error)))
-
 (defcustom chat-ui-tool-loop-max-steps 100
   "Maximum number of tool loop follow-up requests."
   :type 'integer
   :group 'chat)
 
-(defun chat-ui--resolve-tool-loop (model messages processed raw-request raw-response
-                                         &optional depth session)
-  "Continue tool use for MODEL with MESSAGES until a final answer appears."
-  (let ((step (or depth 0)))
-    (if (or (null (plist-get processed :tool-calls))
-            (>= step chat-ui-tool-loop-max-steps))
-        (list :processed processed
-              :raw-request raw-request
-              :raw-response raw-response)
-      (let* ((followup-message
-              (make-chat-message
-               :id (chat-session-new-message-id (format "tool-step-%d" step))
-               :role :system
-               :content (chat-ui--tool-followup-message
-                         (plist-get processed :tool-calls)
-                         (plist-get processed :tool-results))
-               :timestamp (current-time)))
-             ;; Avoid duplicate messages by checking ID
-             (next-messages (if (chat-ui--message-exists-p followup-message messages)
-                                messages
-                              (append messages (list followup-message))))
-             (next-result (chat-llm-request model next-messages '(:temperature 0.7)))
-             (next-processed
-              (chat-tool-caller-process-response-data
-               (plist-get next-result :content)
-               session))
-             (resolved
-              (chat-ui--resolve-tool-loop
-               model
-               next-messages
-               next-processed
-               (plist-get next-result :raw-request)
-               (plist-get next-result :raw-response)
-               (1+ step)
-               session)))
-        (list :processed
-              (chat-ui--merge-processed-results
-               processed
-               (plist-get resolved :processed))
-              :raw-request (plist-get resolved :raw-request)
-              :raw-response (plist-get resolved :raw-response))))))
+(defun chat-ui--make-agent-event-handler (session msg-id ui-buffer content-start request-id)
+  "Return an agent event handler rendering into UI-BUFFER.
+SESSION, MSG-ID, CONTENT-START, and REQUEST-ID identify the pending
+assistant response being filled in."
+  (let ((tool-events nil))
+    (lambda (event)
+      (let ((type (plist-get event :type)))
+        (cond
+         ((eq type 'stream-chunk)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (setq chat-ui--live-response-content
+                    (string-trim-right
+                     (chat-tool-caller-extract-content
+                      (or (plist-get event :content) ""))))
+              (chat-ui--render-response-state
+               ui-buffer
+               content-start
+               chat-ui--live-response-content
+               tool-events
+               (chat-ui--request-live-detail))
+              (redisplay t))))
+         ((eq type 'tool-event)
+          (setq tool-events (append tool-events
+                                    (list (plist-get event :event))))
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (setq chat-ui--request-tool-events tool-events)
+              (chat-ui--render-response-state
+               ui-buffer
+               content-start
+               chat-ui--live-response-content
+               tool-events
+               (chat-ui--request-live-detail)))))
+         ((eq type 'response)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (setq chat-ui--live-response-content
+                    (or (plist-get (plist-get event :processed) :content) ""))
+              (chat-ui--render-response-state
+               ui-buffer
+               content-start
+               chat-ui--live-response-content
+               tool-events
+               (chat-ui--request-live-detail)))))
+         ((eq type 'followup)
+          (when request-id
+            (chat-request-diagnostics-record
+             request-id
+             'tool-loop-step
+             :summary (format "Resolving tool step %d"
+                              (plist-get event :step))))
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (chat-ui--refresh-live-surfaces))))
+         ((eq type 'agent-end)
+          (setq chat-ui--active-agent-run nil)
+          (setq chat-ui--active-request-handle nil)
+          (setq chat-ui--active-stream-process nil)
+          (pcase (plist-get event :status)
+            ((or 'completed 'stopped)
+             (when (buffer-live-p ui-buffer)
+               (with-current-buffer ui-buffer
+                 (chat-ui--cleanup-request-state
+                  'completed
+                  (if (eq (plist-get event :status) 'stopped)
+                      (format "Stopped after tool loop limit (%d)"
+                              chat-ui-tool-loop-max-steps)
+                    "Request completed"))))
+             (chat-ui--finalize-response
+              session
+              msg-id
+              ui-buffer
+              content-start
+              (list :content (plist-get event :content)
+                    :tool-calls (plist-get event :tool-calls)
+                    :tool-results (plist-get event :tool-results)
+                    :tool-events (plist-get event :tool-events))
+              (plist-get event :raw-request)
+              (plist-get event :raw-response)))
+            ('cancelled
+             (when (buffer-live-p ui-buffer)
+               (with-current-buffer ui-buffer
+                 (chat-ui--cleanup-request-state
+                  'cancelled "Cancelled by user"))))
+            ('error
+             (chat-ui--render-error
+              ui-buffer
+              (or (plist-get event :reason) "Unknown error"))))))))))
 
-(defun chat-ui--message-exists-p (message messages)
-  "Check if MESSAGE (by ID) already exists in MESSAGES list."
-  (let ((msg-id (chat-message-id message)))
-    (cl-some (lambda (m) (equal (chat-message-id m) msg-id))
-             messages)))
-
-(defun chat-ui--resolve-tool-loop-async (model messages processed raw-request raw-response
-                                               callback error-callback &optional depth session)
-  "Resolve tool use asynchronously before calling CALLBACK."
-  (let ((step (or depth 0)))
-    (if (or (and (null (plist-get processed :tool-calls))
-                 (not (plist-get processed :parse-error)))
-            (>= step chat-ui-tool-loop-max-steps))
-        (funcall callback
-                 (list :processed processed
-                       :raw-request raw-request
-                       :raw-response raw-response))
-      (let* ((parse-error-only
-              (and (null (plist-get processed :tool-calls))
-                   (plist-get processed :parse-error)))
-             (followup-message
-              (make-chat-message
-               :id (chat-session-new-message-id (format "tool-step-%d" step))
-               :role :system
-               :content (if parse-error-only
-                            chat-tool-caller-parse-error-followup-text
-                          (chat-ui--tool-followup-message
-                           (plist-get processed :tool-calls)
-                           (plist-get processed :tool-results)))
-               :timestamp (current-time)))
-             (next-messages (if (chat-ui--message-exists-p followup-message messages)
-                                messages
-                              (append messages (list followup-message)))))
-        (when chat-ui--current-request-id
-          (chat-request-diagnostics-record
-           chat-ui--current-request-id
-           'tool-loop-step
-           :handle chat-ui--active-request-handle
-           :summary (format "Resolving tool step %d" (1+ step))))
-        (setq chat-ui--live-response-content
-              (or (plist-get processed :content) ""))
-        (chat-ui--refresh-live-surfaces)
-        (setq chat-ui--active-request-handle
-              (chat-llm-request-async
-               model
-               next-messages
-               (lambda (next-result)
-                 (let ((next-processed
-                        (chat-tool-caller-process-response-data
-                         (plist-get next-result :content)
-                         session)))
-                   (chat-ui--resolve-tool-loop-async
-                    model
-                    next-messages
-                    next-processed
-                    (plist-get next-result :raw-request)
-                    (plist-get next-result :raw-response)
-                    (lambda (resolved)
-                      (funcall callback
-                               (list :processed
-                                     (chat-ui--merge-processed-results
-                                      processed
-                                      (plist-get resolved :processed))
-                                     :raw-request (plist-get resolved :raw-request)
-                                     :raw-response (plist-get resolved :raw-response))))
-                    error-callback
-                    (1+ step)
-                    session)))
-               error-callback
-               (append
-                (list :temperature 0.7)
-                (when chat-ui--current-request-id
-                  (list :request-id chat-ui--current-request-id)))))))))
+(defun chat-ui--start-agent-run (transport)
+  "Start an agent run for the current session through TRANSPORT."
+  (message "Getting response from AI...")
+  (let* ((session chat--current-session)
+         (model (chat-session-model-id session))
+         (messages (chat-session-messages session))
+         (msg-id (chat-session-new-message-id))
+         (ui-buffer (current-buffer))
+         assistant-start
+         (request-id (chat-ui--begin-request session model transport)))
+    (save-excursion
+      (goto-char chat-ui--messages-end)
+      (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
+      (set-marker chat-ui--messages-end (point))
+      (setq assistant-start (copy-marker (point))))
+    (setq chat-ui--live-response-start assistant-start)
+    (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
+           (messages-final (chat-context-prepare-messages messages-with-tools)))
+      (chat-log "[UI] Starting %s agent run with %d messages"
+                transport (length messages-final))
+      (setq chat-ui--active-agent-run
+            (chat-agent-start
+             (list :model model
+                   :messages messages-final
+                   :session session
+                   :transport transport
+                   :max-steps chat-ui-tool-loop-max-steps
+                   :request-options
+                   (append
+                    (list :temperature 0.7)
+                    (when request-id
+                      (list :request-id request-id)))
+                   :on-event
+                   (chat-ui--make-agent-event-handler
+                    session msg-id ui-buffer assistant-start request-id)))))))
 
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
@@ -706,69 +710,6 @@
         (insert "\n\n")
         (set-marker chat-ui--messages-end (point))))))
 
-(defun chat-ui--handle-response-success (session msg-id ui-buffer content-start model messages result)
-  "Handle successful RESULT for SESSION in UI-BUFFER."
-  (let* ((raw-content (plist-get result :content))
-         (visible-content (string-trim-right
-                           (chat-tool-caller-extract-content raw-content)))
-        (tool-events nil)
-        (processed (chat-tool-caller-process-response-data
-                     raw-content
-                     session
-                     (lambda (event)
-                       (push event tool-events)
-                       (setq chat-ui--live-response-content visible-content)
-                       (chat-ui--render-response-state
-                        ui-buffer
-                        content-start
-                        visible-content
-                        (nreverse tool-events)
-                        (chat-ui--request-live-detail))))))
-    (setq chat-ui--live-response-content visible-content)
-    (chat-ui--render-response-state
-     ui-buffer
-     content-start
-     visible-content
-     (nreverse tool-events)
-     (chat-ui--request-live-detail))
-    (chat-ui--resolve-tool-loop-async
-     model
-     messages
-     processed
-     (plist-get result :raw-request)
-     (plist-get result :raw-response)
-     (lambda (resolved)
-       (setq chat-ui--active-request-handle nil)
-       (when (buffer-live-p ui-buffer)
-         (with-current-buffer ui-buffer
-           (chat-ui--cleanup-request-state 'completed "Request completed")))
-       (chat-ui--finalize-response
-        session
-        msg-id
-        ui-buffer
-        content-start
-        (plist-get resolved :processed)
-        (plist-get resolved :raw-request)
-        (plist-get resolved :raw-response)))
-    (lambda (err)
-      (chat-ui--render-error ui-buffer err))
-    nil
-    session)))
-
-(defun chat-ui--render-stream-start-error (ui-buffer)
-  "Render a stream startup error in UI-BUFFER."
-  (setq chat-ui--active-stream-process nil)
-  (message "Error: Failed to start stream process")
-  (when (buffer-live-p ui-buffer)
-    (with-current-buffer ui-buffer
-      (chat-ui--cleanup-request-state 'error "Failed to start stream process")))
-  (when (buffer-live-p ui-buffer)
-    (with-current-buffer ui-buffer
-      (save-excursion
-        (goto-char chat-ui--messages-end)
-        (insert "[Error: Failed to start stream]\n\n")
-        (set-marker chat-ui--messages-end (point))))))
-
 (defun chat-ui--get-response ()
   "Get AI response for current session.
 Uses streaming if `chat-ui-use-streaming' is non-nil."
@@ -777,52 +718,12 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
     (chat-ui--get-response-sync)))
 
 (defun chat-ui--get-response-sync ()
-  "Get AI response through the asynchronous non streaming path."
-  (message "Getting response from AI...")
-  (chat-log "=== Starting chat-ui--get-response ===")
-  (let* ((session chat--current-session)
-         (model (chat-session-model-id session))
-         (messages (chat-session-messages session))
-         (msg-id (chat-session-new-message-id))
-         (buffer (current-buffer))
-         assistant-start
-         (request-id (chat-ui--begin-request session model 'async)))
-    
-    (chat-log "Session: %s, Model: %s, Messages count: %d"
-             (chat-session-id session) model (length messages))
-    
-    ;; Insert assistant header
-    (save-excursion
-      (goto-char chat-ui--messages-end)
-      (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
-      (set-marker chat-ui--messages-end (point))
-      (setq assistant-start (copy-marker (point))))
-    (setq chat-ui--live-response-start assistant-start)
-    
-    ;; Prepare messages with context management and tool calling
-    (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
-           (messages-final (chat-context-prepare-messages messages-with-tools)))
-      (chat-log "Context: %d messages after filtering" (length messages-final))
-      (setq chat-ui--active-request-handle
-            (chat-llm-request-async
-             model
-             messages-final
-             (lambda (result)
-               (chat-ui--handle-response-success
-                session
-                msg-id
-                buffer
-                assistant-start
-                model
-                messages-final
-                result))
-             (lambda (err)
-               (chat-log "[Async] ERROR: %s" err)
-               (chat-ui--render-error buffer err))
-             (append
-              (list :temperature 0.7)
-              (when request-id
-                (list :request-id request-id))))))))
+  "Get AI response through the non streaming agent transport."
+  (chat-ui--start-agent-run 'sync))
+
+(defun chat-ui--get-response-streaming ()
+  "Get AI response through the streaming agent transport."
+  (chat-ui--start-agent-run 'stream))
 
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
@@ -1136,155 +1037,28 @@ This is an ephemeral query - the result is displayed but not persisted."
   "Install SENTINEL on PROCESS."
   (set-process-sentinel process sentinel))
 
-(defun chat-ui--stream-request (model messages callback options)
-  "Start a streaming request for MODEL with MESSAGES."
-  (chat-stream-request model messages callback options))
-
-(defun chat-ui--get-response-streaming ()
-  "Get AI response with streaming display."
-  (message "Getting response from AI...")
-  (chat-log "=== Starting streaming response ===")
-  (let* ((session chat--current-session)
-         (model (chat-session-model-id session))
-         (messages (chat-session-messages session))
-         (msg-id (chat-session-new-message-id))
-         (ui-buffer (current-buffer))
-         (content-acc "")
-         assistant-start
-         (request-id (chat-ui--begin-request session model 'stream)))
-    (save-excursion
-      (goto-char chat-ui--messages-end)
-      (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
-      (set-marker chat-ui--messages-end (point))
-      (setq assistant-start (copy-marker (point))))
-    (setq chat-ui--live-response-start assistant-start)
-    (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
-           (messages-final (chat-context-prepare-messages messages-with-tools))
-           (request-json
-            (json-encode
-             (chat-llm--build-request model messages-final
-                                      '(:temperature 0.7 :stream t)))))
-      (chat-log "[STREAM] Context: %d messages" (length messages-final))
-      (chat-log "[STREAM] Starting request to %s with %d messages"
-                model
-                (length messages-final))
-      (let ((stream-process
-             (condition-case err
-                 (funcall
-                  (symbol-function 'chat-ui--stream-request)
-                  model
-                  messages-final
-                  (lambda (chunk)
-                    (when (and chunk (> (length chunk) 0))
-                      (chat-log "[STREAM-UI] Got chunk: %d bytes" (length chunk))
-                      (when (buffer-live-p ui-buffer)
-                        (with-current-buffer ui-buffer
-                          (setq content-acc (concat content-acc chunk))
-                          (setq chat-ui--live-response-content
-                                (string-trim-right
-                                 (chat-tool-caller-extract-content content-acc)))
-                          (chat-ui--render-response-state
-                           ui-buffer
-                           assistant-start
-                           chat-ui--live-response-content
-                           chat-ui--request-tool-events
-                           (chat-ui--request-live-detail))
-                          (redisplay t)))))
-                  (append
-                   (list :temperature 0.7 :stream t)
-                   (when request-id
-                     (list :request-id request-id))))
-               (error
-                (let ((err-message (error-message-string err)))
-                  (chat-log "[STREAM] Exception in stream setup: %s" err-message)
-                  (message "Stream error: %s" err-message)
-                  (when (buffer-live-p ui-buffer)
-                    (with-current-buffer ui-buffer
-                      (save-excursion
-                        (goto-char chat-ui--messages-end)
-                        (insert (format "[Error: %s]\n\n" err-message))
-                        (set-marker chat-ui--messages-end (point)))))
-                  nil)))))
-        (setq chat-ui--active-stream-process stream-process)
-        (if (not (chat-ui--stream-started-p stream-process))
-            (progn
-              (chat-log "[STREAM] ERROR: Process creation returned nil")
-              (chat-ui--render-stream-start-error ui-buffer))
-          (chat-log "[STREAM] Process created successfully: %S" stream-process)
-          (funcall
-           (symbol-function 'chat-ui--set-stream-process-sentinel)
-           stream-process
-             (lambda (proc event)
-             (chat-log "[STREAM] Sentinel event: %s" event)
-             (when (string-match-p "finished\\|closed\\|exited" event)
-               (setq chat-ui--active-stream-process nil)
-               (when request-id
-                 (chat-request-diagnostics-record
-                  request-id
-                  'response-received
-                  :process proc
-                  :summary "Streaming response finished"))
-               (let* ((visible-content (string-trim-right
-                                        (chat-tool-caller-extract-content content-acc)))
-                      (tool-events nil)
-                      (processed
-                       (chat-tool-caller-process-response-data
-                        content-acc
-                        session
-                        (lambda (event)
-                          (push event tool-events)
-                          (setq chat-ui--live-response-content visible-content)
-                          (chat-ui--render-response-state
-                           ui-buffer
-                           assistant-start
-                           visible-content
-                           (nreverse tool-events)
-                           (chat-ui--request-live-detail))))))
-                 (chat-ui--resolve-tool-loop-async
-                  model
-                  messages-final
-                  processed
-                  request-json
-                  nil
-                  (lambda (resolved)
-                    (setq chat-ui--active-request-handle nil)
-                    (when (buffer-live-p ui-buffer)
-                      (with-current-buffer ui-buffer
-                        (chat-ui--cleanup-request-state 'completed "Request completed")))
-                    (chat-ui--finalize-response
-                     session
-                     msg-id
-                     ui-buffer
-                     assistant-start
-                     (plist-get resolved :processed)
-                     (plist-get resolved :raw-request)
-                     (plist-get resolved :raw-response))
-                    (when (buffer-live-p (process-buffer proc))
-                      (kill-buffer (process-buffer proc)))
-                    (chat-log "[STREAM] Response complete"))
-                  (lambda (err-message)
-                    (chat-ui--render-error ui-buffer err-message))
-                  nil
-                  session))))))))))
-
 ;;;###autoload
 (defun chat-ui-cancel-response ()
-  "Cancel the current streaming or non streaming response."
+  "Cancel the current agent run or in flight request."
   (interactive)
-  (when chat-ui--active-request-handle
-    (chat-llm-cancel-request chat-ui--active-request-handle)
-    (setq chat-ui--active-request-handle nil))
-  (when (and chat-ui--active-stream-process
-             (process-live-p chat-ui--active-stream-process))
-    (when chat-ui--current-request-id
-      (chat-request-diagnostics-record
-       chat-ui--current-request-id
-       'cancelled
-       :process chat-ui--active-stream-process
-       :summary "Cancelled by user"))
-    (delete-process chat-ui--active-stream-process)
-    (setq chat-ui--active-stream-process nil)
-    (message "Response cancelled"))
+  (if (chat-agent-active-p chat-ui--active-agent-run)
+      (progn
+        (chat-agent-cancel chat-ui--active-agent-run)
+        (message "Response cancelled"))
+    (when chat-ui--active-request-handle
+      (chat-llm-cancel-request chat-ui--active-request-handle)
+      (setq chat-ui--active-request-handle nil))
+    (when (and chat-ui--active-stream-process
+               (process-live-p chat-ui--active-stream-process))
+      (when chat-ui--current-request-id
+        (chat-request-diagnostics-record
+         chat-ui--current-request-id
+         'cancelled
+         :process chat-ui--active-stream-process
+         :summary "Cancelled by user"))
+      (delete-process chat-ui--active-stream-process)
+      (setq chat-ui--active-stream-process nil)
+      (message "Response cancelled")))
   (chat-ui--cleanup-request-state))
 
 (provide 'chat-ui)

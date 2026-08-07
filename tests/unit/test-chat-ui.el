@@ -78,37 +78,6 @@
            (should (string= (chat-message-raw-request saved) "{\"request\":true}"))
            (should (string= (chat-message-raw-response saved) "{\"response\":true}"))))))))
 
-(ert-deftest chat-ui-resolve-tool-loop-requests-followup-answer ()
-  "Test that tool results are fed back into a follow-up model call."
-  (let* ((initial-messages
-          (list (make-chat-message
-                 :id "user-1"
-                 :role :user
-                 :content "执行一个简单命令然后告诉我结果"
-                 :timestamp (current-time))))
-         (processed '(:content ""
-                     :tool-calls ((:name "shell_execute"
-                                   :arguments (("command" . "echo tool-ok"))))
-                     :tool-results ("tool-ok\n")))
-         captured-messages)
-    (cl-letf (((symbol-function 'chat-llm-request)
-               (lambda (_model messages _options)
-                 (setq captured-messages messages)
-                 '(:content "命令结果是 tool-ok"
-                   :raw-request "{\"step\":2}"
-                   :raw-response "{\"answer\":true}"))))
-      (let* ((resolved (chat-ui--resolve-tool-loop
-                        'kimi-code initial-messages processed "{\"step\":1}" nil))
-             (final (plist-get resolved :processed))
-             (followup (car (last captured-messages))))
-        (should (string= (plist-get final :content) "命令结果是 tool-ok"))
-        (should (equal (plist-get final :tool-results) '("tool-ok\n")))
-        (should (eq (chat-message-role followup) :system))
-        (should (string-match-p "Tool results from the previous step"
-                                (chat-message-content followup)))
-        (should (string-match-p "tool-ok"
-                                (chat-message-content followup)))))))
-
 (ert-deftest chat-ui-get-response-sync-uses-async-request-path ()
   "Test that non streaming UI requests go through the async LLM API."
   (chat-test-with-temp-dir
@@ -136,7 +105,7 @@
                     'request-handle)))
          (chat-ui--get-response-sync)
          (should requested)
-         (should (equal chat-ui--active-request-handle 'request-handle))
+         (should (chat-agent-run-state-done chat-ui--active-agent-run))
          (let ((saved (car (last (chat-session-messages session)))))
            (should (string= (chat-message-content saved) "Async answer"))))))))
 
@@ -230,89 +199,6 @@
        (should (search-forward "Answer 1" nil t))
        (should-not (search-forward "Second draft\n\nAssistant" nil t))
        (should-not (search-forward "Answer 2" nil t))))))
-
-(ert-deftest chat-ui-resolve-tool-loop-async-retries-parse-error ()
-  "Test async tool loop asks the model to retry after a tool call parse error."
-  (let* ((initial-messages
-          (list (make-chat-message
-                 :id "user-1"
-                 :role :user
-                 :content "读一下文件"
-                 :timestamp (current-time))))
-         (processed '(:content ""
-                      :tool-calls nil
-                      :tool-results nil
-                      :parse-error t))
-         captured-messages
-         final-result)
-    (cl-letf (((symbol-function 'chat-llm-request-async)
-               (lambda (_model messages success _error _options)
-                 (setq captured-messages messages)
-                 (funcall success
-                          '(:content "修复后的回答"
-                            :raw-request "{\"step\":2}"
-                            :raw-response "{\"answer\":true}"))
-                 'request-handle))
-              ((symbol-function 'chat-tool-caller-process-response-data)
-               (lambda (_content &optional _session)
-                 '(:content "修复后的回答"))))
-      (chat-ui--resolve-tool-loop-async
-       'kimi-code
-       initial-messages
-       processed
-       "{\"step\":1}"
-       nil
-       (lambda (resolved)
-         (setq final-result resolved))
-       (lambda (_err)
-         (should nil)))
-      (let ((followup (car (last captured-messages))))
-        (should (eq (chat-message-role followup) :system))
-        (should (string-match-p "could not be parsed"
-                                (chat-message-content followup))))
-      (should (string= (plist-get (plist-get final-result :processed) :content)
-                       "修复后的回答")))))
-
-(ert-deftest chat-ui-resolve-tool-loop-async-requests-followup-answer ()
-  "Test async tool loop requests the next model turn correctly."
-  (let* ((initial-messages
-          (list (make-chat-message
-                 :id "user-1"
-                 :role :user
-                 :content "执行一个简单命令然后告诉我结果"
-                 :timestamp (current-time))))
-         (processed '(:content ""
-                     :tool-calls ((:name "shell_execute"
-                                   :arguments (("command" . "echo tool-ok"))))
-                     :tool-results ("tool-ok\n")))
-         captured-options
-         final-result)
-    (cl-letf (((symbol-function 'chat-llm-request-async)
-               (lambda (_model _messages success _error options)
-                 (setq captured-options options)
-                 (funcall success
-                          '(:content "命令结果是 tool-ok"
-                            :raw-request "{\"step\":2}"
-                            :raw-response "{\"answer\":true}"))
-                 'request-handle))
-              ((symbol-function 'chat-tool-caller-process-response-data)
-               (lambda (_content &optional _session)
-                 '(:content "命令结果是 tool-ok"))))
-      (chat-ui--resolve-tool-loop-async
-       'kimi-code
-       initial-messages
-       processed
-       "{\"step\":1}"
-       nil
-       (lambda (resolved)
-         (setq final-result resolved))
-       (lambda (_err)
-         (should nil)))
-      (should (equal captured-options '(:temperature 0.7)))
-      (should (equal (plist-get (plist-get final-result :processed) :tool-results)
-                     '("tool-ok\n")))
-      (should (string= (plist-get (plist-get final-result :processed) :content)
-                       "命令结果是 tool-ok")))))
 
 (ert-deftest chat-ui-stream-started-p-accepts-non-nil-handle ()
   "Test non-nil handles count as successful stream startup."
@@ -569,6 +455,58 @@
                  '((:name "files_read" :arguments (("path" . "/tmp/x"))))
                  (list (make-string 50 ?x)))))
     (should (string-match-p "truncated, 30 chars omitted" (car lines)))))
+
+(ert-deftest chat-ui-get-response-streaming-uses-stream-transport ()
+  "Test streaming UI requests go through the agent stream transport."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Stream Session" 'kimi))
+          (chat-ui--messages-end nil)
+          captured-config)
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "user-1"
+       :role :user
+       :content "Hello"
+       :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-agent-start)
+                  (lambda (config)
+                    (setq captured-config config)
+                    nil)))
+         (chat-ui--get-response-streaming)
+         (should (eq (plist-get captured-config :transport) 'stream))
+         (should (plist-get captured-config :on-event))
+         (should (eq (plist-get captured-config :session) session)))))))
+
+(ert-deftest chat-ui-get-response-sync-uses-sync-transport ()
+  "Test non streaming UI requests go through the agent sync transport."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Sync Session" 'kimi))
+          (chat-ui--messages-end nil)
+          captured-config)
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "user-1"
+       :role :user
+       :content "Hello"
+       :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-agent-start)
+                  (lambda (config)
+                    (setq captured-config config)
+                    nil)))
+         (chat-ui--get-response-sync)
+         (should (eq (plist-get captured-config :transport) 'sync))
+         (should (= (plist-get captured-config :max-steps)
+                    chat-ui-tool-loop-max-steps)))))))
 
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

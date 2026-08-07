@@ -3,6 +3,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'subr-x)
 
 (defgroup chat-request-diagnostics nil
@@ -129,6 +130,13 @@
             (remhash id chat-request-diagnostics--observers)))
       nil)))
 
+(defcustom chat-request-diagnostics-max-events 200
+  "Maximum events retained per request trace.
+Events are stored newest first internally and oldest events are
+dropped once the limit is exceeded."
+  :type 'integer
+  :group 'chat)
+
 (defun chat-request-diagnostics-record (id event-type &rest props)
   "Append EVENT-TYPE with PROPS to request trace ID."
   (let ((trace (chat-request-diagnostics-get id)))
@@ -155,8 +163,11 @@
           (setf (chat-request-trace-stream-chunk-count trace)
                 (1+ (or (chat-request-trace-stream-chunk-count trace) 0)))
           (setf (chat-request-trace-last-chunk-at trace) now))
-        (setf (chat-request-trace-events trace)
-              (append (chat-request-trace-events trace) (list event)))
+        (let ((events (cons event (chat-request-trace-events trace))))
+          (setf (chat-request-trace-events trace)
+                (if (> (length events) chat-request-diagnostics-max-events)
+                    (seq-take events chat-request-diagnostics-max-events)
+                  events)))
         (dolist (observer (gethash id chat-request-diagnostics--observers))
           (funcall observer id trace event))
         trace))))
@@ -183,7 +194,7 @@
                        (chat-request-trace-handle trace))
        :process-live-p (chat-request-diagnostics--process-live-p
                         (chat-request-trace-process trace))
-       :events (chat-request-trace-events trace)))))
+       :events (reverse (chat-request-trace-events trace))))))
 
 (defun chat-request-diagnostics-latest ()
   "Return the most recently updated trace."
