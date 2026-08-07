@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'chat-files)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -155,8 +156,10 @@ Returns t on success, nil on failure."
        nil))))
 
 (defun chat-edit--write-content (edit)
-  "Write edit content to file."
-  (let* ((file (chat-edit-file edit))
+  "Write edit content to file.
+The target path goes through the same validation as the file tools,
+so inline edits cannot escape the allowed directories."
+  (let* ((file (chat-files--safe-path-p (chat-edit-file edit)))
          (new-content (chat-edit-new-content edit))
          (range (chat-edit-range edit))
          (type (chat-edit-type edit)))
@@ -258,9 +261,12 @@ Returns t on success, nil on failure."
           (delete-file file))))))
 
 (defun chat-edit--refresh-file-buffer (file)
-  "Refresh any buffer visiting FILE."
+  "Refresh any buffer visiting FILE.
+Buffers with unsaved modifications are left untouched so user edits
+are never discarded."
   (let ((buffer (find-buffer-visiting file)))
-    (when buffer
+    (when (and buffer
+               (not (buffer-modified-p buffer)))
       (with-current-buffer buffer
         (revert-buffer t t t)))))
 

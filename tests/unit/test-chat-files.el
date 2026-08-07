@@ -214,6 +214,24 @@
                         (buffer-string))
                       "content")))))
 
+(ert-deftest chat-files-move-canonicalizes-dotdot-destination ()
+  "Test move reports a canonical destination path when dot segments are used."
+  (chat-test-with-temp-dir
+   (let* ((source (expand-file-name "old.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          result)
+     (with-temp-file source
+       (insert "content"))
+     (let ((default-directory temp-dir))
+       (setq result
+             (chat-files-move "./old.txt" "./nested/../new.txt")))
+     (should (equal (plist-get result :source)
+                    (file-truename source)))
+     (should (equal (plist-get result :destination)
+                    (file-truename (expand-file-name "new.txt" temp-dir))))
+     (should (file-exists-p (expand-file-name "new.txt" temp-dir)))
+     (should-not (file-exists-p source)))))
+
 (ert-deftest chat-files-move-rejects-existing-destination-without-overwrite ()
   "Test move fails if destination exists and overwrite is nil."
   (chat-test-with-temp-dir
@@ -335,6 +353,17 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "new content")))))
+
+(ert-deftest chat-files-write-canonicalizes-dot-segment-paths ()
+  "Test writes normalize dot segments before reporting the saved path."
+  (chat-test-with-temp-dir
+   (let* ((chat-files-allowed-directories (list temp-dir))
+          (relative-path "./nested/../target.txt")
+          (result (let ((default-directory temp-dir))
+                    (chat-files-write relative-path "hello"))))
+     (should (equal (plist-get result :path)
+                    (file-truename (expand-file-name "target.txt" temp-dir))))
+     (should (file-exists-p (expand-file-name "target.txt" temp-dir))))))
 
 (ert-deftest chat-files-write-appends-content ()
   "Test appending content to file."
@@ -516,6 +545,19 @@
                         (insert-file-contents test-file)
                         (buffer-string))
                       "barfoo\n")))))
+
+(ert-deftest chat-files-replace-line-hint-handles-unicode-content ()
+  "Test line-hinted replacements work on multibyte text."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "unicode.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file test-file
+       (insert "标题\n你好 世界\n尾声\n"))
+     (chat-files-replace test-file "你好" "您好" nil nil nil 2)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "标题\n您好 世界\n尾声\n")))))
 
 (ert-deftest chat-files-replace-invalid-regexp-fails-cleanly ()
   "Test invalid regexp replacement errors without touching the file."
@@ -1296,6 +1338,26 @@
                          "*** End Patch")
                        "\n")))
      (chat-files-apply-patch patch-text)
+     (should (string= (with-temp-buffer
+                        (insert-file-contents test-file)
+                        (buffer-string))
+                      "hello\n")))))
+
+(ert-deftest chat-files-apply-patch-canonicalizes-dot-segment-target-paths ()
+  "Test apply-patch accepts dot-segment paths and lands on the canonical file."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (test-file (expand-file-name "demo.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch-text (mapconcat
+                       #'identity
+                       '("*** Begin Patch"
+                         "*** Add File: ./nested/../demo.txt"
+                         "+hello"
+                         "*** End Patch")
+                       "\n")))
+     (chat-files-apply-patch patch-text)
+     (should (file-exists-p test-file))
      (should (string= (with-temp-buffer
                         (insert-file-contents test-file)
                         (buffer-string))
@@ -2467,6 +2529,54 @@
        (should (plist-get result :lines))
        (should (= (plist-get result :lines) 2))
        (should (plist-get result :mtime))))))
+
+(ert-deftest chat-files-replace-cascade-tolerates-trailing-whitespace ()
+  "Test fuzzy level 1 matches blocks differing only in trailing whitespace."
+  (let* ((content "alpha  \nbeta\n")
+         (result (chat-files--replace-content content "alpha\nbeta" "gamma\ndelta")))
+    (should (string= (plist-get result :content) "gamma\ndelta\n"))
+    (should (eq (plist-get result :match-mode) 'whitespace))))
+
+(ert-deftest chat-files-replace-cascade-folds-unicode-punctuation ()
+  "Test fuzzy level 2 folds smart quotes and dashes."
+  (let* ((content (concat "(message \u201Chello\u201D \u2014 done)\n"))
+         (result (chat-files--replace-content
+                  content "(message \"hello\" - done)" "(message \"hi\")")))
+    (should (string= (plist-get result :content) "(message \"hi\")\n"))
+    (should (eq (plist-get result :match-mode) 'unicode))))
+
+(ert-deftest chat-files-replace-cascade-tolerates-indentation ()
+  "Test fuzzy level 3 matches blocks with different leading whitespace."
+  (let* ((content "if ready:\n    x = 1\n    return x\n")
+         (result (chat-files--replace-content
+                  content "x = 1\nreturn x" "y = 2\nreturn y")))
+    ;; The matched block is replaced with the new text verbatim.
+    (should (string= (plist-get result :content) "if ready:\ny = 2\nreturn y\n"))
+    (should (eq (plist-get result :match-mode) 'indentation))))
+
+(ert-deftest chat-files-replace-cascade-keeps-crlf-endings ()
+  "Test fuzzy replacement preserves CRLF line endings in the block."
+  (let* ((content "alpha \r\nbeta\r\ngamma\r\n")
+         (result (chat-files--replace-content
+                  content "alpha\nbeta" "one\ntwo")))
+    (should (string= (plist-get result :content) "one\r\ntwo\r\ngamma\r\n"))))
+
+(ert-deftest chat-files-replace-cascade-rejects-ambiguous-fuzzy-match ()
+  "Test ambiguous fuzzy matches still fail with the stable error family."
+  (let ((content "foo  \nx\nfoo  \nx\n"))
+    (should-error (chat-files--replace-content content "foo\nx" "bar\nx")
+                  :type 'error)))
+
+(ert-deftest chat-files-replace-cascade-still-rejects-no-match ()
+  "Test content with no candidate at any level still fails."
+  (should-error (chat-files--replace-content "alpha\n" "zzz" "yyy")
+                :type 'error))
+
+(ert-deftest chat-files-replace-exact-match-stays-exact ()
+  "Test exact matches keep exact mode and do not invoke the cascade."
+  (let* ((result (chat-files--replace-content "alpha\nbeta\n" "beta" "gamma")))
+    (should (eq (plist-get result :match-mode) 'exact))
+    (should (string= (plist-get result :content) "alpha\ngamma\n"))))
 
 (provide 'test-chat-files)
 ;;; test-chat-files.el ends here

@@ -563,6 +563,101 @@ the empty string."
      (error
       (chat-files--normalize-edit-error err))))
 
+(defconst chat-files--fuzzy-fold-alist
+  '(("\u201C" . "\"") ("\u201D" . "\"") ("\u201E" . "\"") ("\u201F" . "\"")
+    ("\u2018" . "'") ("\u2019" . "'") ("\u201A" . "'") ("\u201B" . "'")
+    ("\u2014" . "-") ("\u2013" . "-") ("\u2015" . "-")
+    ("\u2026" . "...")
+    ("\u00A0" . " ") ("\u2007" . " ") ("\u202F" . " ")
+    ("\uFEFF" . ""))
+  "Character folds applied by fuzzy replace matching.")
+
+(defun chat-files--fuzzy-normalize-line (line level)
+  "Normalize LINE for fuzzy matching at LEVEL.
+Level 1 strips trailing whitespace.  Level 2 also folds Unicode
+punctuation and spacing to ASCII.  Level 3 also strips leading
+whitespace."
+  (let ((result (string-trim-right line)))
+    (when (>= level 2)
+      (dolist (pair chat-files--fuzzy-fold-alist)
+        (setq result (replace-regexp-in-string
+                      (regexp-quote (car pair))
+                      (cdr pair)
+                      result
+                      t
+                      t))))
+    (when (>= level 3)
+      (setq result (string-trim-left result)))
+    result))
+
+(defun chat-files--fuzzy-line-matches (content search-lines level)
+  "Return 0-based line indices where SEARCH-LINES match CONTENT at LEVEL.
+Matching is line based: every search line must equal the
+corresponding content line after normalization."
+  (let* ((content-lines (split-string content "\n"))
+         (needle-count (length search-lines))
+         (normalized-needle
+          (mapcar (lambda (line)
+                    (chat-files--fuzzy-normalize-line line level))
+                  search-lines))
+         (total (length content-lines))
+         (matches nil)
+         (index 0))
+    (when (and (> needle-count 0) (>= total needle-count))
+      (while (<= index (- total needle-count))
+        (when (cl-every
+               (lambda (content-line needle-line)
+                 (string= (chat-files--fuzzy-normalize-line content-line level)
+                          needle-line))
+               (seq-take (nthcdr index content-lines) needle-count)
+               normalized-needle)
+          (push index matches))
+        (setq index (1+ index))))
+    (nreverse matches)))
+
+(defun chat-files--line-index-region (content index line-count)
+  "Return a match plist covering LINE-COUNT lines of CONTENT from INDEX.
+The region includes the trailing newline of the last line, reported
+as :eol, so replacements can preserve the file line ending style."
+  (with-temp-buffer
+    (insert content)
+    (goto-char (point-min))
+    (forward-line index)
+    (let ((start (point)))
+      (forward-line (1- line-count))
+      (let* ((line-end (line-end-position))
+             (has-newline (< line-end (point-max)))
+             (crlf (and (> line-end start)
+                        (eq (char-before line-end) ?\r)))
+             (eol (if has-newline
+                      (if crlf "\r\n" "\n")
+                    "")))
+        (list :start start
+              :end (if has-newline (1+ line-end) line-end)
+              :line (1+ index)
+              :eol eol)))))
+
+(defun chat-files--cascade-replace-matches (content search)
+  "Return (MATCHES . MODE) for SEARCH in CONTENT via the fuzzy cascade.
+Modes are tried in order: whitespace, unicode, indentation.  The
+first mode yielding any candidate wins.  Returns nil when nothing
+matches at any level."
+  (let ((search-lines (split-string search "\n"))
+        (modes '(whitespace unicode indentation))
+        (level 1)
+        (found nil))
+    (while (and (<= level 3) (null found))
+      (let ((indices (chat-files--fuzzy-line-matches content search-lines level)))
+        (when indices
+          (setq found
+                (cons (mapcar (lambda (index)
+                                (chat-files--line-index-region
+                                 content index (length search-lines)))
+                              indices)
+                      (nth (1- level) modes)))))
+      (setq level (1+ level)))
+    found))
+
 (defun chat-files--replace-content (content search replace &optional all expected-count regexp line-hint)
   "Return updated CONTENT after replacing SEARCH with REPLACE."
   (chat-files--validate-replace-pattern search regexp)
@@ -570,46 +665,59 @@ the empty string."
     (error "Replace failed: replacement text must be a string"))
   (chat-files--validate-replace-selectors all expected-count line-hint)
   (let* ((matches (chat-files--collect-replace-matches content search regexp))
-         (filtered (if line-hint
-                       (seq-filter (lambda (match)
-                                     (= (plist-get match :line) line-hint))
-                                   matches)
-                     matches))
-         (match-count (length filtered))
-         (scope-label (chat-files--replace-scope-label line-hint))
-         (selected (cond
-                    ((zerop match-count)
-                     (error "Replace failed: no matches for %S%s" search scope-label))
-                    (expected-count
-                     (unless (= match-count expected-count)
-                       (error "Replace failed: expected %d matches for %S%s but found %d"
-                              expected-count search scope-label match-count))
-                     filtered)
-                    (all
-                     filtered)
-                    ((> match-count 1)
-                     (error "Replace failed: %d matches for %S%s; refine the search or use expected_count/all"
-                            match-count search scope-label))
-                    (t
-                     (list (car filtered))))))
-    (with-temp-buffer
-      (insert content)
-      (dolist (match (reverse selected))
-        (goto-char (plist-get match :start))
-        (if regexp
-            (progn
-              (re-search-forward search (plist-get match :end) t)
-              (replace-match replace nil nil))
-          (delete-region (plist-get match :start)
-                         (plist-get match :end))
+         (match-mode 'exact))
+    (when (and (not regexp) (null matches))
+      (let ((cascaded (chat-files--cascade-replace-matches content search)))
+        (when cascaded
+          (setq matches (car cascaded)
+                match-mode (cdr cascaded))
+          ;; Keep the file line ending convention inside the replaced block.
+          (when (and (string-match-p "\r\n" content)
+                     (not (string-match-p "\r" replace)))
+            (setq replace (replace-regexp-in-string "\n" "\r\n" replace t t))))))
+    (let* ((filtered (if line-hint
+                         (seq-filter (lambda (match)
+                                       (= (plist-get match :line) line-hint))
+                                     matches)
+                       matches))
+           (match-count (length filtered))
+           (scope-label (chat-files--replace-scope-label line-hint))
+           (selected (cond
+                      ((zerop match-count)
+                       (error "Replace failed: no matches for %S%s" search scope-label))
+                      (expected-count
+                       (unless (= match-count expected-count)
+                         (error "Replace failed: expected %d matches for %S%s but found %d"
+                                expected-count search scope-label match-count))
+                       filtered)
+                      (all
+                       filtered)
+                      ((> match-count 1)
+                       (error "Replace failed: %d matches for %S%s; refine the search or use expected_count/all"
+                              match-count search scope-label))
+                      (t
+                       (list (car filtered))))))
+      (with-temp-buffer
+        (insert content)
+        (dolist (match (reverse selected))
           (goto-char (plist-get match :start))
-          (insert replace)))
-      (let ((updated-content (buffer-string)))
-        (when (string= updated-content content)
-          (error "Replace failed: replacement would not change file content"))
-        (list :content updated-content
-              :replacements-made (length selected)
-              :match-count match-count)))))
+          (if regexp
+              (progn
+                (re-search-forward search (plist-get match :end) t)
+                (replace-match replace nil nil))
+            (delete-region (plist-get match :start)
+                           (plist-get match :end))
+            (goto-char (plist-get match :start))
+            (insert (if (eq match-mode 'exact)
+                        replace
+                      (concat replace (or (plist-get match :eol) ""))))))
+        (let ((updated-content (buffer-string)))
+          (when (string= updated-content content)
+            (error "Replace failed: replacement would not change file content"))
+          (list :content updated-content
+                :replacements-made (length selected)
+                :match-count match-count
+                :match-mode match-mode))))))
 
 (defun chat-files--with-diff (path original-content new-content operation &optional extra)
   "Build a result plist for PATH from ORIGINAL-CONTENT to NEW-CONTENT."
@@ -640,9 +748,14 @@ When LINE-HINT is non-nil, only consider matches on that line."
        original-content
        new-content
        'replace
-       (list :replacements-made (plist-get result :replacements-made)
-             :search search
-             :replace replace)))))
+       (append
+        (list :replacements-made (plist-get result :replacements-made)
+              :search search
+              :replace replace)
+        (let ((mode (plist-get result :match-mode)))
+          (and mode
+               (not (eq mode 'exact))
+               (list :match-mode mode))))))))
 
 ;;;###autoload
 (defun chat-files-insert-at (path position text)
@@ -999,10 +1112,140 @@ All patches are applied atomically."
            (signal (car err) (cdr err))
          (error "apply_patch verification failed: %s" message))))))
 
+(defun chat-files--diff-split-lines (text)
+  "Split TEXT into lines, dropping the phantom line after a trailing newline."
+  (let ((lines (split-string (or text "") "\n")))
+    (if (and lines (string-empty-p (car (last lines))))
+        (butlast lines)
+      lines)))
+
+(defun chat-files--diff-ops (old-lines new-lines)
+  "Return the line edit script from OLD-LINES to NEW-LINES.
+Each op is (type line old-no new-no) with 1-based line numbers;
+old-no is nil for additions and new-no is nil for deletions."
+  (let* ((old-v (vconcat old-lines))
+         (new-v (vconcat new-lines))
+         (n (length old-v))
+         (m (length new-v)))
+    (if (> (* n m) 1000000)
+        ;; Too large for the LCS table; fall back to a whole-file change.
+        (append (cl-loop for i from 0 below n
+                         collect (list 'delete (aref old-v i) (1+ i) nil))
+                (cl-loop for j from 0 below m
+                         collect (list 'add (aref new-v j) nil (1+ j))))
+      (let ((table (make-vector (1+ n) nil)))
+        (dotimes (i (1+ n))
+          (aset table i (make-vector (1+ m) 0)))
+        (cl-loop for i downfrom (1- n) to 0 do
+          (cl-loop for j downfrom (1- m) to 0 do
+            (aset (aref table i) j
+                  (if (string= (aref old-v i) (aref new-v j))
+                      (1+ (aref (aref table (1+ i)) (1+ j)))
+                    (max (aref (aref table (1+ i)) j)
+                         (aref (aref table i) (1+ j)))))))
+        (let ((i 0)
+              (j 0)
+              (ops nil))
+          (while (and (< i n) (< j m))
+            (cond
+             ((string= (aref old-v i) (aref new-v j))
+              (push (list 'context (aref old-v i) (1+ i) (1+ j)) ops)
+              (setq i (1+ i)
+                    j (1+ j)))
+             ((>= (aref (aref table (1+ i)) j)
+                 (aref (aref table i) (1+ j)))
+              (push (list 'delete (aref old-v i) (1+ i) nil) ops)
+              (setq i (1+ i)))
+             (t
+              (push (list 'add (aref new-v j) nil (1+ j)) ops)
+              (setq j (1+ j)))))
+          (while (< i n)
+            (push (list 'delete (aref old-v i) (1+ i) nil) ops)
+            (setq i (1+ i)))
+          (while (< j m)
+            (push (list 'add (aref new-v j) nil (1+ j)) ops)
+            (setq j (1+ j)))
+          (nreverse ops))))))
+
+(defun chat-files--ops-to-hunks (ops context)
+  "Group OPS into hunks with CONTEXT lines of surrounding context."
+  (let* ((vec (vconcat ops))
+         (len (length vec))
+         (include (make-vector len nil))
+         (hunks nil)
+         (current nil))
+    (dotimes (i len)
+      (unless (eq (car (aref vec i)) 'context)
+        (cl-loop for k from (max 0 (- i context))
+                 to (min (1- len) (+ i context))
+                 do (aset include k t))))
+    (dotimes (i len)
+      (if (aref include i)
+          (push (aref vec i) current)
+        (when current
+          (push (nreverse current) hunks)
+          (setq current nil))))
+    (when current
+      (push (nreverse current) hunks))
+    (nreverse hunks)))
+
+(defun chat-files--hunk-range (start count)
+  "Format the START,COUNT pair of a hunk header."
+  (if (= count 1)
+      (format "%d" start)
+    (format "%d,%d" start count)))
+
+(defun chat-files--format-hunk (hunk)
+  "Format HUNK as unified diff text."
+  (let* ((old-nos (delq nil (mapcar (lambda (op) (nth 2 op)) hunk)))
+         (new-nos (delq nil (mapcar (lambda (op) (nth 3 op)) hunk)))
+         ;; Pure additions report the old line before the insertion,
+         ;; pure deletions the new line before the deletion.
+         (old-start (if old-nos
+                        (car old-nos)
+                      (max 0 (1- (or (car new-nos) 1)))))
+         (new-start (if new-nos
+                        (car new-nos)
+                      (max 0 (1- (or (car old-nos) 1)))))
+         (header (format "@@ -%s +%s @@"
+                         (chat-files--hunk-range old-start (length old-nos))
+                         (chat-files--hunk-range new-start (length new-nos))))
+         (lines
+          (mapcar (lambda (op)
+                    (pcase (car op)
+                      ('context (concat " " (nth 1 op)))
+                      ('delete (concat "-" (nth 1 op)))
+                      ('add (concat "+" (nth 1 op)))))
+                  hunk)))
+    (string-join (cons header lines) "\n")))
+
+(defun chat-files--unified-diff (old-label new-label original new &optional context)
+  "Return a unified diff between ORIGINAL and NEW.
+OLD-LABEL and NEW-LABEL label the --- and +++ headers.  CONTEXT
+defaults to 3 lines.  Returns an empty string when inputs match."
+  (if (string= (or original "") (or new ""))
+      ""
+    (let* ((ops (chat-files--diff-ops
+                 (chat-files--diff-split-lines original)
+                 (chat-files--diff-split-lines new)))
+           (hunks (chat-files--ops-to-hunks ops (or context 3)))
+           (parts (list (format "--- %s\n+++ %s" old-label new-label))))
+      (dolist (hunk hunks)
+        (push (chat-files--format-hunk hunk) parts))
+      (string-join (nreverse parts) "\n"))))
+
 (defun chat-files--diff-strings (path original-content new-content)
-  "Return a unified diff for PATH from ORIGINAL-CONTENT to NEW-CONTENT."
-  (let ((old-file (make-temp-file "chat-old-"))
-        (new-file (make-temp-file "chat-new-")))
+  "Return a unified diff for PATH from ORIGINAL-CONTENT to NEW-CONTENT.
+Uses the external diff command when available and falls back to the
+built in implementation otherwise."
+  (if (not (executable-find "diff"))
+      (chat-files--unified-diff
+       (if (null original-content) "/dev/null" path)
+       (if (null new-content) "/dev/null" path)
+       (or original-content "")
+       (or new-content ""))
+    (let ((old-file (make-temp-file "chat-old-"))
+          (new-file (make-temp-file "chat-new-")))
     (unwind-protect
         (progn
           (with-temp-file old-file
@@ -1030,7 +1273,7 @@ All patches are applied atomically."
              (t
               raw-diff))))
       (delete-file old-file)
-      (delete-file new-file))))
+        (delete-file new-file)))))
 
 (defun chat-files--apply-update-operation (content operation)
   "Apply update OPERATION to CONTENT."

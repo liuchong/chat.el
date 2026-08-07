@@ -21,6 +21,7 @@
 (require 'cl-lib)
 (require 'diff-mode)
 (require 'chat-edit)
+(require 'chat-files)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -164,19 +165,8 @@ Returns the preview buffer."
           (delete-file new-file))))))
 
 (defun chat-code-preview--generate-diff-internal (original new)
-  "Generate a simple internal diff (fallback when diff command not available)."
-  (with-temp-buffer
-    (insert "--- a/original\n")
-    (insert "+++ b/new\n")
-    (insert "@@ -1,1 +1,1 @@\n")
-    (let ((orig-lines (split-string original "\n"))
-          (new-lines (split-string new "\n")))
-      ;; Very simple diff - just show all original as removed, all new as added
-      (dolist (line orig-lines)
-        (insert "-" line "\n"))
-      (dolist (line new-lines)
-        (insert "+" line "\n")))
-    (buffer-string)))
+  "Generate a unified diff without relying on an external diff command."
+  (chat-files--unified-diff "a/original" "b/new" original new))
 
 ;; ------------------------------------------------------------------
 ;; Mode Definition
@@ -257,7 +247,7 @@ back to the code buffer with C-x b or continue browsing here."
   "Navigate to next change in diff."
   (interactive)
   (forward-line 1)
-  (if (re-search-forward "^[\\+\\-]" nil t)
+  (if (re-search-forward "^\\+\\([^+]\\|$\\)\\|^-\\([^-]\\|$\\)" nil t)
       (beginning-of-line)
     (message "No more changes")))
 
@@ -265,7 +255,7 @@ back to the code buffer with C-x b or continue browsing here."
   "Navigate to previous change in diff."
   (interactive)
   (forward-line -1)
-  (if (re-search-backward "^[\\+\\-]" nil t)
+  (if (re-search-backward "^\\+\\([^+]\\|$\\)\\|^-\\([^-]\\|$\\)" nil t)
       (beginning-of-line)
     (message "No previous changes")))
 
@@ -274,17 +264,42 @@ back to the code buffer with C-x b or continue browsing here."
   (interactive)
   (if chat-code-preview--current-data
       (let* ((data chat-code-preview--current-data)
-             (file-path (chat-code-preview-data-file-path data))
              (new-content (chat-code-preview-data-new-content data))
              (edit-buffer (get-buffer-create "*chat-code-edit*")))
         (with-current-buffer edit-buffer
           (erase-buffer)
           (insert new-content)
           (set-buffer-modified-p nil)
-          (goto-char (point-min)))
+          (goto-char (point-min))
+          (local-set-key (kbd "C-c C-c") #'chat-code-preview--confirm-edit)
+          (local-set-key (kbd "C-c C-k") #'chat-code-preview--cancel-edit))
         (pop-to-buffer edit-buffer)
         (message "Edit content, then C-c C-c to confirm, C-c C-k to cancel"))
     (message "No preview data available")))
+
+(defun chat-code-preview--confirm-edit ()
+  "Confirm manual edits and refresh the preview with them."
+  (interactive)
+  (let* ((content (buffer-string))
+         (preview-buffer (get-buffer chat-code-preview-buffer-name))
+         (data (and preview-buffer
+                    (with-current-buffer preview-buffer
+                      chat-code-preview--current-data))))
+    (unless data
+      (user-error "No preview data available"))
+    (quit-window t)
+    (chat-code-preview-show (chat-code-preview-data-file-path data)
+                            (chat-code-preview-data-original-content data)
+                            content
+                            (chat-code-preview-data-description data))
+    (pop-to-buffer preview-buffer)
+    (message "Preview updated with manual edits")))
+
+(defun chat-code-preview--cancel-edit ()
+  "Discard manual edits and return to the preview."
+  (interactive)
+  (quit-window t)
+  (message "Manual edit cancelled"))
 
 ;; ------------------------------------------------------------------
 ;; Callback Setup
