@@ -131,35 +131,34 @@ Uses symbol index for smart context when available."
     (chat-context-code--optimize context)
     context))
 
-(defun chat-context-code--project-agents-file (code-session)
-  "Return the project `AGENTS.md` path for CODE-SESSION, when it exists."
-  (let ((path (expand-file-name "AGENTS.md"
-                                (chat-code-session-project-root code-session))))
-    (when (file-exists-p path)
-      path)))
-
 (defun chat-context-code--add-project-instructions (context code-session)
-  "Add project instruction files from CODE-SESSION into CONTEXT."
-  (when-let ((agents-file (chat-context-code--project-agents-file code-session)))
-    (let ((content (chat-context-code--read-file-content agents-file)))
-      (when content
-        (let* ((formatted (concat
-                           ";; Project Instructions: AGENTS.md\n"
-                           ";; Treat these rules as mandatory for work in this project.\n"
-                           "```text\n"
-                           content
-                           (unless (string-suffix-p "\n" content)
-                             "\n")
-                           "```\n"))
-               (tokens (chat-context-code--estimate-tokens formatted))
-               (source (make-chat-code-context-source
-                        :type 'project-instructions
-                        :priority 0
-                        :content formatted
-                        :tokens tokens
-                        :metadata `((path . ,agents-file)))))
-          (push source (chat-code-context-sources context))
-          (cl-incf (chat-code-context-total-tokens context) tokens)))))
+  "Add project instruction files from CODE-SESSION into CONTEXT.
+Instructions are discovered from the filesystem root down to the
+focus file directory (pi style ancestor stacking)."
+  (let* ((focus (chat-code-session-focus-file code-session))
+         (start (or (and focus (file-name-directory focus))
+                    (chat-code-session-project-root code-session)))
+         (content (and (fboundp 'chat-project-instructions)
+                       start
+                       (chat-project-instructions start))))
+    (when content
+      (let* ((formatted (concat
+                         ";; Project Instructions\n"
+                         ";; Treat these rules as mandatory for work in this project.\n"
+                         "```text\n"
+                         content
+                         (unless (string-suffix-p "\n" content)
+                           "\n")
+                         "```\n"))
+             (tokens (chat-context-code--estimate-tokens formatted))
+             (source (make-chat-code-context-source
+                      :type 'project-instructions
+                      :priority 0
+                      :content formatted
+                      :tokens tokens
+                      :metadata `((path . ,start)))))
+        (push source (chat-code-context-sources context))
+        (cl-incf (chat-code-context-total-tokens context) tokens))))
   context)
 
 (defun chat-context-code--add-symbol-context (context code-session index)
@@ -431,8 +430,10 @@ If OUTLINE-ONLY is t, extract only function/class signatures."
               (chat-context-code--truncate-file-context file-to-truncate)
               (setq total (chat-context-code--recalculate-tokens context)))
           ;; No more files to truncate, remove lowest priority source
-          (chat-context-code--remove-lowest-priority context)
-          (setq total (chat-context-code--recalculate-tokens context)))))
+          (if (chat-context-code--remove-lowest-priority context)
+              (setq total (chat-context-code--recalculate-tokens context))
+            ;; Nothing left to remove; stop instead of spinning.
+            (setq total budget)))))
     ;; Update total
     (setf (chat-code-context-total-tokens context) total)))
 
@@ -457,7 +458,7 @@ If OUTLINE-ONLY is t, extract only function/class signatures."
              (chat-code-file-context-content file-ctx))))))
 
 (defun chat-context-code--remove-lowest-priority (context)
-  "Remove the lowest priority source from CONTEXT."
+  "Remove the lowest priority source from CONTEXT; return t when removed."
   (let ((sources (chat-code-context-sources context)))
     (when sources
       (let ((lowest (cl-reduce (lambda (a b)
@@ -466,7 +467,8 @@ If OUTLINE-ONLY is t, extract only function/class signatures."
                                     a b))
                               sources)))
         (setf (chat-code-context-sources context)
-              (delete lowest sources))))))
+              (delete lowest sources))
+        t))))
 
 (defun chat-context-code--recalculate-tokens (context)
   "Recalculate total tokens for CONTEXT."

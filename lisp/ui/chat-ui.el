@@ -420,10 +420,20 @@
         messages)
     (let* ((base-prompt "You are a helpful AI assistant.")
            (target-note (chat-ui--followup-target-note))
-           (system-prompt (chat-tool-caller-build-system-prompt
-                           (if target-note
-                               (format "%s\n\n%s" base-prompt target-note)
-                             base-prompt))))
+           (instructions (and (fboundp 'chat-project-instructions)
+                              (chat-project-instructions default-directory)))
+           (prompt (cond
+                    ((and target-note instructions)
+                     (format "%s\n\n%s\n\n;; Project instructions:\n%s"
+                             base-prompt target-note instructions))
+                    (target-note
+                     (format "%s\n\n%s" base-prompt target-note))
+                    (instructions
+                     (format "%s\n\n;; Project instructions:\n%s"
+                             base-prompt instructions))
+                    (t
+                     base-prompt)))
+           (system-prompt (chat-tool-caller-build-system-prompt prompt)))
       (chat-log "[TOOLS] System prompt: %s" system-prompt)
       (chat-log "[TOOLS] Adding system message to %d user messages" (length messages))
       (cons (make-chat-message

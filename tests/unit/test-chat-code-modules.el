@@ -53,7 +53,7 @@
      (setq context-string
            (chat-context-code-to-string
             (chat-context-code-build session)))
-     (should (string-match-p "Project Instructions: AGENTS.md" context-string))
+     (should (string-match-p "Project instructions from" context-string))
      (should (string-match-p "Project hard rule" context-string))
      (should (string-match-p "Always verify code facts first" context-string)))))
 

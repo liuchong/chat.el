@@ -290,7 +290,7 @@ These commands exist in the repository but are still being repaired and validate
 - **Status discipline** - persistent status surfaces are reserved for blocking states; transient activity stays in the request panel or echo area
 - **Detailed request diagnostics** - `C-c C-s` opens the full current-request status buffer
 - **Project rooted guardrails** - Prompt and tool execution stay anchored to the active project root
-- **Project rules in context** - `AGENTS.md` is injected into code mode context when present
+- **Stacked project rules** - `AGENTS.md` files are collected from the filesystem root down to the working file (root first, deduplicated, capped at 32 KiB), plus an optional global `~/.chat/AGENTS.md`; plain chat injects them too
 
 ### Chat Mode Updates
 
@@ -338,8 +338,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 484 regression tests discovered
-- 484 passing
+- 491 regression tests discovered
+- 491 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:
