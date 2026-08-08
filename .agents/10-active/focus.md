@@ -8,29 +8,26 @@
 
 ## Doing Now
 
-Executing the approved unified agent kernel plan
-(`~/.kimi/plans/moon-girl-black-widow-raven.md`).
-
-- Phase 1 done: `lisp/core/chat-agent.el` kernel with event stream,
-  callback stop conditions, steering, cancellation, truncation refusal,
-  and finish-reason plumbing.
-- Phase 2 done: plain chat migrated onto the kernel; diagnostics
-  traces bounded by `chat-request-diagnostics-max-events`.
-- Phase 3 done: code mode migrated onto the kernel; kernel learned
-  `:followup-request-options`. 454 tests passing.
-- Phase 4 next: async shell tool with timeout and output spill.
+The unified agent kernel plan (phases 1-8) is complete. Plain chat
+and code mode both run on `lisp/core/chat-agent.el`; shell execution
+is async with timeout and output spill; replace matching has a fuzzy
+cascade; diffs are real unified hunks; sessions are append-only
+JSONL with memory.md support; AGENTS.md discovery stacks ancestors;
+streaming renders are differential with markdown-lite styling.
+493 tests passing.
 
 ## Not Doing Now
 
 - No rollback to the legacy `docs/ai-contexts/` workflow
 - No parallel tool execution (interactive approval requires serial)
-- No session tree branching (parent-id/branch-ids stay extension points)
-- No feature-flag dual loop during migration; tests guard parity
+- No session tree branching
 - No security hardening passes unless they block a functional stage
 
 ## Immediate Next Step
 
-Phase 4: async shell execution. Port the kimi-cli/pi design into
-`chat-tool-shell.el`: `make-process` based execution, default 60s
-timeout (foreground capped at 300s), output truncation with spill to
-a temp file, and reuse of the same executor for the `!` prefix path.
+Real world usage validation of the new kernel path, then parity for
+the code-mode render path (differential render plus markdown-lite),
+and collapsible tool event blocks. Deferred security items from the
+deep review (log redaction, shell whitelist tightening, forge load
+checks, encode/backup output validation) can be scheduled when the
+user asks.

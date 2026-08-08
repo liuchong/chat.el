@@ -508,5 +508,42 @@
          (should (= (plist-get captured-config :max-steps)
                     chat-ui-tool-loop-max-steps)))))))
 
+(ert-deftest chat-ui-render-response-state-appends-only-delta-on-growth ()
+  "Test growing content reuses the slot and only appends the delta."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Render Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char chat-ui--messages-end)
+       (insert "Assistant:\n")
+       (set-marker chat-ui--messages-end (point))
+       (let ((content-start (copy-marker (point))))
+         (chat-ui--render-response-state (current-buffer) content-start "abc" nil)
+         (chat-ui--render-response-state (current-buffer) content-start "abcdef" nil)
+         (should (string-match-p "abcdef" (buffer-string)))
+         (should-not (string-match-p "abcabcdef" (buffer-string)))
+         ;; Shrinking content falls back to a full replace.
+         (chat-ui--render-response-state (current-buffer) content-start "ab" nil)
+         (should (string-match-p "Assistant:\nab\n\n" (buffer-string))))))))
+
+(ert-deftest chat-ui-fontify-markdown-lite-styles-blocks-and-emphasis ()
+  "Test markdown lite fontification styles code blocks, headers, and bold."
+  (with-temp-buffer
+    (insert "Intro\n```elisp\n(code here)\n```\n# Title\n**bold** end\n")
+    (chat-ui--fontify-markdown-lite (point-min) (point-max))
+    (goto-char (point-min))
+    (search-forward "(code here)")
+    (should (eq (get-text-property (line-beginning-position) 'face)
+                'chat-ui-code-block-face))
+    (goto-char (point-min))
+    (search-forward "# Title")
+    (should (equal (get-text-property (line-beginning-position) 'face)
+                   '(:weight bold)))
+    (goto-char (point-min))
+    (search-forward "bold")
+    (should (eq (get-text-property (1- (point)) 'face) 'bold))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

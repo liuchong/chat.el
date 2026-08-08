@@ -82,6 +82,9 @@
 (defvar-local chat-ui--live-response-content ""
   "Accumulated visible content for the current live response.")
 
+(defvar-local chat-ui--last-render nil
+  "Last rendered slot state used by the streaming fast path.")
+
 (defun chat-ui--pending-approval-event ()
   "Return the current pending approval event when present."
   (chat-status-persistent-event chat-ui--request-tool-events))
@@ -512,16 +515,34 @@
                     (and (boundp 'chat--current-session)
                          chat--current-session))
                    'face 'shadow))
-          (delete-region content-start chat-ui--messages-end)
-          (goto-char content-start)
-          (unless (string-empty-p content)
-            (insert content))
-          (when-let ((line (chat-ui--live-narrative-line live-detail)))
-            (unless (string-empty-p content)
-              (insert "\n"))
-            (insert line))
-          (insert "\n\n")
-          (set-marker chat-ui--messages-end (point)))))))
+          (let* ((last chat-ui--last-render)
+                 (old-content (and last (plist-get last :content)))
+                 (fast (and old-content
+                            (eq (plist-get last :content-start) content-start)
+                            (= (plist-get last :event-count)
+                               (length tool-events))
+                            (string-prefix-p old-content content))))
+            (if fast
+                ;; Streaming fast path: only the tail changed.
+                (progn
+                  (goto-char (+ (marker-position content-start)
+                                (length old-content)))
+                  (delete-region (point) chat-ui--messages-end)
+                  (insert (substring content (length old-content))))
+              (delete-region content-start chat-ui--messages-end)
+              (goto-char content-start)
+              (unless (string-empty-p content)
+                (insert content)))
+            (when-let ((line (chat-ui--live-narrative-line live-detail)))
+              (unless (string-empty-p content)
+                (insert "\n"))
+              (insert line))
+            (insert "\n\n")
+            (set-marker chat-ui--messages-end (point))
+            (setq chat-ui--last-render
+                  (list :content content
+                        :content-start content-start
+                        :event-count (length tool-events)))))))))
 
 (defun chat-ui--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
@@ -680,6 +701,44 @@ assistant response being filled in."
                    (chat-ui--make-agent-event-handler
                     session msg-id ui-buffer assistant-start request-id)))))))
 
+(defface chat-ui-code-block-face
+  '((t :inherit font-lock-constant-face :extend t))
+  "Face for fenced code block lines in chat buffers."
+  :group 'chat)
+
+(defun chat-ui--fontify-markdown-lite (start end)
+  "Apply lightweight markdown fontification between START and END.
+Fenced code blocks use `chat-ui-code-block-face', fence markers use
+`font-lock-comment-face', ATX headers become bold, and **bold**
+spans use the bold face."
+  (save-excursion
+    (let ((in-fence nil))
+      (goto-char start)
+      (while (< (point) end)
+        (let ((line (buffer-substring-no-properties
+                     (line-beginning-position)
+                     (line-end-position))))
+          (cond
+           ((string-match-p "^\\s-*```" line)
+            (add-text-properties (line-beginning-position)
+                                 (min (1+ (line-end-position)) end)
+                                 '(face font-lock-comment-face))
+            (setq in-fence (not in-fence)))
+           (in-fence
+            (add-text-properties (line-beginning-position)
+                                 (min (1+ (line-end-position)) end)
+                                 '(face chat-ui-code-block-face)))
+           ((string-match-p "^\\s-*#+\\s-" line)
+            (add-text-properties (line-beginning-position)
+                                 (line-end-position)
+                                 '(face (:weight bold))))))
+        (forward-line 1))
+      (goto-char start)
+      (while (re-search-forward "\\*\\*\\([^*\n]+\\)\\*\\*" end t)
+        (add-text-properties (match-beginning 1)
+                             (match-end 1)
+                             '(face bold))))))
+
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
   "Render PROCESSED response and persist it for SESSION."
@@ -692,6 +751,9 @@ assistant response being filled in."
                               tool-summary
                             content)))
     (chat-ui--render-response-state ui-buffer content-start content tool-events)
+    (when (buffer-live-p ui-buffer)
+      (with-current-buffer ui-buffer
+        (chat-ui--fontify-markdown-lite content-start chat-ui--messages-end)))
     (chat-session-add-message
      session
      (make-chat-message
