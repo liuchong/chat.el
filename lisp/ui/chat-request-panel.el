@@ -10,8 +10,10 @@
   "Structured request panel for chat.el."
   :group 'chat)
 
-(defcustom chat-request-panel-auto-show t
-  "Whether to automatically show the request panel for active requests."
+(defcustom chat-request-panel-auto-show nil
+  "Whether to automatically show the request panel for active requests.
+When nil the panel only opens on demand via `chat-ui-toggle-request-panel',
+keeping the chat as one big buffer that you split yourself."
   :type 'boolean
   :group 'chat-request-panel)
 

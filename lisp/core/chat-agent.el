@@ -267,14 +267,20 @@ Events are delivered synchronously through :on-event.  The final
            (cond
             ((chat-agent-run-state-cancelled run)
              nil)
+            ((string-match-p "abnormally\\|failed\\|killed\\|deleted" event)
+             (let ((message (string-trim event)))
+               (chat-agent--emit run 'error :message message)
+               (chat-agent--finish run 'error message)))
             ((string-match-p "finished\\|exited" event)
-             (chat-agent--handle-result
-              run (list :content content-acc
-                        :raw-request nil
-                        :raw-response nil)))
-            ((string-match-p "failed\\|killed\\|deleted" event)
-             (chat-agent--emit run 'error :message (string-trim event))
-             (chat-agent--finish run 'error (string-trim event))))))))))
+             (let ((stream-error (process-get p 'chat-stream-http-error)))
+               (if (and stream-error (string-empty-p content-acc))
+                   (progn
+                     (chat-agent--emit run 'error :message stream-error)
+                     (chat-agent--finish run 'error stream-error))
+                 (chat-agent--handle-result
+                  run (list :content content-acc
+                            :raw-request nil
+                            :raw-response nil))))))))))))
 
 ;; ------------------------------------------------------------------
 ;; Response handling

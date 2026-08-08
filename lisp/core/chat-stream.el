@@ -25,6 +25,9 @@
 ;; Variables
 ;; ------------------------------------------------------------------
 
+(defvar-local chat-stream--partial-line ""
+  "Incomplete SSE line carried between process filter calls.")
+
 (defun chat-stream--redact-curl-args-for-log (args)
   "Return ARGS with sensitive values redacted for logging."
   (let ((result nil))
@@ -168,7 +171,19 @@ Returns the process object."
                                (chat-stream--handle-output proc string provider callback))
                       :sentinel (lambda (proc event)
                                  (chat-log "[STREAM] Process event: %s" event)
-                                 (when (string-match-p "finished\|exited" event)
+                                 (when (string-match-p "finished\\|exited" event)
+                                   ;; Flush the trailing partial line: HTTP
+                                   ;; error bodies and final SSE chunks may
+                                   ;; lack a final newline.
+                                   (when (buffer-live-p (process-buffer proc))
+                                     (with-current-buffer (process-buffer proc)
+                                       (when (and (stringp chat-stream--partial-line)
+                                                  (not (string-empty-p chat-stream--partial-line)))
+                                         (chat-stream--handle-output
+                                          proc
+                                          (concat chat-stream--partial-line "\n")
+                                          provider
+                                          callback))))
                                    (kill-buffer buffer)))
                       :stderr (get-buffer-create "*chat-stream-err*")))
       (error
@@ -209,24 +224,37 @@ Returns the process object."
             (unless has-trailing-newline
               (setq complete-lines (butlast complete-lines)))
             (dolist (line complete-lines)
-              (let ((data (chat-stream--parse-sse-line (string-trim-right line "\r"))))
-                (when data
-                  (let ((content (chat-stream--extract-content data provider)))
-                    (when content
-                      (when request-id
-                        (chat-request-diagnostics-record
-                         request-id
-                         'stream-chunk
-                         :process proc
-                         :summary (format "Received %d streamed chunks"
-                                          (1+ (or (chat-request-trace-stream-chunk-count
-                                                   (chat-request-diagnostics-get request-id))
-                                                  0)))))
-                      (condition-case callback-error
-                          (funcall callback content)
-                        (error
-                         (chat-log "[STREAM] Callback error: %s"
-                                   (error-message-string callback-error))))))))))))
+              (let ((clean-line (string-trim-right line "\r")))
+                (if (chat-stream--parse-sse-line clean-line)
+                    (let ((data (chat-stream--parse-sse-line clean-line)))
+                      (let ((content (chat-stream--extract-content data provider)))
+                        (when content
+                          (when request-id
+                            (chat-request-diagnostics-record
+                             request-id
+                             'stream-chunk
+                             :process proc
+                             :summary (format "Received %d streamed chunks"
+                                              (1+ (or (chat-request-trace-stream-chunk-count
+                                                       (chat-request-diagnostics-get request-id))
+                                                      0)))))
+                          (condition-case callback-error
+                              (funcall callback content)
+                            (error
+                             (chat-log "[STREAM] Callback error: %s"
+                                       (error-message-string callback-error)))))))
+                  ;; Not an SSE data line: an HTTP error body arrives as a
+                  ;; plain JSON object, so capture its message for the
+                  ;; sentinel to surface.
+                  (when (string-prefix-p "{\"error\"" (string-trim-left clean-line))
+                    (let ((message-text
+                           (condition-case nil
+                               (cdr (assoc 'message
+                                           (cdr (assoc 'error
+                                                       (json-read-from-string clean-line)))))
+                             (error nil))))
+                      (process-put proc 'chat-stream-http-error
+                                   (or message-text clean-line))))))))))
     (error
      (when-let ((request-id (process-get proc 'chat-request-id)))
        (chat-request-diagnostics-record

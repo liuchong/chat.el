@@ -540,5 +540,17 @@
     (search-forward "bold")
     (should (eq (get-text-property (1- (point)) 'face) 'bold))))
 
+(ert-deftest chat-ui-request-state-is-buffer-local-per-session ()
+  "Test two chat buffers keep independent active run state."
+  (with-temp-buffer
+    (setq chat-ui--active-agent-run 'run-a)
+    (setq chat-ui--active-request-handle 'handle-a)
+    (with-temp-buffer
+      (should-not chat-ui--active-agent-run)
+      (should-not chat-ui--active-request-handle)
+      (setq chat-ui--active-agent-run 'run-b))
+    (should (eq chat-ui--active-agent-run 'run-a))
+    (should (eq chat-ui--active-request-handle 'handle-a))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

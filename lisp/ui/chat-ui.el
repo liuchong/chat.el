@@ -37,19 +37,19 @@
 (defvar chat-ui-use-streaming nil
   "Whether chat UI should use streaming responses.")
 
-(defvar chat-ui--active-stream-process nil
+(defvar-local chat-ui--active-stream-process nil
   "Currently active stream process for cancellation.")
 
-(defvar chat-ui--input-overlay nil
+(defvar-local chat-ui--input-overlay nil
   "Overlay for the input area in chat buffer.")
 
-(defvar chat-ui--messages-end nil
+(defvar-local chat-ui--messages-end nil
   "Marker for end of messages area.")
 
-(defvar chat-ui--active-request-handle nil
+(defvar-local chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
 
-(defvar chat-ui--active-agent-run nil
+(defvar-local chat-ui--active-agent-run nil
   "Currently active agent run state, or nil.")
 
 (defvar-local chat-ui--current-request-id nil
@@ -644,6 +644,9 @@ assistant response being filled in."
                       (format "Stopped after tool loop limit (%d)"
                               chat-ui-tool-loop-max-steps)
                     "Request completed"))))
+             (message "%s" (if (eq (plist-get event :status) 'stopped)
+                               "Stopped after tool loop limit"
+                             "Response completed"))
              (chat-ui--finalize-response
               session
               msg-id
@@ -659,11 +662,13 @@ assistant response being filled in."
              (when (buffer-live-p ui-buffer)
                (with-current-buffer ui-buffer
                  (chat-ui--cleanup-request-state
-                  'cancelled "Cancelled by user"))))
+                  'cancelled "Cancelled by user")))
+             (message "Response cancelled"))
             ('error
              (chat-ui--render-error
               ui-buffer
-              (or (plist-get event :reason) "Unknown error"))))))))))
+              (or (plist-get event :reason) "Unknown error"))
+             (message "Error: %s" (plist-get event :reason))))))))))
 
 (defun chat-ui--start-agent-run (transport)
   "Start an agent run for the current session through TRANSPORT."

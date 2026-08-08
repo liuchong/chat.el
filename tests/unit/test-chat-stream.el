@@ -132,5 +132,24 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-captures-http-error-payload ()
+  "Test non-SSE JSON error bodies are captured for the sentinel."
+  (let ((buffer (generate-new-buffer " *stream-err-test*"))
+        (proc nil))
+    (unwind-protect
+        (progn
+          (setq proc (start-process "stream-err-test" buffer "true"))
+          (chat-stream--handle-output
+           proc
+           "{\"error\":{\"message\":\"bad key\",\"type\":\"invalid_authentication_error\"}}\n"
+           'kimi
+           #'ignore)
+          (should (equal (process-get proc 'chat-stream-http-error)
+                         "bad key")))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

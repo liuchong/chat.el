@@ -578,6 +578,14 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: delete stray `.elc` files before investigating surprising behavior and keep them out of version control.
 
+### String Literals Eat Backslash Alternation
+
+**Problem**: a regex like `"finished\|exited"` written with a single backslash silently matches nothing, and the failure stays invisible until a guard or sentinel never fires.
+
+**Cause**: in Emacs Lisp string literals `\|` is not an escape sequence, so the backslash is dropped and the regex engine sees a literal `|` instead of alternation. Alternation in a string literal needs `\\|`.
+
+**Solution**: write `\\|` inside string literals, and when a `string-match-p` guard behaves like dead code, suspect the string first. Three instances of this class were fixed in one week: the `!cd` guard, the tool-call attempt heuristic, and the stream sentinel completion check whose failure also leaked stream buffers.
+
 ### Stderr Buffers Collect Sentinel Status Lines
 
 **Problem**: subprocess results captured from a `:stderr` buffer contain a trailing `Process <name> stderr finished` line that was never written by the command.
