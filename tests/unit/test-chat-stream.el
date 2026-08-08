@@ -53,15 +53,6 @@
   (should-not (chat-stream--extract-content "[DONE]" 'kimi))
   (should-not (chat-stream--extract-content "data: [DONE]" 'kimi)))
 
-(ert-deftest chat-stream-buffer-inserts-text ()
-  "Test that stream buffer inserts text correctly."
-  (with-temp-buffer
-    (let ((chat-stream--buffer (current-buffer))
-          (chat-stream--insert-marker (point-marker)))
-      (chat-stream--insert-text "Hello")
-      (chat-stream--insert-text " world")
-      (should (string= (buffer-string) "Hello world")))))
-
 (ert-deftest chat-stream-handle-output-joins-partial-lines ()
   "Test that partial SSE lines are buffered across chunks."
   (let ((buffer (generate-new-buffer " *chat-stream-test*"))

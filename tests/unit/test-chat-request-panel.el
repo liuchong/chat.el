@@ -202,4 +202,33 @@
           (should (search-forward "Chunk age:" nil t))
           (should (search-forward "Last event: Received 7 streamed chunks" nil t)))))))
 
+(ert-deftest chat-request-panel-collapses-old-events ()
+  "Test the panel hides earlier events beyond the display cap."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-panel-max-events 3)
+        panel-buffer)
+    (puthash "req-cap"
+             (make-chat-request-trace
+              :id "req-cap"
+              :mode 'chat
+              :provider 'kimi
+              :model 'kimi
+              :phase 'tool-loop
+              :started-at (current-time)
+              :updated-at (current-time)
+              :events (nreverse
+                       (cl-loop for i from 1 to 8
+                                collect (list :type 'stream-chunk
+                                              :time (current-time)
+                                              :summary (format "chunk %d" i)))))
+             chat-request-diagnostics--traces)
+    (with-temp-buffer
+      (setq panel-buffer (chat-request-panel--buffer (current-buffer)))
+      (chat-request-panel-update (current-buffer) "req-cap" nil)
+      (with-current-buffer panel-buffer
+        (goto-char (point-min))
+        (should (search-forward "5 earlier events hidden" nil t))
+        (should (search-forward "chunk 8" nil t))
+        (should-not (search-forward "chunk 1[^0-9]" nil t))))))
+
 (provide 'test-chat-request-panel)

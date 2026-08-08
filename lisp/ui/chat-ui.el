@@ -1020,22 +1020,6 @@ This is an ephemeral query - the result is displayed but not persisted."
 ;; View Raw Messages
 ;; ------------------------------------------------------------------
 
-(defun chat-ui--get-message-at-point ()
-  "Get the message struct at point."
-  (when (boundp 'chat--current-session)
-    (let* ((session chat--current-session)
-           (messages (chat-session-messages session))
-           found-msg)
-      (save-excursion
-        (goto-char (point-min))
-        (while (and (not found-msg) (< (point) (point-max)))
-          (when (get-text-property (point) 'chat-message-id)
-            (let ((msg-id (get-text-property (point) 'chat-message-id)))
-              (setq found-msg (cl-find-if (lambda (m) (equal (chat-message-id m) msg-id))
-                                          messages))))
-          (forward-line 1)))
-      found-msg)))
-
 ;;;###autoload
 (defun chat-view-raw-message ()
   "View raw API request/response for message at point."
@@ -1096,18 +1080,6 @@ This is an ephemeral query - the result is displayed but not persisted."
   "Use streaming responses for real-time display."
   :type 'boolean
   :group 'chat)
-
-(defun chat-ui--stream-started-p (handle)
-  "Return non-nil when HANDLE means stream startup succeeded."
-  (not (null handle)))
-
-(defun chat-ui--stream-process-p (process)
-  "Return non-nil when PROCESS is a valid stream process."
-  (processp process))
-
-(defun chat-ui--set-stream-process-sentinel (process sentinel)
-  "Install SENTINEL on PROCESS."
-  (set-process-sentinel process sentinel))
 
 ;;;###autoload
 (defun chat-ui-cancel-response ()

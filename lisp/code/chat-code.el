@@ -329,6 +329,11 @@ Inherits from chat-session with additional code-specific fields."
 (defvar chat-code--preview-buffer-name "*chat-preview*"
   "Name of the preview buffer.")
 
+(defface chat-code-block-face
+  '((t :inherit font-lock-constant-face :extend t))
+  "Face for fenced code blocks in code mode buffers."
+  :group 'chat-code)
+
 (defcustom chat-code-tool-loop-max-steps 100
   "Maximum number of follow-up tool resolution requests in code mode."
   :type 'integer
@@ -605,14 +610,6 @@ When SILENT is non-nil, do not show minibuffer feedback."
    (current-buffer)
    chat-code--current-request-id
    chat-code--request-tool-events))
-
-(defun chat-code--stream-started-p (handle)
-  "Return non nil when HANDLE means stream startup succeeded."
-  (not (null handle)))
-
-(defun chat-code--set-stream-process-sentinel (process sentinel)
-  "Install SENTINEL on PROCESS."
-  (set-process-sentinel process sentinel))
 
 (defun chat-code--base-session ()
   "Return the base chat session for the current code session."
@@ -1013,6 +1010,23 @@ Returns either the block body string or a list of (LANG BODY)."
       tool-events
       "\n"))))
 
+(defvar-local chat-code--last-render nil
+  "Last rendered slot state used by the streaming fast path.")
+
+(defun chat-code--fence-safe-prefix-length (content)
+  "Return the length of the CONTENT prefix after the last closed fence."
+  (let ((pos 0)
+        (last-close 0)
+        (count 0))
+    (while (string-match "```" content pos)
+      (setq count (1+ count)
+            pos (match-end 0))
+      (when (zerop (mod count 2))
+        (setq last-close pos)))
+    (if (zerop (mod count 2))
+        (length content)
+      last-close)))
+
 (defun chat-code--render-response-state (content-start content tool-events
                                                       &optional tool-loop-limit-reached
                                                       tool-summary
@@ -1032,29 +1046,52 @@ Returns either the block body string or a list of (LANG BODY)."
        (current-buffer)
        chat-code--current-request-id
        tool-events))
-    (chat-code--replace-response-slot
-     content-start
-     (lambda ()
-       (unless (string-empty-p content)
-         (chat-code--insert-formatted-response content))
-       (when live-detail
-         (unless (string-empty-p content)
-           (insert "\n"))
-         (insert (chat-code--live-narrative-line live-detail)))
-       (when tool-summary
-         (unless (and (string-empty-p content)
-                      (not live-detail)
-                      (not tool-events))
-           (insert "\n"))
-         (insert (format "Tools used: %s" tool-summary)))
-       (when tool-loop-limit-reached
-         (unless (and (string-empty-p content)
-                      (not live-detail)
-                      (not tool-events)
-                      (not tool-summary))
-           (insert "\n"))
-         (insert "Tool loop stopped after reaching the safety limit."))
-       (insert "\n\n")))
+    (let ((trailers
+           (lambda ()
+             (when live-detail
+               (unless (string-empty-p content)
+                 (insert "\n"))
+               (insert (chat-code--live-narrative-line live-detail)))
+             (when tool-summary
+               (unless (and (string-empty-p content)
+                            (not live-detail)
+                            (not tool-events))
+                 (insert "\n"))
+               (insert (format "Tools used: %s" tool-summary)))
+             (when tool-loop-limit-reached
+               (unless (and (string-empty-p content)
+                            (not live-detail)
+                            (not tool-events)
+                            (not tool-summary))
+                 (insert "\n"))
+               (insert "Tool loop stopped after reaching the safety limit."))
+             (insert "\n\n")))
+          (last chat-code--last-render))
+      (if (and last
+               (eq (plist-get last :content-start) content-start)
+               (= (plist-get last :event-count) (length tool-events))
+               (string-prefix-p (plist-get last :content) content))
+          ;; Streaming fast path: re-render only the tail after the
+          ;; last closed fence, then the trailer lines.
+          (let ((cut (chat-code--fence-safe-prefix-length
+                      (plist-get last :content)))
+                (inhibit-read-only t))
+            (save-excursion
+              (goto-char (+ (marker-position content-start) cut))
+              (delete-region (point) chat-code--messages-end)
+              (chat-code--insert-formatted-response (substring content cut))
+              (funcall trailers)
+              (set-marker chat-code--messages-end (point))))
+        (chat-code--replace-response-slot
+         content-start
+         (lambda ()
+           (unless (string-empty-p content)
+             (chat-code--insert-formatted-response content))
+           (funcall trailers))))
+      (setq chat-code--last-render
+            (list :content content
+                  :content-start content-start
+                  :event-count (length tool-events))))
     (chat-code--follow-live-output follow-windows)))
 
 (defun chat-code--tool-result-lines (tool-calls tool-results)
@@ -1909,7 +1946,7 @@ If CONTENT-START is non nil, replace the pending assistant slot."
                    (code (match-string 3 (substring content pos)))
                    (face (if (string= lang "")
                              'default
-                           '(:background "#f5f5f5" :extend t))))
+                           'chat-code-block-face)))
               (insert (propertize (format "```%s\n%s\n```" lang code)
                                   'face face)))
             (setq pos (+ pos (match-end 0))))

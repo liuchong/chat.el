@@ -25,18 +25,6 @@
 ;; Variables
 ;; ------------------------------------------------------------------
 
-(defvar chat-stream--buffer nil
-  "Buffer for accumulating streamed content.")
-
-(defvar chat-stream--insert-marker nil
-  "Marker where next content should be inserted.")
-
-(defvar chat-stream--content-callback nil
-  "Callback function for new content chunks.")
-
-(defvar chat-stream--done-callback nil
-  "Callback function when stream is complete.")
-
 (defun chat-stream--redact-curl-args-for-log (args)
   "Return ARGS with sensitive values redacted for logging."
   (let ((result nil))
@@ -104,35 +92,6 @@ Handles format: data: {...} or data:{...} (with or without space)"
 ;; ------------------------------------------------------------------
 ;; Buffer Insertion
 ;; ------------------------------------------------------------------
-
-(defun chat-stream--insert-text (text)
-  "Insert TEXT at stream insertion marker."
-  (when (and chat-stream--buffer
-             (buffer-live-p chat-stream--buffer)
-             chat-stream--insert-marker)
-    (with-current-buffer chat-stream--buffer
-      (let ((inhibit-read-only t))
-        (save-excursion
-          (goto-char chat-stream--insert-marker)
-          (insert text)
-          (set-marker chat-stream--insert-marker (point))))
-      ;; Force display update
-      (redisplay t))))
-
-;; ------------------------------------------------------------------
-;; Process Filter
-;; ------------------------------------------------------------------
-
-(defun chat-stream--process-filter (proc string)
-  "Process filter for stream PROC receiving STRING."
-  (when chat-stream--content-callback
-    (funcall chat-stream--content-callback string)))
-
-(defun chat-stream--process-sentinel (proc event)
-  "Process sentinel for stream PROC with EVENT."
-  (when (and (string-match-p "finished\\|closed" event)
-             chat-stream--done-callback)
-    (funcall chat-stream--done-callback)))
 
 ;; ------------------------------------------------------------------
 ;; Main Stream Function

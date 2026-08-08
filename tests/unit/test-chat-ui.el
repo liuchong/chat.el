@@ -200,11 +200,6 @@
        (should-not (search-forward "Second draft\n\nAssistant" nil t))
        (should-not (search-forward "Answer 2" nil t))))))
 
-(ert-deftest chat-ui-stream-started-p-accepts-non-nil-handle ()
-  "Test non-nil handles count as successful stream startup."
-  (should (chat-ui--stream-started-p 'stream-handle))
-  (should-not (chat-ui--stream-started-p nil)))
-
 (ert-deftest chat-ui-format-tool-events-renders-structured-lines ()
   "Test tool events are rendered as readable step lines."
   (let ((text (chat-ui--format-tool-events

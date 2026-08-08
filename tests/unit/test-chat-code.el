@@ -1038,5 +1038,37 @@ file contents instead of only a short summary."
                  (list (make-string 40 ?y)))))
     (should (string-match-p "truncated, 30 chars omitted" (car lines)))))
 
+(ert-deftest chat-code-fence-safe-prefix-length-tracks-open-fences ()
+  "Test the fence safe prefix covers only complete fenced regions."
+  (should (= (chat-code--fence-safe-prefix-length "no fences")
+             (length "no fences")))
+  (let ((balanced "before\n```py\nx\n```\nafter"))
+    (should (= (chat-code--fence-safe-prefix-length balanced)
+               (length balanced))))
+  (let* ((unclosed "pre\n```\nmid")
+         (last-close (length "pre\n```")))
+    ;; One fence is open, so the safe prefix ends at its opening.
+    (should (= (chat-code--fence-safe-prefix-length unclosed) 0)))
+  (let* ((text "```\na\n```\ntail\n```\nopen")
+         (expected (length "```\na\n```")))
+    (should (= (chat-code--fence-safe-prefix-length text) expected))))
+
+(ert-deftest chat-code-render-response-state-appends-delta-on-growth ()
+  "Test growing content reuses the slot and appends only the delta."
+  (chat-test-with-temp-dir
+   (let ((session (chat-code-session-create "Render" temp-dir nil)))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (chat-code--setup-buffer session)
+       (let ((content-start (chat-code--show-assistant-indicator)))
+         (chat-code--render-response-state content-start "abc" nil)
+         (chat-code--render-response-state content-start "abcdef" nil)
+         (should (string-match-p "abcdef" (buffer-string)))
+         (should-not (string-match-p "abcabcdef" (buffer-string)))
+         ;; Shrinking content falls back to a full replace.
+         (chat-code--render-response-state content-start "ab" nil)
+         (should (string-match-p "ab\n\n" (buffer-string))))))))
+
 (provide 'test-chat-code)
 ;;; test-chat-code.el ends here

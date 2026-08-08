@@ -20,6 +20,11 @@
   :type 'integer
   :group 'chat-request-panel)
 
+(defcustom chat-request-panel-max-events 30
+  "Maximum request events shown in the panel; older ones collapse."
+  :type 'integer
+  :group 'chat-request-panel)
+
 (defvar-local chat-request-panel--source-buffer nil
   "Source buffer associated with the current request panel buffer.")
 
@@ -180,14 +185,23 @@
          "Tool Steps"
          (apply #'append
                 (mapcar #'chat-request-panel--event-lines tool-events)))
-        (chat-request-panel--insert-lines
-         "Request Events"
-         (mapcar
-          (lambda (event)
-            (format "- %s %s"
-                    (plist-get event :type)
-                    (or (plist-get event :summary) "")))
-          (plist-get snapshot :events)))
+        (let* ((all-events (plist-get snapshot :events))
+               (total (length all-events))
+               (hidden (max 0 (- total chat-request-panel-max-events)))
+               (shown (if (> hidden 0)
+                          (nthcdr hidden all-events)
+                        all-events)))
+          (chat-request-panel--insert-lines
+           "Request Events"
+           (append
+            (when (> hidden 0)
+              (list (format "… %d earlier events hidden" hidden)))
+            (mapcar
+             (lambda (event)
+               (format "- %s %s"
+                       (plist-get event :type)
+                       (or (plist-get event :summary) "")))
+             shown))))
         (goto-char (point-min))
         (view-mode 1)))))
 
