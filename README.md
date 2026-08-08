@@ -24,7 +24,8 @@ Copyright 2026 chat.el contributors.
 ## Current Capabilities
 
 - Chat with Kimi, Kimi Code, and OpenAI compatible providers
-- Keep multiple sessions on disk and inspect raw request and response data
+- Keep multiple sessions on disk as append only JSONL files and inspect raw request and response data
+- Curate long term memory in `~/.chat/memory.md`, injected into every system prompt (`M-x chat-edit-memory`)
 - Stream or fetch responses through an async non blocking UI path
 - Expose built in file tools with approval gates for risky operations
 - Feed tool results back into the model through a bounded tool loop
@@ -337,8 +338,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 476 regression tests discovered
-- 476 passing
+- 484 regression tests discovered
+- 484 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

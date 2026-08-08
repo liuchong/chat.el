@@ -279,10 +279,10 @@
           (id (chat-session-id session)))
      (chat-session-save session)
      (should (file-exists-p
-              (expand-file-name (format "%s.json" id) temp-dir)))
+              (expand-file-name (format "%s.jsonl" id) temp-dir)))
      (chat-session-delete id)
      (should-not (file-exists-p
-                  (expand-file-name (format "%s.json" id) temp-dir))))))
+                  (expand-file-name (format "%s.jsonl" id) temp-dir))))))
 
 ;; Test session rename
 (ert-deftest chat-session-rename-test ()
@@ -326,6 +326,79 @@
    (let ((chat-session-directory temp-dir))
      (chat-session-save (chat-session-create "atomic" 'kimi))
      (should (null (directory-files temp-dir nil "^\\.session-"))))))
+
+(ert-deftest chat-session-jsonl-appends-messages-without-full-rewrite ()
+  "Test adding messages appends entries instead of rewriting the file."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Append Session" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "m1" :role :user
+                         :content "one" :timestamp (current-time)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "m2" :role :assistant
+                         :content "two" :timestamp (current-time)))
+     (let* ((file (expand-file-name
+                   (format "%s.jsonl" (chat-session-id session))
+                   temp-dir))
+            (lines (split-string
+                    (with-temp-buffer
+                      (insert-file-contents file)
+                      (buffer-string))
+                    "\n" t)))
+       ;; header + state, then message + state per added message
+       (should (= (length lines) 6))
+       (should (string-match-p "\"header\"" (nth 0 lines)))
+       (should (string-match-p "\"message\"" (nth 2 lines)))))))
+
+(ert-deftest chat-session-load-migrates-legacy-json ()
+  "Test legacy JSON session files load and migrate to JSONL."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Legacy Session" 'kimi))
+          (id (chat-session-id session)))
+     ;; Rewrite the on-disk file in the legacy single-JSON format.
+     (with-temp-file (expand-file-name (format "%s.json" id) temp-dir)
+       (insert (json-encode (chat-session--serialize session))))
+     (delete-file (expand-file-name (format "%s.jsonl" id) temp-dir))
+     (let ((loaded (chat-session-load id)))
+       (should loaded)
+       (should (string= (chat-session-name loaded) "Legacy Session"))
+       (should (file-exists-p
+                (expand-file-name (format "%s.jsonl" id) temp-dir)))
+       (should-not (file-exists-p
+                    (expand-file-name (format "%s.json" id) temp-dir)))))))
+
+(ert-deftest chat-session-jsonl-tolerates-corrupt-lines ()
+  "Test JSONL loading skips unreadable lines."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Corrupt Session" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "m1" :role :user
+                         :content "one" :timestamp (current-time)))
+     (let ((file (expand-file-name
+                  (format "%s.jsonl" (chat-session-id session))
+                  temp-dir)))
+       (write-region "{not json\n" nil file 'append 'silent)
+       (let ((loaded (chat-session-load (chat-session-id session))))
+         (should loaded)
+         (should (= (length (chat-session-messages loaded)) 1)))))))
+
+(ert-deftest chat-session-list-prefers-jsonl-over-legacy ()
+  "Test listing counts a session once when both file formats exist."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Dup Session" 'kimi))
+          (id (chat-session-id session)))
+     (with-temp-file (expand-file-name (format "%s.json" id) temp-dir)
+       (insert (json-encode (chat-session--serialize session))))
+     (let ((sessions (chat-session-list)))
+       (should (= (length sessions) 1))
+       (should (string= (chat-session-name (car sessions)) "Dup Session"))))))
 
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here

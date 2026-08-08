@@ -103,14 +103,18 @@ model knows content is missing."
    "\n"))
 
 (defun chat-tool-caller-build-system-prompt (base-prompt)
-  "Extend BASE-PROMPT with tool calling instructions."
-  (if (not chat-tool-caller-enabled)
-      base-prompt
-    (let ((tools (chat-tool-caller--available-tools)))
-      (if (null tools)
-          base-prompt
-        (concat
-         base-prompt
+  "Extend BASE-PROMPT with long term memory and tool calling instructions."
+  (let ((base (if-let ((memory (and (fboundp 'chat-memory-snippet)
+                                    (chat-memory-snippet))))
+                  (concat base-prompt "\n\n" memory)
+                base-prompt)))
+    (if (not chat-tool-caller-enabled)
+        base
+      (let ((tools (chat-tool-caller--available-tools)))
+        (if (null tools)
+            base
+          (concat
+           base
          "\n\n"
          "You can call one tool per response when it is necessary.\n"
          "If a tool is needed, respond with only one JSON object and no markdown.\n"
@@ -143,7 +147,7 @@ model knows content is missing."
          "- If editing an existing file, prefer `apply_patch` or `files_replace` over `files_write`.\n"
          "- If no tool is needed, answer normally.\n"
          "Available tools:\n"
-         (mapconcat #'chat-tool-caller--format-tool-line tools "\n"))))))
+         (mapconcat #'chat-tool-caller--format-tool-line tools "\n")))))))
 
 (defun chat-tool-caller--fix-broken-json (string)
   "Apply small compatibility fixes to STRING."

@@ -67,6 +67,7 @@
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-session)
+(require 'chat-memory)
 (require 'chat-stream)
 (require 'chat-context)
 (require 'chat-files)

@@ -118,59 +118,165 @@ PREFIX defaults to \"msg\"."
           (format-time-string "%Y%m%d%H%M%S")
           (cl-incf chat-session--message-counter)))
 
-(defun chat-session-save (session)
-  "Save SESSION to disk.
+(defconst chat-session-format-version 1
+  "Version of the JSONL session file format.")
 
-SESSION is a chat-session struct.
-The write is atomic: content goes to a temporary file first and is
-renamed over the target, so a crash mid-save cannot corrupt the
-previous session file.
+(defun chat-session--file-name (session-id)
+  "Return the JSONL session file name for SESSION-ID."
+  (expand-file-name (format "%s.jsonl" session-id)
+                    chat-session-directory))
+
+(defun chat-session--legacy-file-name (session-id)
+  "Return the legacy JSON session file name for SESSION-ID."
+  (expand-file-name (format "%s.json" session-id)
+                    chat-session-directory))
+
+(defun chat-session--header-entry (session)
+  "Return the JSONL header entry for SESSION."
+  (list (cons 'type "header")
+        (cons 'version chat-session-format-version)
+        (cons 'id (chat-session-id session))
+        (cons 'name (chat-session-name session))
+        (cons 'createdAt (format-time-string
+                          "%Y-%m-%dT%H:%M:%S"
+                          (chat-session-created-at session)))
+        (cons 'modelId (symbol-name (chat-session-model-id session)))))
+
+(defun chat-session--state-entry (session)
+  "Return the JSONL state entry for SESSION."
+  (list (cons 'type "state")
+        (cons 'name (chat-session-name session))
+        (cons 'updatedAt (format-time-string
+                          "%Y-%m-%dT%H:%M:%S"
+                          (chat-session-updated-at session)))
+        (cons 'autoApprove (let ((aa (chat-session-auto-approve session)))
+                             (cond ((eq aa t) t)
+                                   ((eq aa nil) :json-false)
+                                   (t 'inherit))))
+        (cons 'metadata (or (chat-session-metadata session) nil))))
+
+(defun chat-session--message-entry (message)
+  "Return the JSONL message entry for MESSAGE."
+  (cons (cons 'type "message")
+        (chat-message--serialize message)))
+
+(defun chat-session-save (session)
+  "Save SESSION to disk as a JSONL file.
+
+The file holds a header entry, a state entry, and one entry per
+message.  The write is atomic: content goes to a temporary file first
+and is renamed over the target, so a crash mid-save cannot corrupt
+the previous session file.
 Returns t on success, nil on failure."
   (chat-session--ensure-directory)
-  (let* ((id (chat-session-id session))
-         (filename (expand-file-name
-                    (format "%s.json" id)
-                    chat-session-directory))
-         (data (chat-session--serialize session))
+  (let* ((filename (chat-session--file-name (chat-session-id session)))
          (temp-file (make-temp-file
                      (expand-file-name ".session-" chat-session-directory)
-                     nil ".json")))
+                     nil ".jsonl")))
     (unwind-protect
         (progn
           (with-temp-file temp-file
-            (insert (json-encode data)))
+            (insert (json-encode (chat-session--header-entry session)) "\n")
+            (insert (json-encode (chat-session--state-entry session)) "\n")
+            (dolist (message (chat-session-messages session))
+              (insert (json-encode (chat-session--message-entry message)) "\n")))
           (rename-file temp-file filename t)
           t)
       (when (file-exists-p temp-file)
         (delete-file temp-file)))))
 
+(defun chat-session--append-message (session message)
+  "Append MESSAGE and a fresh state entry to the session JSONL file.
+Falls back to a full save when the file is missing."
+  (let ((filename (chat-session--file-name (chat-session-id session))))
+    (if (not (file-exists-p filename))
+        (chat-session-save session)
+      (write-region
+       (concat (json-encode (chat-session--message-entry message)) "\n"
+               (json-encode (chat-session--state-entry session)) "\n")
+       nil
+       filename
+       'append
+       'silent)
+      t)))
+
+(defun chat-session--load-jsonl (filename)
+  "Load a session from the JSONL file FILENAME.
+Later state entries override earlier ones.  Corrupt lines are
+skipped."
+  (with-temp-buffer
+    (insert-file-contents filename)
+    (goto-char (point-min))
+    (let (header state message-datas)
+      (while (not (eobp))
+        (let ((line (string-trim
+                     (buffer-substring-no-properties
+                      (line-beginning-position)
+                      (line-end-position)))))
+          (unless (string-empty-p line)
+            (let ((entry (condition-case nil
+                             (json-read-from-string line)
+                           (error nil))))
+              (when entry
+                (pcase (cdr (assoc 'type entry))
+                  ("header" (setq header entry))
+                  ("state" (setq state entry))
+                  ("message" (push entry message-datas)))))))
+        (forward-line 1))
+      (when header
+        (chat-session--deserialize
+         (list (cons 'id (cdr (assoc 'id header)))
+               (cons 'name (or (and state (cdr (assoc 'name state)))
+                               (cdr (assoc 'name header))))
+               (cons 'createdAt (cdr (assoc 'createdAt header)))
+               (cons 'updatedAt (or (and state (cdr (assoc 'updatedAt state)))
+                                    (cdr (assoc 'createdAt header))))
+               (cons 'modelId (cdr (assoc 'modelId header)))
+               (cons 'messages (nreverse message-datas))
+               (cons 'autoApprove (and state (cdr (assoc 'autoApprove state))))
+               (cons 'metadata (and state
+                                    (assoc 'metadata state)
+                                    (cdr (assoc 'metadata state))))))))))
+
 (defun chat-session-load (session-id)
   "Load session with SESSION-ID from disk.
 
-SESSION-ID is a string identifying the session.
+Reads the JSONL file when present.  A legacy JSON file is loaded and
+migrated to JSONL transparently.
 Returns the chat-session struct, or nil if not found or unreadable."
-  (let ((filename (expand-file-name
-                   (format "%s.json" session-id)
-                   chat-session-directory)))
-    (when (file-exists-p filename)
+  (let ((filename (chat-session--file-name session-id))
+        (legacy (chat-session--legacy-file-name session-id)))
+    (cond
+     ((file-exists-p filename)
       (condition-case nil
-          (with-temp-buffer
-            (insert-file-contents filename)
-            (chat-session--deserialize
-             (json-read-from-string
-              (buffer-string))))
-        (error nil)))))
+          (chat-session--load-jsonl filename)
+        (error nil)))
+     ((file-exists-p legacy)
+      (let ((session (condition-case nil
+                         (with-temp-buffer
+                           (insert-file-contents legacy)
+                           (chat-session--deserialize
+                            (json-read-from-string (buffer-string))))
+                       (error nil))))
+        (when session
+          (when (chat-session-save session)
+            (delete-file legacy)))
+        session)))))
 
 (defun chat-session-delete (session-id)
   "Delete session with SESSION-ID from disk.
 
 Returns t if deleted, nil if file did not exist."
-  (let ((filename (expand-file-name
-                   (format "%s.json" session-id)
-                   chat-session-directory)))
+  (let ((filename (chat-session--file-name session-id))
+        (legacy (chat-session--legacy-file-name session-id))
+        (deleted nil))
     (when (file-exists-p filename)
       (delete-file filename)
-      t)))
+      (setq deleted t))
+    (when (file-exists-p legacy)
+      (delete-file legacy)
+      (setq deleted t))
+    deleted))
 
 (defun chat-session-rename (session-id new-name)
   "Rename session with SESSION-ID to NEW-NAME."
@@ -188,20 +294,29 @@ Returns t if deleted, nil if file did not exist."
 (defun chat-session-list ()
   "Return a list of all saved sessions.
 
-Returns a list of chat-session structs, sorted by updated-at
-descending."
+JSONL files take precedence over legacy JSON files for the same
+session id.  Returns a list of chat-session structs, sorted by
+updated-at descending."
   (chat-session--ensure-directory)
-  (let (sessions)
-    (dolist (file (directory-files
-                   chat-session-directory
-                   t
-                   "\\.json$"))
-      (let ((session (condition-case nil
-                         (chat-session-load
-                          (file-name-base file))
-                       (error nil))))
-        (when session
-          (push session sessions))))
+  (let (sessions
+        (seen (make-hash-table :test 'equal)))
+    (dolist (file (append
+                   (directory-files
+                    chat-session-directory
+                    t
+                    "\\.jsonl$")
+                   (directory-files
+                    chat-session-directory
+                    t
+                    "\\.json$")))
+      (let ((id (file-name-base file)))
+        (unless (gethash id seen)
+          (puthash id t seen)
+          (let ((session (condition-case nil
+                             (chat-session-load id)
+                           (error nil))))
+            (when session
+              (push session sessions))))))
     (sort sessions
           (lambda (a b)
             (time-less-p
@@ -223,7 +338,7 @@ MESSAGE is a chat-message struct."
   (setf (chat-session-updated-at session)
         (current-time))
   (when chat-session-auto-save
-    (chat-session-save session)))
+    (chat-session--append-message session message)))
 
 (defun chat-session-get-messages (session &optional limit)
   "Get messages from SESSION, optionally limited to LIMIT most recent.
@@ -422,10 +537,8 @@ Returns the chat-session struct, or nil if not found."
 
 (defun chat-session-exists-p (session-id)
   "Check if session with SESSION-ID exists on disk."
-  (file-exists-p
-   (expand-file-name
-    (format "%s.json" session-id)
-    chat-session-directory)))
+  (or (file-exists-p (chat-session--file-name session-id))
+      (file-exists-p (chat-session--legacy-file-name session-id))))
 
 ;; ------------------------------------------------------------------
 ;; Auto-Approval
