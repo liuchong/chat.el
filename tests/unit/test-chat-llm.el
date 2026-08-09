@@ -285,5 +285,31 @@
   (should-not (chat-llm--extract-finish-reason '((choices . []))))
   (should-not (chat-llm--extract-finish-reason nil)))
 
+(ert-deftest chat-llm-extracts-anthropic-stop-reason ()
+  "Test stop_reason extraction from Anthropic style responses."
+  (should (string= (chat-llm--extract-finish-reason
+                    '((stop_reason . "max_tokens")))
+                   "length"))
+  (should (string= (chat-llm--extract-finish-reason
+                    '((stop_reason . "end_turn")))
+                   "end_turn")))
+
+(ert-deftest chat-llm-kimi-code-anthropic-uses-anthropic-protocol ()
+  "Test the Kimi Code anthropic provider uses the Messages API shape."
+  (should (string= (chat-llm--request-url 'kimi-code-anthropic)
+                   "https://api.kimi.com/coding/v1/messages"))
+  (let ((chat-llm-kimi-code-api-key "kimi-key"))
+    (should (equal (cdr (assoc "x-api-key"
+                               (chat-llm--make-headers 'kimi-code-anthropic)))
+                   "kimi-key"))
+    (should (cdr (assoc "anthropic-version"
+                        (chat-llm--make-headers 'kimi-code-anthropic)))))
+  (let* ((messages (list (make-chat-message :role :system :content "Rule")
+                         (make-chat-message :role :user :content "Hello")))
+         (request (chat-llm-claude--build-request
+                   'kimi-code-anthropic messages nil)))
+    (should (equal (plist-get request :model) "kimi-for-coding"))
+    (should (equal (plist-get request :system) "Rule"))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

@@ -34,19 +34,22 @@
         (funcall chat-llm-claude-api-key-fn))
       (chat-llm--auth-source-lookup 'claude
                                     (chat-llm-get-provider-config 'claude))))
-(defun chat-llm-claude--auth-headers (api-key _provider _config)
-  "Build Claude auth headers from API-KEY."
+(defun chat-llm-claude--auth-headers (api-key _provider config)
+  "Build Anthropic auth headers from API-KEY."
   (list (cons "x-api-key" api-key)
-        (cons "anthropic-version" chat-llm-claude-api-version)))
+        (cons "anthropic-version"
+              (or (plist-get config :anthropic-version)
+                  chat-llm-claude-api-version))))
 (defun chat-llm-claude--message-role (role)
   "Map internal ROLE to a Claude role string."
   (if (eq role :assistant)
       "assistant"
     "user"))
-(defun chat-llm-claude--build-request (messages options)
-  "Build Claude request with MESSAGES and OPTIONS."
-  (let ((system-lines nil)
-        (normal-messages nil))
+(defun chat-llm-claude--build-request (provider messages options)
+  "Build an Anthropic compatible request for PROVIDER with MESSAGES."
+  (let* ((config (chat-llm--ensure-provider provider))
+         (system-lines nil)
+         (normal-messages nil))
     (dolist (msg messages)
       (let ((role (chat-message-role msg))
             (content (or (chat-message-content msg) "")))
@@ -58,9 +61,11 @@
                   normal-messages)))))
     (let ((request
            (list :model (or (plist-get options :model)
-                            chat-llm-claude-default-model)
+                            (plist-get config :model))
                  :messages (vconcat (nreverse normal-messages))
-                 :max_tokens (or (plist-get options :max-tokens) 4096)
+                 :max_tokens (or (plist-get options :max-tokens)
+                                 (plist-get config :max-output-tokens)
+                                 4096)
                  :temperature (or (plist-get options :temperature) 0.7)
                  :stream (plist-get options :stream))))
       (when system-lines
@@ -87,16 +92,33 @@
   (let ((delta (cdr (assoc 'delta json-data))))
     (or (cdr (assoc 'text delta))
         (cdr (assoc 'text (cdr (assoc 'content_block json-data)))))))
-(chat-llm-register-provider
+(defun chat-llm-register-anthropic-compatible-provider (symbol name base-url model &rest options)
+  "Register SYMBOL as an Anthropic Messages API compatible provider.
+NAME is the display name.
+BASE-URL is the provider API base URL.
+MODEL is the default remote model name.
+OPTIONS are appended to the provider plist; useful keys include
+`:request-path' (default `/v1/messages'), `:anthropic-version', and
+`:api-key-fn'."
+  (apply #'chat-llm-register-provider
+         symbol
+         :name name
+         :base-url base-url
+         :request-path "/v1/messages"
+         :model model
+         :auth-headers-fn #'chat-llm-claude--auth-headers
+         :request-fn (lambda (messages request-options)
+                       (chat-llm-claude--build-request
+                        symbol messages request-options))
+         :response-fn #'chat-llm-claude--parse-response
+         :stream-fn #'chat-llm-claude--parse-stream-chunk
+         options))
+
+(chat-llm-register-anthropic-compatible-provider
  'claude
- :name "Claude"
- :base-url "https://api.anthropic.com"
- :request-path "/v1/messages"
- :api-key-fn #'chat-llm-claude--get-api-key
- :auth-headers-fn #'chat-llm-claude--auth-headers
- :model chat-llm-claude-default-model
- :request-fn #'chat-llm-claude--build-request
- :response-fn #'chat-llm-claude--parse-response
- :stream-fn #'chat-llm-claude--parse-stream-chunk)
+ "Claude"
+ "https://api.anthropic.com"
+ chat-llm-claude-default-model
+ :api-key-fn #'chat-llm-claude--get-api-key)
 (provide 'chat-llm-claude)
 ;;; chat-llm-claude.el ends here

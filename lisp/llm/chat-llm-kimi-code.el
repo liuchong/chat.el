@@ -15,6 +15,7 @@
 ;;; Code:
 
 (require 'chat-llm)
+(require 'chat-llm-claude)
 
 ;; ------------------------------------------------------------------
 ;; Configuration
@@ -137,6 +138,18 @@ Reference: https://www.kimi.com/code/docs/more/third-party-agents.html"
  :build-request-fn #'chat-llm-kimi-code--build-request
  :response-fn #'chat-llm-kimi-code--parse-response
  :stream-fn #'chat-llm-kimi-code--parse-stream-chunk)
+
+;; Kimi Code also speaks the Anthropic Messages protocol on the same
+;; host, so it registers through the anthropic compatible factory.
+(chat-llm-register-anthropic-compatible-provider
+ 'kimi-code-anthropic
+ "Kimi Code (Anthropic)"
+ "https://api.kimi.com/coding"
+ chat-llm-kimi-code-default-model
+ :async-transport 'curl
+ :api-key-fn #'chat-llm-kimi-code--get-api-key
+ :context-window 262144
+ :max-output-tokens 32768)
 
 (provide 'chat-llm-kimi-code)
 ;;; chat-llm-kimi-code.el ends here

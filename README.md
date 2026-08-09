@@ -58,6 +58,7 @@ Supported providers:
 
 - `kimi`
 - `kimi-code`
+- `kimi-code-anthropic`
 - `openai`
 - `deepseek`
 - `qwen`
@@ -69,6 +70,12 @@ Supported providers:
 - `hunyuan`
 - `minimax`
 - `mistral`
+
+Two protocol adapters cover most vendors: any OpenAI compatible API
+registers through `chat-llm-register-openai-compatible-provider`, and
+any Anthropic Messages compatible API registers through
+`chat-llm-register-anthropic-compatible-provider`.  Adding a new
+vendor is a base URL, a key function, and a model name.
 
 Configure providers in one of these files:
 
@@ -338,8 +345,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 496 regression tests discovered
-- 496 passing
+- 498 regression tests discovered
+- 498 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

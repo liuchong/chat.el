@@ -47,7 +47,7 @@
   (let* ((messages (list (make-chat-message :role :system :content "System rule")
                          (make-chat-message :role :user :content "Hello")
                          (make-chat-message :role :assistant :content "Hi")))
-         (request (chat-llm-claude--build-request messages '(:stream t))))
+         (request (chat-llm-claude--build-request 'claude messages '(:stream t))))
     (should (equal (plist-get request :model) "claude-sonnet-4-5"))
     (should (equal (plist-get request :system) "System rule"))
     (should (= (length (plist-get request :messages)) 2))

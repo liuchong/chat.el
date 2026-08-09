@@ -455,16 +455,24 @@ ERROR receives a string message."
      (chat-llm--post-async url headers body success error timeout-secs))))
 
 (defun chat-llm--extract-finish-reason (json-data)
-  "Extract the OpenAI style finish reason from JSON-DATA, or nil."
+  "Extract the finish reason from JSON-DATA, or nil.
+Handles the OpenAI style `finish_reason' inside choices and the
+Anthropic style top level `stop_reason', normalizing
+`max_tokens' to \"length\"."
   (let* ((choices (cdr (assoc 'choices json-data)))
          (first-choice (and choices
                             (if (vectorp choices)
                                 (and (> (length choices) 0)
                                      (aref choices 0))
                               (car choices))))
-         (reason (and first-choice
-                      (cdr (assoc 'finish_reason first-choice)))))
-    (and (stringp reason) reason)))
+         (openai-reason (and first-choice
+                             (cdr (assoc 'finish_reason first-choice))))
+         (reason (or (and (stringp openai-reason) openai-reason)
+                     (cdr (assoc 'stop_reason json-data)))))
+    (cond
+     ((equal reason "max_tokens") "length")
+     ((stringp reason) reason)
+     (t nil))))
 
 (defun chat-llm--decode-response (config raw-request raw-response status-code)
   "Decode one response using CONFIG and request metadata."
