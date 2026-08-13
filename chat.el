@@ -84,6 +84,7 @@
 (require 'chat-llm-compatible-providers)
 (require 'chat-llm-claude)
 (require 'chat-llm-gemini)
+(require 'chat-llm-ark)
 
 ;; Load tool modules.
 (require 'chat-tool-forge)

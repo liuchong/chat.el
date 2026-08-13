@@ -70,6 +70,7 @@ Supported providers:
 - `hunyuan`
 - `minimax`
 - `mistral`
+- `ark-code` and `ark-code-anthropic` (Volcengine Ark Coding Plan)
 
 Two protocol adapters cover most vendors: any OpenAI compatible API
 registers through `chat-llm-register-openai-compatible-provider`, and
@@ -345,8 +346,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 498 regression tests discovered
-- 498 passing
+- 499 regression tests discovered
+- 499 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

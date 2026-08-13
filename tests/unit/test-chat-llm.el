@@ -311,5 +311,25 @@
     (should (equal (plist-get request :model) "kimi-for-coding"))
     (should (equal (plist-get request :system) "Rule"))))
 
+(ert-deftest chat-llm-ark-registers-both-protocols ()
+  "Test Ark registers OpenAI and Anthropic compatible providers."
+  (should (string= (chat-llm--request-url 'ark-code)
+                   "https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions"))
+  (should (string= (chat-llm--request-url 'ark-code-anthropic)
+                   "https://ark.cn-beijing.volces.com/api/plan/v1/messages"))
+  (let ((chat-llm-ark-api-key "ark-key"))
+    (should (equal (cdr (assoc "Authorization"
+                               (chat-llm--make-headers 'ark-code)))
+                   "Bearer ark-key"))
+    (should (equal (cdr (assoc "x-api-key"
+                               (chat-llm--make-headers 'ark-code-anthropic)))
+                   "ark-key")))
+  (let* ((messages (list (make-chat-message :role :user :content "Hello")))
+         (openai-req (chat-llm--build-request 'ark-code messages nil))
+         (anthropic-req (chat-llm-claude--build-request
+                         'ark-code-anthropic messages nil)))
+    (should (equal (plist-get openai-req :model) "ark-code-latest"))
+    (should (equal (plist-get anthropic-req :model) "ark-code-latest"))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here
