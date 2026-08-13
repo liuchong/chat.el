@@ -156,7 +156,7 @@ machine openai-api user api-key password YOUR_KEY</code></pre>
             </ul>
 
             <h3>Adding Custom Providers</h3>
-            <p>Extend <code>lisp/llm/chat-llm.el</code> to add new providers. See existing implementations in <code>lisp/llm/chat-llm-kimi.el</code> and <code>lisp/llm/chat-llm-openai.el</code>.</p>
+            <p>Register through <code>chat-llm-register-openai-compatible-provider</code> or <code>chat-llm-register-anthropic-compatible-provider</code> — a new vendor needs only a base URL, a key function, and a model name. See <code>lisp/llm/chat-llm-ark.el</code> for a dual-protocol example.</p>
 
             <h2 id="tools">Tool System</h2>
             <p>chat.el includes a powerful tool calling system that allows the AI to interact with your filesystem and execute commands.</p>

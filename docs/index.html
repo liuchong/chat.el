@@ -52,44 +52,162 @@
         <div class="main-content">
             <div class="section-header fade-in">
                 <h2>Built for Coders</h2>
-                <p>Everything you need to supercharge your Emacs workflow with AI assistance</p>
+                <p>An event-driven agent kernel with real tool use, inside one big Emacs buffer</p>
             </div>
             
             <div class="features-grid">
                 <div class="feature-card fade-in">
-                    <div class="feature-icon">💬</div>
-                    <h3>Multi-Turn Chat</h3>
-                    <p>Natural conversations with context preservation and intelligent trimming. Your chat history stays organized and accessible.</p>
+                    <div class="feature-icon">🧠</div>
+                    <h3>Agent Kernel</h3>
+                    <p>A UI-agnostic event loop drives every conversation: tool calls, retries, steering, and cancellation all flow through one observable event stream.</p>
                 </div>
                 
                 <div class="feature-card fade-in">
                     <div class="feature-icon">🔌</div>
-                    <h3>Multiple Providers</h3>
-                    <p>Connect to Kimi, Kimi Code, and any OpenAI-compatible API. Switch providers seamlessly without changing your workflow.</p>
+                    <h3>Two Protocol Adapters</h3>
+                    <p>Generic OpenAI-compatible and Anthropic-compatible factories. Sixteen providers onboard; a new vendor is just a base URL, a key, and a model name.</p>
                 </div>
                 
                 <div class="feature-card fade-in">
                     <div class="feature-icon">🛠️</div>
-                    <h3>Tool Calling</h3>
-                    <p>Let AI read files, search code, and execute commands. Built-in approval gates keep risky operations under your control.</p>
+                    <h3>Real Tool Calling</h3>
+                    <p>Files, grep, patch, and shell tools with approval gates. Malformed calls get fed back to the model for automatic retry instead of dying silently.</p>
                 </div>
                 
                 <div class="feature-card fade-in">
-                    <div class="feature-icon">📁</div>
-                    <h3>File Operations</h3>
-                    <p>AI-assisted file reading, grep, and modification with configurable safety controls. Works within allowed directories only.</p>
+                    <div class="feature-icon">🩹</div>
+                    <h3>Fuzzy Patch Editing</h3>
+                    <p>A matching cascade that tolerates whitespace drift, Unicode punctuation, and indentation differences, with atomic multi-file patches and real unified diffs.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">⌨️</div>
+                    <h3>Async Shell Loop</h3>
+                    <p>Commands run as subprocesses with timeouts and output truncation that spills to files. Emacs stays responsive while the shell works.</p>
                 </div>
                 
                 <div class="feature-card fade-in">
                     <div class="feature-icon">💾</div>
-                    <h3>Session Management</h3>
-                    <p>Save and resume chat sessions anytime. Inspect raw request/response data for debugging and transparency.</p>
+                    <h3>Sessions & Memory</h3>
+                    <p>Append-only JSONL sessions resume instantly and survive crashes. A user-curated memory.md is injected into every conversation.</p>
+                </div>
+                
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">📐</div>
+                    <h3>Stacked Project Rules</h3>
+                    <p>AGENTS.md files are discovered from the filesystem root down to your file, merged root-first with a global fallback — just like the best agent CLIs.</p>
                 </div>
                 
                 <div class="feature-card fade-in">
                     <div class="feature-icon">⚡</div>
-                    <h3>Streaming Display</h3>
-                    <p>Real-time response streaming through async non-blocking UI. Watch the AI think and respond in real-time.</p>
+                    <h3>Differential Streaming</h3>
+                    <p>Responses render incrementally — only the tail updates per chunk, with markdown-lite styling for code blocks, headers, and emphasis.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo Buffer Section -->
+    <section class="section" style="background: var(--light);">
+        <div class="main-content">
+            <div class="section-header fade-in">
+                <h2>One Buffer, One Agent</h2>
+                <p>No forced panels, no split layout — just a conversation. Every buffer is its own session, so agents run side by side naturally</p>
+            </div>
+            <div class="demo-window fade-in">
+                <div class="demo-titlebar">
+                    <span class="code-dot red"></span>
+                    <span class="code-dot yellow"></span>
+                    <span class="code-dot green"></span>
+                    <span class="demo-title">*chat:code*</span>
+                    <span class="demo-modeline">ark-code · running</span>
+                </div>
+                <div class="demo-body"><span class="demo-role demo-role-user">You:</span>
+rename tokenize to lex in lib/parser.py
+
+<span class="demo-role demo-role-assistant">Assistant:</span>
+Let me look at the file first.
+<span class="demo-tool">→ files_read  lib/parser.py  <span class="demo-ok">✓ 200 lines</span></span>
+<span class="demo-tool">→ files_replace  tokenize → lex  <span class="demo-ok">✓ 3 replacements</span></span>
+<span class="demo-diff-del">-def tokenize(stream):</span>
+<span class="demo-diff-add">+def lex(stream):</span>
+Done — 3 call sites updated, diff above for review.<span class="demo-cursor"></span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Agent Loop Section -->
+    <section class="section">
+        <div class="main-content">
+            <div class="section-header fade-in">
+                <h2>The Agent Loop</h2>
+                <p>Every turn is explicit and inspectable — no hidden magic</p>
+            </div>
+            <div class="loop-flow fade-in">
+                <div class="loop-step">
+                    <span class="loop-num">1</span>
+                    <h4>You ask</h4>
+                    <p>Project rules, memory, and context are assembled per request</p>
+                </div>
+                <span class="loop-arrow">→</span>
+                <div class="loop-step">
+                    <span class="loop-num">2</span>
+                    <h4>Model responds</h4>
+                    <p>Streamed incrementally, with truncated tool calls refused before execution</p>
+                </div>
+                <span class="loop-arrow">→</span>
+                <div class="loop-step">
+                    <span class="loop-num">3</span>
+                    <h4>Tools run</h4>
+                    <p>Approval gates for risky actions; results feed back into the loop</p>
+                </div>
+                <span class="loop-arrow">→</span>
+                <div class="loop-step">
+                    <span class="loop-num">4</span>
+                    <h4>Answer lands</h4>
+                    <p>Session persisted as append-only JSONL, diff shown for review</p>
+                </div>
+            </div>
+            <p class="loop-return">↺ parse errors and truncated calls loop back to step 2 automatically</p>
+        </div>
+    </section>
+
+    <!-- Providers Section -->
+    <section class="section" style="background: #f8fafc;">
+        <div class="main-content">
+            <div class="section-header fade-in">
+                <h2>Two Protocols, Every Vendor</h2>
+                <p>Generic adapters for the two API formats the industry converged on</p>
+            </div>
+            <div class="badge-groups fade-in">
+                <div class="badge-group">
+                    <h4>OpenAI compatible</h4>
+                    <p><code>/v1/chat/completions</code> · Bearer auth · SSE deltas</p>
+                    <div class="badge-chips">
+                        <span class="badge-chip">openai</span>
+                        <span class="badge-chip">kimi</span>
+                        <span class="badge-chip">kimi-code</span>
+                        <span class="badge-chip badge-new">ark-code</span>
+                        <span class="badge-chip">deepseek</span>
+                        <span class="badge-chip">qwen</span>
+                        <span class="badge-chip">grok</span>
+                        <span class="badge-chip">mistral</span>
+                        <span class="badge-chip">glm</span>
+                        <span class="badge-chip">doubao</span>
+                        <span class="badge-chip">hunyuan</span>
+                        <span class="badge-chip">minimax</span>
+                    </div>
+                </div>
+                <div class="badge-group">
+                    <h4>Anthropic compatible</h4>
+                    <p><code>/v1/messages</code> · x-api-key · content blocks</p>
+                    <div class="badge-chips">
+                        <span class="badge-chip">claude</span>
+                        <span class="badge-chip badge-new">kimi-code-anthropic</span>
+                        <span class="badge-chip badge-new">ark-code-anthropic</span>
+                        <span class="badge-chip">gemini*</span>
+                    </div>
+                    <p style="margin-top: 1rem; margin-bottom: 0;">*gemini uses its own adapter</p>
                 </div>
             </div>
         </div>
@@ -147,20 +265,28 @@
                     <p>Entry point and command wiring</p>
                 </div>
                 <div class="arch-card">
+                    <h4>lisp/core/chat-agent.el</h4>
+                    <p>Event-driven agent kernel: turns, tools, steering, cancellation</p>
+                </div>
+                <div class="arch-card">
                     <h4>lisp/ui/chat-ui.el</h4>
-                    <p>Chat buffer rendering and response lifecycle</p>
+                    <p>Chat buffer rendering over kernel events</p>
                 </div>
                 <div class="arch-card">
                     <h4>lisp/core/chat-session.el</h4>
-                    <p>Session and message persistence</p>
+                    <p>Append-only JSONL session persistence</p>
                 </div>
                 <div class="arch-card">
                     <h4>lisp/llm/chat-llm.el</h4>
                     <p>Provider abstraction and async request handling</p>
                 </div>
                 <div class="arch-card">
+                    <h4>lisp/llm/chat-llm-claude.el</h4>
+                    <p>Anthropic compatible protocol factory</p>
+                </div>
+                <div class="arch-card">
                     <h4>lisp/core/chat-stream.el</h4>
-                    <p>SSE parsing and chunk handling</p>
+                    <p>SSE parsing, chunk handling, error surfacing</p>
                 </div>
                 <div class="arch-card">
                     <h4>lisp/tools/chat-tool-caller.el</h4>
@@ -172,23 +298,15 @@
                 </div>
                 <div class="arch-card">
                     <h4>lisp/core/chat-files.el</h4>
-                    <p>Built-in file tools and path safety checks</p>
+                    <p>File tools, patch engine, fuzzy replace, unified diffs</p>
                 </div>
                 <div class="arch-card">
-                    <h4>lisp/core/chat-context.el</h4>
-                    <p>Context trimming and summary generation</p>
-                </div>
-                <div class="arch-card">
-                    <h4>lisp/tools/chat-tool-forge.el</h4>
-                    <p>Tool registry, compilation, loading, and execution</p>
+                    <h4>lisp/core/chat-project.el</h4>
+                    <p>Stacked AGENTS.md discovery and injection</p>
                 </div>
                 <div class="arch-card">
                     <h4>lisp/code/chat-code.el</h4>
                     <p>Code mode entry point and programming workflow</p>
-                </div>
-                <div class="arch-card">
-                    <h4>lisp/tools/chat-tool-forge-ai.el</h4>
-                    <p>AI-assisted tool generation flow</p>
                 </div>
             </div>
         </div>
@@ -200,16 +318,20 @@
             <div class="stats-section fade-in">
                 <div class="stats-grid">
                     <div class="stat-item">
-                        <h3>156</h3>
+                        <h3>499</h3>
                         <p>Tests Passing</p>
                     </div>
                     <div class="stat-item">
-                        <h3>25</h3>
-                        <p>Runtime Modules</p>
+                        <h3>16</h3>
+                        <p>LLM Providers</p>
                     </div>
                     <div class="stat-item">
-                        <h3>3+</h3>
-                        <p>LLM Providers</p>
+                        <h3>2</h3>
+                        <p>Protocol Adapters</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>38</h3>
+                        <p>Runtime Modules</p>
                     </div>
                     <div class="stat-item">
                         <h3>1PL</h3>
