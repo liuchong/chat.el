@@ -401,9 +401,13 @@ Inherits from chat-session with additional code-specific fields."
               (get-buffer-window-list (current-buffer) nil t)))
 
 (defun chat-code--follow-live-output (windows)
-  "Move WINDOWS to the latest response edge."
+  "Move WINDOWS to the latest response edge.
+Windows whose point sits in the input area are left alone: Emacs
+keeps the cursor visible on its own there, and yanking point out of
+the input area mid-edit feels broken."
   (dolist (window windows)
-    (when (window-live-p window)
+    (when (and (window-live-p window)
+               (not (chat-code--point-in-input-p (window-point window))))
       (chat-code--set-window-point
        window
        (marker-position chat-code--messages-end)))))

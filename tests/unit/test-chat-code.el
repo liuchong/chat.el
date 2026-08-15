@@ -939,21 +939,19 @@ file contents instead of only a short summary."
        (should (member (file-truename target-file)
                        (chat-code-session-context-files session)))))))
 
-(ert-deftest chat-code-render-response-state-follows-live-output-near-input ()
-  "Test code mode auto-follows rendered output when the window is at the live edge."
+(ert-deftest chat-code-render-response-state-keeps-input-point-stable ()
+  "Test rendered output never yanks the cursor out of the input area."
   (save-window-excursion
     (with-temp-buffer
       (switch-to-buffer (current-buffer))
       (chat-code-mode)
-      (setq-local chat-code--messages-end (point-max-marker))
-      (setq-local chat-code--input-marker (point-max-marker))
       (insert "placeholder")
-      (setq chat-code--messages-end (copy-marker (point)))
+      (setq-local chat-code--messages-end (copy-marker (point)))
       (insert "\n> ")
-      (setq chat-code--input-marker (point-marker))
+      (setq-local chat-code--input-marker (point-marker))
       (goto-char (marker-position chat-code--input-marker))
       (chat-code--render-response-state (point-min) "Streaming body" nil)
-      (should (= (point) (marker-position chat-code--messages-end))))))
+      (should (= (point) (marker-position chat-code--input-marker))))))
 
 (ert-deftest chat-code-render-response-state-announces-approval-shortcuts ()
   "Test code mode surfaces approval shortcuts in minibuffer feedback."
@@ -1069,6 +1067,34 @@ file contents instead of only a short summary."
          ;; Shrinking content falls back to a full replace.
          (chat-code--render-response-state content-start "ab" nil)
          (should (string-match-p "ab\n\n" (buffer-string))))))))
+
+(ert-deftest chat-code-follow-live-output-never-yanks-input-point ()
+  "Test code mode never yanks a window point out of the input area."
+  (with-temp-buffer
+    (insert (make-string 4000 ?x))
+    (setq chat-code--messages-end (copy-marker (- (point-max) 4)))
+    (setq chat-code--input-marker (copy-marker (- (point-max) 3)))
+    (let (moved)
+      (cl-letf (((symbol-function 'window-point) (lambda (_) (point-max)))
+                ((symbol-function 'window-live-p) (lambda (_) t))
+                ((symbol-function 'set-window-point)
+                 (lambda (_w pos) (setq moved pos))))
+        (chat-code--follow-live-output '(fake-window))
+        (should-not moved)))))
+
+(ert-deftest chat-code-follow-live-output-follows-edge-window ()
+  "Test code mode moves a non-input window point to the response edge."
+  (with-temp-buffer
+    (insert (make-string 4000 ?x))
+    (setq chat-code--messages-end (copy-marker (- (point-max) 4)))
+    (setq chat-code--input-marker (copy-marker (- (point-max) 3)))
+    (let (moved)
+      (cl-letf (((symbol-function 'window-point) (lambda (_) (point-min)))
+                ((symbol-function 'window-live-p) (lambda (_) t))
+                ((symbol-function 'set-window-point)
+                 (lambda (_w pos) (setq moved pos))))
+        (chat-code--follow-live-output '(fake-window))
+        (should (equal moved (marker-position chat-code--messages-end)))))))
 
 (provide 'test-chat-code)
 ;;; test-chat-code.el ends here

@@ -552,5 +552,59 @@
     (should (eq chat-ui--active-agent-run 'run-a))
     (should (eq chat-ui--active-request-handle 'handle-a))))
 
+(ert-deftest chat-ui-follow-live-output-skips-scrolled-up-window ()
+  "Test a scrolled-up window is never yanked to the response edge."
+  (with-temp-buffer
+    (insert (make-string 4000 ?x))
+    (setq chat-ui--messages-end (copy-marker (- (point-max) 4)))
+    (setq chat-ui--input-overlay (copy-marker (point-max)))
+    (let (moved)
+      (cl-letf (((symbol-function 'get-buffer-window-list)
+                 (lambda (&rest _) (list 'fake-window)))
+                ((symbol-function 'window-live-p) (lambda (_) t))
+                ((symbol-function 'window-point) (lambda (_) 1))
+                ((symbol-function 'window-end) (lambda (&rest _) 10))
+                ((symbol-function 'set-window-point)
+                 (lambda (_w pos) (setq moved pos))))
+        (chat-ui--follow-live-output (current-buffer))
+        (should-not moved)))))
+
+(ert-deftest chat-ui-follow-live-output-follows-edge-window ()
+  "Test a window near the bottom edge follows the response edge."
+  (with-temp-buffer
+    (insert (make-string 4000 ?x))
+    (setq chat-ui--messages-end (copy-marker (- (point-max) 4)))
+    (setq chat-ui--input-overlay (copy-marker (point-max)))
+    (let (moved)
+      (cl-letf (((symbol-function 'get-buffer-window-list)
+                 (lambda (&rest _) (list 'fake-window)))
+                ((symbol-function 'window-live-p) (lambda (_) t))
+                ((symbol-function 'window-point)
+                 (lambda (_) (- (point-max) 40)))
+                ((symbol-function 'window-end)
+                 (lambda (&rest _) (point-max)))
+                ((symbol-function 'set-window-point)
+                 (lambda (_w pos) (setq moved pos))))
+        (chat-ui--follow-live-output (current-buffer))
+        (should (equal moved (marker-position chat-ui--messages-end)))))))
+
+(ert-deftest chat-ui-follow-live-output-never-yanks-input-point ()
+  "Test a window whose point is in the input area is left alone."
+  (with-temp-buffer
+    (insert (make-string 4000 ?x))
+    (setq chat-ui--messages-end (copy-marker (- (point-max) 4)))
+    (setq chat-ui--input-overlay (copy-marker (- (point-max) 3)))
+    (let (moved)
+      (cl-letf (((symbol-function 'get-buffer-window-list)
+                 (lambda (&rest _) (list 'fake-window)))
+                ((symbol-function 'window-live-p) (lambda (_) t))
+                ((symbol-function 'window-point) (lambda (_) (point-max)))
+                ((symbol-function 'window-end)
+                 (lambda (&rest _) (point-max)))
+                ((symbol-function 'set-window-point)
+                 (lambda (_w pos) (setq moved pos))))
+        (chat-ui--follow-live-output (current-buffer))
+        (should-not moved)))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

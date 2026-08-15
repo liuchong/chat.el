@@ -489,6 +489,26 @@
       tool-events
       "\n"))))
 
+(defun chat-ui--follow-live-output (ui-buffer)
+  "Scroll windows showing UI-BUFFER to the live response edge.
+Only windows already near the bottom follow, and only when their
+point is outside the input area, so typing is never interrupted and
+manual scrolling is never overridden."
+  (when (buffer-live-p ui-buffer)
+    (with-current-buffer ui-buffer
+      (let ((edge (and (markerp chat-ui--messages-end)
+                       (marker-position chat-ui--messages-end)))
+            (input-start (and (markerp chat-ui--input-overlay)
+                              (marker-position chat-ui--input-overlay))))
+        (when edge
+          (dolist (window (get-buffer-window-list ui-buffer nil t))
+            (when (and (window-live-p window)
+                       (or (null input-start)
+                           (< (window-point window) input-start))
+                       (>= (window-end window t)
+                           (max (point-min) (- (point-max) 80))))
+              (set-window-point window edge))))))))
+
 (defun chat-ui--render-response-state (ui-buffer content-start content tool-events
                                                  &optional live-detail)
   "Render CONTENT, TOOL-EVENTS, and optional LIVE-DETAIL at CONTENT-START."
@@ -596,7 +616,7 @@ assistant response being filled in."
                chat-ui--live-response-content
                tool-events
                (chat-ui--request-live-detail))
-              (redisplay t))))
+              (chat-ui--follow-live-output ui-buffer))))
          ((eq type 'tool-event)
           (setq tool-events (append tool-events
                                     (list (plist-get event :event))))
@@ -619,7 +639,8 @@ assistant response being filled in."
                content-start
                chat-ui--live-response-content
                tool-events
-               (chat-ui--request-live-detail)))))
+               (chat-ui--request-live-detail))
+              (chat-ui--follow-live-output ui-buffer))))
          ((eq type 'followup)
           (when request-id
             (chat-request-diagnostics-record
