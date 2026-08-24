@@ -56,6 +56,9 @@
   source-code           ; Source code string
   compiled-function     ; Compiled function (for elisp)
   parameters            ; Parameter definitions
+  owner                 ; Plugin or subsystem that registered the tool
+  sensitivity           ; Data sensitivity: public/project/personal/etc.
+  effects               ; Effects: read/write/outbound/destructive
   version               ; Tool version
   created-at            ; Creation timestamp
   updated-at            ; Last update timestamp

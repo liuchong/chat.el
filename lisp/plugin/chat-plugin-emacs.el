@@ -96,13 +96,15 @@
 
 (defun chat-plugin-emacs--register-tool (id name description parameters fn)
   "Register a read-only Emacs tool ID."
-  (chat-tool-forge-register
+  (chat-plugin-register-tool
    (make-chat-forged-tool
     :id id
     :name name
     :description description
     :language 'elisp
     :parameters parameters
+    :sensitivity 'project
+    :effects '(read)
     :compiled-function fn
     :is-active t
     :usage-count 0)))

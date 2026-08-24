@@ -4,14 +4,15 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, kernel
+- Tags: current, phase, kernel, plugin
 
 ## Current Phase
 
-Stage 2 kernel parity work is complete (2026-08-24). The loop lives in
-`lisp/agent/`, emits ordered assistant/tool transcript messages, rebuilds
-context per step, supports next-turn prepare hooks, and propagates
-cancellation through registered callbacks and tool-batch boundaries.
+Stage 3 scoped plugin and permission runtime work is complete
+(2026-08-24). The loop lives in `lisp/agent/`, emits ordered
+assistant/tool transcript messages, rebuilds context per step, supports
+next-turn prepare hooks, and now exposes tools through session overlays
+and owner-scoped plugin resources.
 
 ## Main Objective
 
@@ -20,7 +21,8 @@ Keep the agent loop as the only driver: `chat-message` throughout,
 ordered `:tool` messages, steering and follow-up queues, truncated
 response refusal, per-step context transforms, typed events, and
 project-scoped Emacs tools. Extend the host through `lisp/plugin/`
-rather than growing the loop.
+rather than growing the loop; plugin resources must have owner metadata
+and roll back cleanly when stopped.
 
 ## Active Modules
 
@@ -32,6 +34,7 @@ rather than growing the loop.
 - `lisp/plugin/chat-plugin-emacs.el`
 - `lisp/llm/chat-llm.el`
 - `lisp/tools/chat-tool-caller.el`
+- `lisp/core/chat-session.el`
 - `lisp/core/chat-agent.el` (load-path shim)
 - `tests/unit/test-chat-agent.el`
 - `tests/unit/test-chat-plugin.el`
@@ -41,5 +44,6 @@ rather than growing the loop.
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-24-work-platform-stage3-plugin-runtime.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage2-kernel-parity.md`
 - `../30-records/logs/stage-2026-08-24-agent-kernel-native-tools.md`

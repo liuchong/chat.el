@@ -23,6 +23,69 @@
     (should started)
     (chat-plugin-stop 'demo)))
 
+(ert-deftest chat-plugin-tracks-lifecycle-states ()
+  "Test plugin state moves through pending active failed and disposed."
+  (let ((chat-plugin--registry (make-hash-table :test 'eq))
+        (chat-plugin--services (make-hash-table :test 'eq))
+        (chat-plugin--started nil)
+        (chat-plugin-enabled '(pending-demo)))
+    (chat-plugin-define 'pending-demo
+                        :inject '(missing-service)
+                        :setup (lambda (_ctx) t))
+    (should-not (chat-plugin-start 'pending-demo))
+    (should (eq (chat-plugin-state (chat-plugin-get 'pending-demo)) 'pending))
+    (chat-plugin-provide 'missing-service t)
+    (should (eq (chat-plugin-state (chat-plugin-get 'pending-demo)) 'active))
+    (chat-plugin-stop 'pending-demo)
+    (should (eq (chat-plugin-state (chat-plugin-get 'pending-demo)) 'disposed))
+    (chat-plugin-define 'failed-demo
+                        :setup (lambda (_ctx) (error "boom")))
+    (should-not (chat-plugin-start 'failed-demo))
+    (should (eq (chat-plugin-state (chat-plugin-get 'failed-demo)) 'failed))
+    (should (string= (chat-plugin-error (chat-plugin-get 'failed-demo))
+                     "boom"))))
+
+(ert-deftest chat-plugin-rolls-back-owned-tools-hooks-and-services ()
+  "Test owner-scoped resources are removed on stop."
+  (let ((chat-plugin--registry (make-hash-table :test 'eq))
+        (chat-plugin--services (make-hash-table :test 'eq))
+        (chat-plugin--started nil)
+        (chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-plugin-post-turn-functions nil)
+        called)
+    (chat-plugin-define
+     'owned-demo
+     :setup
+     (lambda (_ctx)
+       (chat-plugin-provide 'owned-service t)
+       (chat-plugin-add-hook
+        'chat-plugin-post-turn-functions
+        (lambda (&rest _args) (setq called t)))
+       (chat-plugin-register-tool
+        (make-chat-forged-tool
+         :id 'owned-tool
+         :name "Owned Tool"
+         :description "Owned"
+         :language 'elisp
+         :compiled-function (lambda (&rest _) "ok")
+         :sensitivity 'project
+         :effects '(read)
+         :is-active t
+         :usage-count 0))))
+    (should (chat-plugin-start 'owned-demo))
+    (should (chat-plugin-service 'owned-service))
+    (should (chat-tool-forge-get 'owned-tool))
+    (should (eq (chat-forged-tool-owner (chat-tool-forge-get 'owned-tool))
+                'owned-demo))
+    (run-hooks 'chat-plugin-post-turn-functions)
+    (should called)
+    (chat-plugin-stop 'owned-demo)
+    (should-not (chat-plugin-service 'owned-service))
+    (should-not (chat-tool-forge-get 'owned-tool))
+    (setq called nil)
+    (run-hooks 'chat-plugin-post-turn-functions)
+    (should-not called)))
+
 (ert-deftest chat-plugin-emacs-reads-buffer-line-range ()
   "Test emacs_read_buffer accepts integer line bounds."
   (with-temp-buffer

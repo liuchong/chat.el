@@ -8,18 +8,18 @@
 
 ## Doing Now
 
-Stage 2 kernel parity is complete. The agent kernel now supports
-per-step context transforms, next-turn prepare hooks, FIFO/LIFO queue
-delivery, explicit queue clearing, cancel callbacks, cancelled
-tool-batch termination, and normalized `stream-result` events. Ordered
-assistant/tool persistence and project-scoped Emacs tools remain the
-active transcript and privacy baseline. Suite: 532 tests passing.
+Stage 3 scoped plugin and permission runtime is complete. The plugin
+host now tracks pending/active/failed/disposed states, retries pending
+dependencies, records owned services/tools/hooks, and rolls them back
+when stopped. Session tool overlays filter advertised and executed
+tools, and tool events carry owner/sensitivity/effect metadata. Suite:
+focused Stage 3 tests passing; canonical suite pending before commit.
 
 ## Not Doing Now
 
 - No DI kernel or contribution-point framework
 - No parallel file-tool execution (Emacs is single-threaded; approval stays serial)
-- No session tree branching
+- No session tree branching yet
 - User plugin files under `~/.chat/plugins/` stay off unless
   `chat-plugin-load-user-directory` is set
 - Anthropic streaming tool_use deltas are not accumulated yet; OpenAI
@@ -27,6 +27,5 @@ active transcript and privacy baseline. Suite: 532 tests passing.
 
 ## Immediate Next Step
 
-Stage 3: evolve `lisp/plugin/chat-plugin.el` into an owner-scoped
-runtime with lifecycle state, owned tool/hook rollback, session overlays,
-and unified permission metadata.
+Stage 4: add durable session tree/branch metadata, crash-safe append
+semantics, compaction records, and interrupted-run recovery.

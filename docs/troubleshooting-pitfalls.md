@@ -423,6 +423,22 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: encode zero-argument tools as an empty object schema with empty `required`, and convert parameter plists to JSON object alists before saving them.
 
+### Session Disabled Tools Must Not Execute Directly
+
+**Problem**: a tool hidden from the provider still runs if a direct tool call reaches the executor.
+
+**Cause**: provider advertisement and direct execution used separate availability paths.
+
+**Solution**: check `chat-session-tool-config` in both paths. Provider tool lists and `chat-tool-caller-execute` must use the same enabled/disabled overlay.
+
+### Plugin Resources Must Roll Back On Stop
+
+**Problem**: stopping a plugin leaves its tools, hooks, or services available in later sessions.
+
+**Cause**: setup registered global Emacs resources without owner tracking.
+
+**Solution**: register plugin-owned tools and hooks through the plugin host so stop and setup-failure paths can remove owned resources in reverse registration order.
+
 ### Mode Specific Tool Prompt Drift Reintroduces Wrong Protocols
 
 **Problem**: a specialized mode like `code-mode` starts emitting XML style tool calls even though the shared chat flow already uses JSON `function_call`.

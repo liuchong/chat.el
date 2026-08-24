@@ -18,6 +18,7 @@
 (require 'cl-lib)
 (require 'chat-approval)
 (require 'chat-files)
+(require 'chat-session)
 (require 'chat-tool-forge)
 (require 'json)
 (require 'pp)
@@ -38,6 +39,9 @@ model knows content is missing."
   :type 'integer
   :group 'chat)
 
+(defvar chat-tool-caller-current-session nil
+  "Session whose tool overlay is used for provider tool exposure.")
+
 (defun chat-tool-caller-truncate-result (result &optional max-chars)
   "Keep RESULT within MAX-CHARS, appending an omission marker when cut."
   (let* ((text (or result ""))
@@ -50,11 +54,13 @@ model knows content is missing."
 
 (defun chat-tool-caller--tool-available-p (tool)
   "Return non-nil when TOOL should be exposed to the model."
-  (cond
-   ((eq (chat-forged-tool-id tool) 'shell_execute)
-    (bound-and-true-p chat-tool-shell-enabled))
-   (t
-    (chat-forged-tool-is-active tool))))
+  (let ((tool-id (chat-forged-tool-id tool)))
+    (and (chat-session-tool-enabled-p chat-tool-caller-current-session tool-id)
+         (cond
+          ((eq tool-id 'shell_execute)
+           (bound-and-true-p chat-tool-shell-enabled))
+          (t
+           (chat-forged-tool-is-active tool))))))
 
 (defun chat-tool-caller--available-tools ()
   "Return tools that can currently be called."
@@ -85,6 +91,16 @@ model knows content is missing."
           (chat-forged-tool-id tool)
           (or (chat-forged-tool-description tool) "No description")
           (chat-tool-caller--tool-argument-spec tool)))
+
+(defun chat-tool-caller--permission-metadata (tool)
+  "Return permission metadata for TOOL."
+  (append
+   (when-let ((sensitivity (chat-forged-tool-sensitivity tool)))
+     (list :sensitivity sensitivity))
+   (when-let ((effects (chat-forged-tool-effects tool)))
+     (list :effects effects))
+   (when-let ((owner (chat-forged-tool-owner tool)))
+     (list :owner owner))))
 
 (defun chat-tool-caller--json-schema (tool)
   "Return an OpenAI-style JSON schema alist for TOOL parameters."
@@ -475,10 +491,24 @@ If SESSION is nil, uses `chat--current-session' if bound."
                                    (chat-tool-caller--execution-directory)))))
           (chat-tool-caller--notify
            observer
-           (list :type 'tool-call
-                 :tool name
-                 :arguments arguments))
-          (if tool
+           (append
+            (list :type 'tool-call
+                  :tool name
+                  :arguments arguments)
+            (when tool
+              (chat-tool-caller--permission-metadata tool))))
+          (cond
+           ((null tool)
+            (format "Error: Tool '%s' not found" name))
+           ((not (chat-session-tool-enabled-p actual-session tool-id))
+            (let ((result (format "Error: Tool '%s' is disabled for this session" name)))
+              (chat-tool-caller--notify
+               observer
+               (list :type 'tool-error
+                     :tool name
+                     :result-summary result))
+              result))
+           (t
               ;; Check shell whitelist first for shell_execute
               (if (and (eq tool-id 'shell_execute)
                        (chat-tool-caller--shell-whitelist-approve-p call))
@@ -521,8 +551,7 @@ If SESSION is nil, uses `chat--current-session' if bound."
                      (list :type 'tool-error
                            :tool name
                            :result-summary result))
-                    result)))
-            (format "Error: Tool '%s' not found" name)))
+                    result))))))
       (error
        (let ((result
               (format "Error executing tool '%s': %s"

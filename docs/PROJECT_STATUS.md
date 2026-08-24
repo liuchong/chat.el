@@ -5,10 +5,10 @@ Last updated: 2026-08-24
 ## Summary
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
-The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, per-step agent context hooks, cancellation callbacks, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
+The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, per-step agent context hooks, cancellation callbacks, scoped plugin runtime, session tool overlays, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
-The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access.
+The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
 
@@ -38,6 +38,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - approval for risky tool execution
 - bounded follow up tool loop
 - tool results fed back as ordered `:tool` messages with provider call ids
+- session overlays for advertised and executable tools
+- owner, sensitivity, and effect metadata on tool events
 
 ### File Operations
 
@@ -62,14 +64,22 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - lambda only elisp source validation
 - registry loading and persistence
 - persisted parameter schemas for generated tools
+- owner, sensitivity, and effect metadata for generated or plugin-owned tools
+
+### Plugin Runtime
+
+- pending, active, failed, and disposed plugin lifecycle states
+- dependency retry when pending services become available
+- owned service, tool, and hook tracking
+- reverse-order rollback when a plugin stops or setup fails
 
 ## Current Quality Baseline
 
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 532 regression tests discovered
-- 532 passing
+- 537 regression tests discovered
+- 537 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -124,6 +134,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - streaming completion now emits a normalized `stream-result` event carrying accumulated text and native tool metadata before regular result handling
 - native provider schemas now encode zero-argument tools as empty objects and forged-tool parameter schemas survive reload
 - Emacs live-buffer tools now hide credential-like buffers and default to project/session-scoped exposure
+- plugin runtime now tracks lifecycle state, retries pending dependency injection, and rolls back owned services, tools, and hooks
+- session tool overlays now filter provider-visible tools and direct execution, with tool events carrying owner, sensitivity, and effect metadata
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
 - code mode now also has a native help buffer and `C-c C-h` shortcut so reading commands, preview flow, request-panel usage, and regenerate/edit-resend are discoverable inside the main coding surface
 - shared reading helpers now have denser regression coverage around naming, fallback behavior, minimal captures, and help-buffer behavior

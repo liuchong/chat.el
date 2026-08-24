@@ -102,6 +102,7 @@ Returns the newly created chat-session struct."
                    :model-id (or model-id (bound-and-true-p chat-default-model) 'kimi)
                    :messages nil
                    :prompt-stack nil
+                   :tool-config nil
                    :metadata nil)))
     (when chat-session-auto-save
       (chat-session-save session))
@@ -153,6 +154,8 @@ PREFIX defaults to \"msg\"."
                              (cond ((eq aa t) t)
                                    ((eq aa nil) :json-false)
                                    (t 'inherit))))
+        (cons 'toolConfig (chat-session--plist-to-alist
+                           (chat-session-tool-config session)))
         (cons 'metadata (or (chat-session-metadata session) nil))))
 
 (defun chat-session--message-entry (message)
@@ -234,6 +237,9 @@ skipped."
                (cons 'modelId (cdr (assoc 'modelId header)))
                (cons 'messages (nreverse message-datas))
                (cons 'autoApprove (and state (cdr (assoc 'autoApprove state))))
+               (cons 'toolConfig (and state
+                                      (assoc 'toolConfig state)
+                                      (cdr (assoc 'toolConfig state))))
                (cons 'metadata (and state
                                     (assoc 'metadata state)
                                     (cdr (assoc 'metadata state))))))))))
@@ -425,7 +431,52 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
                       (cond ((eq aa t) t)
                             ((eq aa nil) :json-false)
                             (t 'inherit))))
+    (toolConfig . ,(chat-session--plist-to-alist
+                    (chat-session-tool-config session)))
     (metadata . ,(or (chat-session-metadata session) nil))))
+
+(defun chat-session--plist-to-alist (plist)
+  "Convert keyword PLIST to a JSON-friendly alist."
+  (when plist
+    (let (items)
+      (while plist
+        (let ((key (pop plist))
+              (value (pop plist)))
+          (push (cons (if (keywordp key)
+                          (substring (symbol-name key) 1)
+                        (symbol-name key))
+                      (cond
+                       ((eq value nil) :json-false)
+                       ((and (listp value)
+                             (cl-every #'symbolp value))
+                        (vconcat (mapcar #'symbol-name value)))
+                       (t value)))
+                items)))
+      (nreverse items))))
+
+(defun chat-session--alist-to-plist (alist)
+  "Convert decoded ALIST to a keyword plist."
+  (let (plist)
+    (dolist (entry alist)
+      (let ((key (let ((raw (car entry)))
+                   (cond
+                    ((keywordp raw) raw)
+                    ((symbolp raw)
+                     (intern (format ":%s" (symbol-name raw))))
+                    (t
+                     (intern (format ":%s" raw))))))
+            (value (cdr entry)))
+        (push key plist)
+        (push (cond
+               ((eq value :json-false) nil)
+               ((vectorp value)
+                (mapcar #'intern (append value nil)))
+               ((and (listp value)
+                     (cl-every #'stringp value))
+                (mapcar #'intern value))
+               (t value))
+              plist)))
+    (nreverse plist)))
 
 (defun chat-message--serialize (message)
   "Convert MESSAGE struct to JSON-serializable alist."
@@ -509,11 +560,30 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
      :model-id (intern (chat-session--alist-get data 'modelId))
      :messages (mapcar #'chat-message--deserialize
                        (chat-session--alist-get data 'messages))
+     :tool-config (chat-session--alist-to-plist
+                   (chat-session--alist-get data 'toolConfig))
      :auto-approve (cond ((eq auto-approve-val t) t)
                          ((eq auto-approve-val :json-false) nil)
                          ((eq auto-approve-val 'inherit) 'inherit)
                          (t nil))  ; default to nil (follow global)
      :metadata (chat-session--alist-get data 'metadata))))
+
+(defun chat-session-set-tool-config (session config)
+  "Set SESSION tool CONFIG and persist the session state."
+  (setf (chat-session-tool-config session) config)
+  (setf (chat-session-updated-at session) (current-time))
+  (when chat-session-auto-save
+    (chat-session-save session))
+  config)
+
+(defun chat-session-tool-enabled-p (session tool-id)
+  "Return non-nil when TOOL-ID is allowed by SESSION tool config."
+  (let* ((config (and session (chat-session-tool-config session)))
+         (enabled (plist-get config :enabled-tools))
+         (disabled (plist-get config :disabled-tools)))
+    (and (or (null enabled)
+             (memq tool-id enabled))
+         (not (memq tool-id disabled)))))
 
 (defun chat-message--deserialize (data)
   "Convert JSON-parsed DATA to chat-message struct."

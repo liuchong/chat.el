@@ -134,6 +134,29 @@
             (message (car (chat-session-messages loaded))))
        (should (eq (chat-message-role message) :assistant))))))
 
+(ert-deftest chat-session-save-and-load-preserves-tool-config ()
+  "Test per-session tool overlays survive a save and load round trip."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently
+                    (chat-session-create "Tool Config" 'gpt-4o)))
+          (session-id (chat-session-id session)))
+     (chat-session-set-tool-config
+      session
+      '(:default t
+        :disabled-tools (danger-tool)
+        :enabled-tools (safe-tool)
+        :packs (programming office)))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load session-id)))
+       (should (equal (chat-session-tool-config loaded)
+                      '(:default t
+                        :disabled-tools (danger-tool)
+                        :enabled-tools (safe-tool)
+                        :packs (programming office))))
+       (should (chat-session-tool-enabled-p loaded 'safe-tool))
+       (should-not (chat-session-tool-enabled-p loaded 'danger-tool))))))
+
 ;; Test session listing
 (ert-deftest chat-session-list-test ()
   "Test listing all sessions."

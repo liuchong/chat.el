@@ -28,9 +28,14 @@ and buffers; a second DI runtime would fight that.
 - Persist loop-emitted assistant/tool messages in order from host event
   handlers; UI and code-mode finalizers only render the completed state
 - Add a small plugin host in `lisp/plugin/` with `define`, `inject`,
-  `provide`, and start/stop
+  `provide`, start/stop, lifecycle state, owned resource tracking, and
+  reverse-order rollback
 - Ship an `emacs` plugin for read-only live buffer, imenu, xref, and
   project.el tools
+- Filter visible and executable tools through per-session tool overlays
+  before provider requests and direct execution
+- Attach owner, sensitivity, and effect metadata to tools for one shared
+  permission contract
 - Do not eval `~/.chat/plugins/` unless the user sets
   `chat-plugin-load-user-directory`
 
@@ -42,3 +47,6 @@ and buffers; a second DI runtime would fight that.
   branches
 - Sequential tool execution remains the default because approval UI is
   synchronous and Emacs is single-threaded
+- Stopping a plugin removes services, tools, and hooks it registered
+  during setup, which keeps capability packs session-scoped instead of
+  leaking global state

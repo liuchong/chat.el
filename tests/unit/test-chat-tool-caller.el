@@ -83,6 +83,59 @@
        (should (string-match-p "\"command\"" prompt))
        (should (string-match-p "demo-tool" prompt))))))
 
+(ert-deftest chat-tool-caller-hides-session-disabled-tools ()
+  "Test per-session overlays filter provider-visible tools."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         (chat-tool-caller-current-session
+          (make-chat-session
+           :id "session"
+           :tool-config '(:disabled-tools (demo-tool)))))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'demo-tool
+       :name "Demo Tool"
+       :description "Echo one argument"
+       :language 'elisp
+       :parameters '((:name "command" :type "string" :required t))
+       :compiled-function (lambda (_command) "ok")
+       :is-active t
+       :usage-count 0))
+     (let ((prompt (chat-tool-caller-build-system-prompt "Base")))
+       (should-not (string-match-p "demo-tool" prompt))))))
+
+(ert-deftest chat-tool-caller-refuses-session-disabled-execution ()
+  "Test per-session overlays block direct tool execution."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         (session (make-chat-session
+                   :id "session"
+                   :tool-config '(:disabled-tools (demo-tool))))
+         events)
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'demo-tool
+       :name "Demo Tool"
+       :description "Echo one argument"
+       :language 'elisp
+       :parameters '((:name "command" :type "string" :required t))
+       :compiled-function (lambda (_command) "should not run")
+       :is-active t
+       :usage-count 0))
+     (let ((result (chat-tool-caller-execute
+                    '(:name "demo-tool"
+                      :arguments (("command" . "pwd")))
+                    session
+                    (lambda (event) (push event events)))))
+       (should (string-match-p "disabled for this session" result))
+       (should (seq-find (lambda (event)
+                           (and (eq (plist-get event :type) 'tool-error)
+                                (string-match-p "disabled"
+                                                (plist-get event :result-summary))))
+                         events))))))
+
 (ert-deftest chat-tool-caller-hides-disabled-shell-tool ()
   "Test that disabled shell tool is not advertised."
   (chat-test-with-temp-dir

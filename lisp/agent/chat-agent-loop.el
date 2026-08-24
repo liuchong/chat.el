@@ -150,7 +150,9 @@
     (when (and (chat-agent-run-state-native-tools run)
                (null (plist-get base :tools))
                (fboundp 'chat-tool-caller-provider-tools))
-      (let ((tools (chat-tool-caller-provider-tools)))
+      (let* ((chat-tool-caller-current-session
+              (chat-agent-run-state-session run))
+             (tools (chat-tool-caller-provider-tools)))
         (when tools
           (setq base (plist-put base :tools tools)))))
     base))

@@ -17,7 +17,7 @@
 > 您的每一份贡献都将推动这个项目变得更好。
 
 `chat.el` is a pure Emacs AI chat client focused on coding workflows.
-It supports multi turn chat, ordered tool transcripts, file operations, session persistence, context trimming, streaming display, and AI assisted tool forging.
+It supports multi turn chat, ordered tool transcripts, file operations, session persistence, context trimming, streaming display, scoped plugin tools, and AI assisted tool forging.
 
 Copyright 2026 chat.el contributors.
 
@@ -31,6 +31,7 @@ Copyright 2026 chat.el contributors.
 - Feed tool results back into the model through ordered assistant and `:tool` messages with provider `tool_call_id` pairing
 - Queue normal input during an active response as steering for the running agent
 - Rebuild context before each agent step and cancel registered work when a run is stopped
+- Scope tools per session and roll back plugin-owned tools, hooks, and services when a plugin stops
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 

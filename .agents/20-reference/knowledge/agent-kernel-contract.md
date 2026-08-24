@@ -51,6 +51,12 @@ next turn cannot pair `tool_call_id` with results.
   are expanded at the convertToLlm boundary so older sessions keep working
 - Native zero-argument tool schemas encode as an empty object with empty
   `required`, and forged tools persist their declared parameter schemas
+- Provider tool exposure is filtered through the active session's
+  `tool-config`, and direct execution must reject tools disabled by that
+  same overlay
+- Tool events carry owner, sensitivity, and effect metadata when a tool
+  declares it, so approval and status surfaces share one permission
+  contract
 
 ## Regression Guard
 
@@ -63,6 +69,10 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-stream.el` covers streamed tool_call merging
 - `tests/unit/test-chat-ui.el` and `tests/unit/test-chat-code.el` cover
   ordered transcript persistence and active-run input steering
-- `tests/unit/test-chat-plugin.el` covers buffer privacy scope
+- `tests/unit/test-chat-plugin.el` covers buffer privacy scope plus
+  plugin lifecycle states and owned resource rollback
 - `tests/unit/test-chat-tool-caller.el` covers native schema and forged
-  parameter persistence
+  parameter persistence plus session-overlay advertisement/execution
+  filtering
+- `tests/unit/test-chat-session.el` covers session tool-config
+  persistence
