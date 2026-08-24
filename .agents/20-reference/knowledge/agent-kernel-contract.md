@@ -115,6 +115,15 @@ next turn cannot pair `tool_call_id` with results.
   final summary enters the parent tool result.
 - External sub-agents receive one JSONL request on stdin. Their process,
   status, output log, and cancellation remain addressable by id.
+- Capability profiles are enforced by the session overlay before provider
+  schema generation, not only at execution time.
+- Programming completion runs the target file's native CAPF at an explicit
+  line/column. Office Org and Dired mutations stay inside approved roots.
+- Web reading accepts only HTTP(S), uses Emacs rendering, truncates output,
+  carries network/outbound approval metadata, and exposes an asynchronous
+  cancellable runner.
+- Daily correspondence creates local records or unsent message-mode
+  buffers; no capability-pack tool sends mail.
 - Work orchestration tools must read and write through the executing
   session when one exists; background process tasks stay cancellable and
   keep bounded logs
@@ -166,8 +175,10 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-mcp-subagent.el` covers stdio/HTTP/SSE protocol
   handling, async dispatch, schema-aware discovery, nested kernel
   isolation, registration, and shared lifecycle events
-- `tests/unit/test-chat-mcp-subagent.el` covers MCP JSON-RPC response
-  handling, stdio lifecycle, mocked HTTP, in-process child-session
-  isolation, and external subprocess output capture
-- `tests/unit/test-chat-capability-packs.el` covers profile overlays,
-  office tools, daily diary/draft tools, and capability metadata
+- `tests/unit/test-chat-capability-packs.el` covers CAPF, rendered web
+  content, Org capture/update/schedule/agenda, Dired operations, Calc
+  conversion, draft-only correspondence, and provider schema filtering
+- `tests/integration/test-chat-work-platform-integration.el` verifies a
+  discovered remote tool executing inside a durable resumable workflow
+- `tests/e2e/test-chat-work-platform-e2e.el` verifies primary agent
+  synthesis after remote MCP and isolated nested-agent tool paths

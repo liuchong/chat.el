@@ -310,6 +310,68 @@ user or agent invokes the connect tool."
                 (chat-mcp-client-transport client)))))
   t)
 
+(defun chat-mcp-send-notification-async
+    (client method params success error-callback)
+  "Send notification METHOD through CLIENT without blocking."
+  (let ((payload (json-encode (chat-mcp--notification method params))))
+    (pcase (chat-mcp-client-transport client)
+      ('stdio
+       (condition-case err
+           (progn
+             (unless (and (chat-mcp-client-process client)
+                          (process-live-p
+                           (chat-mcp-client-process client)))
+               (error "MCP client is not running"))
+             (process-send-string
+              (chat-mcp-client-process client) (concat payload "\n"))
+             (funcall success t)
+             nil)
+         (error
+          (funcall error-callback (error-message-string err))
+          nil)))
+      ('http
+       (let* ((url-request-method "POST")
+              (url-request-extra-headers (chat-mcp--http-headers client))
+              (url-request-data payload)
+              (done nil)
+              buffer
+              timer)
+         (setq
+          buffer
+          (url-retrieve
+           (chat-mcp-client-endpoint client)
+           (lambda (status)
+             (unless done
+               (setq done t)
+               (when (timerp timer) (cancel-timer timer))
+               (unwind-protect
+                   (if-let ((failure (plist-get status :error)))
+                       (funcall error-callback (format "%s" failure))
+                     (funcall success t))
+                 (when (buffer-live-p (current-buffer))
+                   (kill-buffer (current-buffer))))))))
+         (setq timer
+               (run-at-time
+                chat-mcp-request-timeout nil
+                (lambda ()
+                  (unless done
+                    (setq done t)
+                    (when (buffer-live-p buffer) (kill-buffer buffer))
+                    (funcall error-callback
+                             "Timed out sending MCP notification")))))
+         (list :cancel
+               (lambda ()
+                 (unless done
+                   (setq done t)
+                   (when (timerp timer) (cancel-timer timer))
+                   (when (buffer-live-p buffer)
+                     (kill-buffer buffer)))))))
+      (_
+       (funcall error-callback
+                (format "Unsupported MCP transport: %s"
+                        (chat-mcp-client-transport client)))
+       nil))))
+
 (defun chat-mcp-http-request-async
     (client method params success error-callback &optional timeout)
   "Send asynchronous JSON-RPC METHOD through HTTP CLIENT."
@@ -585,6 +647,82 @@ user or agent invokes the connect tool."
         (status . "ready")
         (tools . ,(mapcar #'symbol-name ids))))))
 
+(defun chat-mcp-connect-server-async (argv success error-callback)
+  "Connect configured MCP server from tool ARGV without blocking."
+  (let* ((server-id (car argv))
+         (client (condition-case err
+                     (chat-mcp-client-get server-id)
+                   (error
+                    (funcall error-callback
+                             (error-message-string err))
+                    nil)))
+         current
+         cancelled)
+    (when client
+      (condition-case err
+          (progn
+            (when (and (eq (chat-mcp-client-transport client) 'stdio)
+                       (not (and (chat-mcp-client-process client)
+                                 (process-live-p
+                                  (chat-mcp-client-process client)))))
+              (chat-mcp-stdio-start client))
+            (cl-labels
+                ((fail (message)
+                   (unless cancelled
+                     (funcall error-callback message)))
+                 (list-tools (_ignored)
+                   (unless cancelled
+                     (setq
+                      current
+                      (chat-mcp-request-async
+                       client "tools/list" nil
+                       (lambda (response)
+                         (unless cancelled
+                           (condition-case inner
+                               (let ((ids
+                                      (chat-mcp-register-discovered-tools
+                                       client response)))
+                                 (setf (chat-mcp-client-status client)
+                                       'ready)
+                                 (funcall
+                                  success
+                                  `((serverId . ,server-id)
+                                    (status . "ready")
+                                    (tools
+                                     . ,(mapcar #'symbol-name ids)))))
+                             (error
+                              (fail (error-message-string inner))))))
+                       #'fail))))
+                 (initialized (response)
+                   (unless cancelled
+                     (condition-case inner
+                         (progn
+                           (chat-mcp--response-result response)
+                           (setq
+                            current
+                            (chat-mcp-send-notification-async
+                             client "notifications/initialized" nil
+                             #'list-tools #'fail)))
+                       (error
+                        (fail (error-message-string inner)))))))
+              (setq
+               current
+               (chat-mcp-request-async
+                client "initialize"
+                '((protocolVersion . "2024-11-05"))
+                #'initialized #'fail))))
+        (error
+         (funcall error-callback (error-message-string err)))))
+    (list :cancel
+          (lambda ()
+            (setq cancelled t)
+            (cond
+             ((functionp current) (funcall current))
+             ((processp current)
+              (when (process-live-p current) (delete-process current)))
+             ((functionp (plist-get current :cancel))
+              (funcall (plist-get current :cancel))))))))
+
 (defun chat-mcp-generic-call (server-id name arguments-json)
   "Call NAME on SERVER-ID with ARGUMENTS-JSON synchronously."
   (let ((json-object-type 'alist)
@@ -636,7 +774,8 @@ user or agent invokes the connect tool."
    'mcp_connect "MCP Connect"
    "Connect one configured MCP server and discover schema-aware tools."
    '((:name "server_id" :type "string" :required t))
-   #'chat-mcp-connect-server '(execute outbound))
+   #'chat-mcp-connect-server '(execute outbound)
+   #'chat-mcp-connect-server-async)
   (chat-mcp--register-tool
    'mcp_call "MCP Call"
    "Call a tool on a connected MCP server using JSON arguments."

@@ -929,4 +929,18 @@ overlay, bounded depth and steps, and return only the final summary as the
 parent tool result. Keep child messages available through their own
 session for diagnostics.
 
+### Capability Profiles Must Filter Provider Schemas
+
+**Problem**: a model sees tools outside the selected programming, office,
+or daily profile even though execution later rejects them.
+
+**Cause**: applying the session overlay only in the executor leaves an
+incorrect capability contract in the provider request.
+
+**Solution**: filter the forged-tool registry with the session overlay
+while generating provider schemas, then enforce the same overlay again at
+execution. Keep personal, correspondence, network, write, and outbound
+metadata on every profile tool so profile selection never bypasses
+approval.
+
 Last updated: 2026-08-24

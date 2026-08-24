@@ -107,6 +107,47 @@
         (should (equal (chat-forged-tool-effects tool)
                        '(read outbound)))))))
 
+(ert-deftest chat-mcp-connect-tool-discovers-without-blocking ()
+  "Test the connect tool chains initialize and discovery asynchronously."
+  (let* ((client (chat-mcp-client-create
+                  :id "async" :transport 'http
+                  :endpoint "http://example.invalid/mcp"))
+         (chat-mcp--clients (make-hash-table :test 'equal))
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         methods
+         result)
+    (puthash "async" client chat-mcp--clients)
+    (cl-letf (((symbol-function 'chat-mcp-request-async)
+               (lambda (_client method _params success _error &optional _timeout)
+                 (push method methods)
+                 (funcall
+                  success
+                  (if (equal method "initialize")
+                      '((jsonrpc . "2.0") (id . "1")
+                        (result (protocolVersion . "2024-11-05")))
+                    '((jsonrpc . "2.0") (id . "2")
+                      (result
+                       (tools
+                        ((name . "ping")
+                         (inputSchema
+                          (type . "object")
+                          (properties))))))))
+                 '(:cancel ignore)))
+              ((symbol-function 'chat-mcp-send-notification-async)
+               (lambda (_client method _params success _error)
+                 (push method methods)
+                 (funcall success t)
+                 nil)))
+      (chat-mcp-connect-server-async
+       '("async")
+       (lambda (value) (setq result value))
+       #'ert-fail))
+    (should (equal (reverse methods)
+                   '("initialize" "notifications/initialized"
+                     "tools/list")))
+    (should (equal (cdr (assoc 'status result)) "ready"))
+    (should (chat-tool-forge-get 'mcp_async_ping))))
+
 (ert-deftest chat-mcp-async-response-dispatches-pending-callback ()
   "Test JSON-RPC responses complete their asynchronous pending request."
   (let* ((client (chat-mcp-client-create :transport 'stdio))

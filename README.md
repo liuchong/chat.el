@@ -186,7 +186,8 @@ Layout rules:
 
 ## Tool Model
 
-Built in tools currently focus on coding assistance:
+Built-in tools cover coding, work orchestration, external capabilities,
+office tasks, and simple daily work:
 
 - `files_read`
 - `files_read_lines`
@@ -215,21 +216,41 @@ Built in tools currently focus on coding assistance:
 - `work_goal_update`
 - `work_goal_list`
 - `work_workflow_start`
+- `work_workflow_resume`
 - `work_workflow_cancel`
 - `work_workflow_list`
+- `mcp_server_list`
+- `mcp_connect`
+- `mcp_call`
+- `subagent_run`
+- `subagent_list`
+- `subagent_status`
+- `subagent_cancel`
+- `subagent_external_start`
+- `subagent_external_output`
 - `programming_git_status`
 - `programming_flymake_diagnostics`
 - `programming_compile_task`
+- `programming_completion_at_point`
+- `web_eww_read`
 - `office_org_headlines`
+- `office_org_agenda`
+- `office_org_capture`
+- `office_org_todo_update`
+- `office_org_schedule`
 - `office_dired_list`
+- `office_dired_open`
+- `office_dired_copy`
 - `office_dired_mkdir`
 - `office_dired_rename`
 - `office_calc_eval`
+- `office_calc_convert`
 - `daily_calendar_today`
 - `daily_diary_read`
 - `daily_diary_insert`
 - `daily_notify`
 - `daily_mail_draft_create`
+- `daily_message_draft_buffer`
 - `daily_mail_draft_list`
 - `daily_mail_draft_delete`
 
@@ -436,8 +457,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 585 regression tests discovered
-- 585 passing
+- 591 regression tests discovered
+- 591 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:
@@ -448,9 +469,15 @@ emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exi
 
 Integration test notes:
 
-- requires real provider credentials
-- currently includes the Kimi online request checks
-- should be run explicitly instead of being mixed into the canonical regression suite
+- deterministic cross-module workflow/MCP persistence runs without credentials
+- online provider checks run only when their credentials are available
+- integration tests remain separate from the canonical unit suite
+
+Run deterministic primary-loop end-to-end paths:
+
+```bash
+emacs -Q -batch -l tests/run-e2e-tests.el -f ert-run-tests-batch-and-exit
+```
 
 ## Documentation Map
 

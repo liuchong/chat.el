@@ -9,6 +9,7 @@
   (let ((session (make-chat-session :id "profile")))
     (chat-capability-apply-profile session 'daily)
     (should (chat-session-tool-enabled-p session 'daily_calendar_today))
+    (should (chat-session-tool-enabled-p session 'web_eww_read))
     (should-not (chat-session-tool-enabled-p session 'programming_git_status))
     (should (eq (plist-get (chat-session-tool-config session) :profile)
                 'daily))))
@@ -30,7 +31,100 @@
      (should (file-directory-p dir))
      (chat-capability-office-dired-rename dir renamed)
      (should (file-directory-p renamed))
-     (should (string= (chat-capability-office-calc-eval "2+3") "5")))))
+     (let* ((source (expand-file-name "source.txt" temp-dir))
+            (target (expand-file-name "target.txt" temp-dir)))
+       (with-temp-file source (insert "copy me"))
+       (chat-capability-office-dired-copy source target)
+       (should (file-exists-p target))
+       (should (get-buffer
+                (cdr (assoc 'buffer
+                            (chat-capability-office-dired-open target))))))
+     (should (string= (chat-capability-office-calc-eval "2+3") "5"))
+     (should (string-match-p
+              "100"
+              (chat-capability-office-calc-convert "1 m" "cm"))))))
+
+(ert-deftest chat-capability-programming-capf-uses-file-major-mode ()
+  "Test programming completion delegates to native CAPF sources."
+  (chat-test-with-temp-dir
+   (let* ((chat-files-allowed-directories (list temp-dir))
+          (path (expand-file-name "sample.el" temp-dir)))
+     (with-temp-file path
+       (insert "(mes"))
+     (let* ((result
+             (chat-capability-programming-completion-at-point
+              path 1 4 50))
+            (candidates (cdr (assoc 'candidates result))))
+       (should (equal (cdr (assoc 'prefix result)) "mes"))
+       (should (seq-some
+                (lambda (candidate)
+                  (string-prefix-p "message" candidate))
+                candidates))))))
+
+(ert-deftest chat-capability-web-reader-renders-html-with-shr ()
+  "Test the shared web tool returns rendered page text."
+  (cl-letf (((symbol-function 'url-retrieve-synchronously)
+             (lambda (&rest _args)
+               (let ((buffer (generate-new-buffer " *capability-web*")))
+                 (with-current-buffer buffer
+                   (insert "HTTP/1.1 200 OK\r\n\r\n")
+                   (insert "<html><body><h1>Hello</h1><p>World</p></body></html>"))
+                 buffer))))
+    (let ((result
+           (chat-capability-web-eww-read
+            "https://example.invalid/page")))
+      (should (string-match-p "Hello"
+                              (cdr (assoc 'content result))))
+      (should (string-match-p "World"
+                              (cdr (assoc 'content result)))))))
+
+(ert-deftest chat-capability-web-reader-has-nonblocking-tool-path ()
+  "Test web reads expose an asynchronous cancellable execution path."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        result)
+    (chat-capability-register-tools)
+    (cl-letf (((symbol-function 'url-retrieve)
+               (lambda (_url callback &rest _args)
+                 (let ((buffer (generate-new-buffer
+                                " *capability-web-async*")))
+                   (with-current-buffer buffer
+                     (insert "HTTP/1.1 200 OK\r\n\r\n")
+                     (insert "<html><body>Async page</body></html>")
+                     (funcall callback nil))
+                   buffer))))
+      (funcall
+       (chat-forged-tool-async-function
+        (chat-tool-forge-get 'web_eww_read))
+       '("https://example.invalid/async" 1000)
+       (lambda (value) (setq result value))
+       #'ert-fail))
+    (should (string-match-p
+             "Async[[:space:]]+page"
+             (cdr (assoc 'content result))))))
+
+(ert-deftest chat-capability-office-org-workflow-captures-and-updates ()
+  "Test Org agenda, capture, TODO update, and scheduling."
+  (chat-test-with-temp-dir
+   (let* ((chat-files-allowed-directories (list temp-dir))
+          (org-file (expand-file-name "work.org" temp-dir)))
+     (with-temp-file org-file
+       (insert "* TODO Existing\n"))
+     (chat-capability-office-org-capture
+      org-file "New item" "Details" "TODO")
+     (chat-capability-office-org-todo-update
+      org-file "Existing" "DONE")
+     (chat-capability-office-org-schedule
+      org-file "New item" "2026-08-25")
+     (let ((agenda
+            (chat-capability-office-org-agenda
+             (json-encode (vector org-file)) "2026-08-25")))
+       (should (= (length agenda) 1))
+       (should (equal (cdr (assoc 'title (car agenda)))
+                      "New item")))
+     (with-temp-buffer
+       (insert-file-contents org-file)
+       (should (search-forward "* DONE Existing" nil t))
+       (should (search-forward "SCHEDULED: <2026-08-25" nil t))))))
 
 (ert-deftest chat-capability-daily-tools_keep_mail_as_drafts ()
   "Test daily tools support diary and unsent mail drafts."
@@ -47,7 +141,18 @@
        (should (string= (cdr (assoc 'status draft)) "draft"))
        (should (= (length (chat-capability-daily-mail-draft-list)) 1))
        (chat-capability-daily-mail-draft-delete (cdr (assoc 'id draft)))
-       (should-not (chat-capability-daily-mail-draft-list))))))
+       (should-not (chat-capability-daily-mail-draft-list)))
+     (let* ((draft (chat-capability-daily-message-draft-buffer
+                    "user@example.test" "Subject" "Body"))
+            (buffer (get-buffer (cdr (assoc 'buffer draft)))))
+       (unwind-protect
+           (progn
+             (should (buffer-live-p buffer))
+             (should (eq (buffer-local-value 'major-mode buffer)
+                         'message-mode))
+             (should (equal (cdr (assoc 'status draft)) "draft")))
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer)))))))
 
 (ert-deftest chat-capability-register-tools-adds_metadata ()
   "Test capability tools register with owner and permission metadata."
@@ -58,6 +163,25 @@
       (should (eq (chat-forged-tool-owner tool) 'capability-packs))
       (should (eq (chat-forged-tool-sensitivity tool) 'correspondence))
       (should (memq 'write (chat-forged-tool-effects tool))))))
+
+(ert-deftest chat-capability-profile-filters-provider-tool-schemas ()
+  "Test profile overlays control the tools advertised to providers."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (session (make-chat-session :id "office-profile")))
+    (chat-capability-register-tools)
+    (chat-capability-apply-profile session 'office)
+    (let* ((chat-tool-caller-current-session session)
+           (tools (chat-tool-caller-provider-tools))
+           (names
+            (mapcar
+             (lambda (tool)
+               (cdr (assoc 'name
+                           (cdr (assoc 'function tool)))))
+             (append tools nil))))
+      (should (member "office_org_agenda" names))
+      (should (member "office_calc_convert" names))
+      (should-not (member "programming_completion_at_point" names))
+      (should-not (member "daily_message_draft_buffer" names)))))
 
 (provide 'test-chat-capability-packs)
 ;;; test-chat-capability-packs.el ends here

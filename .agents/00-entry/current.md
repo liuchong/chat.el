@@ -8,12 +8,12 @@
 
 ## Current Phase
 
-Stage 14 external capability integration is complete (2026-08-24).
-Configured stdio and Streamable HTTP MCP servers lazily discover
-schema-aware namespaced tools. Nested agents run the shared kernel in
-isolated child sessions, while external agents use a bounded JSONL
-subprocess contract. All paths use shared approvals, cancellation, and
-tool lifecycle events. Canonical suite: 585 tests passing.
+Stage 15 capability-pack completion is complete (2026-08-24).
+Programming now includes native completion and rendered web reading;
+office includes Org agenda/capture/TODO/scheduling, Dired operations, and
+unit conversion; daily work includes web reading and unsent message-mode
+drafts. Profile overlays filter provider-visible schemas and all sensitive
+actions use shared approvals. Canonical suite: 591 tests passing.
 
 ## Main Objective
 

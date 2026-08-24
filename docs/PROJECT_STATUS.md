@@ -16,7 +16,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 ### Chat Core
 
-- session creation and append-only persistence
+- session creation and atomically replaced JSONL persistence
 - parent/branch/leaf session metadata and a tabulated-list tree browser
 - durable summary records for branch and compaction workflows
 - interrupted tool-run recovery metadata on load
@@ -106,21 +106,28 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 ### Capability Packs
 
-- code, office, and daily session profiles backed by tool overlays
-- programming tools for read-only status, Flymake diagnostics, and compile/test background tasks
-- office tools for Org headlines, Dired-style directory operations, and Calc evaluation
-- daily tools for calendar/diary, notifications, and draft-only mail records
+- code, office, and daily session profiles backed by provider-visible tool overlays
+- programming tools for read-only status, Flymake diagnostics, native
+  completion-at-point, web documentation, and compile/test background tasks
+- office tools for Org agenda/capture/TODO/scheduling, Dired-style
+  open/copy/mkdir/rename operations, and Calc evaluation/unit conversion
+- daily tools for calendar/diary, rendered web reading, notifications,
+  local draft records, and unsent message-mode draft buffers
 
 ## Current Quality Baseline
 
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 585 regression tests discovered
-- 585 passing
+- 591 regression tests discovered
+- 591 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
+- deterministic end-to-end command: `emacs -Q -batch -l tests/run-e2e-tests.el -f ert-run-tests-batch-and-exit`
+- cross-module workflow/MCP integration: 1 passing; online provider checks
+  skip when credentials are absent
+- primary-loop MCP and nested-agent end-to-end paths: 2 passing
 
 ### Stability Highlights
 
@@ -204,11 +211,17 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - `files_read_lines` now normalizes invalid start lines and keeps empty line ranges coherent when callers ask beyond EOF
 - session helpers now have denser regression coverage for clearing history, missing message ids, default last-message lookup, and invalid saved-session files
 - sessions now persist parent/branch/leaf metadata, message parent/branch fields, durable summary records, and expose a tabulated-list tree browser
-- JSONL appends now isolate partial trailing records before writing new entries, and loading marks unfinished assistant/tool pairs for recovery instead of inventing successful tool results
+- JSONL updates now repair partial tails in a same-directory temporary file
+  before atomic rename, and loading offers explicit recovery for unfinished
+  assistant/tool pairs
 - compaction helpers now find tool-pair-safe cut indices so summaries do not split an assistant tool call from its matching tool result
-- work orchestration now supports cancellable background process tasks, persisted task logs, session-local plan/TODO/goal state, and declarative workflow records
-- MCP and sub-agent backend primitives now cover JSON-RPC stdio/HTTP request handling, process lifecycle, child-session isolation, and external subprocess output capture
-- capability packs now provide code, office, and daily tool profiles so sessions can expose scoped tools instead of the full global catalog
+- work orchestration now executes and resumes conditional registered-tool
+  workflows with approval checkpoints and per-step persistence
+- MCP and sub-agent tools now cover cancellable stdio/Streamable HTTP
+  discovery, primary-loop remote calls, nested kernel isolation, and JSONL
+  subprocess agents
+- capability packs now provide concrete programming, office, and daily
+  tools with provider-visible profile filtering
 - file editing helpers now create missing parent directories on write, allow append-to-new-file flows, keep `apply_patch` atomic across multiple operations, and support regexp capture-group replacements
 - `apply_patch` now uses hunk headers to resolve repeated source blocks and accepts the codex-compatible `*** End of File` marker
 - `apply_patch` add-file operations now honor codex-style `*** End of File` newline semantics instead of always forcing a trailing newline
@@ -273,7 +286,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - keep closing blank-context edge cases before spending more effort on wider reading-surface discoverability
 - keep treating whitespace-only context as invalid input so helper-level guardrails match actual AI usefulness
 - keep pushing helper-level blank-context coverage until quoted reading prompts cannot be created from useless input
-- add integration coverage for approval and tool loop behavior
+- add live-server integration cases only for intentionally provisioned
+  environments; deterministic workflow, remote-tool, and nested-agent
+  paths are covered
 - consider a richer session browser and export flow
 
 ## Key Files

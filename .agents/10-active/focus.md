@@ -8,12 +8,12 @@
 
 ## Doing Now
 
-Stage 14 closes primary-loop MCP and sub-agent integration gaps found by
-the execution audit. Configured servers connect lazily and register
-discovered schemas as namespaced tools. Nested agents use isolated child
-sessions and the shared kernel; subprocess agents exchange JSONL. Shared
-approval, async cancellation, and request lifecycle events remain intact.
-Canonical suite: 585 tests passing.
+Stage 15 closes the final capability-pack gaps found by the execution audit.
+Programming exposes native completion and rendered web reading. Office
+supports actionable Org, Dired, and Calc workflows. Daily sessions can
+read rendered pages and create unsent message-mode drafts. Profile
+overlays are verified at the provider-schema boundary.
+Canonical suite: 591 tests passing.
 
 ## Not Doing Now
 
@@ -25,5 +25,6 @@ Canonical suite: 585 tests passing.
 
 ## Immediate Next Step
 
-Complete the missing programming, office, and daily capability tools and
-their profile-level integration tests.
+No deterministic implementation gap from the execution audit remains.
+Run credential-dependent provider or live-server checks only when their
+environments are intentionally available.

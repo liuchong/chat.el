@@ -16,7 +16,10 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
+(require 'seq)
 (require 'subr-x)
+(require 'url)
 (require 'chat-files)
 (require 'chat-session)
 (require 'chat-tool-forge)
@@ -29,6 +32,8 @@
   '(programming_git_status
     programming_flymake_diagnostics
     programming_compile_task
+    programming_completion_at_point
+    web_eww_read
     files_read files_read_lines files_list files_grep open_file
     files_write files_replace files_patch apply_patch
     emacs_buffers emacs_read_buffer emacs_imenu emacs_xref emacs_project)
@@ -36,19 +41,28 @@
 
 (defconst chat-capability-office-tools
   '(office_org_headlines
+    office_org_agenda
+    office_org_capture
+    office_org_todo_update
+    office_org_schedule
     office_dired_list
+    office_dired_open
+    office_dired_copy
     office_dired_mkdir
     office_dired_rename
     office_calc_eval
+    office_calc_convert
     files_read files_read_lines open_file)
   "Tools exposed by the office profile.")
 
 (defconst chat-capability-daily-tools
   '(daily_calendar_today
+    web_eww_read
     daily_diary_read
     daily_diary_insert
     daily_notify
     daily_mail_draft_create
+    daily_message_draft_buffer
     daily_mail_draft_list
     daily_mail_draft_delete)
   "Tools exposed by the daily profile.")
@@ -136,6 +150,128 @@
   "Start compile/test COMMAND as a background task."
   (chat-work-task-start command (or directory default-directory)))
 
+(defun chat-capability-programming-completion-at-point
+    (path line column &optional limit)
+  "Return completion candidates at PATH LINE and COLUMN."
+  (let* ((safe (chat-files--safe-path-p path))
+         (existing (get-file-buffer safe))
+         (buffer (find-file-noselect safe))
+         result)
+    (unwind-protect
+        (with-current-buffer buffer
+          (save-excursion
+            (goto-char (point-min))
+            (forward-line (max 0 (1- line)))
+            (move-to-column (max 0 column))
+            (let ((completion
+                   (run-hook-with-args-until-success
+                    'completion-at-point-functions)))
+              (unless (and (listp completion)
+                           (integer-or-marker-p (nth 0 completion))
+                           (integer-or-marker-p (nth 1 completion)))
+                (error "No completion source at %s:%d:%d"
+                       safe line column))
+              (let* ((start (nth 0 completion))
+                     (end (nth 1 completion))
+                     (collection (nth 2 completion))
+                     (properties (nthcdr 3 completion))
+                     (predicate (plist-get properties :predicate))
+                     (prefix (buffer-substring-no-properties start end))
+                     (candidates
+                      (all-completions prefix collection predicate)))
+                (setq result
+                      `((path . ,safe)
+                        (line . ,line)
+                        (column . ,column)
+                        (prefix . ,prefix)
+                        (candidates
+                         . ,(seq-take candidates (or limit 100)))))))))
+      (when (and (not existing) (buffer-live-p buffer)
+                 (not (buffer-modified-p buffer)))
+        (kill-buffer buffer)))
+    result))
+
+(defun chat-capability-web-eww-read (url &optional max-chars)
+  "Render HTTP(S) URL with the Emacs web rendering stack."
+  (unless (string-match-p "\\`https?://" url)
+    (error "Only HTTP(S) URLs are supported"))
+  (require 'eww)
+  (let ((source (url-retrieve-synchronously url t t 15))
+        (limit (or max-chars 20000)))
+    (unless source
+      (error "Unable to retrieve URL: %s" url))
+    (unwind-protect
+        (with-current-buffer source
+          (chat-capability--web-render-current-buffer url limit))
+      (kill-buffer source))))
+
+(defun chat-capability--web-render-current-buffer (url limit)
+  "Render the current HTTP buffer for URL within LIMIT."
+  (goto-char (point-min))
+  (unless (re-search-forward "\r?\n\r?\n" nil t)
+    (error "Malformed HTTP response"))
+  (let ((body-start (point)))
+    (shr-render-region body-start (point-max))
+    (let ((text (string-trim
+                 (buffer-substring-no-properties
+                  body-start (point-max)))))
+      `((url . ,url)
+        (content . ,(if (> (length text) limit)
+                        (concat (substring text 0 limit)
+                                "\n... [truncated]")
+                      text))))))
+
+(defun chat-capability-web-eww-read-async (argv success error-callback)
+  "Render a web page from tool ARGV without blocking Emacs."
+  (pcase-let ((`(,url ,max-chars) argv))
+    (if (not (string-match-p "\\`https?://" url))
+        (progn
+          (funcall error-callback "Only HTTP(S) URLs are supported")
+          nil)
+      (require 'eww)
+      (let ((limit (or max-chars 20000))
+            (done nil)
+            buffer
+            timer)
+        (setq
+         buffer
+         (url-retrieve
+          url
+          (lambda (status)
+            (unless done
+              (setq done t)
+              (when (timerp timer) (cancel-timer timer))
+              (unwind-protect
+                  (if-let ((failure (plist-get status :error)))
+                      (funcall error-callback (format "%s" failure))
+                    (condition-case err
+                        (funcall
+                         success
+                         (chat-capability--web-render-current-buffer
+                          url limit))
+                      (error
+                       (funcall error-callback
+                                (error-message-string err)))))
+                (when (buffer-live-p (current-buffer))
+                  (kill-buffer (current-buffer))))))))
+        (unless done
+          (setq timer
+                (run-at-time
+                 20 nil
+                 (lambda ()
+                   (unless done
+                     (setq done t)
+                     (when (buffer-live-p buffer) (kill-buffer buffer))
+                     (funcall error-callback
+                              "Timed out retrieving web page"))))))
+        (list :cancel
+              (lambda ()
+                (unless done
+                  (setq done t)
+                  (when (timerp timer) (cancel-timer timer))
+                  (when (buffer-live-p buffer)
+                    (kill-buffer buffer)))))))))
+
 (defun chat-capability-office-org-headlines (path)
   "Return Org headlines from PATH."
   (let ((safe (chat-files--safe-path-p path))
@@ -150,6 +286,106 @@
               headlines)))
     (nreverse headlines)))
 
+(defun chat-capability--org-paths (paths-json)
+  "Decode and validate Org file PATHS-JSON."
+  (let* ((json-array-type 'list)
+         (paths (json-read-from-string paths-json)))
+    (unless (and (listp paths) (cl-every #'stringp paths))
+      (error "Org paths must be a JSON string array"))
+    (mapcar #'chat-files--safe-path-p paths)))
+
+(defun chat-capability-office-org-agenda (paths-json &optional date)
+  "Return TODO, schedule, and deadline entries from PATHS-JSON.
+When DATE is non-nil, keep entries whose timestamp contains DATE."
+  (require 'org)
+  (require 'org-element)
+  (let (entries)
+    (dolist (path (chat-capability--org-paths paths-json))
+      (with-temp-buffer
+        (insert-file-contents path)
+        (org-mode)
+        (org-element-map (org-element-parse-buffer) 'headline
+          (lambda (headline)
+            (let* ((todo (org-element-property :todo-keyword headline))
+                   (scheduled (org-element-property :scheduled headline))
+                   (deadline (org-element-property :deadline headline))
+                   (scheduled-text
+                    (and scheduled
+                         (org-element-property :raw-value scheduled)))
+                   (deadline-text
+                    (and deadline
+                         (org-element-property :raw-value deadline))))
+              (when (and (or todo scheduled deadline)
+                         (or (null date)
+                             (string-match-p
+                              (regexp-quote date)
+                              (concat (or scheduled-text "") " "
+                                      (or deadline-text "")))))
+                (push `((path . ,path)
+                        (line . ,(line-number-at-pos
+                                  (org-element-property :begin headline)))
+                        (title . ,(org-element-property :raw-value headline))
+                        (todo . ,todo)
+                        (scheduled . ,scheduled-text)
+                        (deadline . ,deadline-text))
+                      entries)))))))
+    (nreverse entries)))
+
+(defun chat-capability-office-org-capture
+    (path title &optional body status)
+  "Append an Org heading with TITLE, BODY, and optional STATUS to PATH."
+  (let ((safe (chat-files--safe-path-p path)))
+    (with-temp-buffer
+      (when (file-exists-p safe)
+        (insert-file-contents safe))
+      (goto-char (point-max))
+      (unless (or (bobp) (eq (char-before) ?\n))
+        (insert "\n"))
+      (insert "* "
+              (if (and status (not (string-empty-p status)))
+                  (concat status " ")
+                "")
+              title "\n")
+      (when (and body (not (string-empty-p body)))
+        (insert body "\n"))
+      (write-region (point-min) (point-max) safe nil 'silent))
+    `((path . ,safe) (title . ,title) (captured . t))))
+
+(defun chat-capability--org-find-heading (title)
+  "Move point to exact Org heading TITLE."
+  (goto-char (point-min))
+  (unless (re-search-forward
+           (format "^\\*+[ \t]+\\(?:[[:upper:]][[:upper:]_-]*[ \t]+\\)?%s[ \t]*$"
+                   (regexp-quote title))
+           nil t)
+    (error "Org heading not found: %s" title))
+  (beginning-of-line))
+
+(defun chat-capability-office-org-todo-update (path title status)
+  "Set Org heading TITLE in PATH to TODO STATUS."
+  (require 'org)
+  (let ((safe (chat-files--safe-path-p path))
+        (org-log-done nil))
+    (with-current-buffer (find-file-noselect safe)
+      (org-mode)
+      (save-excursion
+        (chat-capability--org-find-heading title)
+        (org-todo status)
+        (save-buffer)))
+    `((path . ,safe) (title . ,title) (status . ,status))))
+
+(defun chat-capability-office-org-schedule (path title date)
+  "Schedule Org heading TITLE in PATH for DATE."
+  (require 'org)
+  (let ((safe (chat-files--safe-path-p path)))
+    (with-current-buffer (find-file-noselect safe)
+      (org-mode)
+      (save-excursion
+        (chat-capability--org-find-heading title)
+        (org-schedule nil date)
+        (save-buffer)))
+    `((path . ,safe) (title . ,title) (scheduled . ,date))))
+
 (defun chat-capability-office-dired-list (directory)
   "Return a Dired-style listing for DIRECTORY."
   (let ((safe (chat-files--safe-path-p directory)))
@@ -158,6 +394,24 @@
                 `((name . ,name)
                   (type . ,(if (file-directory-p path) "directory" "file")))))
             (directory-files safe nil directory-files-no-dot-files-regexp))))
+
+(defun chat-capability-office-dired-open (path)
+  "Open PATH in an Emacs file or Dired buffer."
+  (let* ((safe (chat-files--safe-path-p path))
+         (buffer (find-file-noselect safe)))
+    `((path . ,safe)
+      (buffer . ,(buffer-name buffer))
+      (mode . ,(symbol-name
+                (buffer-local-value 'major-mode buffer))))))
+
+(defun chat-capability-office-dired-copy (source target)
+  "Copy SOURCE to TARGET without overwriting."
+  (let ((from (chat-files--safe-path-p source))
+        (to (chat-files--safe-path-p target)))
+    (if (file-directory-p from)
+        (copy-directory from to nil nil nil)
+      (copy-file from to nil))
+    `((source . ,from) (target . ,to) (copied . t))))
 
 (defun chat-capability-office-dired-mkdir (directory)
   "Create DIRECTORY after approval."
@@ -176,6 +430,15 @@
   "Evaluate pure Calc EXPRESSION."
   (require 'calc)
   (calc-eval expression))
+
+(defun chat-capability-office-calc-convert (value target-unit)
+  "Convert Calc VALUE to TARGET-UNIT."
+  (require 'calc)
+  (require 'calc-units)
+  (math-format-value
+   (math-convert-units
+    (math-read-expr value)
+    (math-read-expr target-unit))))
 
 (defun chat-capability-daily-calendar-today ()
   "Return today's date in calendar-friendly form."
@@ -214,6 +477,21 @@
     (push draft chat-capability-mail-drafts)
     draft))
 
+(defun chat-capability-daily-message-draft-buffer (to subject body)
+  "Create an unsent `message-mode' draft buffer."
+  (require 'message)
+  (let* ((draft (chat-capability-daily-mail-draft-create
+                 to subject body))
+         (buffer (generate-new-buffer
+                  (format "*chat-draft-%s*"
+                          (cdr (assoc 'id draft))))))
+    (with-current-buffer buffer
+      (message-mode)
+      (insert (format "To: %s\nSubject: %s\n\n%s"
+                      to subject body))
+      (goto-char (point-min)))
+    (append draft `((buffer . ,(buffer-name buffer))))))
+
 (defun chat-capability-daily-mail-draft-list ()
   "List local mail drafts."
   (nreverse (copy-tree chat-capability-mail-drafts)))
@@ -227,7 +505,8 @@
   `((id . ,id) (deleted . t)))
 
 (defun chat-capability--register-tool
-    (id name description parameters fn sensitivity effects)
+    (id name description parameters fn sensitivity effects
+        &optional async-fn)
   "Register one capability tool."
   (chat-tool-forge-register
    (make-chat-forged-tool
@@ -240,6 +519,7 @@
     :sensitivity sensitivity
     :effects effects
     :compiled-function fn
+    :async-function async-fn
     :is-active t
     :usage-count 0)))
 
@@ -261,15 +541,69 @@
      (:name "directory" :type "string" :required nil))
    #'chat-capability-programming-compile-task 'project '(write outbound))
   (chat-capability--register-tool
+   'programming_completion_at_point "Programming Completion At Point"
+   "Return native completion candidates at a file position."
+   '((:name "path" :type "string" :required t)
+     (:name "line" :type "integer" :required t)
+     (:name "column" :type "integer" :required t)
+     (:name "limit" :type "integer" :required nil))
+   #'chat-capability-programming-completion-at-point 'project '(read))
+  (chat-capability--register-tool
+   'web_eww_read "Web EWW Read"
+   "Retrieve and render an HTTP(S) page with the Emacs web stack."
+   '((:name "url" :type "string" :required t)
+     (:name "max_chars" :type "integer" :required nil))
+   #'chat-capability-web-eww-read 'network '(read outbound)
+   #'chat-capability-web-eww-read-async)
+  (chat-capability--register-tool
    'office_org_headlines "Office Org Headlines"
    "Read Org headlines from a file."
    '((:name "path" :type "string" :required t))
    #'chat-capability-office-org-headlines 'project '(read))
   (chat-capability--register-tool
+   'office_org_agenda "Office Org Agenda"
+   "List TODO, scheduled, and deadline entries from Org files."
+   '((:name "paths_json" :type "string" :required t)
+     (:name "date" :type "string" :required nil))
+   #'chat-capability-office-org-agenda 'personal '(read))
+  (chat-capability--register-tool
+   'office_org_capture "Office Org Capture"
+   "Append a heading to an Org file."
+   '((:name "path" :type "string" :required t)
+     (:name "title" :type "string" :required t)
+     (:name "body" :type "string" :required nil)
+     (:name "status" :type "string" :required nil))
+   #'chat-capability-office-org-capture 'personal '(write))
+  (chat-capability--register-tool
+   'office_org_todo_update "Office Org Todo Update"
+   "Set the TODO state of an exact Org heading."
+   '((:name "path" :type "string" :required t)
+     (:name "title" :type "string" :required t)
+     (:name "status" :type "string" :required t))
+   #'chat-capability-office-org-todo-update 'personal '(write))
+  (chat-capability--register-tool
+   'office_org_schedule "Office Org Schedule"
+   "Schedule an exact Org heading for a date."
+   '((:name "path" :type "string" :required t)
+     (:name "title" :type "string" :required t)
+     (:name "date" :type "string" :required t))
+   #'chat-capability-office-org-schedule 'personal '(write))
+  (chat-capability--register-tool
    'office_dired_list "Office Dired List"
    "List files in a directory."
    '((:name "directory" :type "string" :required t))
    #'chat-capability-office-dired-list 'project '(read))
+  (chat-capability--register-tool
+   'office_dired_open "Office Dired Open"
+   "Open a file or directory in an Emacs buffer."
+   '((:name "path" :type "string" :required t))
+   #'chat-capability-office-dired-open 'project '(read))
+  (chat-capability--register-tool
+   'office_dired_copy "Office Dired Copy"
+   "Copy a file or directory without overwriting."
+   '((:name "source" :type "string" :required t)
+     (:name "target" :type "string" :required t))
+   #'chat-capability-office-dired-copy 'project '(write))
   (chat-capability--register-tool
    'office_dired_mkdir "Office Dired Mkdir"
    "Create a directory."
@@ -286,6 +620,12 @@
    "Evaluate a pure Calc expression."
    '((:name "expression" :type "string" :required t))
    #'chat-capability-office-calc-eval 'public '(read))
+  (chat-capability--register-tool
+   'office_calc_convert "Office Calc Convert"
+   "Convert a Calc value to a target unit."
+   '((:name "value" :type "string" :required t)
+     (:name "target_unit" :type "string" :required t))
+   #'chat-capability-office-calc-convert 'public '(read))
   (chat-capability--register-tool
    'daily_calendar_today "Daily Calendar Today"
    "Return today's local date."
@@ -314,6 +654,14 @@
      (:name "subject" :type "string" :required t)
      (:name "body" :type "string" :required t))
    #'chat-capability-daily-mail-draft-create 'correspondence '(write))
+  (chat-capability--register-tool
+   'daily_message_draft_buffer "Daily Message Draft Buffer"
+   "Create an unsent message-mode draft buffer."
+   '((:name "to" :type "string" :required t)
+     (:name "subject" :type "string" :required t)
+     (:name "body" :type "string" :required t))
+   #'chat-capability-daily-message-draft-buffer
+   'correspondence '(write))
   (chat-capability--register-tool
    'daily_mail_draft_list "Daily Mail Draft List"
    "List local mail drafts."
