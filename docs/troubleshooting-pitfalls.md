@@ -397,7 +397,7 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Cause**: tool results are stored in metadata only and do not reenter the visible conversation history.
 
-**Solution**: feed tool results back through a follow up system message and persist a readable assistant side summary when needed.
+**Solution**: feed tool results back as `:tool` messages with `tool_call_id`, and persist a readable assistant side summary when the UI needs one.
 
 ### Mode Specific Tool Prompt Drift Reintroduces Wrong Protocols
 
@@ -456,6 +456,22 @@ Do not persist tools that only have an in memory compiled function and no source
 **Cause**: the fenced block extractor never advanced its scan position when no closing fence existed, so the same opener matched forever.
 
 **Solution**: skip past the opener when no closing fence exists and cover truncated responses with a regression test.
+
+### Truncated Responses Must Not Execute Tools
+
+**Problem**: a length-truncated reply still runs a half-written tool call.
+
+**Cause**: the loop treated any parsed `function_call` as executable, even when `finish_reason` was `length`.
+
+**Solution**: refuse those calls, emit a `truncated` event, and return the synthetic truncated tool result so the model can re-issue a complete call.
+
+### Tool-Only Provider Replies Look Like Parse Failures
+
+**Problem**: a native `tool_calls` response with null `content` raises unexpected response format.
+
+**Cause**: the OpenAI parser required a string `content` field.
+
+**Solution**: treat JSON null content as an empty string and keep `tool_calls` on the transport result.
 
 ### Silent Tool Call Parse Failures End The Loop
 

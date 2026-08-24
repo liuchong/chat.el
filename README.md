@@ -28,7 +28,7 @@ Copyright 2026 chat.el contributors.
 - Curate long term memory in `~/.chat/memory.md`, injected into every system prompt (`M-x chat-edit-memory`)
 - Stream or fetch responses through an async non blocking UI path
 - Expose built in file tools with approval gates for risky operations
-- Feed tool results back into the model through a bounded tool loop
+- Feed tool results back into the model through `:tool` messages and a bounded tool loop
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
@@ -117,9 +117,11 @@ chat.el/
   chat.el
   chat-config.local.el.example
   lisp/
+    agent/
     core/
     llm/
     tools/
+    plugin/
     ui/
     code/
   tests/
@@ -138,6 +140,8 @@ Layout rules:
 
 - `chat.el` stays at the repository root as the single entry point
 - runtime modules live under `lisp/` by domain
+- the agent kernel lives under `lisp/agent/`
+- Emacs plugins live under `lisp/plugin/`
 - stable regression tests live under `tests/unit/`
 - exploratory scripts live under `tests/prototypes/` or `tests/manual/`
 - one-off migration helpers live under `scripts/migration/`
@@ -176,6 +180,11 @@ Built in tools currently focus on coding assistance:
 - `files_replace`
 - `files_patch`
 - `apply_patch`
+- `emacs_buffers`
+- `emacs_read_buffer`
+- `emacs_imenu`
+- `emacs_xref`
+- `emacs_project`
 
 Risky tools require approval before execution.
 Generated tools also require approval before registration.

@@ -249,7 +249,7 @@ M-x chat-list-sessions      ; List and switch sessions
 M-x chat-view-raw-message   ; Inspect API exchanges</code></pre>
 
             <h2 id="architecture">Architecture</h2>
-            <p>chat.el follows a modular architecture with clear separation of concerns. Runtime modules now live under <code>lisp/core</code>, <code>lisp/llm</code>, <code>lisp/tools</code>, <code>lisp/ui</code>, and <code>lisp/code</code>.</p>
+            <p>chat.el follows a modular architecture with clear separation of concerns. Runtime modules now live under <code>lisp/agent</code>, <code>lisp/core</code>, <code>lisp/llm</code>, <code>lisp/tools</code>, <code>lisp/plugin</code>, <code>lisp/ui</code>, and <code>lisp/code</code>.</p>
 
             <table>
                 <thead>
@@ -262,6 +262,14 @@ M-x chat-view-raw-message   ; Inspect API exchanges</code></pre>
                     <tr>
                         <td><code>chat.el</code></td>
                         <td>Entry point and command wiring</td>
+                    </tr>
+                    <tr>
+                        <td><code>lisp/agent/chat-agent.el</code></td>
+                        <td>Event-driven agent kernel and tool loop</td>
+                    </tr>
+                    <tr>
+                        <td><code>lisp/plugin/chat-plugin.el</code></td>
+                        <td>Plugin host for Emacs-native tools</td>
                     </tr>
                     <tr>
                         <td><code>lisp/ui/chat-ui.el</code></td>

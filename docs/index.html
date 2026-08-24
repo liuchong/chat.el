@@ -256,7 +256,7 @@ Done — 3 call sites updated, diff above for review.<span class="demo-cursor"><
         <div class="main-content">
             <div class="section-header fade-in">
                 <h2>Modular Architecture</h2>
-                <p>Runtime modules are organized under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/ui`, and `lisp/code`</p>
+                <p>Runtime modules are organized under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`</p>
             </div>
             
             <div class="architecture-grid fade-in">
@@ -265,12 +265,12 @@ Done — 3 call sites updated, diff above for review.<span class="demo-cursor"><
                     <p>Entry point and command wiring</p>
                 </div>
                 <div class="arch-card">
-                    <h4>lisp/core/chat-agent.el</h4>
-                    <p>Event-driven agent kernel: turns, tools, steering, cancellation</p>
+                    <h4>lisp/agent/chat-agent.el</h4>
+                    <p>Event-driven agent kernel: turns, native tools, steering, cancellation</p>
                 </div>
                 <div class="arch-card">
-                    <h4>lisp/ui/chat-ui.el</h4>
-                    <p>Chat buffer rendering over kernel events</p>
+                    <h4>lisp/plugin/chat-plugin.el</h4>
+                    <p>Plugin host for Emacs-native agent tools</p>
                 </div>
                 <div class="arch-card">
                     <h4>lisp/core/chat-session.el</h4>

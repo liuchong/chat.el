@@ -4,39 +4,37 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, migration
+- Tags: current, phase, kernel
 
 ## Current Phase
 
-Agent kernel phase 1 is complete (2026-08-07).
+Agent kernel extraction is complete (2026-08-24). The loop lives in
+`lisp/agent/`. Native provider tool calling and the plugin host are
+wired into boot.
 
 ## Main Objective
 
-Execute the approved plan "unified event-driven kernel" (pi agent-loop
-port): replace the duplicated chat-ui/chat-code request and tool loops
-with the new `lisp/core/chat-agent.el` kernel, then land the borrowed
-designs from pi, kimi-cli, and opencode: async shell execution with
-timeout and output spill, edit replacer cascade with unified diff
-display, append-only JSONL sessions, AGENTS.md ancestor stacking, and
-differential UI rendering.
+Keep the PI-aligned loop as the only driver: `chat-message` throughout,
+`chat-llm--format-messages` as convertToLlm, tool results as `:tool`
+messages, steering and follow-up queues, truncated-response refusal.
+Extend the host through `lisp/plugin/` rather than growing the loop.
 
 ## Active Modules
 
-- `AGENTS.md`
-- `.agents/`
-- `lisp/core/chat-agent.el`
-- `lisp/ui/chat-ui.el`
-- `lisp/code/chat-code.el`
-- `lisp/`
-- `tests/`
-- `docs/troubleshooting-pitfalls.md`
+- `lisp/agent/chat-agent.el`
+- `lisp/agent/chat-agent-loop.el`
+- `lisp/agent/chat-agent-types.el`
+- `lisp/plugin/chat-plugin.el`
+- `lisp/plugin/chat-plugin-emacs.el`
+- `lisp/llm/chat-llm.el`
+- `lisp/tools/chat-tool-caller.el`
+- `lisp/core/chat-agent.el` (load-path shim)
+- `tests/unit/test-chat-agent.el`
+- `tests/unit/test-chat-plugin.el`
 
 ## Recommended Reads
 
 - `../10-active/focus.md`
-- `../10-active/risks.md`
-- `../30-records/logs/conversation-2026-08-07-deep-project-review.md`
-- `../30-records/logs/stage-2026-08-07-functional-fix-pack.md`
-- `../30-records/logs/stage-2026-08-07-agent-kernel-phase1.md`
-- `../20-reference/decisions/0001-agent-knowledge-layout.md`
-- `../20-reference/decisions/0002-json-structured-protocols.md`
+- `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-24-agent-kernel-native-tools.md`

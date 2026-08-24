@@ -331,5 +331,83 @@
     (should (equal (plist-get openai-req :model) "ark-code-latest"))
     (should (equal (plist-get anthropic-req :model) "ark-code-latest"))))
 
+(ert-deftest chat-llm-format-messages-keeps-tool-role ()
+  "Test convertToLlm emits tool_call_id for :tool messages."
+  (let* ((messages (list
+                    (make-chat-message :role :user :content "hi")
+                    (make-chat-message
+                     :role :assistant
+                     :content ""
+                     :tool-calls '((:id "call-1" :name "demo-tool"
+                                   :arguments (("input" . "x")))))
+                    (make-chat-message
+                     :role :tool
+                     :content "echo:x"
+                     :metadata '(:tool-call-id "call-1"))))
+         (formatted (chat-llm--format-messages messages)))
+    (should (= (length formatted) 3))
+    (let ((assistant (aref formatted 1))
+          (tool (aref formatted 2)))
+      (should (equal (cdr (assoc 'role assistant)) "assistant"))
+      (should (assoc 'tool_calls assistant))
+      (should (equal (cdr (assoc 'role tool)) "tool"))
+      (should (equal (cdr (assoc 'tool_call_id tool)) "call-1")))))
+
+(ert-deftest chat-llm-format-messages-expands-persisted-tool-results ()
+  "Test stored assistant tool-results become tool role payloads."
+  (let* ((messages (list
+                    (make-chat-message
+                     :role :assistant
+                     :content "using tools"
+                     :tool-calls '((:id "call-9" :name "demo-tool"
+                                   :arguments (("input" . "x"))))
+                     :tool-results '("echo:x"))))
+         (formatted (chat-llm--format-messages messages)))
+    (should (= (length formatted) 2))
+    (should (equal (cdr (assoc 'role (aref formatted 1))) "tool"))
+    (should (equal (cdr (assoc 'tool_call_id (aref formatted 1))) "call-9"))
+    (should (equal (cdr (assoc 'content (aref formatted 1))) "echo:x"))))
+
+(ert-deftest chat-llm-extracts-openai-tool-calls ()
+  "Test native OpenAI tool_calls decode into plists."
+  (let ((calls (chat-llm--extract-tool-calls
+                '((choices . [((message . ((content . :json-null)
+                                           (tool_calls . [((id . "call-1")
+                                                           (function . ((name . "demo-tool")
+                                                                        (arguments . "{\"input\":\"hi\"}"))))])))
+                               (finish_reason . "tool_calls"))]))))
+        (reason (chat-llm--extract-finish-reason
+                 '((choices . [((finish_reason . "tool_calls"))])))))
+    (should (= (length calls) 1))
+    (should (string= (plist-get (car calls) :id) "call-1"))
+    (should (string= (plist-get (car calls) :name) "demo-tool"))
+    (should (equal (plist-get (car calls) :arguments) '(("input" . "hi"))))
+    (should (string= reason "tool_calls"))))
+
+(ert-deftest chat-llm-parses-null-content-as-empty-string ()
+  "Test tool-only responses with null content do not error."
+  (should (string= (chat-llm--default-parse-response
+                    '((choices . [((message . ((content . :json-null)
+                                               (tool_calls . []))))])))
+                   "")))
+
+(ert-deftest chat-llm-openai-compatible-request-includes-tools ()
+  "Test OpenAI compatible requests advertise provider tools."
+  (chat-llm-register-provider 'tools-test
+                              :model "test-model"
+                              :request-fn (lambda (messages options)
+                                            (chat-llm-build-openai-compatible-request
+                                             'tools-test messages options)))
+  (let* ((tools [((type . "function")
+                  (function . ((name . "demo-tool")
+                               (description . "Echo")
+                               (parameters . ((type . "object"))))))])
+         (request (chat-llm--build-request
+                   'tools-test
+                   (list (make-chat-message :role :user :content "Hi"))
+                   (list :tools tools))))
+    (should (equal (plist-get request :tool_choice) "auto"))
+    (should (equal (plist-get request :tools) tools))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

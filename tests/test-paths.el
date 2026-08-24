@@ -8,7 +8,9 @@
                "lisp/llm"
                "lisp/tools"
                "lisp/ui"
-               "lisp/code"))
+               "lisp/code"
+               "lisp/agent"
+               "lisp/plugin"))
   (add-to-list 'load-path (expand-file-name dir chat-test-root-dir)))
 (provide 'test-paths)
 ;;; test-paths.el ends here

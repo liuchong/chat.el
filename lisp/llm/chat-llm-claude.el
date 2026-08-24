@@ -42,23 +42,57 @@
                   chat-llm-claude-api-version))))
 (defun chat-llm-claude--message-role (role)
   "Map internal ROLE to a Claude role string."
-  (if (eq role :assistant)
-      "assistant"
-    "user"))
+  (pcase role
+    (:assistant "assistant")
+    (:tool "user")
+    (_ "user")))
+
+(defun chat-llm-claude--content-for (msg)
+  "Build Claude content for MSG, including tool_use / tool_result blocks."
+  (let ((role (chat-message-role msg))
+        (content (or (chat-message-content msg) ""))
+        (calls (chat-message-tool-calls msg))
+        (metadata (chat-message-metadata msg)))
+    (cond
+     ((eq role :tool)
+      (vector
+       `((type . "tool_result")
+         (tool_use_id . ,(or (plist-get metadata :tool-call-id)
+                             (chat-message-id msg)))
+         (content . ,content))))
+     ((and (eq role :assistant) calls)
+      (vconcat
+       (append
+        (unless (string-blank-p content)
+          (list `((type . "text") (text . ,content))))
+        (mapcar
+         (lambda (call)
+           `((type . "tool_use")
+             (id . ,(or (plist-get call :id) (plist-get call :name)))
+             (name . ,(plist-get call :name))
+             (input . ,(or (plist-get call :arguments) (make-hash-table)))))
+         calls))))
+     (t content))))
+
 (defun chat-llm-claude--build-request (provider messages options)
   "Build an Anthropic compatible request for PROVIDER with MESSAGES."
   (let* ((config (chat-llm--ensure-provider provider))
          (system-lines nil)
-         (normal-messages nil))
+         (normal-messages nil)
+         (tools (plist-get options :tools)))
     (dolist (msg messages)
       (let ((role (chat-message-role msg))
             (content (or (chat-message-content msg) "")))
-        (when (not (string-empty-p content))
-          (if (eq role :system)
-              (push content system-lines)
-            (push `((role . ,(chat-llm-claude--message-role role))
-                    (content . ,content))
-                  normal-messages)))))
+        (cond
+         ((eq role :system)
+          (unless (string-empty-p content)
+            (push content system-lines)))
+         ((or (not (string-empty-p content))
+              (chat-message-tool-calls msg)
+              (eq role :tool))
+          (push `((role . ,(chat-llm-claude--message-role role))
+                  (content . ,(chat-llm-claude--content-for msg)))
+                normal-messages)))))
     (let ((request
            (list :model (or (plist-get options :model)
                             (plist-get config :model))
@@ -72,7 +106,25 @@
         (setq request
               (plist-put request :system
                          (mapconcat #'identity (nreverse system-lines) "\n\n"))))
+      (when tools
+        (setq request
+              (plist-put request :tools
+                         (chat-llm-claude--tools-from-openai tools))))
       request)))
+
+(defun chat-llm-claude--tools-from-openai (tools)
+  "Convert OpenAI-style TOOLS vector into Anthropic tool definitions."
+  (vconcat
+   (mapcar
+    (lambda (tool)
+      (let ((fn (or (chat-llm--field tool 'function) tool)))
+        (list :name (or (chat-llm--field fn 'name)
+                        (chat-llm--field tool 'name))
+              :description (or (chat-llm--field fn 'description) "")
+              :input_schema (or (chat-llm--field fn 'parameters)
+                                (list :type "object" :properties nil)))))
+    (if (vectorp tools) (append tools nil) tools))))
+
 (defun chat-llm-claude--parse-response (json-data)
   "Parse Claude response JSON-DATA."
   (when-let ((error-obj (cdr (assoc 'error json-data))))
@@ -84,8 +136,6 @@
     (dolist (block (if (vectorp blocks) (append blocks nil) blocks))
       (when (string= (cdr (assoc 'type block)) "text")
         (push (cdr (assoc 'text block)) texts)))
-    (unless texts
-      (error "Unexpected Claude response format: %s" (json-encode json-data)))
     (mapconcat #'identity (nreverse texts) "")))
 (defun chat-llm-claude--parse-stream-chunk (json-data)
   "Parse Claude stream chunk JSON-DATA."

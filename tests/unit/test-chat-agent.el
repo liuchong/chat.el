@@ -91,7 +91,7 @@ car collects the messages of every request."
       (should (= (car exec-counter) 1))
       (should (= (length (car calls)) 2))
       (let ((followup (car (last (cadr (car calls))))))
-        (should (eq (chat-message-role followup) :system))
+        (should (eq (chat-message-role followup) :tool))
         (should (string-match-p "echo:hi" (chat-message-content followup)))))))
 
 (ert-deftest chat-agent-retries-after-parse-error ()
@@ -188,6 +188,7 @@ car collects the messages of every request."
         (should (equal (plist-get end :tool-results)
                        (list chat-agent-truncated-tool-result-text))))
       (let ((followup (car (last (cadr (car calls))))))
+        (should (eq (chat-message-role followup) :tool))
         (should (string-match-p "truncated"
                                 (chat-message-content followup)))))))
 
@@ -269,6 +270,92 @@ car collects the messages of every request."
       (should (= (plist-get (car seen-options) :timeout) 300))
       (should (= (plist-get (cadr seen-options) :timeout) 60))
       (should (equal (plist-get (car seen-options) :temperature) 0.7)))))
+
+(ert-deftest chat-agent-executes-native-tool-calls ()
+  "Test provider tool_calls are executed and returned as :tool messages."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (exec-counter (list 0))
+        (calls (list nil))
+        (events nil))
+    (chat-agent-test--register-demo-tool exec-counter)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list (list :content ""
+                            :tool-calls (list (list :id "call-1"
+                                                    :name "demo-tool"
+                                                    :arguments '(("input" . "hi")))))
+                      '(:content "native done"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :on-event (lambda (event) (setq events (append events (list event))))))
+      (should (= (car exec-counter) 1))
+      (should (= (length (car calls)) 2))
+      (let* ((second (cadr (car calls)))
+             (assistant (nth 1 second))
+             (tool (nth 2 second)))
+        (should (eq (chat-message-role assistant) :assistant))
+        (should (equal (plist-get (car (chat-message-tool-calls assistant)) :name)
+                       "demo-tool"))
+        (should (eq (chat-message-role tool) :tool))
+        (should (string= (plist-get (chat-message-metadata tool) :tool-call-id)
+                         "call-1"))
+        (should (string-match-p "echo:hi" (chat-message-content tool))))
+      (should (eq (plist-get (car (last events)) :status) 'completed)))))
+
+(ert-deftest chat-agent-steer-and-follow-up-queues ()
+  "Test follow-up runs after the agent would otherwise stop."
+  (let ((calls (list nil))
+        (queued nil)
+        run)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "first")
+                  (:content "after follow-up"))
+                calls)))
+      (setq run (chat-agent-start
+                 (list :model 'kimi
+                       :messages (list (chat-agent-test--user-message))
+                       :on-event
+                       (lambda (event)
+                         (when (and (not queued)
+                                    (eq (plist-get event :type) 'response))
+                           (setq queued t)
+                           (chat-agent-follow-up
+                            (plist-get event :run)
+                            (make-chat-message
+                             :id "follow-1"
+                             :role :user
+                             :content "continue"
+                             :timestamp (current-time))))))))
+      (should (chat-agent-run-state-done run))
+      (should (= (length (car calls)) 2))
+      (should (string= (chat-message-content (car (last (cadr (car calls)))))
+                       "continue")))))
+
+(ert-deftest chat-agent-plugin-can-block-tool-calls ()
+  "Test before-tool-call hooks can block execution."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (exec-counter (list 0))
+        (chat-plugin-before-tool-call-functions
+         (list (lambda (_run _call)
+                 '(:block t :reason "blocked by plugin"))))
+        (calls (list nil)))
+    (chat-agent-test--register-demo-tool exec-counter)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list (list :content chat-agent-test--tool-call-json)
+                      '(:content "blocked noted"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))))
+      (should (= (car exec-counter) 0))
+      (let ((tool (car (last (cadr (car calls))))))
+        (should (eq (chat-message-role tool) :tool))
+        (should (string-match-p "blocked by plugin"
+                                (chat-message-content tool)))))))
 
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here

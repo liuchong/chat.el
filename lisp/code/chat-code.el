@@ -1758,12 +1758,9 @@ CONTENT-START marks the assistant response body."
                :max-steps chat-code-tool-loop-max-steps
                :followup-fn
                (lambda (processed)
-                 (if (and (null (plist-get processed :tool-calls))
-                          (plist-get processed :parse-error))
-                     chat-tool-caller-parse-error-followup-text
-                   (chat-code--tool-followup-message
-                    (plist-get processed :tool-calls)
-                    (plist-get processed :tool-results))))
+                 (when (and (null (plist-get processed :tool-calls))
+                            (plist-get processed :parse-error))
+                   chat-tool-caller-parse-error-followup-text))
                :request-options
                (append
                 (list :temperature 0.7

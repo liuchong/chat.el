@@ -67,7 +67,10 @@ Uses OpenAI-compatible format."
       (messages . ,(chat-llm--format-messages messages))
       (temperature . ,temperature)
       (max_tokens . ,max-tokens)
-      ,@(when stream `((stream . ,stream))))))
+      ,@(when stream `((stream . ,stream)))
+      ,@(when-let ((tools (plist-get options :tools)))
+          `((tools . ,tools)
+            (tool_choice . "auto"))))))
 
 (defun chat-llm-kimi-code--parse-response (json-data)
   "Parse Kimi Code API JSON-DATA response.
@@ -86,12 +89,11 @@ Handles OpenAI-compatible response format."
                             (if (vectorp choices)
                                 (aref choices 0)
                               (car choices))))
-         (message (and first-choice (cdr (assoc 'message first-choice))))
-         (content (and message (cdr (assoc 'content message)))))
-    (unless content
+         (message (and first-choice (cdr (assoc 'message first-choice)))))
+    (unless message
       (error "Unexpected response format: %s"
              (json-encode json-data)))
-    content))
+    (chat-llm--normalize-content (cdr (assoc 'content message)))))
 
 (defun chat-llm-kimi-code--parse-stream-chunk (json-data)
   "Parse a Kimi Code streaming chunk JSON-DATA.

@@ -147,22 +147,96 @@ Checks in order:
 ;; Request Building
 ;; ------------------------------------------------------------------
 
+(defun chat-llm--field (obj key)
+  "Return KEY from alist or plist OBJ."
+  (cond
+   ((null obj) nil)
+   ((consp (car-safe obj))
+    (or (cdr (assq key obj))
+        (cdr (assoc key obj))
+        (cdr (assoc (symbol-name key) obj))))
+   (t
+    (plist-get obj (intern (concat ":" (symbol-name key)))))))
+
+(defun chat-llm--tool-call-payload (call)
+  "Encode CALL as an OpenAI tool_calls item."
+  (let* ((name (or (plist-get call :name) ""))
+         (id (or (plist-get call :id) name))
+         (arguments (plist-get call :arguments))
+         (encoded (cond
+                   ((stringp arguments) arguments)
+                   (arguments (json-encode arguments))
+                   (t "{}"))))
+    `((id . ,id)
+      (type . "function")
+      (function . ((name . ,name)
+                   (arguments . ,encoded))))))
+
+(defun chat-llm--format-one-message (msg)
+  "Convert one chat-message MSG to a provider payload alist."
+  (let ((role (chat-message-role msg))
+        (content (or (chat-message-content msg) ""))
+        (calls (chat-message-tool-calls msg))
+        (metadata (chat-message-metadata msg)))
+    (cond
+     ((eq role :tool)
+      `((role . "tool")
+        (tool_call_id . ,(or (plist-get metadata :tool-call-id)
+                             (chat-message-id msg)
+                             "call"))
+        (content . ,content)))
+     ((and (eq role :assistant) calls)
+      `((role . "assistant")
+        (content . ,(if (string-blank-p content) json-null content))
+        (tool_calls . ,(vconcat (mapcar #'chat-llm--tool-call-payload
+                                        calls)))))
+     ((and (eq role :assistant) (string-blank-p content))
+      nil)
+     (t
+      `((role . ,(if (keywordp role)
+                     (substring (symbol-name role) 1)
+                   (symbol-name role)))
+        (content . ,content))))))
+
+(defun chat-llm--synthetic-tool-messages (msg)
+  "Expand persisted tool-results on assistant MSG into tool payloads.
+Kernel transcripts already store :tool messages, so those assistants
+have no tool-results field and this returns nil."
+  (when (and (eq (chat-message-role msg) :assistant)
+             (chat-message-tool-calls msg)
+             (chat-message-tool-results msg))
+    (let ((calls (chat-message-tool-calls msg))
+          (results (chat-message-tool-results msg))
+          (index 0)
+          out)
+      (while (and calls results)
+        (setq index (1+ index))
+        (let* ((call (car calls))
+               (id (or (plist-get call :id)
+                       (format "call-%d" index))))
+          (push `((role . "tool")
+                  (tool_call_id . ,id)
+                  (content . ,(or (car results) "")))
+                out))
+        (setq calls (cdr calls)
+              results (cdr results)))
+      (nreverse out))))
+
 (defun chat-llm--format-messages (messages)
   "Convert chat MESSAGE structs to API format.
-Filters out empty assistant messages which are not allowed by the API."
-  (vconcat
-   (delq nil
-         (mapcar (lambda (msg)
-                   (let ((role (chat-message-role msg))
-                         (content (chat-message-content msg)))
-                     ;; Skip empty assistant messages
-                     (when (or (not (eq role :assistant))
-                               (and content (not (string-blank-p content))))
-                       `((role . ,(if (keywordp role)
-                                     (substring (symbol-name role) 1)
-                                   (symbol-name role)))
-                         (content . ,(or content ""))))))
-                 messages))))
+This is the convertToLlm boundary: empty assistant messages are
+dropped, :tool messages keep tool_call_id, and assistant tool
+calls become provider tool_calls.  Persisted assistant messages
+that still store tool-results on the same struct are expanded
+into tool role messages."
+  (let (out)
+    (dolist (msg messages)
+      (let ((formatted (chat-llm--format-one-message msg)))
+        (when formatted
+          (push formatted out)))
+      (dolist (tool-msg (chat-llm--synthetic-tool-messages msg))
+        (push tool-msg out)))
+    (vconcat (nreverse out))))
 
 (defun chat-llm--request-builder (config)
   "Return the request builder function from CONFIG."
@@ -454,6 +528,76 @@ ERROR receives a string message."
     (_
      (chat-llm--post-async url headers body success error timeout-secs))))
 
+(defun chat-llm--json-list (value)
+  "Normalize VALUE to a list when it is a vector."
+  (cond
+   ((vectorp value) (append value nil))
+   ((listp value) value)
+   (t nil)))
+
+(defun chat-llm--parse-tool-arguments (arguments)
+  "Parse tool ARGUMENTS from a JSON string or alist."
+  (cond
+   ((stringp arguments)
+    (condition-case nil
+        (let ((json-object-type 'alist)
+              (json-array-type 'list)
+              (json-key-type 'string))
+          (json-read-from-string arguments))
+      (error nil)))
+   ((listp arguments) arguments)
+   (t nil)))
+
+(defun chat-llm--normalize-tool-call (id name arguments)
+  "Return a tool-call plist for ID, NAME, and ARGUMENTS."
+  (when (and (stringp name) (not (string-empty-p name)))
+    (list :id (or (and (stringp id) id)
+                  (format "call-%s" name))
+          :name name
+          :arguments (or (chat-llm--parse-tool-arguments arguments) nil))))
+
+(defun chat-llm--extract-openai-tool-calls (json-data)
+  "Extract OpenAI-style tool_calls from JSON-DATA."
+  (let* ((choices (chat-llm--json-list (cdr (assoc 'choices json-data))))
+         (first (car choices))
+         (message (and first (cdr (assoc 'message first))))
+         (calls (and message (chat-llm--json-list
+                              (cdr (assoc 'tool_calls message)))))
+         out)
+    (dolist (call calls)
+      (let* ((function (cdr (assoc 'function call)))
+             (normalized
+              (chat-llm--normalize-tool-call
+               (cdr (assoc 'id call))
+               (or (and function (cdr (assoc 'name function)))
+                   (cdr (assoc 'name call)))
+               (or (and function (cdr (assoc 'arguments function)))
+                   (cdr (assoc 'arguments call))
+                   (cdr (assoc 'input call))))))
+        (when normalized
+          (push normalized out))))
+    (nreverse out)))
+
+(defun chat-llm--extract-anthropic-tool-calls (json-data)
+  "Extract Anthropic tool_use blocks from JSON-DATA."
+  (let ((blocks (chat-llm--json-list (cdr (assoc 'content json-data))))
+        out)
+    (dolist (block blocks)
+      (when (equal (cdr (assoc 'type block)) "tool_use")
+        (let ((normalized
+               (chat-llm--normalize-tool-call
+                (cdr (assoc 'id block))
+                (cdr (assoc 'name block))
+                (cdr (assoc 'input block)))))
+          (when normalized
+            (push normalized out)))))
+    (nreverse out)))
+
+(defun chat-llm--extract-tool-calls (json-data)
+  "Extract native tool calls from OpenAI or Anthropic JSON-DATA."
+  (or (chat-llm--extract-openai-tool-calls json-data)
+      (chat-llm--extract-anthropic-tool-calls json-data)))
+
 (defun chat-llm--extract-finish-reason (json-data)
   "Extract the finish reason from JSON-DATA, or nil.
 Handles the OpenAI style `finish_reason' inside choices and the
@@ -483,6 +627,7 @@ Anthropic style top level `stop_reason', normalizing
         (error "HTTP error %d: %s" status-code raw-response)
       (let ((json-data (json-read-from-string raw-response)))
         (list :content (funcall parser json-data)
+              :tool-calls (chat-llm--extract-tool-calls json-data)
               :finish-reason (chat-llm--extract-finish-reason json-data)
               :raw-request raw-request
               :raw-response raw-response)))))
@@ -637,6 +782,15 @@ OPTIONS is an optional plist of request parameters."
      (error "%s" err))
    (plist-put (copy-tree options) :stream t)))
 
+(defun chat-llm--normalize-content (content)
+  "Return CONTENT as a string, treating JSON null as empty."
+  (cond
+   ((null content) "")
+   ((eq content json-null) "")
+   ((eq content :json-null) "")
+   ((stringp content) content)
+   (t (error "Unexpected message content: %S" content))))
+
 (defun chat-llm--default-parse-response (json-data)
   "Default response parser for JSON-DATA."
   ;; Check for API error response
@@ -650,12 +804,11 @@ OPTIONS is an optional plist of request parameters."
                             (if (vectorp choices)
                                 (aref choices 0)
                               (car choices))))
-         (message (and first-choice (cdr (assoc 'message first-choice))))
-         (content (and message (cdr (assoc 'content message)))))
-    (unless content
-      (error "Unexpected response format: %s" 
+         (message (and first-choice (cdr (assoc 'message first-choice)))))
+    (unless message
+      (error "Unexpected response format: %s"
              (json-encode json-data)))
-    content))
+    (chat-llm--normalize-content (cdr (assoc 'content message)))))
 
 (defun chat-llm-build-openai-compatible-request (provider messages options)
   "Build an OpenAI compatible request for PROVIDER."
@@ -666,11 +819,15 @@ OPTIONS is an optional plist of request parameters."
          (max-tokens (or (plist-get options :max-tokens)
                          (plist-get config :max-output-tokens)))
          (stream (plist-get options :stream)))
-    (list :model model
-          :messages (chat-llm--format-messages messages)
-          :temperature temperature
-          :max_tokens max-tokens
-          :stream stream)))
+    (let ((payload (list :model model
+                         :messages (chat-llm--format-messages messages)
+                         :temperature temperature
+                         :max_tokens max-tokens
+                         :stream stream))
+          (tools (plist-get options :tools)))
+      (if tools
+          (append payload (list :tools tools :tool_choice "auto"))
+        payload))))
 
 (defun chat-llm-parse-openai-compatible-response (json-data)
   "Parse an OpenAI compatible response from JSON-DATA."

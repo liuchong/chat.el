@@ -44,7 +44,9 @@
                       "lisp/tools"
                       "lisp/ui"
                       "lisp/code"
-                      "lisp/wiki")))
+                      "lisp/wiki"
+                      "lisp/agent"
+                      "lisp/plugin")))
   (dolist (dir module-dirs)
     (add-to-list 'load-path (expand-file-name dir chat-root))))
 
@@ -96,6 +98,13 @@
 
 ;; Load the agent kernel after transports and tooling.
 (require 'chat-agent)
+
+;; Plugin host: Emacs-native tools and optional user plugins.
+(require 'chat-plugin)
+(require 'chat-plugin-emacs)
+(chat-plugin-provide 'tools t)
+(chat-plugin-start-enabled)
+(chat-plugin-load-user-files)
 
 ;; Load UI after tooling has been registered.
 (require 'chat-request-panel)

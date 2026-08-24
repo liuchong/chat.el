@@ -82,6 +82,44 @@ model knows content is missing."
           (or (chat-forged-tool-description tool) "No description")
           (chat-tool-caller--tool-argument-spec tool)))
 
+(defun chat-tool-caller--json-schema (tool)
+  "Return an OpenAI-style JSON schema alist for TOOL parameters."
+  (let ((params (chat-forged-tool-parameters tool))
+        properties
+        required)
+    (cond
+     ((and (listp params) params)
+      (dolist (param params)
+        (let ((name (plist-get param :name))
+              (type (or (plist-get param :type) "string"))
+              (desc (or (plist-get param :description) "")))
+          (push (cons name `((type . ,type) (description . ,desc))) properties)
+          (when (plist-get param :required)
+            (push name required))))
+      `((type . "object")
+        (properties . ,(nreverse properties))
+        (required . ,(vconcat (nreverse required)))))
+     (t
+      `((type . "object")
+        (properties . (("input" . ((type . "string")
+                                   (description . "Tool input")))))
+        (required . ["input"]))))))
+
+(defun chat-tool-caller-provider-tools ()
+  "Return provider tool definitions for currently available tools.
+The vector is empty when tool calling is disabled."
+  (when chat-tool-caller-enabled
+    (let (defs)
+      (dolist (tool (chat-tool-caller--available-tools))
+        (push `((type . "function")
+                (function . ((name . ,(symbol-name (chat-forged-tool-id tool)))
+                             (description . ,(or (chat-forged-tool-description tool)
+                                                 ""))
+                             (parameters . ,(chat-tool-caller--json-schema tool)))))
+              defs))
+      (when defs
+        (vconcat (nreverse defs))))))
+
 (defun chat-tool-caller--tool-usage-guidance ()
   "Return human readable usage guidance for built in tools."
   (mapconcat
@@ -116,10 +154,11 @@ model knows content is missing."
           (concat
            base
          "\n\n"
-         "You can call one tool per response when it is necessary.\n"
-         "If a tool is needed, respond with only one JSON object and no markdown.\n"
-         "After a tool runs, the system will send the tool result back to you.\n"
-         "You may then either answer normally or call one more tool.\n"
+         "You can call tools when they are necessary.\n"
+         "Prefer the provider tool-calling API. Multiple tools may be issued in one response.\n"
+         "If the provider has no tool API, respond with JSON objects of the form below.\n"
+         "After a tool runs, the system will send the tool result back to you as a tool message.\n"
+         "You may then either answer normally or call more tools.\n"
          "Some tools may require user approval before execution.\n"
          "Read files before editing them.\n"
          "Use `open_file` when the user wants you to open a relevant file in Emacs.\n"
@@ -140,7 +179,8 @@ model knows content is missing."
          "+new line\n"
          "*** End Patch\n"
          "Rules:\n"
-         "- Use exactly one tool name from the list below.\n"
+         "- Use only tool names from the list below.\n"
+         "- You may issue multiple tool calls in one response.\n"
          "- Use the exact argument names shown for that tool.\n"
          "- Do not rename keys.\n"
          "- Do not print raw file contents in chat when a write tool should be used.\n"

@@ -381,5 +381,30 @@
     (should-not (plist-get plain :parse-error))
     (should-not (plist-get valid :parse-error))))
 
+(ert-deftest chat-tool-caller-provider-tools-are-json-objects ()
+  "Test provider tool schemas encode as JSON objects, not arrays."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'demo-tool
+      :name "Demo Tool"
+      :description "Echo one argument"
+      :language 'elisp
+      :parameters '((:name "input" :type "string" :required t))
+      :compiled-function (lambda (input) input)
+      :is-active t
+      :usage-count 0))
+    (let* ((tools (chat-tool-caller-provider-tools))
+           (encoded (json-encode tools))
+           (decoded (let ((json-object-type 'alist)
+                          (json-array-type 'list)
+                          (json-key-type 'string))
+                      (json-read-from-string encoded))))
+      (should (arrayp tools))
+      (should (string-match-p "\"demo-tool\"" encoded))
+      (should (string-match-p "\"type\":\"function\"" encoded))
+      (should (stringp (cdr (assoc "name"
+                                   (cdr (assoc "function" (car decoded))))))))))
+
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

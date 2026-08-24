@@ -90,7 +90,107 @@ Handles format: data: {...} or data:{...} (with or without space)"
          (content (and (listp delta)
                        (or (cdr (assoc 'content delta))
                            (cdr (assoc "content" delta))))))
-    content))
+    (and (stringp content) content)))
+
+(defun chat-stream--alist-get (alist key)
+  "Return KEY from ALIST, accepting symbol or string keys."
+  (or (cdr (assq key alist))
+      (cdr (assoc key alist))
+      (cdr (assoc (symbol-name key) alist))))
+
+(defun chat-stream--ensure-call-acc (acc index)
+  "Grow ACC so INDEX is a valid slot."
+  (let ((vec (or acc (vector))))
+    (while (<= (length vec) index)
+      (setq vec (vconcat vec (vector (list :id nil :name nil :arguments "")))))
+    vec))
+
+(defun chat-stream--merge-tool-call-delta (acc call)
+  "Merge one streamed CALL into ACC and return the new vector."
+  (let* ((index (or (chat-stream--alist-get call 'index) 0))
+         (function (chat-stream--alist-get call 'function))
+         (id (chat-stream--alist-get call 'id))
+         (name (or (and (listp function) (chat-stream--alist-get function 'name))
+                   (chat-stream--alist-get call 'name)))
+         (arguments (or (and (listp function)
+                             (chat-stream--alist-get function 'arguments))
+                        (chat-stream--alist-get call 'arguments)
+                        ""))
+         (vec (chat-stream--ensure-call-acc acc index))
+         (current (aref vec index)))
+    (when (and (stringp id) (not (string-empty-p id)))
+      (setq current (plist-put current :id id)))
+    (when (and (stringp name) (not (string-empty-p name)))
+      (setq current (plist-put current :name name)))
+    (when (stringp arguments)
+      (setq current (plist-put current :arguments
+                               (concat (or (plist-get current :arguments) "")
+                                       arguments))))
+    (aset vec index current)
+    vec))
+
+(defun chat-stream-accumulate-payload (proc json-string)
+  "Accumulate native tool calls and finish_reason from JSON-STRING onto PROC."
+  (when (and proc (stringp json-string) (not (string-empty-p json-string)))
+    (condition-case nil
+        (let* ((json-object-type 'alist)
+               (json-array-type 'list)
+               (json-key-type 'symbol)
+               (data (json-read-from-string json-string))
+               (choices (chat-stream--alist-get data 'choices))
+               (first (car-safe choices))
+               (delta (and (listp first) (chat-stream--alist-get first 'delta)))
+               (reason (or (and (listp first)
+                                (chat-stream--alist-get first 'finish_reason))
+                           (chat-stream--alist-get data 'stop_reason)))
+               (calls (or (and (listp delta)
+                               (chat-stream--alist-get delta 'tool_calls))
+                          (and (listp first)
+                               (let ((message (chat-stream--alist-get first 'message)))
+                                 (and (listp message)
+                                      (chat-stream--alist-get message 'tool_calls)))))))
+          (when (and (stringp reason) (not (string-empty-p reason)))
+            (process-put proc 'chat-stream-finish-reason
+                         (if (equal reason "max_tokens") "length" reason)))
+          (dolist (call (if (listp calls) calls nil))
+            (when (listp call)
+              (process-put proc 'chat-stream-tool-calls-acc
+                           (chat-stream--merge-tool-call-delta
+                            (process-get proc 'chat-stream-tool-calls-acc)
+                            call)))))
+      (error nil))))
+
+(defun chat-stream--parse-arguments (raw)
+  "Parse streamed tool ARGUMENTS JSON into an alist."
+  (cond
+   ((and (stringp raw) (not (string-empty-p raw)))
+    (condition-case nil
+        (let ((json-object-type 'alist)
+              (json-array-type 'list)
+              (json-key-type 'string))
+          (json-read-from-string raw))
+      (error nil)))
+   ((listp raw) raw)
+   (t nil)))
+
+(defun chat-stream-native-result (proc)
+  "Return accumulated native tool-calls and finish-reason from PROC."
+  (let* ((acc (and proc (process-get proc 'chat-stream-tool-calls-acc)))
+         (reason (and proc (process-get proc 'chat-stream-finish-reason)))
+         (calls nil))
+    (when acc
+      (dotimes (index (length acc))
+        (let* ((item (aref acc index))
+               (name (plist-get item :name))
+               (raw (plist-get item :arguments)))
+          (when (and (stringp name) (not (string-empty-p name)))
+            (push (list :id (or (plist-get item :id)
+                                (format "call-%d" (1+ index)))
+                        :name name
+                        :arguments (or (chat-stream--parse-arguments raw) nil))
+                  calls)))))
+    (append (when calls (list :tool-calls (nreverse calls)))
+            (when reason (list :finish-reason reason)))))
 
 ;; ------------------------------------------------------------------
 ;; Buffer Insertion
@@ -227,8 +327,9 @@ Returns the process object."
               (let ((clean-line (string-trim-right line "\r")))
                 (if (chat-stream--parse-sse-line clean-line)
                     (let ((data (chat-stream--parse-sse-line clean-line)))
+                      (chat-stream-accumulate-payload proc data)
                       (let ((content (chat-stream--extract-content data provider)))
-                        (when content
+                        (when (and (stringp content) (not (string-empty-p content)))
                           (when request-id
                             (chat-request-diagnostics-record
                              request-id

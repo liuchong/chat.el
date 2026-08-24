@@ -8,26 +8,24 @@
 
 ## Doing Now
 
-The unified agent kernel plan (phases 1-8) is complete. Plain chat
-and code mode both run on `lisp/core/chat-agent.el`; shell execution
-is async with timeout and output spill; replace matching has a fuzzy
-cascade; diffs are real unified hunks; sessions are append-only
-JSONL with memory.md support; AGENTS.md discovery stacks ancestors;
-streaming renders are differential with markdown-lite styling.
-493 tests passing.
+The agent kernel is extracted to `lisp/agent/` and covers the PI loop
+contract: native `tool_calls`, JSON-in-text fallback, `:tool` transcript
+messages, truncated refusal, steer/follow-up queues, and plugin hooks.
+The emacs plugin exposes live buffers, imenu, xref, and project.el as
+read-only tools. Suite: 519 tests passing.
 
 ## Not Doing Now
 
-- No rollback to the legacy `docs/ai-contexts/` workflow
-- No parallel tool execution (interactive approval requires serial)
+- No DI kernel or contribution-point framework
+- No parallel file-tool execution (Emacs is single-threaded; approval stays serial)
 - No session tree branching
-- No security hardening passes unless they block a functional stage
+- User plugin files under `~/.chat/plugins/` stay off unless
+  `chat-plugin-load-user-directory` is set
+- Anthropic streaming tool_use deltas are not accumulated yet; OpenAI
+  compatible stream tool_calls are
 
 ## Immediate Next Step
 
-Real world usage validation of the new kernel path, then parity for
-the code-mode render path (differential render plus markdown-lite),
-and collapsible tool event blocks. Deferred security items from the
-deep review (log redaction, shell whitelist tightening, forge load
-checks, encode/backup output validation) can be scheduled when the
-user asks.
+Real world usage of native tool calling on Kimi/OpenAI/Claude, then
+optional extra emacs plugins (completion-at-point, flymake) when a
+concrete user path appears.

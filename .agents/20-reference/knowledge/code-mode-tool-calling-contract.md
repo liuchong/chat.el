@@ -19,8 +19,9 @@ Code mode drifts when it invents its own tool protocol, prompt rules, or tool re
 ## Resolution
 
 - Reuse the shared JSON tool-calling prompt contract
-- Route code mode response finalization through the same processed tool result model
+- Route tool results through `:tool` messages with `tool-call-id`
 - Keep code-mode-specific guidance limited to guardrails, editing protocol, and project-root context
+- Do not inject a second system summary of the same tool results
 
 ## Regression Guard
 

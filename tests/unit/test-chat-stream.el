@@ -151,5 +151,30 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-accumulates-native-tool-calls ()
+  "Test streamed tool_call deltas are merged into a native result."
+  (let ((buffer (generate-new-buffer " *chat-stream-tools*"))
+        (proc nil))
+    (unwind-protect
+        (progn
+          (setq proc (start-process "chat-stream-tools" buffer "true"))
+          (chat-stream-accumulate-payload
+           proc
+           "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"demo-tool\",\"arguments\":\"{\\\"in\"}}]}}]}")
+          (chat-stream-accumulate-payload
+           proc
+           "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"put\\\":\\\"hi\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}")
+          (let ((result (chat-stream-native-result proc)))
+            (should (string= (plist-get result :finish-reason) "tool_calls"))
+            (should (= (length (plist-get result :tool-calls)) 1))
+            (should (string= (plist-get (car (plist-get result :tool-calls)) :name)
+                             "demo-tool"))
+            (should (equal (plist-get (car (plist-get result :tool-calls)) :arguments)
+                           '(("input" . "hi"))))))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

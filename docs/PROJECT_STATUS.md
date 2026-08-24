@@ -1,13 +1,14 @@
 # Project Status
 
-Last updated: 2026-04-24
+Last updated: 2026-08-24
 
 ## Summary
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
-The core chat flow, tool calling flow, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
+The core chat flow, native and JSON tool calling, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
-Runtime source files now live under `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
+Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
+The agent loop is extracted from UI and code mode. Tool results reenter the transcript as `:tool` messages. Emacs-native read-only tools are registered through the plugin host.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
 
@@ -30,11 +31,11 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 ### Tool Calling
 
-- one tool per turn JSON contract
-- built in file tools registration
+- provider tool calling plus JSON-in-text fallback
+- built in file tools and Emacs buffer/imenu/xref/project tools
 - approval for risky tool execution
 - bounded follow up tool loop
-- tool results fed back into later model turns
+- tool results fed back as `:tool` messages
 
 ### File Operations
 
@@ -198,7 +199,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 | File | Area |
 |------|------|
-| `chat.el` | entry point |
+| `lisp/agent/chat-agent.el` | agent kernel |
+| `lisp/core/chat-agent.el` | load-path shim |
+| `lisp/plugin/chat-plugin.el` | plugin host |
 | `lisp/ui/chat-ui.el` | UI and response lifecycle |
 | `lisp/core/chat-session.el` | persistence |
 | `lisp/llm/chat-llm.el` | provider abstraction |

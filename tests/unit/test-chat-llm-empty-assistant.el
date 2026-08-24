@@ -50,5 +50,18 @@ This is a regression test for HTTP 400 error:
     ;; User messages can be empty, only assistant is restricted
     (should (>= (length formatted) 1))))
 
+(ert-deftest chat-llm-keeps-empty-assistant-with-tool-calls ()
+  "Test empty assistant content is kept when native tool calls exist."
+  (let* ((messages (list
+                    (make-chat-message :id "1" :role :user :content "Call it"
+                                       :timestamp (current-time))
+                    (make-chat-message :id "2" :role :assistant :content ""
+                                       :tool-calls '((:id "c1" :name "demo-tool"
+                                                     :arguments (("input" . "x"))))
+                                       :timestamp (current-time))))
+         (formatted (chat-llm--format-messages messages)))
+    (should (= (length formatted) 2))
+    (should (assoc 'tool_calls (aref formatted 1)))))
+
 (provide 'test-chat-llm-empty-assistant)
 ;;; test-chat-llm-empty-assistant.el ends here
