@@ -47,6 +47,14 @@ next turn cannot pair `tool_call_id` with results.
   calls so a cancelled batch cannot continue to later tools
 - Streaming completion emits `stream-result` before the normal result
   path, carrying accumulated text plus native tool metadata
+- Streaming normalization covers text, typed reasoning deltas, native
+  tool starts/input fragments, nested stop reasons, and terminal provider
+  errors. `max_tokens` maps to `length` before tool execution checks.
+- Tool batches preserve provider order in their result vector. Only
+  asynchronous, non-conflicting reads may overlap; write/destructive and
+  approval-bearing calls carry exclusive scheduler accesses.
+- Cancelling a run must invoke every active asynchronous tool handle and
+  prevent late callbacks from appending transcript messages.
 - Persist assistants that still store `tool-results` on the same struct
   are expanded at the convertToLlm boundary so older sessions keep working
 - Native zero-argument tool schemas encode as an empty object with empty
@@ -95,10 +103,12 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-agent.el` covers JSON tools, native tools,
   truncated refusal, parse-error follow-up, no-tool steer, follow-up,
   context transforms, next-turn prepare hooks, queue order, cancellation
-  callbacks, cancelled batches, and plugin block hooks
+  callbacks, cancelled batches, async read overlap, ordered results,
+  write serialization, async handle cancellation, and plugin block hooks
 - `tests/unit/test-chat-llm.el` covers tool role payloads, persisted
   result expansion, null content, and OpenAI `tool_calls` decode
-- `tests/unit/test-chat-stream.el` covers streamed tool_call merging
+- `tests/unit/test-chat-stream.el` covers streamed tool-call merging,
+  reasoning, nested stop reasons, and terminal provider errors
 - `tests/unit/test-chat-ui.el` and `tests/unit/test-chat-code.el` cover
   ordered transcript persistence and active-run input steering
 - `tests/unit/test-chat-plugin.el` covers buffer privacy scope plus

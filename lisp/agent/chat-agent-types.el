@@ -12,7 +12,7 @@
 ;; Event types delivered through :on-event:
 ;;
 ;;   agent-start  context-transformed  turn-start  stream-chunk
-;;   stream-result  tool-batch-start  tool-event  tool-batch-end
+;;   stream-reasoning  stream-result  tool-batch-start  tool-event  tool-batch-end
 ;;   message-appended  truncated  response  followup  steering
 ;;   prepared-next-turn  error  agent-end
 ;;

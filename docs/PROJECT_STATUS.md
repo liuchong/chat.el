@@ -104,8 +104,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 564 regression tests discovered
-- 564 passing
+- 569 regression tests discovered
+- 569 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -160,6 +160,11 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - active chat and code-mode input now steers the running agent instead of being rejected when a response is in progress
 - agent runs now support per-step context transforms, next-turn prepare hooks, FIFO/LIFO queue delivery, cancel callbacks, and tool-batch cancellation before later tools run
 - streaming completion now emits a normalized `stream-result` event carrying accumulated text and native tool metadata before regular result handling
+- stream normalization now also carries typed reasoning, native partial
+  tool input, nested stop reasons, and terminal provider errors
+- tool batches preserve provider result order, overlap only
+  non-conflicting asynchronous reads, serialize writes and approvals,
+  and cancel active asynchronous handles with the parent run
 - native provider schemas now encode zero-argument tools as empty objects and forged-tool parameter schemas survive reload
 - runtime tool calls now enforce required fields, JSON types,
   enumerations, and unknown-field rejection before execution

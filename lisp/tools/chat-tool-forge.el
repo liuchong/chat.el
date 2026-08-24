@@ -60,6 +60,8 @@
   sensitivity           ; Data sensitivity: public/project/personal/etc.
   effects               ; Effects: read/write/outbound/destructive
   approval-predicate    ; Optional function called with tool call data
+  async-function        ; Optional (ARGS SUCCESS ERROR) asynchronous runner
+  resource-function     ; Optional function mapping a call to resource accesses
   version               ; Tool version
   created-at            ; Creation timestamp
   updated-at            ; Last update timestamp

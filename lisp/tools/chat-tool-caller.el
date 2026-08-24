@@ -544,6 +544,129 @@ enumerated values."
   (or (chat-tool-caller--code-project-root)
       default-directory))
 
+(defun chat-tool-caller-call-tool (call)
+  "Return the registered tool targeted by CALL."
+  (let ((tool-id (intern (plist-get call :name))))
+    (or (chat-tool-forge-get tool-id)
+        (when (and (eq tool-id 'shell_execute)
+                   (require 'chat-tool-shell nil t))
+          (chat-tool-forge-get tool-id)))))
+
+(defun chat-tool-caller-call-approval-required-p (call)
+  "Return non-nil when CALL requires serialized approval."
+  (when-let ((tool (chat-tool-caller-call-tool call)))
+    (chat-approval-tool-required-p tool call)))
+
+(defun chat-tool-caller-call-resource-accesses (call)
+  "Return resource access plists for scheduling CALL.
+An access contains :resource, :mode, and optional :exclusive."
+  (let* ((tool (chat-tool-caller-call-tool call))
+         (resource-fn (and tool (chat-forged-tool-resource-function tool)))
+         (effects (and tool (chat-forged-tool-effects tool)))
+         (tool-id (and tool (chat-forged-tool-id tool)))
+         (approval (and tool
+                        (chat-approval-tool-required-p tool call)))
+         accesses)
+    (when resource-fn
+      (setq accesses (funcall resource-fn call)))
+    (when (seq-some (lambda (effect)
+                      (memq effect '(write destructive)))
+                    effects)
+      (push '(:resource "global-write" :mode write :exclusive t) accesses))
+    (when approval
+      (push '(:resource "approval" :mode write :exclusive t) accesses))
+    (unless accesses
+      (push (list :resource (format "tool:%s" tool-id)
+                  :mode 'read)
+            accesses))
+    (nreverse accesses)))
+
+(defun chat-tool-caller-cancel-handle (handle)
+  "Cancel asynchronous tool HANDLE when possible."
+  (cond
+   ((functionp handle)
+    (ignore-errors (funcall handle)))
+   ((processp handle)
+    (when (process-live-p handle)
+      (delete-process handle)))
+   ((and (consp handle) (functionp (plist-get handle :cancel)))
+    (ignore-errors (funcall (plist-get handle :cancel))))))
+
+(defun chat-tool-caller-execute-async
+    (call session observer success error-callback)
+  "Execute CALL and invoke SUCCESS or ERROR-CALLBACK.
+Tools without an asynchronous runner complete synchronously through the
+normal execution path. Asynchronous runners receive ARGV, SUCCESS, and
+ERROR-CALLBACK and return a cancellable handle."
+  (let ((tool (chat-tool-caller-call-tool call)))
+    (if (not (and tool (chat-forged-tool-async-function tool)))
+        (funcall success (chat-tool-caller-execute call session observer))
+      (let* ((name (plist-get call :name))
+             (arguments (plist-get call :arguments))
+             (tool-id (chat-forged-tool-id tool))
+             (actual-session (or session
+                                 (when (boundp 'chat--current-session)
+                                   chat--current-session))))
+        (condition-case err
+            (let ((chat-tool-caller-current-session actual-session)
+                  (chat-files-allowed-directories
+                   (chat-tool-caller--allowed-directories))
+                  (default-directory
+                   (file-name-as-directory
+                    (chat-files--resolved-path
+                     (chat-tool-caller--execution-directory)))))
+              (chat-tool-caller--notify
+               observer
+               (append (list :type 'tool-call
+                             :tool name
+                             :arguments arguments)
+                       (chat-tool-caller--permission-metadata tool)))
+              (unless (chat-session-tool-enabled-p actual-session tool-id)
+                (error "Tool '%s' is disabled for this session" name))
+              (let ((argv (chat-tool-caller--arguments-to-argv tool arguments)))
+                (if (not (chat-approval-request-tool-call
+                          tool call actual-session observer))
+                    (let ((text (format "Approval denied for tool '%s'" name)))
+                      (chat-tool-caller--notify
+                       observer
+                       (list :type 'tool-error
+                             :tool name
+                             :result-summary text))
+                      (funcall error-callback text))
+                  (cl-incf (chat-forged-tool-usage-count tool))
+                  (funcall
+                   (chat-forged-tool-async-function tool)
+                   argv
+                   (lambda (result)
+                     (let ((text (chat-tool-caller--stringify-result result)))
+                       (chat-tool-caller--notify
+                        observer
+                        (list :type 'tool-result
+                              :tool name
+                              :result-summary
+                              (chat-tool-caller--tool-result-summary text)))
+                       (funcall success text)))
+                   (lambda (message)
+                     (let ((text (format "Error executing tool '%s': %s"
+                                         name message)))
+                       (chat-tool-caller--notify
+                        observer
+                        (list :type 'tool-error
+                              :tool name
+                              :result-summary
+                              (chat-tool-caller--compact-text text)))
+                       (funcall error-callback text)))))))
+          (error
+           (let ((text (format "Error executing tool '%s': %s"
+                               name (error-message-string err))))
+             (chat-tool-caller--notify
+              observer
+              (list :type 'tool-error
+                    :tool name
+                    :result-summary
+                    (chat-tool-caller--compact-text text)))
+             (funcall error-callback text))))))))
+
 (defun chat-tool-caller-execute (call &optional session observer)
   "Execute one parsed tool CALL.
 Optional SESSION is the current chat session for approval context.
@@ -551,10 +674,7 @@ If SESSION is nil, uses `chat--current-session' if bound."
   (let* ((name (plist-get call :name))
          (arguments (plist-get call :arguments))
          (tool-id (intern name))
-         (tool (or (chat-tool-forge-get tool-id)
-                   (when (and (eq tool-id 'shell_execute)
-                              (require 'chat-tool-shell nil t))
-                     (chat-tool-forge-get tool-id))))
+         (tool (chat-tool-caller-call-tool call))
          (actual-session (or session
                              (when (boundp 'chat--current-session)
                                chat--current-session))))

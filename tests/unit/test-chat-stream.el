@@ -176,5 +176,57 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-accumulates-anthropic-tool-and-stop-deltas ()
+  "Test native tool input and nested stop reasons share the stream contract."
+  (let ((buffer (generate-new-buffer " *chat-stream-anthropic-tools*"))
+        proc)
+    (unwind-protect
+        (progn
+          (setq proc (start-process "chat-stream-anthropic-tools" buffer "true"))
+          (chat-stream-accumulate-payload
+           proc
+           "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"demo-tool\",\"input\":{}}}")
+          (chat-stream-accumulate-payload
+           proc
+           "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"input\\\":\\\"hi\\\"}\"}}")
+          (chat-stream-accumulate-payload
+           proc
+           "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}")
+          (let* ((result (chat-stream-native-result proc))
+                 (call (car (plist-get result :tool-calls))))
+            (should (equal (plist-get result :finish-reason) "length"))
+            (should (equal (plist-get call :id) "tool-1"))
+            (should (equal (plist-get call :name) "demo-tool"))
+            (should (equal (plist-get call :arguments)
+                           '(("input" . "hi"))))))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest chat-stream-accumulates-reasoning-and-terminal-errors ()
+  "Test reasoning deltas and provider error events remain typed."
+  (let ((buffer (generate-new-buffer " *chat-stream-reasoning*"))
+        proc)
+    (unwind-protect
+        (progn
+          (setq proc (start-process "chat-stream-reasoning" buffer "true"))
+          (chat-stream-accumulate-payload
+           proc
+           "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"check inputs\"}}")
+          (chat-stream-accumulate-payload
+           proc
+           "{\"type\":\"error\",\"error\":{\"message\":\"stream failed\"}}")
+          (should
+           (equal (plist-get (chat-stream-native-result proc) :reasoning)
+                  "check inputs"))
+          (should
+           (equal (process-get proc 'chat-stream-http-error)
+                  "stream failed")))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

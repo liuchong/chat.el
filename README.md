@@ -18,6 +18,10 @@
 
 `chat.el` is a pure Emacs AI chat client focused on coding workflows.
 It supports multi turn chat, ordered tool transcripts, file operations, session persistence, context trimming, streaming display, scoped plugin tools, and AI assisted tool forging.
+Streaming keeps visible text, reasoning, native tool input, stop reasons,
+and terminal errors as distinct events. Tool batches preserve provider
+order while allowing only non-conflicting asynchronous reads to overlap;
+writes and approvals remain serialized and cancellable.
 
 Copyright 2026 chat.el contributors.
 

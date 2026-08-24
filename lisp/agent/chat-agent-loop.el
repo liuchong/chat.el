@@ -5,8 +5,7 @@
 
 ;;; Commentary:
 
-;; Stateless-style loop driver for one agent run.  Mirrors
-;; packages/agent/src/agent-loop.ts:
+;; Stateless-style loop driver for one agent run:
 ;;
 ;;   inner: steering -> LLM turn -> tools (or refuse if truncated)
 ;;   outer: follow-up queue after the agent would otherwise stop
@@ -184,7 +183,8 @@
 
 (defun chat-agent--dispatch-stream (run)
   "Dispatch RUN through the streaming transport."
-  (let ((content-acc ""))
+  (let ((content-acc "")
+        (reasoning-acc ""))
     (let ((proc
            (chat-stream-request
             (chat-agent-run-state-model run)
@@ -195,7 +195,16 @@
                 (chat-agent--emit run 'stream-chunk
                                   :text chunk
                                   :content content-acc)))
-            (append (list :stream t)
+            (append (list :stream t
+                          :on-reasoning
+                          (lambda (chunk)
+                            (when (and chunk (> (length chunk) 0))
+                              (setq reasoning-acc
+                                    (concat reasoning-acc chunk))
+                              (chat-agent--emit
+                               run 'stream-reasoning
+                               :text chunk
+                               :reasoning reasoning-acc))))
                     (chat-agent--options-for-turn run)))))
       (setf (chat-agent-run-state-handle run) proc)
       (let ((inner (process-sentinel proc)))
@@ -215,7 +224,7 @@
                (chat-agent--finish run 'error message)))
             ((string-match-p "finished\\|exited" event)
              (let ((stream-error (process-get p 'chat-stream-http-error)))
-               (if (and stream-error (string-empty-p content-acc))
+               (if stream-error
                    (progn
                      (chat-agent--emit run 'error :message stream-error)
                      (chat-agent--finish run 'error stream-error))
@@ -224,6 +233,7 @@
                   (let ((native (chat-stream-native-result p)))
                     (chat-agent--emit run 'stream-result
                                       :content content-acc
+                                      :reasoning reasoning-acc
                                       :native native)
                     (append (list :content content-acc
                                   :raw-request nil
@@ -269,44 +279,215 @@
      :timestamp (current-time)
      :metadata (list :tool-call-id id :name name))))
 
-(defun chat-agent--execute-calls (run calls observer)
-  "Execute CALLS for RUN, notifying OBSERVER.
-Return a plist with :results and :cancelled."
-  (let ((results nil)
-        (index 0)
-        (cancelled nil))
-    (chat-agent--emit run 'tool-batch-start :count (length calls))
-    (dolist (call calls)
-      (unless cancelled
-        (if (chat-agent-run-state-cancelled run)
-            (setq cancelled t)
-          (setq index (1+ index))
-          (let* ((blocked (chat-agent--hook-until
-                           'chat-plugin-before-tool-call-functions
-                           run call))
-                 (result
-                  (cond
-                   ((and (listp blocked) (plist-get blocked :block))
-                    (or (plist-get blocked :reason)
-                        "Tool execution was blocked"))
-                   (t
-                    (chat-tool-caller-execute
-                     call
-                     (chat-agent-run-state-session run)
-                     (lambda (event)
-                       (let ((indexed (copy-tree event)))
-                         (setq indexed (plist-put indexed :index index))
-                         (funcall observer indexed))))))))
-            (chat-agent--hook-all
-             'chat-plugin-after-tool-call-functions run call result)
-            (push result results)
-            (when (chat-agent-run-state-cancelled run)
-              (setq cancelled t))))))
-    (chat-agent--emit run 'tool-batch-end
-                      :count index
-                      :cancelled cancelled)
-    (list :results (nreverse results)
-          :cancelled cancelled)))
+(defun chat-agent--resource-conflict-p (left right)
+  "Return non-nil when resource accesses LEFT and RIGHT conflict."
+  (or (plist-get left :exclusive)
+      (plist-get right :exclusive)
+      (and (equal (plist-get left :resource)
+                  (plist-get right :resource))
+           (or (eq (plist-get left :mode) 'write)
+               (eq (plist-get right :mode) 'write)))))
+
+(defun chat-agent--accesses-conflict-p (left right)
+  "Return non-nil when access lists LEFT and RIGHT conflict."
+  (seq-some
+   (lambda (a)
+     (seq-some (lambda (b) (chat-agent--resource-conflict-p a b))
+               right))
+   left))
+
+(defun chat-agent--execute-calls-async (run calls observer callback)
+  "Schedule CALLS for RUN and invoke CALLBACK with ordered results.
+Only asynchronous, non-conflicting calls overlap. Writes and calls that
+need approval carry exclusive accesses and therefore remain serialized."
+  (let* ((count (length calls))
+         (results (make-vector count nil))
+         (pending (cl-loop for call in calls
+                           for index from 0
+                           collect (cons index call)))
+         (running (make-hash-table :test 'eql))
+         (finished 0)
+         (cancelled nil)
+         (pumping nil)
+         (reported nil)
+         (report-fn nil)
+         (conflict-fn nil)
+         (complete-fn nil)
+         (launch-fn nil)
+         (pump-fn nil))
+    (chat-agent--emit run 'tool-batch-start :count count)
+    (setq
+     report-fn
+     (lambda ()
+       (unless reported
+         (setq reported t)
+         (chat-agent--emit run 'tool-batch-end
+                           :count finished
+                           :cancelled cancelled)
+         (funcall callback
+                  (list :results (append results nil)
+                        :cancelled cancelled))))
+     conflict-fn
+     (lambda (accesses)
+       (let (conflict)
+         (maphash
+          (lambda (_index job)
+            (when (chat-agent--accesses-conflict-p
+                   accesses (plist-get job :accesses))
+              (setq conflict t)))
+          running)
+         conflict))
+     complete-fn
+     (lambda (index call result)
+       (unless (aref results index)
+         (aset results index result)
+         (remhash index running)
+         (cl-incf finished)
+         (chat-agent--hook-all
+          'chat-plugin-after-tool-call-functions run call result))
+       (cond
+        ((or cancelled (chat-agent-run-state-cancelled run))
+         (setq cancelled t)
+         (funcall report-fn))
+        ((= finished count)
+         (funcall report-fn))
+        ((not pumping)
+         (funcall pump-fn))))
+     launch-fn
+     (lambda (entry accesses)
+       (let* ((index (car entry))
+              (call (cdr entry))
+              (display-index (1+ index))
+              (blocked (chat-agent--hook-until
+                        'chat-plugin-before-tool-call-functions
+                        run call)))
+         (puthash index (list :call call :accesses accesses :handle nil)
+                  running)
+         (if (and (listp blocked) (plist-get blocked :block))
+             (funcall complete-fn index call
+                      (or (plist-get blocked :reason)
+                          "Tool execution was blocked"))
+           (let ((handle
+                  (chat-tool-caller-execute-async
+                   call
+                   (chat-agent-run-state-session run)
+                   (lambda (event)
+                     (let ((indexed (copy-tree event)))
+                       (setq indexed
+                             (plist-put indexed :index display-index))
+                       (funcall observer indexed)))
+                   (lambda (result)
+                     (funcall complete-fn index call result))
+                   (lambda (result)
+                     (funcall complete-fn index call result)))))
+             (when-let ((job (gethash index running)))
+               (puthash index (plist-put job :handle handle) running))))))
+     pump-fn
+     (lambda ()
+       (unless (or reported cancelled)
+         (setq pumping t)
+         (unwind-protect
+             (let (launched)
+               (while
+                   (progn
+                     (setq launched nil)
+                     (let ((rest pending))
+                       (while (and rest (not launched))
+                         (let* ((entry (car rest))
+                                (accesses
+                                 (chat-tool-caller-call-resource-accesses
+                                  (cdr entry))))
+                           (if (funcall conflict-fn accesses)
+                               (setq rest (cdr rest))
+                             (setq pending (delq entry pending)
+                                   launched t)
+                             (funcall launch-fn entry accesses))))
+                       launched)))
+               (when (and (null pending)
+                          (zerop (hash-table-count running))
+                          (= finished count))
+                 (funcall report-fn)))
+           (setq pumping nil)))))
+    (chat-agent-add-cancel-function
+     run
+     (lambda (_run)
+       (setq cancelled t
+             pending nil)
+       (maphash
+        (lambda (_index job)
+          (chat-tool-caller-cancel-handle (plist-get job :handle)))
+        running)
+       (funcall report-fn)))
+    (if (zerop count)
+        (funcall report-fn)
+      (funcall pump-fn))))
+
+(defun chat-agent--complete-result (run result processed truncated)
+  "Commit PROCESSED transport RESULT for RUN.
+TRUNCATED is non-nil when tool calls were refused for length."
+  (when (plist-get processed :cancelled)
+    (chat-agent--finish run 'cancelled nil)
+    (cl-return-from chat-agent--complete-result nil))
+  (when truncated
+    (let ((calls (plist-get processed :tool-calls)))
+      (chat-agent--emit run 'truncated :count (length calls))
+      (dolist (call calls)
+        (chat-agent--emit run 'tool-event
+                          :event (list :type 'tool-error
+                                       :tool (plist-get call :name)
+                                       :result-summary
+                                       chat-agent-truncated-tool-result-text)))))
+  (chat-agent--append-message
+   run
+   (chat-agent--make-assistant-message
+    run
+    (plist-get processed :content)
+    (plist-get processed :tool-calls)
+    (plist-get result :raw-request)
+    (plist-get result :raw-response)))
+  (let ((calls (plist-get processed :tool-calls))
+        (results (plist-get processed :tool-results)))
+    (while (and calls results)
+      (chat-agent--append-message
+       run
+       (chat-agent--make-tool-message run (car calls) (car results)))
+      (setq calls (cdr calls)
+            results (cdr results))))
+  (setf (chat-agent-run-state-content run) (plist-get processed :content)
+        (chat-agent-run-state-tool-calls run)
+        (append (chat-agent-run-state-tool-calls run)
+                (plist-get processed :tool-calls))
+        (chat-agent-run-state-tool-results run)
+        (append (chat-agent-run-state-tool-results run)
+                (plist-get processed :tool-results))
+        (chat-agent-run-state-tool-events run)
+        (append (chat-agent-run-state-tool-events run)
+                (plist-get processed :tool-events)))
+  (chat-agent--emit run 'response :processed processed)
+  (chat-agent--hook-all 'chat-plugin-post-turn-functions run processed)
+  (chat-agent--prepare-next-turn run processed)
+  (cond
+   ((chat-agent-run-state-done run)
+    nil)
+   ((chat-agent--forced-stop-p run processed)
+    (chat-agent--finish run 'completed nil))
+   ((chat-agent-run-state-steering-queue run)
+    (chat-agent--turn run))
+   ((chat-agent--default-stop-p processed)
+    (let ((queued (chat-agent--queue-order
+                   run
+                   (chat-agent-run-state-followup-queue run))))
+      (setf (chat-agent-run-state-followup-queue run) nil)
+      (if queued
+          (progn
+            (setf (chat-agent-run-state-messages run)
+                  (append (chat-agent-run-state-messages run) queued))
+            (chat-agent--emit run 'followup :message (car queued))
+            (chat-agent--turn run))
+        (chat-agent--finish run 'completed nil))))
+   (t
+    (chat-agent--queue-followup run processed)
+    (chat-agent--turn run))))
 
 (defun chat-agent--handle-result (run result)
   "Process transport RESULT for RUN and continue or finish the loop."
@@ -315,105 +496,51 @@ Return a plist with :results and :cancelled."
   (let* ((content (or (plist-get result :content) ""))
          (calls (chat-agent--collect-tool-calls result content))
          (truncated (and (equal (plist-get result :finish-reason) "length")
-                         calls))
-         (tool-events nil)
-         (processed
-          (cond
-           (truncated
-            (list :content (string-trim-right
-                            (chat-tool-caller-extract-content content))
-                  :tool-calls calls
-                  :tool-results (mapcar
-                                 (lambda (_call)
-                                   chat-agent-truncated-tool-result-text)
-                                 calls)
-                  :tool-events nil
-                  :parse-error nil
-                  :truncated-tool-calls t))
-           (calls
-            (let* ((execution
-                    (chat-agent--execute-calls
-                     run calls
-                     (lambda (event)
-                       (push event tool-events)
-                       (chat-agent--emit run 'tool-event :event event))))
-                   (results (plist-get execution :results)))
-              (if (plist-get execution :cancelled)
-                  (list :cancelled t)
-                (list :content (string-trim-right
-                                (chat-tool-caller-extract-content content))
-                      :tool-calls calls
-                      :tool-results results
-                      :tool-events (nreverse tool-events)
-                      :parse-error nil))))
-           (t
-            (chat-tool-caller-process-response-data
-             content
-             (chat-agent-run-state-session run)
-             (lambda (event)
-               (chat-agent--emit run 'tool-event :event event)))))))
-    (when (plist-get processed :cancelled)
-      (chat-agent--finish run 'cancelled nil)
-      (cl-return-from chat-agent--handle-result nil))
-    (when truncated
-      (chat-agent--emit run 'truncated :count (length calls))
-      (dolist (call calls)
-        (chat-agent--emit run 'tool-event
-                          :event (list :type 'tool-error
-                                       :tool (plist-get call :name)
-                                       :result-summary
-                                       chat-agent-truncated-tool-result-text))))
-    (chat-agent--append-message
-     run
-     (chat-agent--make-assistant-message
-      run
-      (plist-get processed :content)
-      (plist-get processed :tool-calls)
-      (plist-get result :raw-request)
-      (plist-get result :raw-response)))
-    (let ((calls (plist-get processed :tool-calls))
-          (results (plist-get processed :tool-results)))
-      (while (and calls results)
-        (chat-agent--append-message
-         run
-         (chat-agent--make-tool-message run (car calls) (car results)))
-        (setq calls (cdr calls)
-              results (cdr results))))
-    (setf (chat-agent-run-state-content run) (plist-get processed :content)
-          (chat-agent-run-state-tool-calls run)
-          (append (chat-agent-run-state-tool-calls run)
-                  (plist-get processed :tool-calls))
-          (chat-agent-run-state-tool-results run)
-          (append (chat-agent-run-state-tool-results run)
-                  (plist-get processed :tool-results))
-          (chat-agent-run-state-tool-events run)
-          (append (chat-agent-run-state-tool-events run)
-                  (plist-get processed :tool-events)))
-    (chat-agent--emit run 'response :processed processed)
-    (chat-agent--hook-all 'chat-plugin-post-turn-functions run processed)
-    (chat-agent--prepare-next-turn run processed)
+                         calls)))
     (cond
-     ((chat-agent-run-state-done run)
-      nil)
-     ((chat-agent--forced-stop-p run processed)
-      (chat-agent--finish run 'completed nil))
-     ((chat-agent-run-state-steering-queue run)
-      (chat-agent--turn run))
-     ((chat-agent--default-stop-p processed)
-      (let ((queued (chat-agent--queue-order
-                     run
-                     (chat-agent-run-state-followup-queue run))))
-        (setf (chat-agent-run-state-followup-queue run) nil)
-        (if queued
-            (progn
-              (setf (chat-agent-run-state-messages run)
-                    (append (chat-agent-run-state-messages run) queued))
-              (chat-agent--emit run 'followup :message (car queued))
-              (chat-agent--turn run))
-          (chat-agent--finish run 'completed nil))))
+     (truncated
+      (chat-agent--complete-result
+       run result
+       (list :content (string-trim-right
+                       (chat-tool-caller-extract-content content))
+             :tool-calls calls
+             :tool-results
+             (mapcar (lambda (_call) chat-agent-truncated-tool-result-text)
+                     calls)
+             :tool-events nil
+             :parse-error nil
+             :truncated-tool-calls t)
+       t))
+     (calls
+      (let (tool-events)
+        (chat-agent--execute-calls-async
+         run calls
+         (lambda (event)
+           (push event tool-events)
+           (chat-agent--emit run 'tool-event :event event))
+         (lambda (execution)
+           (unless (chat-agent-run-state-done run)
+             (if (plist-get execution :cancelled)
+                 (chat-agent--finish run 'cancelled nil)
+               (chat-agent--complete-result
+                run result
+                (list :content
+                      (string-trim-right
+                       (chat-tool-caller-extract-content content))
+                      :tool-calls calls
+                      :tool-results (plist-get execution :results)
+                      :tool-events (nreverse tool-events)
+                      :parse-error nil)
+                nil)))))))
      (t
-      (chat-agent--queue-followup run processed)
-      (chat-agent--turn run)))))
+      (chat-agent--complete-result
+       run result
+       (chat-tool-caller-process-response-data
+        content
+        (chat-agent-run-state-session run)
+        (lambda (event)
+          (chat-agent--emit run 'tool-event :event event)))
+       nil)))))
 
 (defun chat-agent--queue-followup (run processed)
   "Queue parse-error or caller follow-up text after PROCESSED.

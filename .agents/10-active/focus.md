@@ -8,12 +8,12 @@
 
 ## Doing Now
 
-Stage 9 closes the foundation and shared permission contract gaps found
-by the execution audit. Runtime schemas reject invalid arguments before
-approval or execution. Sensitivity/effect metadata now enforces approval,
-and opted-in out-of-project buffer reads use a call-specific approval
-predicate. User plugin loading is allowlisted and ordered before startup.
-Canonical suite: 564 tests passing.
+Stage 10 closes the remaining kernel stream, scheduling, and in-flight
+cancellation gaps found by the execution audit. Native tool deltas,
+reasoning, stop reasons, and provider errors now share one stream result
+contract. Resource-aware asynchronous batches preserve result order,
+serialize writes and approvals, and cancel active tool handles.
+Canonical suite: 569 tests passing.
 
 ## Not Doing Now
 
@@ -26,5 +26,5 @@ Canonical suite: 564 tests passing.
 
 ## Immediate Next Step
 
-Complete the remaining kernel stream contract, cancellation propagation,
-and resource-access scheduler before advancing to session behavior.
+Close the remaining plugin runtime lifecycle and metadata persistence
+details before advancing to session behavior.

@@ -540,5 +540,132 @@ car collects the messages of every request."
         (should (string-match-p "blocked by plugin"
                                 (chat-message-content tool)))))))
 
+(ert-deftest chat-agent-scheduler-overlaps-reads-and-preserves-result-order ()
+  "Test independent async reads overlap while results keep provider order."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        callbacks
+        (transport-calls (list nil))
+        run)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'async-read
+      :name "Async Read"
+      :language 'elisp
+      :parameters '((:name "key" :type "string" :required t))
+      :effects '(read)
+      :resource-function
+      (lambda (call)
+        (list (list :resource
+                    (cdr (assoc "key" (plist-get call :arguments)))
+                    :mode 'read)))
+      :async-function
+      (lambda (argv success _error)
+        (push (cons (car argv) success) callbacks)
+        #'ignore)
+      :is-active t
+      :usage-count 0))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list
+                 (list :content ""
+                       :tool-calls
+                       '((:id "read-1" :name "async-read"
+                          :arguments (("key" . "one")))
+                         (:id "read-2" :name "async-read"
+                          :arguments (("key" . "two")))))
+                 '(:content "done"))
+                transport-calls)))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :messages (list (chat-agent-test--user-message)))))
+      (should (= (length callbacks) 2))
+      (funcall (cdr (assoc "two" callbacks)) "second")
+      (should-not (chat-agent-run-state-done run))
+      (funcall (cdr (assoc "one" callbacks)) "first")
+      (should (chat-agent-run-state-done run))
+      (should (equal (chat-agent-run-state-tool-results run)
+                     '("first" "second"))))))
+
+(ert-deftest chat-agent-scheduler-serializes-write-effects ()
+  "Test async writes never overlap even when their targets differ."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-approval-enabled nil)
+        callbacks
+        (transport-calls (list nil)))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'async-write
+      :name "Async Write"
+      :language 'elisp
+      :parameters '((:name "key" :type "string" :required t))
+      :effects '(write)
+      :async-function
+      (lambda (argv success _error)
+        (setq callbacks
+              (append callbacks (list (cons (car argv) success))))
+        #'ignore)
+      :is-active t
+      :usage-count 0))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list
+                 (list :content ""
+                       :tool-calls
+                       '((:id "write-1" :name "async-write"
+                          :arguments (("key" . "one")))
+                         (:id "write-2" :name "async-write"
+                          :arguments (("key" . "two")))))
+                 '(:content "done"))
+                transport-calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))))
+      (should (equal (mapcar #'car callbacks) '("one")))
+      (funcall (cdr (car callbacks)) "first")
+      (should (equal (mapcar #'car callbacks) '("one" "two")))
+      (funcall (cdr (cadr callbacks)) "second"))))
+
+(ert-deftest chat-agent-cancellation-propagates-to-async-tools ()
+  "Test cancelling a run invokes every active async tool handle."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (cancel-count 0)
+        (transport-calls (list nil))
+        run)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'cancellable-read
+      :name "Cancellable Read"
+      :language 'elisp
+      :parameters '((:name "key" :type "string" :required t))
+      :effects '(read)
+      :resource-function
+      (lambda (call)
+        (list (list :resource
+                    (cdr (assoc "key" (plist-get call :arguments)))
+                    :mode 'read)))
+      :async-function
+      (lambda (_argv _success _error)
+        (lambda () (cl-incf cancel-count)))
+      :is-active t
+      :usage-count 0))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list
+                 (list :content ""
+                       :tool-calls
+                       '((:id "cancel-1" :name "cancellable-read"
+                          :arguments (("key" . "one")))
+                         (:id "cancel-2" :name "cancellable-read"
+                          :arguments (("key" . "two"))))))
+                transport-calls)))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :messages (list (chat-agent-test--user-message)))))
+      (should (chat-agent-cancel run))
+      (should (= cancel-count 2))
+      (should (eq (chat-agent-run-state-status run) 'cancelled)))))
+
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here

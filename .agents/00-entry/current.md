@@ -8,12 +8,12 @@
 
 ## Current Phase
 
-Stage 9 safety contract closure is complete (2026-08-24). Runtime tool
-arguments now enforce declared JSON types, required fields, enumerations,
-and additional-properties rejection. Approval is driven by sensitivity,
-effects, and optional call-specific predicates instead of only a fixed
-tool-id list. User plugin files are allowlisted by enabled plugin name
-and loaded before startup. Canonical suite: 564 tests passing.
+Stage 10 kernel parity closure is complete (2026-08-24). Streaming now
+normalizes text, reasoning, native tool-input deltas, nested stop reasons,
+and terminal provider errors. The tool batch scheduler overlaps only
+non-conflicting asynchronous reads, preserves provider result order,
+serializes writes and approvals, and propagates cancellation to active
+tool handles. Canonical suite: 569 tests passing.
 
 ## Main Objective
 

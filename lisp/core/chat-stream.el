@@ -129,8 +129,54 @@ Handles format: data: {...} or data:{...} (with or without space)"
     (aset vec index current)
     vec))
 
+(defun chat-stream--normalize-finish-reason (reason)
+  "Normalize provider REASON to the agent finish contract."
+  (pcase reason
+    ((or "max_tokens" "length") "length")
+    ("tool_use" "tool_calls")
+    (_ reason)))
+
+(defun chat-stream--anthropic-tool-start (data)
+  "Return an OpenAI-shaped tool delta for Anthropic start DATA."
+  (let* ((index (or (chat-stream--alist-get data 'index) 0))
+         (block (chat-stream--alist-get data 'content_block)))
+    (when (and (listp block)
+               (equal (chat-stream--alist-get block 'type) "tool_use"))
+      `((index . ,index)
+        (id . ,(chat-stream--alist-get block 'id))
+        (name . ,(chat-stream--alist-get block 'name))
+        (arguments . ,(let ((input (chat-stream--alist-get block 'input)))
+                        (if (or (null input)
+                                (and (hash-table-p input)
+                                     (zerop (hash-table-count input))))
+                            ""
+                          (json-encode input))))))))
+
+(defun chat-stream--anthropic-tool-delta (data)
+  "Return an OpenAI-shaped tool delta for Anthropic delta DATA."
+  (let ((delta (chat-stream--alist-get data 'delta)))
+    (when (and (listp delta)
+               (equal (chat-stream--alist-get delta 'type)
+                      "input_json_delta"))
+      `((index . ,(or (chat-stream--alist-get data 'index) 0))
+        (arguments . ,(or (chat-stream--alist-get delta 'partial_json)
+                          ""))))))
+
+(defun chat-stream--extract-reasoning-data (data)
+  "Return a reasoning text delta from decoded stream DATA."
+  (let* ((choices (chat-stream--alist-get data 'choices))
+         (first (car-safe choices))
+         (openai-delta (and (listp first)
+                            (chat-stream--alist-get first 'delta)))
+         (delta (or openai-delta (chat-stream--alist-get data 'delta))))
+    (when (listp delta)
+      (let ((text (or (chat-stream--alist-get delta 'reasoning_content)
+                      (chat-stream--alist-get delta 'reasoning)
+                      (chat-stream--alist-get delta 'thinking))))
+        (and (stringp text) text)))))
+
 (defun chat-stream-accumulate-payload (proc json-string)
-  "Accumulate native tool calls and finish_reason from JSON-STRING onto PROC."
+  "Accumulate native stream metadata from JSON-STRING onto PROC."
   (when (and proc (stringp json-string) (not (string-empty-p json-string)))
     (condition-case nil
         (let* ((json-object-type 'alist)
@@ -140,18 +186,40 @@ Handles format: data: {...} or data:{...} (with or without space)"
                (choices (chat-stream--alist-get data 'choices))
                (first (car-safe choices))
                (delta (and (listp first) (chat-stream--alist-get first 'delta)))
-               (reason (or (and (listp first)
-                                (chat-stream--alist-get first 'finish_reason))
-                           (chat-stream--alist-get data 'stop_reason)))
-               (calls (or (and (listp delta)
-                               (chat-stream--alist-get delta 'tool_calls))
-                          (and (listp first)
-                               (let ((message (chat-stream--alist-get first 'message)))
-                                 (and (listp message)
-                                      (chat-stream--alist-get message 'tool_calls)))))))
+               (message-delta (chat-stream--alist-get data 'delta))
+               (reason
+                (or (and (listp first)
+                         (chat-stream--alist-get first 'finish_reason))
+                    (and (listp message-delta)
+                         (chat-stream--alist-get message-delta 'stop_reason))
+                    (chat-stream--alist-get data 'stop_reason)))
+               (calls
+                (or (and (listp delta)
+                         (chat-stream--alist-get delta 'tool_calls))
+                    (and (listp first)
+                         (let ((message (chat-stream--alist-get first 'message)))
+                           (and (listp message)
+                                (chat-stream--alist-get message 'tool_calls))))
+                    (when-let ((start (chat-stream--anthropic-tool-start data)))
+                      (list start))
+                    (when-let ((tool-delta
+                                (chat-stream--anthropic-tool-delta data)))
+                      (list tool-delta))))
+               (reasoning (chat-stream--extract-reasoning-data data))
+               (event-type (chat-stream--alist-get data 'type)))
           (when (and (stringp reason) (not (string-empty-p reason)))
             (process-put proc 'chat-stream-finish-reason
-                         (if (equal reason "max_tokens") "length" reason)))
+                         (chat-stream--normalize-finish-reason reason)))
+          (when (and (stringp reasoning) (not (string-empty-p reasoning)))
+            (process-put proc 'chat-stream-reasoning
+                         (concat (or (process-get proc 'chat-stream-reasoning) "")
+                                 reasoning)))
+          (when (equal event-type "error")
+            (let ((error-data (chat-stream--alist-get data 'error)))
+              (process-put proc 'chat-stream-http-error
+                           (or (and (listp error-data)
+                                    (chat-stream--alist-get error-data 'message))
+                               "Provider stream error"))))
           (dolist (call (if (listp calls) calls nil))
             (when (listp call)
               (process-put proc 'chat-stream-tool-calls-acc
@@ -177,6 +245,7 @@ Handles format: data: {...} or data:{...} (with or without space)"
   "Return accumulated native tool-calls and finish-reason from PROC."
   (let* ((acc (and proc (process-get proc 'chat-stream-tool-calls-acc)))
          (reason (and proc (process-get proc 'chat-stream-finish-reason)))
+         (reasoning (and proc (process-get proc 'chat-stream-reasoning)))
          (calls nil))
     (when acc
       (dotimes (index (length acc))
@@ -190,7 +259,8 @@ Handles format: data: {...} or data:{...} (with or without space)"
                         :arguments (or (chat-stream--parse-arguments raw) nil))
                   calls)))))
     (append (when calls (list :tool-calls (nreverse calls)))
-            (when reason (list :finish-reason reason)))))
+            (when reason (list :finish-reason reason))
+            (when reasoning (list :reasoning reasoning)))))
 
 ;; ------------------------------------------------------------------
 ;; Buffer Insertion
@@ -215,6 +285,7 @@ Returns the process object."
          (url (chat-llm--request-url provider options))
          (headers (chat-llm--make-headers provider))
          (request-id (plist-get options :request-id))
+         (reasoning-callback (plist-get options :on-reasoning))
          ;; Build request body
          (opts (plist-put (copy-tree options) :stream t))
          (body (chat-llm--build-request provider messages opts))
@@ -268,7 +339,8 @@ Returns the process object."
                       :buffer buffer
                       :command (cons "curl" curl-args)
                       :filter (lambda (proc string)
-                               (chat-stream--handle-output proc string provider callback))
+                               (chat-stream--handle-output
+                                proc string provider callback reasoning-callback))
                       :sentinel (lambda (proc event)
                                  (chat-log "[STREAM] Process event: %s" event)
                                  (when (string-match-p "finished\\|exited" event)
@@ -283,7 +355,8 @@ Returns the process object."
                                           proc
                                           (concat chat-stream--partial-line "\n")
                                           provider
-                                          callback))))
+                                          callback
+                                          reasoning-callback))))
                                    (kill-buffer buffer)))
                       :stderr (get-buffer-create "*chat-stream-err*")))
       (error
@@ -307,7 +380,8 @@ Returns the process object."
     (chat-log "[STREAM] Process started: %S" process)
     process))
 
-(defun chat-stream--handle-output (proc string provider callback)
+(defun chat-stream--handle-output
+    (proc string provider callback &optional reasoning-callback)
   "Handle output STRING from process PROC."
   (chat-log "[STREAM] Received %d bytes" (length string))
   (condition-case err
@@ -328,6 +402,24 @@ Returns the process object."
                 (if (chat-stream--parse-sse-line clean-line)
                     (let ((data (chat-stream--parse-sse-line clean-line)))
                       (chat-stream-accumulate-payload proc data)
+                      (when reasoning-callback
+                        (let* ((json-object-type 'alist)
+                               (json-array-type 'list)
+                               (decoded (condition-case nil
+                                            (json-read-from-string data)
+                                          (error nil)))
+                               (reasoning
+                                (and decoded
+                                     (chat-stream--extract-reasoning-data
+                                      decoded))))
+                          (when (and (stringp reasoning)
+                                     (not (string-empty-p reasoning)))
+                            (condition-case callback-error
+                                (funcall reasoning-callback reasoning)
+                              (error
+                               (chat-log
+                                "[STREAM] Reasoning callback error: %s"
+                                (error-message-string callback-error)))))))
                       (let ((content (chat-stream--extract-content data provider)))
                         (when (and (stringp content) (not (string-empty-p content)))
                           (when request-id

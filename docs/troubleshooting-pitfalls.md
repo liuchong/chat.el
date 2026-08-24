@@ -196,6 +196,14 @@ Required field order:
 
 **Solution**: keep a per process partial line buffer and parse only complete lines.
 
+### Stream Metadata Must Not Be Flattened Into Text
+
+**Problem**: reasoning leaks into visible output, native tool arguments are incomplete, or a truncated tool call executes.
+
+**Cause**: the stream adapter handles only text deltas and ignores provider-specific tool starts, partial JSON input, nested stop reasons, reasoning deltas, or typed error events.
+
+**Solution**: normalize each event into distinct text, reasoning, tool, finish-reason, and terminal-error fields. Map token-limit stop reasons to `length` before the kernel decides whether tool arguments are complete.
+
 ### Mode Specific Stream Adapters Can Drift From The Core API
 
 **Problem**: a mode specific streaming path fails with wrong number of arguments or never finalizes the response.
@@ -218,7 +226,15 @@ Required field order:
 
 **Cause**: cancellation is treated only as a transport/UI state and the tool batch loop does not re-check the run state between calls.
 
-**Solution**: register cancellers on the run, mark the run cancelled in the kernel, and check cancellation between tool calls before executing the next item in the batch.
+**Solution**: register cancellers on the run, mark the run cancelled in the kernel, check cancellation between synchronous calls, and invoke every active asynchronous tool handle. Late callbacks must not append transcript messages.
+
+### Concurrent Tool Results Must Keep Provider Order
+
+**Problem**: two independent asynchronous reads finish out of order and their results are paired with the wrong tool-call ids.
+
+**Cause**: completion order is used as transcript order.
+
+**Solution**: allocate the result vector in provider order before dispatch. Overlap only resource-compatible asynchronous reads; serialize writes, destructive operations, and approval-bearing calls.
 
 ### Vague Code-Mode Follow-Ups Can Drift Away From The Reviewed File
 
