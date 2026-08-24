@@ -96,11 +96,13 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 ### MCP and Sub-agents
 
-- optional JSON-RPC stdio MCP client lifecycle with request ids, cancel notification, reconnect, and teardown
-- optional Streamable HTTP JSON-RPC request primitive
-- deterministic fake/mocked transport coverage for initialize/list/call-style paths
-- in-process sub-agent child-session isolation with depth and budget metadata
-- external subprocess-agent backend with captured output and cancellation
+- lazy configured stdio MCP clients with request ids, async callbacks,
+  timeout/cancel notification, reconnect, and teardown
+- Streamable HTTP JSON-RPC with JSON/SSE responses and session-id reuse
+- discovery of namespaced schema-aware remote tools in the shared registry
+- in-process nested kernel runs with isolated child sessions, depth limits,
+  budgets, cancellation, and parent-safe summaries
+- external subprocess-agent JSONL protocol with captured output and cancellation
 
 ### Capability Packs
 
@@ -114,8 +116,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 578 regression tests discovered
-- 578 passing
+- 585 regression tests discovered
+- 585 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

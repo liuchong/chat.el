@@ -8,11 +8,12 @@
 
 ## Current Phase
 
-Stage 13 work orchestration is complete (2026-08-24). Declarative
-workflows execute registered tools in order, support conditions and
-explicit approval checkpoints, persist every step, pause on failure, and
-resume from the durable step index. Background task completion now has a
-hook and optional desktop notification. Canonical suite: 578 tests passing.
+Stage 14 external capability integration is complete (2026-08-24).
+Configured stdio and Streamable HTTP MCP servers lazily discover
+schema-aware namespaced tools. Nested agents run the shared kernel in
+isolated child sessions, while external agents use a bounded JSONL
+subprocess contract. All paths use shared approvals, cancellation, and
+tool lifecycle events. Canonical suite: 585 tests passing.
 
 ## Main Objective
 

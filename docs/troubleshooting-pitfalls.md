@@ -904,4 +904,29 @@ next step. Keep the index unchanged on failure, require an explicit
 decision at approval checkpoints, and execute tools through the normal
 session overlay and approval path.
 
+### MCP Discovery Must Not Connect During Startup
+
+**Problem**: loading chat.el hangs or launches untrusted server processes
+before a conversation needs them.
+
+**Cause**: treating configured MCP definitions as eager connections mixes
+configuration with execution.
+
+**Solution**: create inert clients at startup and connect only through an
+approved tool call. After initialize and tool discovery, register
+namespaced schemas so normal tool overlays, effects, cancellation, and
+request diagnostics apply.
+
+### Nested Agents Must Not Leak Child Transcripts
+
+**Problem**: parent context grows unpredictably or receives internal child
+tool chatter.
+
+**Cause**: appending every nested event directly to the parent transcript.
+
+**Solution**: use an isolated child session with a copied capability
+overlay, bounded depth and steps, and return only the final summary as the
+parent tool result. Keep child messages available through their own
+session for diagnostics.
+
 Last updated: 2026-08-24

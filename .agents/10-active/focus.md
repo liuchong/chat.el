@@ -8,12 +8,12 @@
 
 ## Doing Now
 
-Stage 13 closes work orchestration execution and resume gaps found by the
-execution audit. Declarative workflows now execute ordered tool steps,
-skip conditional steps deterministically, pause at approval checkpoints
-or failures, and resume from persisted session state. Background task
-completion emits a hook and optional notification.
-Canonical suite: 578 tests passing.
+Stage 14 closes primary-loop MCP and sub-agent integration gaps found by
+the execution audit. Configured servers connect lazily and register
+discovered schemas as namespaced tools. Nested agents use isolated child
+sessions and the shared kernel; subprocess agents exchange JSONL. Shared
+approval, async cancellation, and request lifecycle events remain intact.
+Canonical suite: 585 tests passing.
 
 ## Not Doing Now
 
@@ -25,5 +25,5 @@ Canonical suite: 578 tests passing.
 
 ## Immediate Next Step
 
-Integrate MCP and sub-agent capabilities into the primary agent tool loop,
-including request-panel lifecycle events and protocol-level tests.
+Complete the missing programming, office, and daily capability tools and
+their profile-level integration tests.

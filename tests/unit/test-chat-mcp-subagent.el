@@ -46,6 +46,113 @@
       (should (equal (cdr (assoc 'result response))
                      '((tools)))))))
 
+(ert-deftest chat-mcp-streamable-http-keeps-session-and-decodes-sse ()
+  "Test Streamable HTTP records session ids and accepts SSE responses."
+  (let ((client (chat-mcp-client-create
+                 :transport 'http
+                 :endpoint "http://example.invalid/mcp")))
+    (cl-letf (((symbol-function 'url-retrieve-synchronously)
+               (lambda (&rest _args)
+                 (let ((buffer (generate-new-buffer " *mcp-sse*")))
+                   (with-current-buffer buffer
+                     (insert "HTTP/1.1 200 OK\r\n")
+                     (insert "Mcp-Session-Id: session-42\r\n\r\n")
+                     (insert "event: message\n")
+                     (insert "data: {\"jsonrpc\":\"2.0\",\"id\":\"1\",")
+                     (insert "\"result\":{\"tools\":[]}}\n\n"))
+                   buffer))))
+      (let ((response
+             (chat-mcp-http-client-request client "tools/list")))
+        (should (equal (chat-mcp-client-session-id client)
+                       "session-42"))
+        (should (equal (cdr (assoc 'result response))
+                       '((tools))))))))
+
+(ert-deftest chat-mcp-configured-server-registers-schema-aware-tools ()
+  "Test discovery turns configured remote capabilities into forged tools."
+  (let ((chat-mcp-servers
+         '((:id "notes" :transport http
+            :endpoint "http://example.invalid/mcp")))
+        (chat-mcp--clients (make-hash-table :test 'equal))
+        (chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-mcp-configure-servers)
+    (chat-mcp-register-tools)
+    (cl-letf (((symbol-function 'chat-mcp-initialize)
+               (lambda (_client)
+                 '((jsonrpc . "2.0") (id . "1") (result))))
+              ((symbol-function 'chat-mcp-list-tools)
+               (lambda (_client)
+                 '((jsonrpc . "2.0")
+                   (id . "2")
+                   (result
+                    (tools
+                     ((name . "lookup")
+                      (description . "Look up a note")
+                      (inputSchema
+                       (type . "object")
+                       (properties
+                        (query (type . "string")
+                               (enum . ["title" "body"])))
+                       (required . ["query"]))
+                      (annotations (readOnlyHint . t)))))))))
+      (let* ((summary (chat-mcp-connect-server "notes"))
+             (tool (chat-tool-forge-get 'mcp_notes_lookup))
+             (parameter (car (chat-forged-tool-parameters tool))))
+        (should (equal (cdr (assoc 'status summary)) "ready"))
+        (should tool)
+        (should (equal (plist-get parameter :name) "query"))
+        (should (plist-get parameter :required))
+        (should (equal (plist-get parameter :enum)
+                       '("title" "body")))
+        (should (equal (chat-forged-tool-effects tool)
+                       '(read outbound)))))))
+
+(ert-deftest chat-mcp-async-response-dispatches-pending-callback ()
+  "Test JSON-RPC responses complete their asynchronous pending request."
+  (let* ((client (chat-mcp-client-create :transport 'stdio))
+         value)
+    (puthash "7" (list :success
+                       (lambda (response)
+                         (setq value (cdr (assoc 'result response))))
+                       :error #'ignore)
+             (chat-mcp-client-pending client))
+    (chat-mcp--handle-line
+     client
+     "{\"jsonrpc\":\"2.0\",\"id\":\"7\",\"result\":{\"value\":42}}")
+    (should (equal value '((value . 42))))
+    (should-not (gethash "7" (chat-mcp-client-pending client)))))
+
+(ert-deftest chat-mcp-discovered-tool-uses-async-remote-call ()
+  "Test a discovered tool delegates through the cancellable async client."
+  (let* ((client (chat-mcp-client-create :id "remote" :transport 'http))
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         captured
+         result)
+    (chat-mcp--register-remote-tool
+     client
+     '((name . "echo")
+       (description . "Echo")
+       (inputSchema
+        (type . "object")
+        (properties (text (type . "string")))
+        (required . ["text"]))))
+    (cl-letf (((symbol-function 'chat-mcp-call-tool-async)
+               (lambda (_client name arguments success _error)
+                 (setq captured (list name arguments))
+                 (funcall success
+                          '((jsonrpc . "2.0")
+                            (id . "1")
+                            (result (content . "ok"))))
+                 '(:cancel ignore))))
+      (funcall
+       (chat-forged-tool-async-function
+        (chat-tool-forge-get 'mcp_remote_echo))
+       '("hello")
+       (lambda (value) (setq result value))
+       #'ert-fail))
+    (should (equal captured '("echo" (("text" . "hello")))))
+    (should (string-match-p "ok" result))))
+
 (ert-deftest chat-subagent-in-process-uses-isolated-child-session ()
   "Test in-process sub-agents keep child state isolated."
   (let* ((parent (make-chat-session :id "parent" :name "Parent"
@@ -83,6 +190,72 @@
      (should (string= (chat-subagent-external-output
                        (chat-subagent-id subagent))
                       "external-ok")))))
+
+(ert-deftest chat-subagent-nested-agent-returns-parent-safe-summary ()
+  "Test the nested backend uses the kernel and returns only final content."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-subagent--registry (make-hash-table :test 'equal))
+          (parent (make-chat-session
+                   :id "parent" :name "Parent" :model-id 'kimi
+                   :metadata '((subagentDepth . 0))))
+          summary)
+     (cl-letf (((symbol-function 'chat-agent-start)
+                (lambda (config)
+                  (funcall
+                   (plist-get config :on-event)
+                   (list :type 'agent-end :status 'completed
+                         :content "child summary" :step 1))
+                  'fake-run)))
+       (chat-subagent-start-agent
+        "Research" "Find the answer" parent
+        (lambda (value) (setq summary value))
+        #'ert-fail 3))
+     (should (equal (cdr (assoc 'summary summary)) "child summary"))
+     (let ((subagent
+            (car (hash-table-values chat-subagent--registry))))
+       (should (= (chat-subagent-depth subagent) 1))
+       (should (= (length
+                   (chat-session-messages
+                    (chat-subagent-child-session subagent)))
+                  1))))))
+
+(ert-deftest chat-subagent-registers-primary-loop-tools ()
+  "Test nested and external backends are exposed as forged tools."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-subagent-register-tools)
+    (let ((run (chat-tool-forge-get 'subagent_run))
+          (external (chat-tool-forge-get 'subagent_external_start)))
+      (should (chat-forged-tool-async-function run))
+      (should (memq 'outbound (chat-forged-tool-effects run)))
+      (should (eq (chat-forged-tool-sensitivity external)
+                  'restricted)))))
+
+(ert-deftest chat-subagent-tool-emits-standard-request-lifecycle-events ()
+  "Test nested runs use the normal tool-call and tool-result event path."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-approval-noninteractive-policy 'approve)
+        (session (make-chat-session :id "parent" :model-id 'kimi))
+        events
+        result)
+    (chat-subagent-register-tools)
+    (cl-letf (((symbol-function 'chat-subagent-start-agent)
+               (lambda (_name _prompt _session success _error _budget)
+                 (funcall success
+                          '((id . "child") (summary . "done")))
+                 '(:cancel ignore))))
+      (chat-tool-caller-execute-async
+       (list :name "subagent_run"
+             :arguments '(("name" . "Child")
+                          ("prompt" . "Do work")
+                          ("budget" . 2)))
+       session
+       (lambda (event) (push (plist-get event :type) events))
+       (lambda (value) (setq result value))
+       #'ert-fail))
+    (should (string-match-p "done" result))
+    (should (memq 'tool-call events))
+    (should (memq 'tool-result events))))
 
 (provide 'test-chat-mcp-subagent)
 ;;; test-chat-mcp-subagent.el ends here

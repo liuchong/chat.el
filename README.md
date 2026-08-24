@@ -370,6 +370,34 @@ These commands exist in the repository but are still being repaired and validate
 
 See `specs/002-code-mode*.md` for detailed documentation.
 
+## External Capabilities
+
+Configure MCP servers in a normal chat configuration file. Connections
+are lazy: no process or network request starts while loading chat.el.
+
+```elisp
+(setq chat-mcp-servers
+      '((:id "local-tools"
+         :transport stdio
+         :command ("server-command" "--stdio"))
+        (:id "team-service"
+         :transport http
+         :endpoint "https://example.invalid/mcp")))
+```
+
+The `mcp_connect` tool initializes a configured server, preserves a
+Streamable HTTP session when supplied, discovers its input schemas, and
+registers namespaced tools for the next agent step. Stdio and HTTP calls
+are cancellable and pass through the standard approval and request-panel
+lifecycle.
+
+The `subagent_run` tool starts an isolated nested kernel run with a bounded
+step budget. The parent receives only the final summary; child messages
+remain in the child session. External subprocess agents use one JSONL
+request on stdin and keep their JSONL output in
+`chat-subagent-directory`. Starting or cancelling either backend uses the
+same scoped tool and approval policy as other capabilities.
+
 ## Architecture Map
 
 | File | Responsibility |
@@ -385,6 +413,8 @@ See `specs/002-code-mode*.md` for detailed documentation.
 | `lisp/core/chat-context.el` | Context trimming and summary generation |
 | `lisp/tools/chat-tool-forge.el` | Tool registry, compilation, loading, and execution |
 | `lisp/tools/chat-tool-forge-ai.el` | AI assisted tool generation flow |
+| `lisp/tools/chat-mcp.el` | Stdio/Streamable HTTP MCP lifecycle and remote tool discovery |
+| `lisp/tools/chat-subagent.el` | Isolated nested and JSONL subprocess agents |
 | `lisp/code/chat-code.el` | Code mode main entry |
 | `lisp/code/chat-context-code.el` | Smart context building |
 | `lisp/code/chat-edit.el` | Edit operations |
@@ -406,8 +436,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 504 regression tests discovered
-- 504 passing
+- 585 regression tests discovered
+- 585 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

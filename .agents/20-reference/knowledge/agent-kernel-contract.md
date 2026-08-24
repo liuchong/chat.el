@@ -105,6 +105,16 @@ next turn cannot pair `tool_call_id` with results.
 - Background task terminal states run `chat-work-task-finished-hook' and
   may emit a desktop notification; cancellation uses the same terminal
   notification contract.
+- MCP configuration is inert at startup. Connection performs initialize,
+  initialized notification, and tool discovery; discovered schemas become
+  namespaced forged tools with remote annotations mapped to effects.
+- Stdio and Streamable HTTP MCP calls use async callbacks and cancellation.
+  HTTP accepts JSON or SSE bodies and preserves the server session id.
+- Nested sub-agents run `chat-agent-start' with copied session capability
+  overlays, bounded depth/steps, and an isolated child transcript. Only a
+  final summary enters the parent tool result.
+- External sub-agents receive one JSONL request on stdin. Their process,
+  status, output log, and cancellation remain addressable by id.
 - Work orchestration tools must read and write through the executing
   session when one exists; background process tasks stay cancellable and
   keep bounded logs
@@ -153,6 +163,9 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-work.el` covers ordered conditional execution,
   durable approval resume, failure retry, cancellation, and task
   completion notification hooks
+- `tests/unit/test-chat-mcp-subagent.el` covers stdio/HTTP/SSE protocol
+  handling, async dispatch, schema-aware discovery, nested kernel
+  isolation, registration, and shared lifecycle events
 - `tests/unit/test-chat-mcp-subagent.el` covers MCP JSON-RPC response
   handling, stdio lifecycle, mocked HTTP, in-process child-session
   isolation, and external subprocess output capture
