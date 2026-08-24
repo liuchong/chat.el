@@ -8,17 +8,16 @@
 
 ## Doing Now
 
-Stage 11 closes the remaining plugin lifecycle and metadata persistence
-gaps found by the execution audit. Mixed owned resources share one
-reverse-chronological rollback stack, replaced registrations are restored,
-and teardown errors cannot leak resources. Persisted tools retain their
-permission metadata and parameter enumerations.
-Canonical suite: 571 tests passing.
+Stage 13 closes work orchestration execution and resume gaps found by the
+execution audit. Declarative workflows now execute ordered tool steps,
+skip conditional steps deterministically, pause at approval checkpoints
+or failures, and resume from persisted session state. Background task
+completion emits a hook and optional notification.
+Canonical suite: 578 tests passing.
 
 ## Not Doing Now
 
 - No DI kernel or contribution-point framework
-- No destructive branch truncation UI beyond existing explicit truncate helpers
 - Mail sending remains intentionally disabled; daily mail support is
   draft-only
 - User plugin files under `~/.chat/plugins/` stay off unless
@@ -26,5 +25,5 @@ Canonical suite: 571 tests passing.
 
 ## Immediate Next Step
 
-Complete durable session branching, compaction, append durability, and
-interrupted-run recovery behavior.
+Integrate MCP and sub-agent capabilities into the primary agent tool loop,
+including request-panel lifecycle events and protocol-level tests.

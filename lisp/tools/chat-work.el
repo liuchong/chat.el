@@ -9,9 +9,9 @@
 
 ;;; Commentary:
 
-;; Background tasks, session-local work records, and declarative
-;; workflow state.  Workflow records are data only; they do not evaluate
-;; arbitrary Lisp.
+;; Background tasks, session-local work records, and resumable declarative
+;; workflows.  Workflow steps call registered tools or pause at explicit
+;; approval checkpoints; they never evaluate arbitrary Lisp.
 
 ;;; Code:
 
@@ -19,6 +19,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'chat-session)
+(require 'chat-tool-caller)
 (require 'chat-tool-forge)
 
 (defgroup chat-work nil
@@ -35,6 +36,19 @@
   "Maximum background task output returned from one tool call."
   :type 'integer
   :group 'chat-work)
+
+(defcustom chat-work-notify-task-completion t
+  "Whether completed background tasks produce a desktop notification."
+  :type 'boolean
+  :group 'chat-work)
+
+(defcustom chat-work-workflow-max-steps 100
+  "Maximum number of steps accepted in one workflow."
+  :type 'integer
+  :group 'chat-work)
+
+(defvar chat-work-task-finished-hook nil
+  "Hook run with one argument, a finished `chat-work-task'.")
 
 (cl-defstruct chat-work-task
   id
@@ -69,6 +83,21 @@
 (defun chat-work--timestamp ()
   "Return the current timestamp string."
   (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time)))
+
+(defun chat-work--notify-task-finished (task)
+  "Notify the user that TASK reached a terminal state."
+  (run-hook-with-args 'chat-work-task-finished-hook task)
+  (when chat-work-notify-task-completion
+    (let ((title (format "Background task %s"
+                         (symbol-name (chat-work-task-status task))))
+          (body (format "%s\n%s"
+                        (chat-work-task-id task)
+                        (chat-work-task-command task))))
+      (if (and (require 'notifications nil t)
+               (fboundp 'notifications-notify))
+          (notifications-notify :title title :body body
+                                :app-name "chat.el")
+        (message "%s: %s" title body)))))
 
 (defun chat-work--task-to-json (task)
   "Convert TASK to JSON-friendly data."
@@ -159,8 +188,9 @@
                                  (chat-work-task-exit-code task)
                                  (process-exit-status proc)
                                  (chat-work-task-ended-at task)
-                                 (chat-work--timestamp)))
-                         (chat-work-save-tasks)))))
+                                 (chat-work--timestamp))
+                           (chat-work-save-tasks)
+                           (chat-work--notify-task-finished task))))))
     (setf (chat-work-task-process task) process)
     (puthash id task chat-work--tasks)
     (chat-work-save-tasks)
@@ -203,12 +233,13 @@
   (let ((task (gethash id chat-work--tasks)))
     (unless task
       (error "Task not found: %s" id))
+    (setf (chat-work-task-status task) 'cancelled
+          (chat-work-task-ended-at task) (chat-work--timestamp))
     (when-let ((proc (chat-work-task-process task)))
       (when (process-live-p proc)
         (delete-process proc)))
-    (setf (chat-work-task-status task) 'cancelled
-          (chat-work-task-ended-at task) (chat-work--timestamp))
     (chat-work-save-tasks)
+    (chat-work--notify-task-finished task)
     (chat-work-task-summary task)))
 
 (defun chat-work--current-session ()
@@ -338,24 +369,271 @@
   "List session-local goal records."
   (chat-work--state-get (chat-work--state) 'goals))
 
+(defun chat-work--json-get (object key)
+  "Return KEY from decoded JSON OBJECT with string or symbol keys."
+  (or (cdr (assoc key object))
+      (and (symbolp key) (cdr (assoc (symbol-name key) object)))
+      (and (stringp key) (cdr (assoc (intern key) object)))))
+
+(defun chat-work--alist-set (alist key value)
+  "Return ALIST with KEY set to VALUE."
+  (cons (cons key value) (assq-delete-all key (copy-tree alist))))
+
+(defun chat-work--workflow-find (id)
+  "Return workflow ID from current work state."
+  (cl-find id (chat-work--state-get (chat-work--state) 'workflows)
+           :key (lambda (workflow) (chat-work--json-get workflow 'id))
+           :test #'equal))
+
+(defun chat-work--workflow-store (workflow)
+  "Persist WORKFLOW and return it."
+  (let* ((state (chat-work--state))
+         (id (chat-work--json-get workflow 'id))
+         (found nil)
+         (workflows
+          (mapcar
+           (lambda (entry)
+             (if (equal (chat-work--json-get entry 'id) id)
+                 (progn (setq found t) workflow)
+               entry))
+           (chat-work--state-get state 'workflows))))
+    (unless found
+      (setq workflows (append workflows (list workflow))))
+    (chat-work--set-state
+     (chat-work--state-put state 'workflows workflows))
+    workflow))
+
+(defun chat-work--workflow-valid-step-p (step)
+  "Return non-nil when STEP has a supported declarative shape."
+  (let ((kind (chat-work--json-get step 'kind)))
+    (cond
+     ((equal kind "tool")
+      (let ((name (chat-work--json-get step 'name))
+            (arguments (chat-work--json-get step 'arguments)))
+        (and (stringp name)
+             (not (string-empty-p name))
+             (not (member name '("work_workflow_start"
+                                 "work_workflow_resume"
+                                 "work_workflow_cancel")))
+             (or (null arguments) (listp arguments)))))
+     ((equal kind "approval")
+      (stringp (chat-work--json-get step 'message)))
+     (t nil))))
+
+(defun chat-work--workflow-validate-steps (steps)
+  "Validate declarative workflow STEPS or signal an error."
+  (unless (listp steps)
+    (error "Workflow steps must be a JSON array"))
+  (when (> (length steps) chat-work-workflow-max-steps)
+    (error "Workflow exceeds the %d step limit"
+           chat-work-workflow-max-steps))
+  (cl-loop for step in steps
+           for index from 0
+           unless (chat-work--workflow-valid-step-p step)
+           do (error "Invalid workflow step %d" index))
+  steps)
+
+(defun chat-work--workflow-result (workflow index)
+  "Return result at INDEX from WORKFLOW."
+  (cl-find index (chat-work--json-get workflow 'results)
+           :key (lambda (result)
+                  (chat-work--json-get result 'stepIndex))
+           :test #'equal))
+
+(defun chat-work--workflow-condition-p (workflow condition)
+  "Return non-nil when WORKFLOW satisfies declarative CONDITION.
+CONDITION may compare a prior step's status or result text.  Supported
+keys are `step', `status', `equals', `notEquals', and `contains'."
+  (if (null condition)
+      t
+    (let* ((step-index (chat-work--json-get condition 'step))
+           (prior (and (integerp step-index)
+                       (chat-work--workflow-result workflow step-index)))
+           (actual-status (and prior
+                               (chat-work--json-get prior 'status)))
+           (actual-result (and prior
+                               (chat-work--json-get prior 'result)))
+           (status (chat-work--json-get condition 'status))
+           (equals (chat-work--json-get condition 'equals))
+           (not-equals (chat-work--json-get condition 'notEquals))
+           (contains (chat-work--json-get condition 'contains)))
+      (and prior
+           (or (null status) (equal actual-status status))
+           (or (null equals) (equal actual-result equals))
+           (or (null not-equals) (not (equal actual-result not-equals)))
+           (or (null contains)
+               (and (stringp actual-result)
+                    (string-match-p (regexp-quote contains)
+                                    actual-result)))))))
+
+(defun chat-work--workflow-string-arguments (arguments)
+  "Return ARGUMENTS with top-level keys converted to strings."
+  (mapcar (lambda (entry)
+            (cons (if (symbolp (car entry))
+                      (symbol-name (car entry))
+                    (car entry))
+                  (cdr entry)))
+          arguments))
+
+(defun chat-work--workflow-record-result
+    (workflow index status &optional result error)
+  "Record INDEX STATUS and optional RESULT or ERROR in WORKFLOW."
+  (let* ((record `((stepIndex . ,index)
+                   (status . ,status)
+                   (result . ,result)
+                   (error . ,error)
+                   (completedAt . ,(chat-work--timestamp))))
+         (results (chat-work--json-get workflow 'results)))
+    (chat-work--alist-set
+     workflow 'results
+     (append
+      (cl-remove index results
+                 :key (lambda (entry)
+                        (chat-work--json-get entry 'stepIndex))
+                 :test #'equal)
+      (list record)))))
+
+(defun chat-work--workflow-tool-error-result-p (result)
+  "Return non-nil when RESULT is the tool caller's error envelope."
+  (and (stringp result)
+       (or (string-prefix-p "Error:" result)
+           (string-prefix-p "Error executing tool " result)
+           (string-prefix-p "Approval denied for tool " result))))
+
+(defun chat-work--workflow-finish-step (id index status result error)
+  "Finish workflow ID step INDEX and continue when successful."
+  (when-let ((workflow (chat-work--workflow-find id)))
+    (when (and (equal (chat-work--json-get workflow 'status) "running")
+               (= (or (chat-work--json-get workflow 'stepIndex) -1)
+                  index))
+      (setq workflow
+            (chat-work--workflow-record-result workflow index status
+                                               result error))
+      (if error
+          (setq workflow
+                (chat-work--alist-set
+                 (chat-work--alist-set workflow 'status "paused")
+                 'error error))
+        (setq workflow
+              (chat-work--alist-set
+               (chat-work--alist-set workflow 'stepIndex (1+ index))
+               'error nil)))
+      (chat-work--workflow-store workflow)
+      (unless error
+        (chat-work--workflow-drive id)))))
+
+(defun chat-work--workflow-drive (id)
+  "Run workflow ID from its persisted step index."
+  (let ((workflow (chat-work--workflow-find id)))
+    (unless workflow
+      (error "Workflow not found: %s" id))
+    (when (equal (chat-work--json-get workflow 'status) "running")
+      (let* ((index (or (chat-work--json-get workflow 'stepIndex) 0))
+             (steps (chat-work--json-get workflow 'steps))
+             (step (nth index steps)))
+        (if (null step)
+            (progn
+              (setq workflow
+                    (chat-work--alist-set
+                     (chat-work--alist-set workflow 'status "completed")
+                     'completedAt (chat-work--timestamp)))
+              (chat-work--workflow-store workflow))
+          (let ((condition (chat-work--json-get step 'when))
+                (kind (chat-work--json-get step 'kind)))
+            (cond
+             ((not (chat-work--workflow-condition-p workflow condition))
+              (setq workflow
+                    (chat-work--workflow-record-result
+                     workflow index "skipped" nil nil))
+              (setq workflow
+                    (chat-work--alist-set workflow 'stepIndex (1+ index)))
+              (chat-work--workflow-store workflow)
+              (chat-work--workflow-drive id))
+             ((equal kind "approval")
+              (setq workflow
+                    (chat-work--alist-set workflow 'status
+                                         "awaiting-approval"))
+              (chat-work--workflow-store workflow))
+             (t
+              (let* ((session (chat-work--current-session))
+                     (name (chat-work--json-get step 'name))
+                     (arguments
+                      (chat-work--workflow-string-arguments
+                       (or (chat-work--json-get step 'arguments) nil)))
+                     (call (list :id (format "%s:%d" id index)
+                                 :name name
+                                 :arguments arguments)))
+                (chat-tool-caller-execute-async
+                 call session nil
+                 (lambda (result)
+                   (let ((chat-tool-caller-current-session session))
+                     (if (chat-work--workflow-tool-error-result-p result)
+                         (chat-work--workflow-finish-step
+                          id index "failed" nil result)
+                       (chat-work--workflow-finish-step
+                        id index "succeeded" result nil))))
+                 (lambda (message)
+                   (let ((chat-tool-caller-current-session session))
+                     (chat-work--workflow-finish-step
+                      id index "failed" nil message)))))))))))
+    (chat-work--workflow-find id)))
+
 (defun chat-work-workflow-start (name steps-json)
-  "Start a declarative workflow NAME from STEPS-JSON."
+  "Create and start resumable declarative workflow NAME from STEPS-JSON."
   (let* ((json-array-type 'list)
-         (steps (json-read-from-string steps-json))
-         (state (chat-work--state))
-         (workflows (chat-work--state-get state 'workflows))
+         (json-object-type 'alist)
+         (json-key-type 'symbol)
+         (steps (chat-work--workflow-validate-steps
+                 (json-read-from-string steps-json)))
          (workflow `((id . ,(chat-session-new-message-id "workflow"))
                      (name . ,name)
                      (status . "running")
                      (stepIndex . 0)
                      (steps . ,steps)
-                     (createdAt . ,(chat-work--timestamp)))))
-    (unless (listp steps)
-      (error "Workflow steps must be a JSON array"))
-    (chat-work--set-state
-     (chat-work--state-put state 'workflows
-                           (append workflows (list workflow))))
-    workflow))
+                     (results . nil)
+                     (createdAt . ,(chat-work--timestamp))
+                     (updatedAt . ,(chat-work--timestamp)))))
+    (chat-work--workflow-store workflow)
+    (chat-work--workflow-drive (chat-work--json-get workflow 'id))))
+
+(defun chat-work-workflow-resume (id &optional decision)
+  "Resume workflow ID, optionally applying checkpoint DECISION.
+DECISION is `approve' or `reject' when the workflow awaits approval."
+  (let ((workflow (chat-work--workflow-find id)))
+    (unless workflow
+      (error "Workflow not found: %s" id))
+    (let ((status (chat-work--json-get workflow 'status))
+          (index (or (chat-work--json-get workflow 'stepIndex) 0)))
+      (cond
+       ((member status '("completed" "cancelled"))
+        (error "Workflow is already %s" status))
+       ((equal status "awaiting-approval")
+        (unless (member decision '("approve" "reject"))
+          (error "Workflow requires an approve or reject decision"))
+        (if (equal decision "reject")
+            (progn
+              (setq workflow
+                    (chat-work--workflow-record-result
+                     workflow index "rejected" nil "Checkpoint rejected"))
+              (setq workflow
+                    (chat-work--alist-set workflow 'status "cancelled"))
+              (chat-work--workflow-store workflow))
+          (setq workflow
+                (chat-work--workflow-record-result
+                 workflow index "approved" "approved" nil))
+          (setq workflow
+                (chat-work--alist-set
+                 (chat-work--alist-set workflow 'stepIndex (1+ index))
+                 'status "running"))
+          (chat-work--workflow-store workflow)
+          (chat-work--workflow-drive id)))
+       (t
+        (setq workflow
+              (chat-work--alist-set
+               (chat-work--alist-set workflow 'status "running")
+               'error nil))
+        (chat-work--workflow-store workflow)
+        (chat-work--workflow-drive id))))))
 
 (defun chat-work-workflow-cancel (id)
   "Cancel workflow ID."
@@ -364,18 +642,22 @@
          found)
     (setq workflows
           (mapcar (lambda (workflow)
-                    (if (equal (cdr (assoc 'id workflow)) id)
+                    (if (equal (chat-work--json-get workflow 'id) id)
                         (progn
                           (setq found t)
-                          (cons '(status . "cancelled")
-                                (assq-delete-all 'status
-                                                 (copy-tree workflow))))
+                          (if (equal (chat-work--json-get workflow 'status)
+                                     "completed")
+                              (error "Completed workflow cannot be cancelled")
+                            (chat-work--alist-set workflow 'status
+                                                  "cancelled")))
                       workflow))
                   workflows))
     (unless found
       (error "Workflow not found: %s" id))
     (chat-work--set-state (chat-work--state-put state 'workflows workflows))
-    (cl-find id workflows :key (lambda (workflow) (cdr (assoc 'id workflow)))
+    (cl-find id workflows
+             :key (lambda (workflow)
+                    (chat-work--json-get workflow 'id))
              :test #'equal)))
 
 (defun chat-work-workflow-list ()
@@ -462,10 +744,17 @@
    nil #'chat-work-goal-list '(read))
   (chat-work--register-tool
    'work_workflow_start "Work Workflow Start"
-   "Create a declarative workflow record from JSON steps."
+   "Start an ordered declarative workflow of tool and approval steps."
    '((:name "name" :type "string" :required t)
      (:name "steps_json" :type "string" :required t))
    #'chat-work-workflow-start '(write))
+  (chat-work--register-tool
+   'work_workflow_resume "Work Workflow Resume"
+   "Resume a paused workflow or decide its approval checkpoint."
+   '((:name "id" :type "string" :required t)
+     (:name "decision" :type "string" :required nil
+      :enum ("approve" "reject")))
+   #'chat-work-workflow-resume '(write))
   (chat-work--register-tool
    'work_workflow_cancel "Work Workflow Cancel"
    "Cancel a declarative workflow record."

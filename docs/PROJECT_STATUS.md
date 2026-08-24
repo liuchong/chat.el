@@ -59,6 +59,14 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - omitted history summary messages
 - summary inclusion of tool calls and tool results
 - per-step agent context transform and next-turn prepare hooks
+- persisted summary coverage with tool-pair-safe cut points
+- iterative automatic compaction and asynchronous model summaries
+
+### Durable Sessions
+
+- same-directory atomic JSONL updates
+- parent/child branching without destructive history edits
+- explicit mark-failed, discard, and keep recovery for interrupted tool runs
 
 ### Tool Forging
 
@@ -78,10 +86,12 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 ### Work Orchestration
 
-- cancellable background process tasks with persisted task state and logs
+- cancellable background process tasks with persisted state, logs, and
+  terminal notifications
 - bounded output reads and explicit task stop support
 - session-local plan, TODO, and goal records
-- declarative workflow records with cancellation and no Lisp evaluation
+- ordered conditional workflows with approval checkpoints, per-step
+  persistence, failure pause, cancellation, and durable resume
 - work tools registered with owner and effect metadata
 
 ### MCP and Sub-agents
@@ -104,8 +114,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 571 regression tests discovered
-- 571 passing
+- 578 regression tests discovered
+- 578 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -150,9 +160,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - plain chat now also tracks recent single-file tool targets and feeds them back into later vague follow-up requests, which reduces rediscovery when the user says things like "optimize it" after a file-specific review
 - persistent native status surfaces are now explicitly limited to blocking states, while transient activity stays out of header and mode lines
 - `.agents/` now holds the formal agent workflow records, phase history, reference decisions, and imported legacy logs
-- sessions now support explicit history truncation and last-message lookup so regenerate and edit-resend flows can operate on durable message boundaries
-- chat mode now supports regenerating the last assistant turn and restoring the last user turn into the input area for editing
-- code mode now supports the same regenerate and edit-resend flow, and buffer rebuilds now replay persisted session history instead of only showing headers and an empty prompt
+- sessions create child branches at durable message boundaries so regenerate and edit-resend preserve the original lineage
+- chat mode regenerates on a sibling branch and restores the last user turn into the branched input area for editing
+- code mode supports the same non-destructive regenerate and edit-resend flow, and buffer rebuilds replay the active branch history
 - code mode now supports explicit reading captures for region, defun, and nearby context, all routed through the same quoted question flow
 - code mode now also supports bounded current-file capture on top of a shared reading capture module
 - plain chat now exposes the same shared reading capture model for region, defun, near-point, and bounded current-file questions

@@ -28,7 +28,7 @@ Copyright 2026 chat.el contributors.
 ## Current Capabilities
 
 - Chat with Kimi, Kimi Code, and OpenAI compatible providers
-- Keep multiple sessions on disk as append only JSONL files and inspect raw request and response data
+- Keep multiple sessions in atomically updated JSONL files and inspect raw request and response data
 - Curate long term memory in `~/.chat/memory.md`, injected into every system prompt (`M-x chat-edit-memory`)
 - Stream or fetch responses through an async non blocking UI path
 - Expose built in file tools with approval gates for risky operations
@@ -38,11 +38,13 @@ Copyright 2026 chat.el contributors.
 - Scope tools per session and roll back plugin-owned tools, hooks, and services when a plugin stops
 - Restore replaced tools/services through one reverse-chronological
   plugin rollback stack, including teardown-failure cleanup
-- Browse durable parent/branch session trees and preserve recovery metadata for interrupted tool runs
-- Run cancellable background tasks and keep session-local plan, TODO, goal, and workflow records
+- Regenerate or edit-resend through non-destructive sibling branches
+- Browse durable parent/branch session trees and explicitly recover interrupted tool runs
+- Run cancellable background tasks with completion notifications
+- Execute and resume session-local conditional workflows with approval checkpoints
 - Use optional MCP JSON-RPC stdio/HTTP primitives and isolated sub-agent backends
 - Apply code, office, and daily capability profiles so sessions expose scoped tool sets
-- Trim long conversations with system message preservation and summary messages
+- Compact long conversations into durable, tool-pair-safe summaries
 - Generate custom tools and save them to disk after explicit approval
 
 ### Code Mode
@@ -167,6 +169,7 @@ Layout rules:
 | `M-x chat-new-session` | Create a new session |
 | `M-x chat-list-sessions` | Switch to an existing session |
 | `M-x chat-session-tree-open` | Browse saved sessions as a parent/branch tree |
+| `M-x chat-context-compact-current-session` | Summarize compactable history with the session model |
 | `M-x chat-show-help` | Open the native chat help buffer |
 | `M-x chat-view-raw-message` | Inspect the last raw API exchange |
 | `M-x chat-view-last-raw-exchange` | Open the latest assistant request and response |

@@ -8,11 +8,11 @@
 
 ## Current Phase
 
-Stage 11 plugin runtime closure is complete (2026-08-24). Plugins now
-roll back one reverse-chronological resource stack across tools, services,
-and hooks, restoring replaced values and cleaning up even when teardown
-fails. Persisted forged tools retain owner, sensitivity, effects, and
-parameter enumerations. Canonical suite: 571 tests passing.
+Stage 13 work orchestration is complete (2026-08-24). Declarative
+workflows execute registered tools in order, support conditions and
+explicit approval checkpoints, persist every step, pause on failure, and
+resume from the durable step index. Background task completion now has a
+hook and optional desktop notification. Canonical suite: 578 tests passing.
 
 ## Main Objective
 

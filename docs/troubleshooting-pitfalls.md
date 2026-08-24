@@ -868,4 +868,40 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: prefer newer source at package entry, and remove stale `.elc` artifacts when they no longer match the current source tree.
 
-Last updated: 2026-03-26
+### Session Compaction Must Respect Tool Call Boundaries
+
+**Problem**: a compacted transcript can start with a tool result whose
+assistant tool call was removed.
+
+**Cause**: choosing a cut point solely from token count can split one
+assistant/tool protocol unit.
+
+**Solution**: move the cut backward until no tool call remains open, then
+persist summary coverage through the last fully covered message id.
+
+### Durable JSONL Updates Cannot Append In Place Safely
+
+**Problem**: a crash during an append can leave another partial record
+even after an older partial tail was repaired.
+
+**Cause**: in-place append exposes the destination while bytes are still
+being written.
+
+**Solution**: build the complete replacement in a same-directory
+temporary file, flush it, and rename it atomically. Encode message
+metadata as JSON objects so tool-call ids keep their key/value shape.
+
+### Workflow Resume Must Persist Before Continuing
+
+**Problem**: a restarted workflow repeats an already completed side
+effect or skips a failed step.
+
+**Cause**: advancing an in-memory loop before saving the step result and
+next index makes process interruption ambiguous.
+
+**Solution**: persist each result and transition before dispatching the
+next step. Keep the index unchanged on failure, require an explicit
+decision at approval checkpoints, and execute tools through the normal
+session overlay and approval path.
+
+Last updated: 2026-08-24

@@ -86,6 +86,25 @@ next turn cannot pair `tool_call_id` with results.
   instead of creating synthetic success messages
 - Compaction cut points must not split an assistant `tool_calls` message
   from its matching `:tool` results
+- Message/state updates use same-directory temporary files and atomic
+  rename; a crash cannot expose a half-written new record set.
+- Regenerate and edit-resend create child sessions from a message
+  boundary. The original session remains unchanged and records the branch.
+- Durable compaction records the covered message id. Automatic pre-step
+  pressure may iterate deterministic summaries; the manual command uses
+  the session model asynchronously and persists the result.
+- Interrupted tool recovery is explicit: mark missing calls failed,
+  discard the unfinished assistant turn, or keep it pending. Recovery
+  never fabricates successful tool output.
+- Declarative workflows may contain only registered tool steps and
+  explicit approval checkpoints. They cannot evaluate Lisp or recursively
+  invoke workflow-control tools.
+- Workflow state is persisted after each step. Conditions inspect only
+  prior persisted status/result values; failures pause at the current
+  index, while approval advances only after an explicit decision.
+- Background task terminal states run `chat-work-task-finished-hook' and
+  may emit a desktop notification; cancellation uses the same terminal
+  notification contract.
 - Work orchestration tools must read and write through the executing
   session when one exists; background process tasks stay cancellable and
   keep bounded logs
@@ -127,10 +146,13 @@ next turn cannot pair `tool_call_id` with results.
   call-specific approval requirements
 - `tests/unit/test-chat-session.el` covers session tool-config
   persistence, branch metadata, append-boundary recovery, interrupted
-  tool-pair detection, and safe compaction cut indices
-- `tests/unit/test-chat-work.el` covers background task execution/stop,
-  session-local work records, declarative workflow cancellation, and
-  work tool metadata
+  tool-pair detection/recovery, sibling branch preservation, atomic
+  append, and safe compaction cut indices
+- `tests/unit/test-chat-context.el` covers automatic durable summaries,
+  summary reuse, and asynchronous model compaction
+- `tests/unit/test-chat-work.el` covers ordered conditional execution,
+  durable approval resume, failure retry, cancellation, and task
+  completion notification hooks
 - `tests/unit/test-chat-mcp-subagent.el` covers MCP JSON-RPC response
   handling, stdio lifecycle, mocked HTTP, in-process child-session
   isolation, and external subprocess output capture
