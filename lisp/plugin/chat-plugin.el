@@ -62,7 +62,8 @@ Disabled by default because those files run as Lisp."
   owner
   owned-tools
   owned-services
-  owned-hooks)
+  owned-hooks
+  owned-resources)
 
 (defvar chat-plugin--registry (make-hash-table :test 'eq)
   "Registered plugins keyed by name.")
@@ -116,10 +117,16 @@ Disabled by default because those files run as Lisp."
 
 (defun chat-plugin-provide (service value)
   "Provide SERVICE with VALUE in the plugin context."
-  (puthash service value chat-plugin--services)
   (when-let ((plugin (and chat-plugin--current-owner
                           (chat-plugin-get chat-plugin--current-owner))))
-    (cl-pushnew service (chat-plugin-owned-services plugin)))
+    (let ((missing (make-symbol "missing-service")))
+      (push (list :type 'service
+                  :id service
+                  :previous (gethash service chat-plugin--services missing)
+                  :missing missing)
+            (chat-plugin-owned-resources plugin)))
+    (push service (chat-plugin-owned-services plugin)))
+  (puthash service value chat-plugin--services)
   (unless chat-plugin--current-owner
     (chat-plugin-retry-pending))
   value)
@@ -150,31 +157,62 @@ Disabled by default because those files run as Lisp."
   "Register TOOL and mark it as owned by the current plugin when any."
   (when chat-plugin--current-owner
     (setf (chat-forged-tool-owner tool) chat-plugin--current-owner))
-  (let ((registered (chat-tool-forge-register tool)))
+  (let* ((previous (chat-tool-forge-get (chat-forged-tool-id tool)))
+         (registered (chat-tool-forge-register tool)))
     (when-let ((plugin (and chat-plugin--current-owner
                             (chat-plugin-get chat-plugin--current-owner))))
-      (chat-plugin--record-tool plugin (chat-forged-tool-id registered)))
+      (chat-plugin--record-tool plugin (chat-forged-tool-id registered))
+      (push (list :type 'tool
+                  :id (chat-forged-tool-id registered)
+                  :previous previous)
+            (chat-plugin-owned-resources plugin)))
     registered))
 
 (defun chat-plugin-add-hook (hook function)
   "Add FUNCTION to HOOK and record ownership for rollback."
-  (add-hook hook function)
-  (when-let ((plugin (and chat-plugin--current-owner
-                          (chat-plugin-get chat-plugin--current-owner))))
-    (push (cons hook function) (chat-plugin-owned-hooks plugin)))
-  function)
+  (let ((already-present (and (boundp hook)
+                              (member function (symbol-value hook)))))
+    (add-hook hook function)
+    (when-let ((plugin (and chat-plugin--current-owner
+                            (chat-plugin-get chat-plugin--current-owner))))
+      (unless already-present
+        (push (cons hook function) (chat-plugin-owned-hooks plugin))
+        (push (list :type 'hook :hook hook :function function)
+              (chat-plugin-owned-resources plugin))))
+    function))
+
+(defun chat-plugin--rollback-resource (resource)
+  "Rollback one owned RESOURCE."
+  (pcase (plist-get resource :type)
+    ('hook
+     (remove-hook (plist-get resource :hook)
+                  (plist-get resource :function)))
+    ('tool
+     (if-let ((previous (plist-get resource :previous)))
+         (puthash (plist-get resource :id)
+                  previous
+                  chat-tool-forge--registry)
+       (chat-tool-forge-unload (plist-get resource :id))))
+    ('service
+     (let ((previous (plist-get resource :previous))
+           (missing (plist-get resource :missing))
+           (id (plist-get resource :id)))
+       (if (eq previous missing)
+           (remhash id chat-plugin--services)
+         (puthash id previous chat-plugin--services))))))
 
 (defun chat-plugin--rollback-owned (plugin)
   "Rollback owned resources for PLUGIN in reverse registration order."
-  (dolist (hook-entry (chat-plugin-owned-hooks plugin))
-    (remove-hook (car hook-entry) (cdr hook-entry)))
-  (setf (chat-plugin-owned-hooks plugin) nil)
-  (dolist (tool-id (chat-plugin-owned-tools plugin))
-    (chat-tool-forge-unload tool-id))
-  (setf (chat-plugin-owned-tools plugin) nil)
-  (dolist (service (chat-plugin-owned-services plugin))
-    (remhash service chat-plugin--services))
-  (setf (chat-plugin-owned-services plugin) nil))
+  (dolist (resource (chat-plugin-owned-resources plugin))
+    (condition-case err
+        (chat-plugin--rollback-resource resource)
+      (error
+       (chat-log "[plugin] rollback failed for %S: %s"
+                 resource (error-message-string err)))))
+  (setf (chat-plugin-owned-resources plugin) nil
+        (chat-plugin-owned-hooks plugin) nil
+        (chat-plugin-owned-tools plugin) nil
+        (chat-plugin-owned-services plugin) nil))
 
 (defun chat-plugin-start (name)
   "Start plugin NAME.  Return the plugin or nil."
@@ -215,10 +253,19 @@ Disabled by default because those files run as Lisp."
   "Stop plugin NAME if it is active."
   (when-let ((plugin (chat-plugin-get name)))
     (when (chat-plugin-active plugin)
-      (let ((chat-plugin--current-owner name))
-        (when (functionp (chat-plugin-teardown plugin))
-          (funcall (chat-plugin-teardown plugin) (chat-plugin-context))))
-      (chat-plugin--rollback-owned plugin)
+      (let ((chat-plugin--current-owner name)
+            teardown-error)
+        (unwind-protect
+            (condition-case err
+                (when (functionp (chat-plugin-teardown plugin))
+                  (funcall (chat-plugin-teardown plugin)
+                           (chat-plugin-context)))
+              (error
+               (setq teardown-error (error-message-string err))
+               (chat-log "[plugin] teardown failed for %s: %s"
+                         name teardown-error)))
+          (chat-plugin--rollback-owned plugin))
+        (setf (chat-plugin-error plugin) teardown-error))
       (setf (chat-plugin-active plugin) nil
             (chat-plugin-state plugin) 'disposed)
       (setq chat-plugin--started (delq name chat-plugin--started)))

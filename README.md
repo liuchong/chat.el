@@ -36,6 +36,8 @@ Copyright 2026 chat.el contributors.
 - Queue normal input during an active response as steering for the running agent
 - Rebuild context before each agent step and cancel registered work when a run is stopped
 - Scope tools per session and roll back plugin-owned tools, hooks, and services when a plugin stops
+- Restore replaced tools/services through one reverse-chronological
+  plugin rollback stack, including teardown-failure cleanup
 - Browse durable parent/branch session trees and preserve recovery metadata for interrupted tool runs
 - Run cancellable background tasks and keep session-local plan, TODO, goal, and workflow records
 - Use optional MCP JSON-RPC stdio/HTTP primitives and isolated sub-agent backends

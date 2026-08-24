@@ -518,7 +518,8 @@
       :name "Demo Tool"
       :description "Echo one argument"
       :language 'elisp
-      :parameters '((:name "input" :type "string" :required t))
+      :parameters '((:name "input" :type "string"
+                     :enum ("one" "two") :required t))
       :compiled-function (lambda (input) input)
       :is-active t
       :usage-count 0))
@@ -532,7 +533,14 @@
       (should (string-match-p "\"demo-tool\"" encoded))
       (should (string-match-p "\"type\":\"function\"" encoded))
       (should (stringp (cdr (assoc "name"
-                                   (cdr (assoc "function" (car decoded))))))))))
+                                   (cdr (assoc "function" (car decoded)))))))
+      (let* ((definition (aref tools 0))
+             (schema (cdr (assoc 'parameters
+                                 (cdr (assoc 'function definition)))))
+             (property (cdr (assoc "input"
+                                   (cdr (assoc 'properties schema))))))
+        (should (equal (cdr (assoc 'enum property))
+                       ["one" "two"]))))))
 
 (ert-deftest chat-tool-caller-zero-arg-provider-schema-is-empty-object ()
   "Test zero-argument tools use an empty object schema."
@@ -554,8 +562,8 @@
       (should (string-match-p "\"required\":\\[\\]" encoded))
       (should-not (string-match-p "input" encoded)))))
 
-(ert-deftest chat-tool-forge-persists-parameter-schemas ()
-  "Test forged tools reload with their parameter schema."
+(ert-deftest chat-tool-forge-persists-schema-and-permission-metadata ()
+  "Test forged tools reload with schema and permission metadata."
   (chat-test-with-temp-dir
    (let ((chat-tool-forge-directory temp-dir)
          (chat-tool-forge--registry (make-hash-table :test 'eq)))
@@ -566,14 +574,24 @@
        :description "Echo one argument"
        :language 'elisp
        :source-code "(lambda (input) input)"
-       :parameters '((:name "input" :type "string" :required t))
+       :parameters '((:name "input" :type "string"
+                      :enum ("one" "two") :required t))
+       :owner 'persisted-owner
+       :sensitivity 'personal
+       :effects '(read outbound)
        :is-active t
        :usage-count 0))
      (setq chat-tool-forge--registry (make-hash-table :test 'eq))
      (chat-tool-forge-load-all)
-     (should (equal (chat-forged-tool-parameters
-                     (chat-tool-forge-get 'persisted_tool))
-                    '((:name "input" :type "string" :required t)))))))
+     (let ((tool (chat-tool-forge-get 'persisted_tool)))
+       (should
+        (equal (chat-forged-tool-parameters tool)
+               '((:name "input" :type "string"
+                  :enum ("one" "two") :required t))))
+       (should (eq (chat-forged-tool-owner tool) 'persisted-owner))
+       (should (eq (chat-forged-tool-sensitivity tool) 'personal))
+       (should (equal (chat-forged-tool-effects tool)
+                      '(read outbound)))))))
 
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

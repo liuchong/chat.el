@@ -192,10 +192,13 @@
 
 (defun chat-tool-forge--parameter-to-json (param)
   "Convert parameter plist PARAM to a JSON object alist."
-  `((name . ,(plist-get param :name))
-    (type . ,(plist-get param :type))
-    (description . ,(or (plist-get param :description) ""))
-    (required . ,(if (plist-get param :required) t :json-false))))
+  (append
+   `((name . ,(plist-get param :name))
+     (type . ,(plist-get param :type))
+     (description . ,(or (plist-get param :description) ""))
+     (required . ,(if (plist-get param :required) t :json-false)))
+   (when-let ((enum (plist-get param :enum)))
+     `((enum . ,(vconcat enum))))))
 
 (defun chat-tool-forge--parameters-to-json (parameters)
   "Convert PARAMETERS to a JSON array for persistence."
@@ -211,11 +214,15 @@
         (description (or (cdr (assoc "description" param))
                          (cdr (assoc 'description param))))
         (required (or (cdr (assoc "required" param))
-                      (cdr (assoc 'required param)))))
+                      (cdr (assoc 'required param))))
+        (enum (or (cdr (assoc "enum" param))
+                  (cdr (assoc 'enum param)))))
     (append
      (list :name name :type type)
      (when (and description (not (string-empty-p description)))
        (list :description description))
+     (when enum
+       (list :enum (if (vectorp enum) (append enum nil) enum)))
      (list :required (and required (not (eq required :json-false)))))))
 
 (defun chat-tool-forge--parameters-from-json (parameters)
@@ -246,6 +253,20 @@
                       (json-encode
                        (chat-tool-forge--parameters-to-json
                         (chat-forged-tool-parameters tool)))))
+      (insert
+       (format
+        ";;; permissions: %s\n"
+        (json-encode
+         `((owner . ,(when-let ((owner (chat-forged-tool-owner tool)))
+                       (symbol-name owner)))
+           (sensitivity
+            . ,(when-let ((sensitivity
+                           (chat-forged-tool-sensitivity tool)))
+                 (symbol-name sensitivity)))
+           (effects
+            . ,(vconcat
+                (mapcar #'symbol-name
+                        (or (chat-forged-tool-effects tool) nil))))))))
       (insert (format ";;; created: %s\n\n" (format-time-string "%Y-%m-%dT%H:%M:%S")))
       (when (chat-forged-tool-source-code tool)
         (insert (chat-forged-tool-source-code tool))))))
@@ -264,7 +285,7 @@
     (insert-file-contents filepath)
     ;; Parse header
     (let ((id nil) (name nil) (desc nil) (lang 'elisp)
-          (parameters nil) (source nil))
+          (parameters nil) (permissions nil) (source nil))
       (goto-char (point-min))
       (while (looking-at ";;; ")
         (let ((line (buffer-substring (point) (line-end-position))))
@@ -285,6 +306,14 @@
                     (condition-case nil
                         (chat-tool-forge--parameters-from-json
                          (json-read-from-string (match-string 1 line)))
+                      (error nil)))))
+           ((string-match "permissions: \\(.*\\)" line)
+            (setq permissions
+                  (let ((json-array-type 'list)
+                        (json-object-type 'alist)
+                        (json-key-type 'symbol))
+                    (condition-case nil
+                        (json-read-from-string (match-string 1 line))
                       (error nil)))))))
         (forward-line 1))
       ;; Rest is source code
@@ -301,6 +330,13 @@
           :language lang
           :source-code source
           :parameters parameters
+          :owner (when-let ((owner (cdr (assoc 'owner permissions))))
+                   (intern owner))
+          :sensitivity
+          (when-let ((sensitivity (cdr (assoc 'sensitivity permissions))))
+            (intern sensitivity))
+          :effects
+          (mapcar #'intern (or (cdr (assoc 'effects permissions)) nil))
           :version "1.0.0"
           :created-at (current-time)
           :updated-at (current-time)

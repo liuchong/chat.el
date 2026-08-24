@@ -480,7 +480,7 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Cause**: setup registered global Emacs resources without owner tracking.
 
-**Solution**: register plugin-owned tools and hooks through the plugin host so stop and setup-failure paths can remove owned resources in reverse registration order.
+**Solution**: register plugin-owned tools, services, and hooks through one newest-first ownership stack. Roll it back across resource types, restore replaced values, and put cleanup in the teardown unwind path so teardown failures cannot leak resources.
 
 ### User Plugins Must Register Before Startup
 

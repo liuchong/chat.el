@@ -123,6 +123,73 @@
     (run-hooks 'chat-plugin-post-turn-functions)
     (should-not called)))
 
+(ert-deftest chat-plugin-rolls-back-mixed-resources-chronologically ()
+  "Test rollback restores values replaced across resource types."
+  (let* ((chat-plugin--registry (make-hash-table :test 'eq))
+         (chat-plugin--services (make-hash-table :test 'eq))
+         (chat-plugin--started nil)
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         (chat-plugin-post-turn-functions nil)
+         (original-hook (lambda (&rest _) 'original))
+         (plugin-hook (lambda (&rest _) 'plugin))
+         (original-tool
+          (make-chat-forged-tool
+           :id 'shared-tool
+           :name "Original"
+           :language 'elisp
+           :compiled-function (lambda (&rest _) "original")
+           :is-active t
+           :usage-count 0)))
+    (chat-tool-forge-register original-tool)
+    (puthash 'shared-service 'original chat-plugin--services)
+    (add-hook 'chat-plugin-post-turn-functions original-hook)
+    (chat-plugin-define
+     'mixed-owner
+     :setup
+     (lambda (_ctx)
+       (chat-plugin-register-tool
+        (make-chat-forged-tool
+         :id 'shared-tool
+         :name "Replacement"
+         :language 'elisp
+         :compiled-function (lambda (&rest _) "replacement")
+         :is-active t
+         :usage-count 0))
+       (chat-plugin-provide 'shared-service 'replacement)
+       (chat-plugin-add-hook
+        'chat-plugin-post-turn-functions plugin-hook)))
+    (should (chat-plugin-start 'mixed-owner))
+    (should
+     (equal (mapcar (lambda (resource) (plist-get resource :type))
+                    (chat-plugin-owned-resources
+                     (chat-plugin-get 'mixed-owner)))
+            '(hook service tool)))
+    (chat-plugin-stop 'mixed-owner)
+    (should (eq (chat-tool-forge-get 'shared-tool) original-tool))
+    (should (eq (chat-plugin-service 'shared-service) 'original))
+    (should (memq original-hook chat-plugin-post-turn-functions))
+    (should-not (memq plugin-hook chat-plugin-post-turn-functions))))
+
+(ert-deftest chat-plugin-teardown-errors-still-rollback-resources ()
+  "Test teardown failures cannot leak owned resources."
+  (let ((chat-plugin--registry (make-hash-table :test 'eq))
+        (chat-plugin--services (make-hash-table :test 'eq))
+        (chat-plugin--started nil)
+        (chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-plugin-define
+     'failing-teardown
+     :setup
+     (lambda (_ctx)
+       (chat-plugin-provide 'temporary-service t))
+     :teardown
+     (lambda (_ctx) (error "teardown boom")))
+    (should (chat-plugin-start 'failing-teardown))
+    (chat-plugin-stop 'failing-teardown)
+    (let ((plugin (chat-plugin-get 'failing-teardown)))
+      (should (eq (chat-plugin-state plugin) 'disposed))
+      (should (string-match-p "teardown boom" (chat-plugin-error plugin)))
+      (should-not (chat-plugin-service 'temporary-service)))))
+
 (ert-deftest chat-plugin-emacs-reads-buffer-line-range ()
   "Test emacs_read_buffer accepts integer line bounds."
   (with-temp-buffer

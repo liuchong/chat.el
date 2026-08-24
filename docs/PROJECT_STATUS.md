@@ -104,8 +104,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 569 regression tests discovered
-- 569 passing
+- 571 regression tests discovered
+- 571 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -170,8 +170,13 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
   enumerations, and unknown-field rejection before execution
 - Emacs live-buffer tools now hide credential-like buffers and default to project/session-scoped exposure
 - plugin runtime now tracks lifecycle state, retries pending dependency injection, and rolls back owned services, tools, and hooks
+- plugin rollback now follows one reverse-chronological stack across
+  resource types, restores replaced registrations, and still completes
+  after teardown errors
 - optional user plugin loading evaluates only explicitly enabled files
   and completes registration before enabled plugins start
+- persisted forged tools retain owner, sensitivity, effects, and
+  parameter enumerations used by provider schemas
 - session tool overlays now filter provider-visible tools and direct execution, with tool events carrying owner, sensitivity, and effect metadata
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
 - code mode now also has a native help buffer and `C-c C-h` shortcut so reading commands, preview flow, request-panel usage, and regenerate/edit-resend are discoverable inside the main coding surface

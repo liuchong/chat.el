@@ -112,8 +112,13 @@ model knows content is missing."
       (dolist (param params)
         (let ((name (plist-get param :name))
               (type (or (plist-get param :type) "string"))
-              (desc (or (plist-get param :description) "")))
-          (push (cons name `((type . ,type) (description . ,desc))) properties)
+              (desc (or (plist-get param :description) ""))
+              (enum (plist-get param :enum)))
+          (push (cons name
+                      (append `((type . ,type) (description . ,desc))
+                              (when enum
+                                `((enum . ,(vconcat enum))))))
+                properties)
           (when (plist-get param :required)
             (push name required))))
       `((type . "object")

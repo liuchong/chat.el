@@ -73,6 +73,11 @@ next turn cannot pair `tool_call_id` with results.
   sensitive. Metadata is an enforcement contract, not display-only data.
 - Optional user plugin loading evaluates only enabled NAME.el files and
   registration must happen before `chat-plugin-start-enabled`.
+- Plugin ownership uses one newest-first resource stack across tools,
+  services, and hooks. Rollback restores replaced values and always runs
+  after teardown, including teardown failure.
+- Persisted forged tools retain owner, sensitivity, effects, parameter
+  enumerations, and provider-visible schema constraints.
 - Session state may add parent, branch, leaf, and summary entries while
   keeping `chat-session-format-version` stable; old files omit those
   fields and load with defaults
@@ -113,7 +118,8 @@ next turn cannot pair `tool_call_id` with results.
   ordered transcript persistence and active-run input steering
 - `tests/unit/test-chat-plugin.el` covers buffer privacy scope plus
   call-specific approval, plugin lifecycle states, dependency retry,
-  user-plugin allowlisting, and owned resource rollback
+  user-plugin allowlisting, mixed-resource replacement restoration,
+  teardown-failure cleanup, and owned resource rollback
 - `tests/unit/test-chat-tool-caller.el` covers native schema and forged
   parameter persistence, runtime argument validation, plus session-overlay
   advertisement/execution filtering

@@ -8,12 +8,12 @@
 
 ## Doing Now
 
-Stage 10 closes the remaining kernel stream, scheduling, and in-flight
-cancellation gaps found by the execution audit. Native tool deltas,
-reasoning, stop reasons, and provider errors now share one stream result
-contract. Resource-aware asynchronous batches preserve result order,
-serialize writes and approvals, and cancel active tool handles.
-Canonical suite: 569 tests passing.
+Stage 11 closes the remaining plugin lifecycle and metadata persistence
+gaps found by the execution audit. Mixed owned resources share one
+reverse-chronological rollback stack, replaced registrations are restored,
+and teardown errors cannot leak resources. Persisted tools retain their
+permission metadata and parameter enumerations.
+Canonical suite: 571 tests passing.
 
 ## Not Doing Now
 
@@ -26,5 +26,5 @@ Canonical suite: 569 tests passing.
 
 ## Immediate Next Step
 
-Close the remaining plugin runtime lifecycle and metadata persistence
-details before advancing to session behavior.
+Complete durable session branching, compaction, append durability, and
+interrupted-run recovery behavior.

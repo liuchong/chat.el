@@ -8,12 +8,11 @@
 
 ## Current Phase
 
-Stage 10 kernel parity closure is complete (2026-08-24). Streaming now
-normalizes text, reasoning, native tool-input deltas, nested stop reasons,
-and terminal provider errors. The tool batch scheduler overlaps only
-non-conflicting asynchronous reads, preserves provider result order,
-serializes writes and approvals, and propagates cancellation to active
-tool handles. Canonical suite: 569 tests passing.
+Stage 11 plugin runtime closure is complete (2026-08-24). Plugins now
+roll back one reverse-chronological resource stack across tools, services,
+and hooks, restoring replaced values and cleaning up even when teardown
+fails. Persisted forged tools retain owner, sensitivity, effects, and
+parameter enumerations. Canonical suite: 571 tests passing.
 
 ## Main Objective
 
