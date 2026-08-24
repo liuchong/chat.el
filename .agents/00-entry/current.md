@@ -8,21 +8,24 @@
 
 ## Current Phase
 
-Agent kernel extraction is complete (2026-08-24). The loop lives in
-`lisp/agent/`. Native provider tool calling and the plugin host are
-wired into boot.
+Stage 1 correctness work is complete (2026-08-24). The loop lives in
+`lisp/agent/`, emits ordered assistant/tool transcript messages, and
+the UI hosts persist those messages incrementally instead of rebundling
+tool results at request end.
 
 ## Main Objective
 
-Keep the PI-aligned loop as the only driver: `chat-message` throughout,
-`chat-llm--format-messages` as convertToLlm, tool results as `:tool`
-messages, steering and follow-up queues, truncated-response refusal.
-Extend the host through `lisp/plugin/` rather than growing the loop.
+Keep the agent loop as the only driver: `chat-message` throughout,
+`chat-llm--format-messages` as the provider boundary, tool results as
+ordered `:tool` messages, steering and follow-up queues, truncated
+response refusal, and project-scoped Emacs tools. Extend the host
+through `lisp/plugin/` rather than growing the loop.
 
 ## Active Modules
 
 - `lisp/agent/chat-agent.el`
 - `lisp/agent/chat-agent-loop.el`
+- `lisp/agent/chat-agent-transcript.el`
 - `lisp/agent/chat-agent-types.el`
 - `lisp/plugin/chat-plugin.el`
 - `lisp/plugin/chat-plugin-emacs.el`

@@ -102,7 +102,7 @@
        :id "m1"
        :role :assistant
        :content ""
-       :tool-calls '((:name "demo" :arguments (("input" . "hello"))))
+       :tool-calls '((:id "call-1" :name "demo" :arguments (("input" . "hello"))))
        :tool-results '("done")
        :raw-request "{\"request\":true}"
        :raw-response "{\"response\":true}"))
@@ -110,7 +110,7 @@
      (let* ((loaded (chat-session-load session-id))
             (message (car (chat-session-messages loaded))))
        (should (equal (chat-message-tool-calls message)
-                      '((:name "demo" :arguments (("input" . "hello"))))))
+                      '((:id "call-1" :name "demo" :arguments (("input" . "hello"))))))
        (should (equal (chat-message-tool-results message) '("done")))
        (should (string= (chat-message-raw-request message) "{\"request\":true}"))
        (should (string= (chat-message-raw-response message) "{\"response\":true}"))))))

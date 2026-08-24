@@ -79,6 +79,30 @@
        (should-not sent)
        (should-not (chat-session-messages (chat-code-session-base-session session)))))))
 
+(ert-deftest chat-code-send-message-steers-active-agent-run ()
+  "Test code-mode input during an agent run is queued as steering."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Steer Code" temp-dir))
+          (base-session (chat-code-session-base-session session))
+          (run (chat-agent--run-create
+                :model 'kimi
+                :messages nil
+                :max-steps 10)))
+     (with-temp-buffer
+       (chat-code-mode)
+       (setq-local chat-code--current-session session)
+       (setq-local chat-code--active-agent-run run)
+       (chat-code--setup-buffer session)
+       (goto-char (point-max))
+       (insert "Respect this constraint")
+       (chat-code-send-message)
+       (should (= (length (chat-agent-run-state-steering-queue run)) 1))
+       (should (= (length (chat-session-messages base-session)) 1))
+       (should (string= (chat-message-content
+                         (car (chat-agent-run-state-steering-queue run)))
+                        "Respect this constraint"))))))
+
 (ert-deftest chat-code-from-chat-reuses-current-chat-session ()
   "Test converting from chat mode reuses the currently bound base session."
   (chat-test-with-temp-dir
@@ -713,12 +737,17 @@ file contents instead of only a short summary."
                    :content "Run a tool"
                    :timestamp (current-time)))
             content-start)))
-       (let ((saved (car (last (chat-session-messages
-                                (chat-code-session-base-session session))))))
-         (should (string= (chat-message-content saved) "Tool finished successfully."))
-         (should (equal (chat-message-tool-results saved) '("ran:hello")))
-         (should (equal (plist-get (car (chat-message-tool-calls saved)) :name)
+       (let* ((messages (chat-session-messages
+                         (chat-code-session-base-session session)))
+              (assistant (nth 0 messages))
+              (tool (nth 1 messages))
+              (final (nth 2 messages)))
+         (should (equal (mapcar #'chat-message-role messages)
+                        '(:assistant :tool :assistant)))
+         (should (equal (plist-get (car (chat-message-tool-calls assistant)) :name)
                         "demo-tool"))
+         (should (string-match-p "ran:hello" (chat-message-content tool)))
+         (should (string= (chat-message-content final) "Tool finished successfully."))
          (goto-char (point-min))
          (should (search-forward "Tool finished successfully." nil t)))))))
 

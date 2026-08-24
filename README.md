@@ -17,7 +17,7 @@
 > 您的每一份贡献都将推动这个项目变得更好。
 
 `chat.el` is a pure Emacs AI chat client focused on coding workflows.
-It supports multi turn chat, tool calling, file operations, session persistence, context trimming, streaming display, and AI assisted tool forging.
+It supports multi turn chat, ordered tool transcripts, file operations, session persistence, context trimming, streaming display, and AI assisted tool forging.
 
 Copyright 2026 chat.el contributors.
 
@@ -28,7 +28,8 @@ Copyright 2026 chat.el contributors.
 - Curate long term memory in `~/.chat/memory.md`, injected into every system prompt (`M-x chat-edit-memory`)
 - Stream or fetch responses through an async non blocking UI path
 - Expose built in file tools with approval gates for risky operations
-- Feed tool results back into the model through `:tool` messages and a bounded tool loop
+- Feed tool results back into the model through ordered assistant and `:tool` messages with provider `tool_call_id` pairing
+- Queue normal input during an active response as steering for the running agent
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
@@ -189,6 +190,7 @@ Built in tools currently focus on coding assistance:
 Risky tools require approval before execution.
 Generated tools also require approval before registration.
 File writing tools can also be whitelisted by directory, so future writes under an approved directory can run without repeated prompts.
+Emacs live-buffer tools are scoped by default: buffer listing and reads stay within the current project or current non-file buffer, and credential-like buffers are hard-denied.
 
 Generated elisp tools must be a single top level `lambda` form.
 This prevents compile time side effects from arbitrary wrapper forms.

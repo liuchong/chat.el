@@ -34,8 +34,8 @@
        (goto-char (point-max))
        (should (search-backward ">" nil t))))))
 
-(ert-deftest chat-ui-finalize-response-persists-tool-data ()
-  "Test that finalized responses replace raw content and persist tool data."
+(ert-deftest chat-ui-finalize-response-renders-without-rebundling-tools ()
+  "Test finalized responses render without writing bundled tool history."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Test Session" 'kimi))
@@ -70,13 +70,63 @@
          (should-not (search-backward "function_call" nil t))
          (goto-char (point-min))
          (should-not (search-forward "Steps:" nil t))
-         (let ((saved (car (last (chat-session-messages session)))))
-           (should (string= (chat-message-content saved) "done"))
-           (should (equal (chat-message-tool-results saved) '("done")))
-           (should (equal (chat-message-tool-calls saved)
-                          '((:name "demo" :arguments (("input" . "hello"))))))
-           (should (string= (chat-message-raw-request saved) "{\"request\":true}"))
-           (should (string= (chat-message-raw-response saved) "{\"response\":true}"))))))))
+         (should-not (chat-session-messages session)))))))
+
+(ert-deftest chat-ui-agent-run-persists-ordered-tool-messages ()
+  "Test agent runs persist assistant and tool messages in loop order."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (session (chat-session-create "Tool Session" 'kimi))
+          (session-id (chat-session-id session))
+          (responses (list
+                      '(:content "{\"function_call\":{\"name\":\"demo_tool\",\"arguments\":{\"input\":\"hi\"}}}"
+                        :raw-request "{\"step\":1}"
+                        :raw-response "{\"tool\":true}")
+                      '(:content "done"
+                        :raw-request "{\"step\":2}"
+                        :raw-response "{\"done\":true}"))))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'demo_tool
+       :name "Demo Tool"
+       :description "Echo one argument"
+       :language 'elisp
+       :parameters '((:name "input" :type "string" :required t))
+       :compiled-function (lambda (input) (format "echo:%s" input))
+       :is-active t
+       :usage-count 0))
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "user-1"
+       :role :user
+       :content "Use a tool"
+       :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-llm-request-async)
+                  (lambda (_model _messages success _error _options)
+                    (funcall success (pop responses))
+                    'request-handle)))
+         (chat-ui--get-response-sync))
+       (let ((roles (mapcar #'chat-message-role
+                            (chat-session-messages session))))
+         (should (equal roles '(:user :assistant :tool :assistant))))
+       (let* ((messages (chat-session-messages session))
+              (assistant (nth 1 messages))
+              (tool (nth 2 messages)))
+         (should (string= (plist-get (car (chat-message-tool-calls assistant)) :id)
+                          "call-1"))
+         (should (eq (chat-message-role tool) :tool))
+         (should (string= (plist-get (chat-message-metadata tool) :tool-call-id)
+                          "call-1"))
+         (should (string-match-p "echo:hi" (chat-message-content tool))))
+       (let ((loaded (chat-session-load session-id)))
+         (should (equal (mapcar #'chat-message-role
+                                (chat-session-messages loaded))
+                        '(:user :assistant :tool :assistant))))))))
 
 (ert-deftest chat-ui-get-response-sync-uses-async-request-path ()
   "Test that non streaming UI requests go through the async LLM API."
@@ -139,6 +189,28 @@
          (chat-ui-send-message)
          (should-not sent)
          (should-not (chat-session-messages session)))))))
+
+(ert-deftest chat-ui-send-message-steers-active-agent-run ()
+  "Test normal input during an agent run is queued as steering."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Steer Session" 'kimi))
+          (run (chat-agent--run-create
+                :model 'kimi
+                :messages nil
+                :max-steps 10)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (setq-local chat-ui--active-agent-run run)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "Add this constraint")
+       (chat-ui-send-message)
+       (should (= (length (chat-agent-run-state-steering-queue run)) 1))
+       (should (= (length (chat-session-messages session)) 1))
+       (should (string= (chat-message-content
+                         (car (chat-agent-run-state-steering-queue run)))
+                        "Add this constraint"))))))
 
 (ert-deftest chat-ui-regenerate-last-response-replays-last-user-turn ()
   "Test regenerating removes the trailing assistant message and replays."

@@ -62,6 +62,28 @@
   chat-version)
 
 ;; ------------------------------------------------------------------
+;; Configuration Loading
+;; ------------------------------------------------------------------
+
+(defun chat--config-file-candidates (&optional root-directory)
+  "Return config file candidates for ROOT-DIRECTORY.
+Later files override earlier ones."
+  (list (expand-file-name "~/.chat.el")
+        (expand-file-name "~/.chat/config.el")
+        (expand-file-name "chat-config.local.el"
+                          (or root-directory chat-root-directory))))
+
+(defun chat-load-config-files (&optional root-directory)
+  "Load chat config files for ROOT-DIRECTORY.
+Returns the list of files that were loaded."
+  (let (loaded-files)
+    (dolist (file (chat--config-file-candidates root-directory))
+      (when (file-exists-p file)
+        (load file nil t)
+        (push file loaded-files)))
+    (nreverse loaded-files)))
+
+;; ------------------------------------------------------------------
 ;; Dependencies Loading
 ;; ------------------------------------------------------------------
 
@@ -92,8 +114,6 @@
 (require 'chat-tool-forge)
 (require 'chat-tool-forge-ai)
 (require 'chat-tool-caller)
-(chat-tool-forge-load-all)
-(chat-files-register-built-in-tools)
 (require 'chat-tool-shell)
 
 ;; Load the agent kernel after transports and tooling.
@@ -102,6 +122,13 @@
 ;; Plugin host: Emacs-native tools and optional user plugins.
 (require 'chat-plugin)
 (require 'chat-plugin-emacs)
+
+;; Load configuration before persisted tools or plugins are started, so
+;; local policy can tighten capability exposure on first registration.
+(chat-load-config-files chat-root-directory)
+
+(chat-tool-forge-load-all)
+(chat-files-register-built-in-tools)
 (chat-plugin-provide 'tools t)
 (chat-plugin-start-enabled)
 (chat-plugin-load-user-files)
@@ -177,26 +204,6 @@ Type your message and press RET to send."
   "Help text displayed for chat commands."
   :type 'string
   :group 'chat)
-
-(defun chat--config-file-candidates (&optional root-directory)
-  "Return config file candidates for ROOT-DIRECTORY.
-Later files override earlier ones."
-  (list (expand-file-name "~/.chat.el")
-        (expand-file-name "~/.chat/config.el")
-        (expand-file-name "chat-config.local.el"
-                          (or root-directory chat-root-directory))))
-
-(defun chat-load-config-files (&optional root-directory)
-  "Load chat config files for ROOT-DIRECTORY.
-Returns the list of files that were loaded."
-  (let (loaded-files)
-    (dolist (file (chat--config-file-candidates root-directory))
-      (when (file-exists-p file)
-        (load file nil t)
-        (push file loaded-files)))
-    (nreverse loaded-files)))
-
-(chat-load-config-files chat-root-directory)
 
 ;; ------------------------------------------------------------------
 ;; Main Entry Points

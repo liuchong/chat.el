@@ -282,6 +282,14 @@ Required field order:
 
 **Solution**: write to a temporary file and rename it over the target atomically, make `chat-session-load` return nil on unreadable files, and never push nil sessions into `chat-session-list`.
 
+### Tool Pairs Must Persist In Transcript Order
+
+**Problem**: a reloaded session can fail the next provider request after a tool call, or the model repeats a completed tool call.
+
+**Cause**: saving one aggregated assistant message with bundled tool results loses the provider's ordered assistant/tool pair contract.
+
+**Solution**: persist each loop-emitted assistant and `:tool` message in order. Keep bundled `tool-results` expansion only as compatibility for older sessions.
+
 ---
 
 ## File Tools and Security
@@ -397,7 +405,15 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Cause**: tool results are stored in metadata only and do not reenter the visible conversation history.
 
-**Solution**: feed tool results back as `:tool` messages with `tool_call_id`, and persist a readable assistant side summary when the UI needs one.
+**Solution**: feed tool results back as `:tool` messages with `tool_call_id`. Render readable summaries in UI surfaces without rebundling them into new assistant history.
+
+### Tool Parameter Schemas Must Be Real JSON Objects
+
+**Problem**: native provider tool calling advertises `input` for zero-argument tools or reloads generated tools without their declared parameters.
+
+**Cause**: fallback schemas and forged-tool persistence used implicit plist/list JSON encoding instead of explicit object shapes.
+
+**Solution**: encode zero-argument tools as an empty object schema with empty `required`, and convert parameter plists to JSON object alists before saving them.
 
 ### Mode Specific Tool Prompt Drift Reintroduces Wrong Protocols
 

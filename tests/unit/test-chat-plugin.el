@@ -41,6 +41,40 @@
     (let ((listing (chat-plugin-emacs--buffers)))
       (should (string-match-p "chat-plugin-emacs-buffers" listing)))))
 
+(ert-deftest chat-plugin-emacs-denies-sensitive-buffers ()
+  "Test Emacs buffer tools hard-deny sensitive buffers."
+  (with-temp-buffer
+    (rename-buffer ".env" t)
+    (insert "TOKEN=value")
+    (should-error (chat-plugin-emacs--read-buffer (buffer-name)))))
+
+(ert-deftest chat-plugin-emacs-hides-buffers-outside-project ()
+  "Test Emacs buffer listing is scoped to the current project."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project/" temp-dir))
+          (inside-file (expand-file-name "inside.txt" project-root))
+          (outside-file (expand-file-name "outside.txt" temp-dir))
+          inside-buffer
+          outside-buffer)
+     (make-directory project-root t)
+     (with-temp-file inside-file (insert "inside"))
+     (with-temp-file outside-file (insert "outside"))
+     (setq inside-buffer (find-file-noselect inside-file))
+     (setq outside-buffer (find-file-noselect outside-file))
+     (unwind-protect
+         (cl-letf (((symbol-function 'chat-plugin-emacs--project-root)
+                    (lambda () (file-truename project-root))))
+           (with-current-buffer inside-buffer
+             (let ((listing (chat-plugin-emacs--buffers)))
+               (should (string-match-p "inside.txt" listing))
+               (should-not (string-match-p "outside.txt" listing))))
+           (should-error
+            (chat-plugin-emacs--read-buffer (buffer-name outside-buffer))))
+       (when (buffer-live-p inside-buffer)
+         (kill-buffer inside-buffer))
+       (when (buffer-live-p outside-buffer)
+         (kill-buffer outside-buffer))))))
+
 (ert-deftest chat-plugin-emacs-registers-tools-on-setup ()
   "Test the emacs plugin registers read-only tools."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))

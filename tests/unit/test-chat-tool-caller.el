@@ -1,6 +1,7 @@
 ;;; test-chat-tool-caller.el --- Tests for chat-tool-caller -*- lexical-binding: t -*-
 
 (require 'ert)
+(require 'json)
 (require 'test-helper)
 (require 'chat-code)
 (require 'chat-tool-caller)
@@ -405,6 +406,47 @@
       (should (string-match-p "\"type\":\"function\"" encoded))
       (should (stringp (cdr (assoc "name"
                                    (cdr (assoc "function" (car decoded))))))))))
+
+(ert-deftest chat-tool-caller-zero-arg-provider-schema-is-empty-object ()
+  "Test zero-argument tools use an empty object schema."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'no_arg_tool
+      :name "No Arg Tool"
+      :description "Needs no arguments"
+      :language 'elisp
+      :compiled-function (lambda (&rest _) "ok")
+      :is-active t
+      :usage-count 0))
+    (let* ((tools (chat-tool-caller-provider-tools))
+           (schema (cdr (assoc 'parameters
+                               (cdr (assoc 'function (aref tools 0))))))
+           (encoded (json-encode schema)))
+      (should (string-match-p "\"properties\":{}" encoded))
+      (should (string-match-p "\"required\":\\[\\]" encoded))
+      (should-not (string-match-p "input" encoded)))))
+
+(ert-deftest chat-tool-forge-persists-parameter-schemas ()
+  "Test forged tools reload with their parameter schema."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'persisted_tool
+       :name "Persisted Tool"
+       :description "Echo one argument"
+       :language 'elisp
+       :source-code "(lambda (input) input)"
+       :parameters '((:name "input" :type "string" :required t))
+       :is-active t
+       :usage-count 0))
+     (setq chat-tool-forge--registry (make-hash-table :test 'eq))
+     (chat-tool-forge-load-all)
+     (should (equal (chat-forged-tool-parameters
+                     (chat-tool-forge-get 'persisted_tool))
+                    '((:name "input" :type "string" :required t)))))))
 
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

@@ -449,8 +449,11 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
 
 (defun chat-session--serialize-tool-call (call)
   "Convert tool CALL plist to an alist."
-  (list (cons 'name (plist-get call :name))
-        (cons 'arguments (plist-get call :arguments))))
+  (append
+   (when-let ((id (plist-get call :id)))
+     (list (cons 'id id)))
+   (list (cons 'name (plist-get call :name))
+         (cons 'arguments (plist-get call :arguments)))))
 
 (defun chat-session--normalize-tool-call (call)
   "Normalize decoded JSON CALL into a plist."
@@ -458,11 +461,15 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
    ((and (consp call) (keywordp (car call)))
     call)
    ((listp call)
-    (list :name (or (cdr (assoc 'name call))
-                    (cdr (assoc "name" call)))
-          :arguments (chat-session--normalize-tool-arguments
-                      (or (cdr (assoc 'arguments call))
-                          (cdr (assoc "arguments" call))))))
+    (append
+     (when-let ((id (or (cdr (assoc 'id call))
+                        (cdr (assoc "id" call)))))
+       (list :id id))
+     (list :name (or (cdr (assoc 'name call))
+                     (cdr (assoc "name" call)))
+           :arguments (chat-session--normalize-tool-arguments
+                       (or (cdr (assoc 'arguments call))
+                           (cdr (assoc "arguments" call)))))))
    (t
     call)))
 

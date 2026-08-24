@@ -42,6 +42,7 @@
 (require 'chat-status)
 (require 'chat-stream)
 (require 'chat-agent)
+(require 'chat-agent-transcript)
 (require 'chat-code-lsp)
 (require 'chat-tool-caller)
 (require 'chat-request-diagnostics)
@@ -1558,23 +1559,37 @@ using C-x b or C-c C-v."
   "Send message from input area."
   (interactive)
   (when chat-code--current-session
-    (if (chat-code--response-active-p)
-        (message "A response is already in progress. Cancel it before sending another message.")
-      (let* ((input-start (marker-position chat-code--input-marker))
-             (input-end (point-max))
-             (content (string-trim (buffer-substring-no-properties
-                                    input-start input-end))))
-        (if (string-empty-p content)
-            (message "Cannot send empty message")
-          (delete-region input-start input-end)
-          (goto-char input-start)
-          (let ((user-msg (make-chat-message
-                           :id (chat-session-new-message-id)
-                           :role :user
-                           :content content
-                           :timestamp (current-time))))
-            (chat-session-add-message (chat-code--base-session) user-msg)
-            (chat-code--display-user-message content)
+    (let* ((input-start (marker-position chat-code--input-marker))
+           (input-end (point-max))
+           (content (string-trim (buffer-substring-no-properties
+                                  input-start input-end))))
+      (cond
+       ((string-empty-p content)
+        (message "Cannot send empty message"))
+       ((chat-agent-active-p chat-code--active-agent-run)
+        (delete-region input-start input-end)
+        (goto-char input-start)
+        (let ((user-msg (make-chat-message
+                         :id (chat-session-new-message-id)
+                         :role :user
+                         :content content
+                         :timestamp (current-time))))
+          (chat-session-add-message (chat-code--base-session) user-msg)
+          (chat-code--display-user-message content)
+          (chat-agent-steer chat-code--active-agent-run user-msg)
+          (message "Message queued for the active response.")))
+       ((chat-code--response-active-p)
+        (message "A response is already in progress. Cancel it before sending another message."))
+       (t
+        (delete-region input-start input-end)
+        (goto-char input-start)
+        (let ((user-msg (make-chat-message
+                         :id (chat-session-new-message-id)
+                         :role :user
+                         :content content
+                         :timestamp (current-time))))
+          (chat-session-add-message (chat-code--base-session) user-msg)
+          (chat-code--display-user-message content)
           (chat-code--process-message)))))))
 
 (defun chat-code-show-help ()
@@ -1688,6 +1703,10 @@ using C-x b or C-c C-v."
                nil
                nil
                (chat-code--request-live-detail)))))
+         ((eq type 'message-appended)
+          (chat-agent-transcript-persist-message
+           (chat-code--base-session)
+           (plist-get event :message)))
          ((eq type 'response)
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
@@ -1726,15 +1745,9 @@ using C-x b or C-c C-v."
                       "Completed"))
                    (let ((processed
                           (list :content (plist-get event :content)
-                                :tool-calls (plist-get event :tool-calls)
-                                :tool-results (plist-get event :tool-results)
                                 :tool-events (plist-get event :tool-events)
                                 :tool-loop-limit-reached
                                 (eq status 'stopped))))
-                     (chat-code--persist-processed-response
-                      processed
-                      (plist-get event :raw-request)
-                      (plist-get event :raw-response))
                      (chat-code--display-processed-response
                       processed content-start)))
                   ('cancelled

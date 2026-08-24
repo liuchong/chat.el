@@ -5,10 +5,10 @@ Last updated: 2026-08-24
 ## Summary
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
-The core chat flow, native and JSON tool calling, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
+The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
-The agent loop is extracted from UI and code mode. Tool results reenter the transcript as `:tool` messages. Emacs-native read-only tools are registered through the plugin host.
+The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
 
@@ -16,7 +16,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 
 ### Chat Core
 
-- session creation and persistence
+- session creation and append-only persistence
+- ordered assistant/tool transcript persistence for new agent runs
 - raw request and response inspection
 - async non streaming request path
 - optional streaming UI path
@@ -32,10 +33,10 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Tool Calling
 
 - provider tool calling plus JSON-in-text fallback
-- built in file tools and Emacs buffer/imenu/xref/project tools
+- built in file tools and project-scoped Emacs buffer/imenu/xref/project tools
 - approval for risky tool execution
 - bounded follow up tool loop
-- tool results fed back as `:tool` messages
+- tool results fed back as ordered `:tool` messages with provider call ids
 
 ### File Operations
 
@@ -58,14 +59,15 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - explicit approval before tool registration
 - lambda only elisp source validation
 - registry loading and persistence
+- persisted parameter schemas for generated tools
 
 ## Current Quality Baseline
 
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 376 regression tests discovered
-- 376 passing
+- 527 regression tests discovered
+- 527 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -115,6 +117,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - code mode now also supports bounded current-file capture on top of a shared reading capture module
 - plain chat now exposes the same shared reading capture model for region, defun, near-point, and bounded current-file questions
 - AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
+- active chat and code-mode input now steers the running agent instead of being rejected when a response is in progress
+- native provider schemas now encode zero-argument tools as empty objects and forged-tool parameter schemas survive reload
+- Emacs live-buffer tools now hide credential-like buffers and default to project/session-scoped exposure
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
 - code mode now also has a native help buffer and `C-c C-h` shortcut so reading commands, preview flow, request-panel usage, and regenerate/edit-resend are discoverable inside the main coding surface
 - shared reading helpers now have denser regression coverage around naming, fallback behavior, minimal captures, and help-buffer behavior

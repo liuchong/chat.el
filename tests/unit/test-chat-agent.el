@@ -334,6 +334,39 @@ car collects the messages of every request."
       (should (string= (chat-message-content (car (last (cadr (car calls)))))
                        "continue")))))
 
+(ert-deftest chat-agent-no-tool-steer-runs-before-default-stop ()
+  "Test mid-run steering continues even when the current turn has no tools."
+  (let ((calls (list nil))
+        (queued nil)
+        run)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "first")
+                  (:content "after steer"))
+                calls)))
+      (setq
+       run
+       (chat-agent-start
+        (list
+         :model 'kimi
+         :messages (list (chat-agent-test--user-message))
+         :on-event
+         (lambda (event)
+           (when (and (not queued)
+                      (eq (plist-get event :type) 'response))
+             (setq queued t)
+             (chat-agent-steer
+              (plist-get event :run)
+              (make-chat-message
+               :id "steer-2"
+               :role :user
+               :content "new constraint"
+               :timestamp (current-time))))))))
+      (should (chat-agent-run-state-done run))
+      (should (= (length (car calls)) 2))
+      (should (string= (chat-message-content (car (last (cadr (car calls)))))
+                       "new constraint")))))
+
 (ert-deftest chat-agent-plugin-can-block-tool-calls ()
   "Test before-tool-call hooks can block execution."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))

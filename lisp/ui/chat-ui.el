@@ -26,6 +26,7 @@
 (require 'chat-request-surface)
 (require 'chat-status)
 (require 'chat-agent)
+(require 'chat-agent-transcript)
 
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
@@ -366,47 +367,62 @@
   "Send message from input area."
   (interactive)
   (when chat--current-session
-    (if (chat-ui--response-active-p)
-        (message "A response is already in progress. Cancel it before sending another message.")
-      (let* ((input-start (marker-position chat-ui--input-overlay))
-             (input-end (point-max))
-             (content (string-trim (buffer-substring-no-properties input-start input-end))))
-        ;; Check for empty message
-        (if (string-empty-p content)
-            (message "Cannot send empty message")
-          ;; Clear input
-          (delete-region input-start input-end)
-          (goto-char input-start)
-          ;; Check for special prefixes and commands
-          (cond
-           ;; Cancel current request
-           ((string-equal "/cancel" content)
-            (chat-ui-cancel-response)
-            (message "Request cancelled."))
-           ;; Shell command with ! prefix
-           ((string-prefix-p "!" content)
-            (chat-ui--handle-shell-command (substring content 1)))
-           ;; Direct AI query with ? prefix
-           ((string-prefix-p "?" content)
-            (chat-ui--handle-direct-query (substring content 1)))
-           ;; Tool creation request
-           ((chat-tool-forge-ai--tool-request-p content)
-            (chat-ui--handle-tool-creation content))
-           ;; Normal message flow
-           (t
-            (let ((user-msg (make-chat-message
-                            :id (chat-session-new-message-id)
-                            :role :user
-                            :content content
-                            :timestamp (current-time))))
-              (chat-session-add-message chat--current-session user-msg)
-              ;; Insert in buffer
-              (save-excursion
-                (goto-char chat-ui--messages-end)
-                (chat-ui--insert-message user-msg)
-                (set-marker chat-ui--messages-end (point)))
-              ;; Get AI response
-              (chat-ui--get-response)))))))))
+    (let* ((input-start (marker-position chat-ui--input-overlay))
+           (input-end (point-max))
+           (content (string-trim (buffer-substring-no-properties input-start input-end))))
+      (cond
+       ((string-empty-p content)
+        (message "Cannot send empty message"))
+       ((string-equal "/cancel" content)
+        (delete-region input-start input-end)
+        (goto-char input-start)
+        (chat-ui-cancel-response)
+        (message "Request cancelled."))
+       ((chat-agent-active-p chat-ui--active-agent-run)
+        (delete-region input-start input-end)
+        (goto-char input-start)
+        (let ((user-msg (make-chat-message
+                         :id (chat-session-new-message-id)
+                         :role :user
+                         :content content
+                         :timestamp (current-time))))
+          (chat-session-add-message chat--current-session user-msg)
+          (save-excursion
+            (goto-char chat-ui--messages-end)
+            (chat-ui--insert-message user-msg)
+            (set-marker chat-ui--messages-end (point)))
+          (chat-agent-steer chat-ui--active-agent-run user-msg)
+          (message "Message queued for the active response.")))
+       ((chat-ui--response-active-p)
+        (message "A response is already in progress. Cancel it before sending another message."))
+       (t
+        (delete-region input-start input-end)
+        (goto-char input-start)
+        (cond
+         ;; Shell command with ! prefix
+         ((string-prefix-p "!" content)
+          (chat-ui--handle-shell-command (substring content 1)))
+         ;; Direct AI query with ? prefix
+         ((string-prefix-p "?" content)
+          (chat-ui--handle-direct-query (substring content 1)))
+         ;; Tool creation request
+         ((chat-tool-forge-ai--tool-request-p content)
+          (chat-ui--handle-tool-creation content))
+         ;; Normal message flow
+         (t
+          (let ((user-msg (make-chat-message
+                           :id (chat-session-new-message-id)
+                           :role :user
+                           :content content
+                           :timestamp (current-time))))
+            (chat-session-add-message chat--current-session user-msg)
+            ;; Insert in buffer
+            (save-excursion
+              (goto-char chat-ui--messages-end)
+              (chat-ui--insert-message user-msg)
+              (set-marker chat-ui--messages-end (point)))
+            ;; Get AI response
+            (chat-ui--get-response)))))))))
 
 (defun chat-ui--followup-target-note ()
   "Return a system note about the most recent file target."
@@ -629,6 +645,10 @@ assistant response being filled in."
                chat-ui--live-response-content
                tool-events
                (chat-ui--request-live-detail)))))
+         ((eq type 'message-appended)
+          (chat-agent-transcript-persist-message
+           session
+           (plist-get event :message)))
          ((eq type 'response)
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
@@ -674,11 +694,7 @@ assistant response being filled in."
               ui-buffer
               content-start
               (list :content (plist-get event :content)
-                    :tool-calls (plist-get event :tool-calls)
-                    :tool-results (plist-get event :tool-results)
-                    :tool-events (plist-get event :tool-events))
-              (plist-get event :raw-request)
-              (plist-get event :raw-response)))
+                    :tool-events (plist-get event :tool-events))))
             ('cancelled
              (when (buffer-live-p ui-buffer)
                (with-current-buffer ui-buffer
@@ -767,31 +783,17 @@ spans use the bold face."
 
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
-  "Render PROCESSED response and persist it for SESSION."
+  "Render PROCESSED response for SESSION.
+MSG-ID, RAW-REQUEST, and RAW-RESPONSE are accepted for compatibility;
+agent messages are persisted incrementally from `message-appended'."
   (let* ((content (or (plist-get processed :content) ""))
-         (tool-events (plist-get processed :tool-events))
-         (tool-calls (plist-get processed :tool-calls))
-         (tool-results (plist-get processed :tool-results))
-         (tool-summary (chat-ui--format-tool-results tool-results))
-         (history-content (if (and (string-blank-p content) tool-summary)
-                              tool-summary
-                            content)))
+         (tool-events (plist-get processed :tool-events)))
+    (ignore session msg-id raw-request raw-response)
     (chat-ui--render-response-state ui-buffer content-start content tool-events)
     (when (buffer-live-p ui-buffer)
       (with-current-buffer ui-buffer
         (chat-ui--fontify-markdown-lite content-start chat-ui--messages-end)))
-    (chat-session-add-message
-     session
-     (make-chat-message
-      :id msg-id
-      :role :assistant
-      :content history-content
-      :timestamp (current-time)
-      :tool-calls tool-calls
-      :tool-results tool-results
-      :raw-request raw-request
-      :raw-response raw-response))
-    (chat-log "[UI] Response saved to session")))
+    (chat-log "[UI] Response rendered")))
 
 (defun chat-ui--render-error (ui-buffer error-message)
   "Render ERROR-MESSAGE in UI-BUFFER."

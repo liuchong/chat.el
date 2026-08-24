@@ -12,6 +12,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'project)
 (require 'subr-x)
 (require 'seq)
 (require 'chat-plugin)
@@ -25,6 +26,73 @@
    ((and (stringp value) (string-match-p "\\`[0-9]+\\'" value))
     (string-to-number value))
    (t nil)))
+
+(defcustom chat-plugin-emacs-sensitive-buffer-patterns
+  '("authinfo" "\\.gpg\\'" "\\.netrc\\'" "\\.env\\'" "password" "secret" "token")
+  "Buffer name or file name patterns that Emacs tools never expose."
+  :type '(repeat regexp)
+  :group 'chat-plugin)
+
+(defcustom chat-plugin-emacs-allow-all-buffers nil
+  "When non-nil, allow read-only Emacs tools to inspect any non-sensitive buffer."
+  :type 'boolean
+  :group 'chat-plugin)
+
+(defun chat-plugin-emacs--project-root ()
+  "Return the current project root, or nil."
+  (when-let ((project (ignore-errors (project-current))))
+    (file-truename (project-root project))))
+
+(defun chat-plugin-emacs--sensitive-buffer-p (buffer)
+  "Return non-nil when BUFFER matches a hard deny pattern."
+  (with-current-buffer buffer
+    (let ((values (delq nil (list (buffer-name) buffer-file-name))))
+      (seq-some
+       (lambda (pattern)
+         (seq-some (lambda (value)
+                     (string-match-p pattern value))
+                   values))
+       chat-plugin-emacs-sensitive-buffer-patterns))))
+
+(defun chat-plugin-emacs--buffer-in-project-p (buffer)
+  "Return non-nil when BUFFER visits a file under the current project."
+  (let ((root (chat-plugin-emacs--project-root)))
+    (and root
+         (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (and buffer-file-name
+                (string-prefix-p root
+                                 (file-truename buffer-file-name)))))))
+
+(defun chat-plugin-emacs--buffer-visible-p (buffer)
+  "Return non-nil when BUFFER may be listed or read by Emacs tools."
+  (and (buffer-live-p buffer)
+       (not (string-prefix-p " " (buffer-name buffer)))
+       (not (chat-plugin-emacs--sensitive-buffer-p buffer))
+       (or chat-plugin-emacs-allow-all-buffers
+           (eq buffer (current-buffer))
+           (chat-plugin-emacs--buffer-in-project-p buffer))))
+
+(defun chat-plugin-emacs--buffer-listable-p (buffer)
+  "Return non-nil when BUFFER may be included in buffer listings."
+  (and (buffer-live-p buffer)
+       (not (string-prefix-p " " (buffer-name buffer)))
+       (not (chat-plugin-emacs--sensitive-buffer-p buffer))
+       (or chat-plugin-emacs-allow-all-buffers
+           (and (eq buffer (current-buffer))
+                (with-current-buffer buffer
+                  (null buffer-file-name)))
+           (chat-plugin-emacs--buffer-in-project-p buffer))))
+
+(defun chat-plugin-emacs--readable-buffer (name)
+  "Return the readable buffer named NAME, or signal a user-facing error."
+  (let ((buffer (or (and (stringp name) (get-buffer name))
+                    (current-buffer))))
+    (unless (buffer-live-p buffer)
+      (error "Buffer not found: %s" name))
+    (unless (chat-plugin-emacs--buffer-visible-p buffer)
+      (error "Buffer access denied: %s" (buffer-name buffer)))
+    buffer))
 
 (defun chat-plugin-emacs--register-tool (id name description parameters fn)
   "Register a read-only Emacs tool ID."
@@ -44,7 +112,7 @@
   (let (rows)
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
-        (unless (string-prefix-p " " (buffer-name))
+        (when (chat-plugin-emacs--buffer-listable-p buffer)
           (push (format "%s%s%s"
                         (buffer-name)
                         (if (buffer-modified-p) " *" "")
@@ -56,10 +124,7 @@
 
 (defun chat-plugin-emacs--read-buffer (name &optional start-line end-line)
   "Read buffer NAME, optionally from START-LINE to END-LINE."
-  (let ((buffer (or (and (stringp name) (get-buffer name))
-                    (current-buffer))))
-    (unless (buffer-live-p buffer)
-      (error "Buffer not found: %s" name))
+  (let ((buffer (chat-plugin-emacs--readable-buffer name)))
     (with-current-buffer buffer
       (save-restriction
         (widen)
@@ -88,10 +153,7 @@
 
 (defun chat-plugin-emacs--imenu (name)
   "Return imenu entries for buffer NAME."
-  (let ((buffer (or (and (stringp name) (get-buffer name))
-                    (current-buffer))))
-    (unless (buffer-live-p buffer)
-      (error "Buffer not found: %s" name))
+  (let ((buffer (chat-plugin-emacs--readable-buffer name)))
     (with-current-buffer buffer
       (require 'imenu)
       (condition-case err

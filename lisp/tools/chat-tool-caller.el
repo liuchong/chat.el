@@ -73,7 +73,11 @@ model knows content is missing."
                  params
                  ", ")
                 "}")
-      "{\"input\": \"value\"}")))
+      "{}")))
+
+(defun chat-tool-caller--empty-json-object ()
+  "Return an object that encodes as JSON `{}`."
+  (make-hash-table :test 'equal))
 
 (defun chat-tool-caller--format-tool-line (tool)
   "Format TOOL as one line for the system prompt."
@@ -98,12 +102,13 @@ model knows content is missing."
             (push name required))))
       `((type . "object")
         (properties . ,(nreverse properties))
-        (required . ,(vconcat (nreverse required)))))
+        (required . ,(vconcat (nreverse required)))
+        (additionalProperties . :json-false)))
      (t
       `((type . "object")
-        (properties . (("input" . ((type . "string")
-                                   (description . "Tool input")))))
-        (required . ["input"]))))))
+        (properties . ,(chat-tool-caller--empty-json-object))
+        (required . [])
+        (additionalProperties . :json-false))))))
 
 (defun chat-tool-caller-provider-tools ()
   "Return provider tool definitions for currently available tools.
@@ -363,6 +368,8 @@ examples in prose do not count as attempts."
                 params)))
      ((chat-tool-caller--argument-value arguments "input")
       (list (chat-tool-caller--argument-value arguments "input")))
+     ((null arguments)
+      nil)
      (t
       (mapcar #'cdr arguments)))))
 

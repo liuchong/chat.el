@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
 (require 'subr-x)
 
 ;; ------------------------------------------------------------------
@@ -183,6 +184,42 @@
   (unless (file-directory-p chat-tool-forge-directory)
     (make-directory chat-tool-forge-directory t)))
 
+(defun chat-tool-forge--parameter-to-json (param)
+  "Convert parameter plist PARAM to a JSON object alist."
+  `((name . ,(plist-get param :name))
+    (type . ,(plist-get param :type))
+    (description . ,(or (plist-get param :description) ""))
+    (required . ,(if (plist-get param :required) t :json-false))))
+
+(defun chat-tool-forge--parameters-to-json (parameters)
+  "Convert PARAMETERS to a JSON array for persistence."
+  (vconcat (mapcar #'chat-tool-forge--parameter-to-json
+                   (or parameters nil))))
+
+(defun chat-tool-forge--parameter-from-json (param)
+  "Convert decoded PARAM alist to the internal parameter plist."
+  (let ((name (or (cdr (assoc "name" param))
+                  (cdr (assoc 'name param))))
+        (type (or (cdr (assoc "type" param))
+                  (cdr (assoc 'type param))))
+        (description (or (cdr (assoc "description" param))
+                         (cdr (assoc 'description param))))
+        (required (or (cdr (assoc "required" param))
+                      (cdr (assoc 'required param)))))
+    (append
+     (list :name name :type type)
+     (when (and description (not (string-empty-p description)))
+       (list :description description))
+     (list :required (and required (not (eq required :json-false)))))))
+
+(defun chat-tool-forge--parameters-from-json (parameters)
+  "Convert decoded PARAMETERS into internal parameter plists."
+  (mapcar #'chat-tool-forge--parameter-from-json
+          (cond
+           ((vectorp parameters) (append parameters nil))
+           ((listp parameters) parameters)
+           (t nil))))
+
 (defun chat-tool-forge--save (tool)
   "Save TOOL to disk."
   (chat-tool-forge--ensure-directory)
@@ -199,6 +236,10 @@
       (insert (format ";;; description: %s\n" (chat-forged-tool-description tool)))
       (insert (format ";;; language: %s\n" lang))
       (insert (format ";;; version: %s\n" (or (chat-forged-tool-version tool) "1.0.0")))
+      (insert (format ";;; parameters: %s\n"
+                      (json-encode
+                       (chat-tool-forge--parameters-to-json
+                        (chat-forged-tool-parameters tool)))))
       (insert (format ";;; created: %s\n\n" (format-time-string "%Y-%m-%dT%H:%M:%S")))
       (when (chat-forged-tool-source-code tool)
         (insert (chat-forged-tool-source-code tool))))))
@@ -216,7 +257,8 @@
   (with-temp-buffer
     (insert-file-contents filepath)
     ;; Parse header
-    (let ((id nil) (name nil) (desc nil) (lang 'elisp) (source nil))
+    (let ((id nil) (name nil) (desc nil) (lang 'elisp)
+          (parameters nil) (source nil))
       (goto-char (point-min))
       (while (looking-at ";;; ")
         (let ((line (buffer-substring (point) (line-end-position))))
@@ -228,7 +270,16 @@
            ((string-match "description: \\(.*\\)" line)
             (setq desc (match-string 1 line)))
            ((string-match "language: \\(.*\\)" line)
-            (setq lang (intern (match-string 1 line))))))
+            (setq lang (intern (match-string 1 line))))
+           ((string-match "parameters: \\(.*\\)" line)
+            (setq parameters
+                  (let ((json-array-type 'list)
+                        (json-object-type 'alist)
+                        (json-key-type 'string))
+                    (condition-case nil
+                        (chat-tool-forge--parameters-from-json
+                         (json-read-from-string (match-string 1 line)))
+                      (error nil)))))))
         (forward-line 1))
       ;; Rest is source code
       (setq source (string-trim (buffer-substring (point) (point-max))))
@@ -243,6 +294,7 @@
           :description desc
           :language lang
           :source-code source
+          :parameters parameters
           :version "1.0.0"
           :created-at (current-time)
           :updated-at (current-time)

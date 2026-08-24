@@ -84,12 +84,15 @@
               (append (chat-agent-run-state-messages run) messages))
         (chat-agent--emit run 'steering :messages messages)))))
 
-(defun chat-agent--stop-p (run processed)
-  "Return non-nil when RUN should stop after PROCESSED."
-  (if-let ((fn (chat-agent-run-state-should-stop-fn run)))
-      (funcall fn run processed)
-    (and (null (plist-get processed :tool-calls))
-         (not (plist-get processed :parse-error)))))
+(defun chat-agent--forced-stop-p (run processed)
+  "Return non-nil when RUN explicitly asks to stop after PROCESSED."
+  (when-let ((fn (chat-agent-run-state-should-stop-fn run)))
+    (funcall fn run processed)))
+
+(defun chat-agent--default-stop-p (processed)
+  "Return non-nil when PROCESSED would naturally end the run."
+  (and (null (plist-get processed :tool-calls))
+       (not (plist-get processed :parse-error))))
 
 (defun chat-agent--finish (run status reason)
   "Finish RUN once with STATUS and REASON and emit the final event."
@@ -204,9 +207,10 @@
 (defun chat-agent--append-message (run message)
   "Append MESSAGE to RUN transcript."
   (setf (chat-agent-run-state-messages run)
-        (append (chat-agent-run-state-messages run) (list message))))
+        (append (chat-agent-run-state-messages run) (list message)))
+  (chat-agent--emit run 'message-appended :message message))
 
-(defun chat-agent--make-assistant-message (run content calls)
+(defun chat-agent--make-assistant-message (run content calls raw-request raw-response)
   "Build the assistant transcript message for RUN."
   (make-chat-message
    :id (chat-session-new-message-id
@@ -214,6 +218,8 @@
    :role :assistant
    :content content
    :tool-calls calls
+   :raw-request raw-request
+   :raw-response raw-response
    :timestamp (current-time)))
 
 (defun chat-agent--make-tool-message (run call result-text)
@@ -310,7 +316,9 @@
      (chat-agent--make-assistant-message
       run
       (plist-get processed :content)
-      (plist-get processed :tool-calls)))
+      (plist-get processed :tool-calls)
+      (plist-get result :raw-request)
+      (plist-get result :raw-response)))
     (let ((calls (plist-get processed :tool-calls))
           (results (plist-get processed :tool-results)))
       (while (and calls results)
@@ -332,7 +340,11 @@
     (chat-agent--emit run 'response :processed processed)
     (chat-agent--hook-all 'chat-plugin-post-turn-functions run processed)
     (cond
-     ((chat-agent--stop-p run processed)
+     ((chat-agent--forced-stop-p run processed)
+      (chat-agent--finish run 'completed nil))
+     ((chat-agent-run-state-steering-queue run)
+      (chat-agent--turn run))
+     ((chat-agent--default-stop-p processed)
       (let ((queued (nreverse (chat-agent-run-state-followup-queue run))))
         (setf (chat-agent-run-state-followup-queue run) nil)
         (if queued

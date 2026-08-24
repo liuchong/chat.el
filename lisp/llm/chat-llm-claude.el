@@ -122,7 +122,10 @@
                         (chat-llm--field tool 'name))
               :description (or (chat-llm--field fn 'description) "")
               :input_schema (or (chat-llm--field fn 'parameters)
-                                (list :type "object" :properties nil)))))
+                                (list :type "object"
+                                      :properties (make-hash-table :test 'equal)
+                                      :required []
+                                      :additionalProperties :json-false)))))
     (if (vectorp tools) (append tools nil) tools))))
 
 (defun chat-llm-claude--parse-response (json-data)
