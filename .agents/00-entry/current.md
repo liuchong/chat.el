@@ -4,15 +4,15 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, kernel, plugin, sessions, work
+- Tags: current, phase, kernel, plugin, sessions, work, mcp, subagents
 
 ## Current Phase
 
-Stage 5 work orchestration is complete (2026-08-24). The loop lives in
-`lisp/agent/`, emits ordered assistant/tool transcript messages,
-rebuilds context per step, supports next-turn prepare hooks, and now has
-session-local plan/TODO/goal/workflow state plus cancellable background
-tasks.
+Stage 6 MCP and sub-agent backend work is complete (2026-08-24). The
+loop lives in `lisp/agent/`, emits ordered assistant/tool transcript
+messages, rebuilds context per step, and now has optional MCP JSON-RPC
+stdio/HTTP primitives plus in-process and external subprocess sub-agent
+backends.
 
 ## Main Objective
 
@@ -25,7 +25,9 @@ rather than growing the loop; plugin resources must have owner metadata
 and roll back cleanly when stopped. Preserve session durability through
 JSONL-compatible state entries and computed recovery metadata. Work
 orchestration must stay declarative and cancellable; no untrusted Lisp
-evaluation is allowed in workflow records.
+evaluation is allowed in workflow records. MCP and sub-agent lifecycle
+must be visible as summarized state instead of dumping child transcripts
+into parent context.
 
 ## Active Modules
 
@@ -38,6 +40,8 @@ evaluation is allowed in workflow records.
 - `lisp/llm/chat-llm.el`
 - `lisp/tools/chat-tool-caller.el`
 - `lisp/tools/chat-work.el`
+- `lisp/tools/chat-mcp.el`
+- `lisp/tools/chat-subagent.el`
 - `lisp/core/chat-session.el`
 - `lisp/core/chat-session-tree.el`
 - `lisp/core/chat-agent.el` (load-path shim)
@@ -49,6 +53,7 @@ evaluation is allowed in workflow records.
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-24-work-platform-stage6-mcp-subagents.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage5-work-orchestration.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage4-session-runtime.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage3-plugin-runtime.md`

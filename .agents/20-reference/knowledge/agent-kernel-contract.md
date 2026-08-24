@@ -70,6 +70,13 @@ next turn cannot pair `tool_call_id` with results.
   keep bounded logs
 - Workflow state is declarative data. It may store ordered steps and
   cancellation state, but must not evaluate arbitrary Lisp from records
+- MCP clients are optional JSON-RPC transports. Stdio clients own a
+  process lifecycle; HTTP requests are single JSON-RPC POST calls; both
+  keep request/response state keyed by JSON-RPC id
+- Sub-agents must isolate child sessions and return parent-safe
+  summaries. External subprocess backends capture output to logs and
+  expose cancellation without requiring external binaries in canonical
+  tests
 
 ## Regression Guard
 
@@ -93,3 +100,6 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-work.el` covers background task execution/stop,
   session-local work records, declarative workflow cancellation, and
   work tool metadata
+- `tests/unit/test-chat-mcp-subagent.el` covers MCP JSON-RPC response
+  handling, stdio lifecycle, mocked HTTP, in-process child-session
+  isolation, and external subprocess output capture

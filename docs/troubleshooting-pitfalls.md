@@ -26,6 +26,7 @@ Required field order:
 - File Tools and Security
 - Tool Calling and Tool Forging
 - Work Orchestration
+- MCP and Sub-agents
 - Testing and Batch Mode
 - Development Hygiene
 
@@ -573,6 +574,26 @@ Do not persist tools that only have an in memory compiled function and no source
 **Cause**: workflow steps are stored as executable Lisp forms instead of structured data.
 
 **Solution**: store workflow steps as JSON-compatible records. Execution layers may interpret known step kinds later, but loading and cancellation must never evaluate record contents.
+
+---
+
+## MCP and Sub-agents
+
+### MCP Responses Must Be Matched By JSON-RPC Id
+
+**Problem**: a later MCP response is delivered to the wrong request or a request appears to time out even though the server answered.
+
+**Cause**: stdio chunks can contain partial or multiple JSON lines, and responses may arrive out of order.
+
+**Solution**: buffer incomplete lines, decode only complete JSONL records, and store responses by JSON-RPC `id`.
+
+### Child Transcripts Must Not Leak Into Parent Context
+
+**Problem**: a parent conversation grows rapidly or exposes low-level child-agent details after a sub-agent finishes.
+
+**Cause**: the backend appends the child transcript directly into the parent session.
+
+**Solution**: keep child work in an isolated child session or subprocess log, then return only a parent-safe summary and lifecycle metadata.
 
 ---
 

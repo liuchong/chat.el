@@ -34,6 +34,7 @@ Copyright 2026 chat.el contributors.
 - Scope tools per session and roll back plugin-owned tools, hooks, and services when a plugin stops
 - Browse durable parent/branch session trees and preserve recovery metadata for interrupted tool runs
 - Run cancellable background tasks and keep session-local plan, TODO, goal, and workflow records
+- Use optional MCP JSON-RPC stdio/HTTP primitives and isolated sub-agent backends
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
