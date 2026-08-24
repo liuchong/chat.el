@@ -119,6 +119,7 @@ Returns the list of files that were loaded."
 (require 'chat-work)
 (require 'chat-mcp)
 (require 'chat-subagent)
+(require 'chat-capability-packs)
 
 ;; Load the agent kernel after transports and tooling.
 (require 'chat-agent)
@@ -135,6 +136,7 @@ Returns the list of files that were loaded."
 (chat-files-register-built-in-tools)
 (chat-work-load-tasks)
 (chat-work-register-tools)
+(chat-capability-register-tools)
 (chat-plugin-provide 'tools t)
 (chat-plugin-start-enabled)
 (chat-plugin-load-user-files)

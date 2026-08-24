@@ -27,6 +27,7 @@ Required field order:
 - Tool Calling and Tool Forging
 - Work Orchestration
 - MCP and Sub-agents
+- Capability Packs
 - Testing and Batch Mode
 - Development Hygiene
 
@@ -594,6 +595,26 @@ Do not persist tools that only have an in memory compiled function and no source
 **Cause**: the backend appends the child transcript directly into the parent session.
 
 **Solution**: keep child work in an isolated child session or subprocess log, then return only a parent-safe summary and lifecycle metadata.
+
+---
+
+## Capability Packs
+
+### Profiles Must Not Advertise The Global Tool Catalog
+
+**Problem**: an office or daily session sees programming and file mutation tools that are unrelated to the current surface.
+
+**Cause**: tools are registered globally but no session overlay is applied.
+
+**Solution**: apply a capability profile with `chat-capability-apply-profile`; provider tool exposure and direct execution both honor the session's `:enabled-tools` overlay.
+
+### Mail Tools Must Stay Draft-only
+
+**Problem**: a daily task sends mail when the user expected only a prepared draft.
+
+**Cause**: sending behavior was bundled with draft creation.
+
+**Solution**: keep mail draft CRUD separate from sending. No mail-send tool should be registered by default, and any future sending capability must require explicit approval.
 
 ---
 

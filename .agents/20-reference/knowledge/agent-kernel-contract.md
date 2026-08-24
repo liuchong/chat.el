@@ -77,6 +77,10 @@ next turn cannot pair `tool_call_id` with results.
   summaries. External subprocess backends capture output to logs and
   expose cancellation without requiring external binaries in canonical
   tests
+- Capability packs must be exposed through session tool overlays.
+  Profiles should keep code, office, and daily surfaces from advertising
+  the full global tool catalog
+- Daily mail support is draft-only; sending is not registered as a tool
 
 ## Regression Guard
 
@@ -103,3 +107,5 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-mcp-subagent.el` covers MCP JSON-RPC response
   handling, stdio lifecycle, mocked HTTP, in-process child-session
   isolation, and external subprocess output capture
+- `tests/unit/test-chat-capability-packs.el` covers profile overlays,
+  office tools, daily diary/draft tools, and capability metadata

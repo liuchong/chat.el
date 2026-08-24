@@ -35,6 +35,7 @@ Copyright 2026 chat.el contributors.
 - Browse durable parent/branch session trees and preserve recovery metadata for interrupted tool runs
 - Run cancellable background tasks and keep session-local plan, TODO, goal, and workflow records
 - Use optional MCP JSON-RPC stdio/HTTP primitives and isolated sub-agent backends
+- Apply code, office, and daily capability profiles so sessions expose scoped tool sets
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
@@ -207,6 +208,21 @@ Built in tools currently focus on coding assistance:
 - `work_workflow_start`
 - `work_workflow_cancel`
 - `work_workflow_list`
+- `programming_git_status`
+- `programming_flymake_diagnostics`
+- `programming_compile_task`
+- `office_org_headlines`
+- `office_dired_list`
+- `office_dired_mkdir`
+- `office_dired_rename`
+- `office_calc_eval`
+- `daily_calendar_today`
+- `daily_diary_read`
+- `daily_diary_insert`
+- `daily_notify`
+- `daily_mail_draft_create`
+- `daily_mail_draft_list`
+- `daily_mail_draft_delete`
 
 Risky tools require approval before execution.
 Generated tools also require approval before registration.
