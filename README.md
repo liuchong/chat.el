@@ -224,7 +224,10 @@ Built in tools currently focus on coding assistance:
 - `daily_mail_draft_list`
 - `daily_mail_draft_delete`
 
-Risky tools require approval before execution.
+Risky tools require approval before execution. The shared gate evaluates
+tool sensitivity, effects, and call-specific policy, so new write,
+outbound, personal, correspondence, credential, and network capabilities
+do not depend on a manually maintained tool-id list.
 Generated tools also require approval before registration.
 File writing tools can also be whitelisted by directory, so future writes under an approved directory can run without repeated prompts.
 Emacs live-buffer tools are scoped by default: buffer listing and reads stay within the current project or current non-file buffer, and credential-like buffers are hard-denied.

@@ -440,7 +440,7 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Cause**: fallback schemas and forged-tool persistence used implicit plist/list JSON encoding instead of explicit object shapes.
 
-**Solution**: encode zero-argument tools as an empty object schema with empty `required`, and convert parameter plists to JSON object alists before saving them.
+**Solution**: encode zero-argument tools as an empty object schema with empty `required`, convert parameter plists to JSON object alists before saving them, and enforce required fields, types, enumerations, and unknown-field rejection again at runtime.
 
 ### Session Disabled Tools Must Not Execute Directly
 
@@ -450,6 +450,14 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: check `chat-session-tool-config` in both paths. Provider tool lists and `chat-tool-caller-execute` must use the same enabled/disabled overlay.
 
+### Permission Metadata Must Enforce Approval
+
+**Problem**: a newly registered write, outbound, personal, or network tool executes without prompting even though its event displays sensitivity and effects.
+
+**Cause**: approval checks use a fixed tool-id list while treating permission metadata as display-only data.
+
+**Solution**: derive the approval requirement from tool ids, sensitivity, effects, and call-specific predicates through one shared gate. Use dynamic predicates when only some targets, such as opted-in out-of-project buffers, require approval.
+
 ### Plugin Resources Must Roll Back On Stop
 
 **Problem**: stopping a plugin leaves its tools, hooks, or services available in later sessions.
@@ -457,6 +465,14 @@ Do not persist tools that only have an in memory compiled function and no source
 **Cause**: setup registered global Emacs resources without owner tracking.
 
 **Solution**: register plugin-owned tools and hooks through the plugin host so stop and setup-failure paths can remove owned resources in reverse registration order.
+
+### User Plugins Must Register Before Startup
+
+**Problem**: an explicitly enabled user plugin is loaded but never becomes active.
+
+**Cause**: enabled plugins are started before their user files define and register them.
+
+**Solution**: when user plugin loading is explicitly enabled, load only enabled NAME.el files first, then start enabled plugins and retry dependencies provided during setup.
 
 ### Mode Specific Tool Prompt Drift Reintroduces Wrong Protocols
 

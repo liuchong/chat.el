@@ -10,9 +10,9 @@
 
 ;;; Commentary:
 
-;; Public API for the PI-aligned agent kernel.  The loop lives in
-;; `chat-agent-loop'.  This file owns construction, cancel, steering
-;; and follow-up queues, matching PI's Agent class around agentLoop.
+;; Public API for the agent kernel.  The loop lives in
+;; `chat-agent-loop'.  This file owns construction, cancellation,
+;; steering, and follow-up queues.
 
 ;;; Code:
 
@@ -138,15 +138,14 @@ Events are delivered synchronously through :on-event.  The final
 
 (defun chat-agent-steer (run message)
   "Queue MESSAGE to be injected before the next LLM call of RUN.
-Like PI Agent.steer: takes effect after the current tool batch."
+The message takes effect after the current tool batch."
   (when (and (chat-agent-run-state-p run) message)
     (chat-agent--queue-message
      run 'steering message)
     message))
 
 (defun chat-agent-follow-up (run message)
-  "Queue MESSAGE to run only after RUN would otherwise stop.
-Like PI Agent.followUp."
+  "Queue MESSAGE to run only after RUN would otherwise stop."
   (when (and (chat-agent-run-state-p run) message)
     (chat-agent--queue-message
      run 'followup message)

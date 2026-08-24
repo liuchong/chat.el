@@ -94,7 +94,8 @@
       (error "Buffer access denied: %s" (buffer-name buffer)))
     buffer))
 
-(defun chat-plugin-emacs--register-tool (id name description parameters fn)
+(defun chat-plugin-emacs--register-tool
+    (id name description parameters fn &optional approval-predicate)
   "Register a read-only Emacs tool ID."
   (chat-plugin-register-tool
    (make-chat-forged-tool
@@ -105,9 +106,22 @@
     :parameters parameters
     :sensitivity 'project
     :effects '(read)
+    :approval-predicate approval-predicate
     :compiled-function fn
     :is-active t
     :usage-count 0)))
+
+(defun chat-plugin-emacs--buffer-call-needs-approval-p (call)
+  "Return non-nil when CALL targets a buffer outside project/session scope."
+  (let* ((arguments (plist-get call :arguments))
+         (name (or (cdr (assoc "name" arguments))
+                   (cdr (assoc 'name arguments))))
+         (buffer (or (and (stringp name) (get-buffer name))
+                     (current-buffer))))
+    (and chat-plugin-emacs-allow-all-buffers
+         (buffer-live-p buffer)
+         (not (eq buffer (current-buffer)))
+         (not (chat-plugin-emacs--buffer-in-project-p buffer)))))
 
 (defun chat-plugin-emacs--buffers ()
   "Return a compact listing of live file and named buffers."
@@ -222,7 +236,8 @@
    'emacs_buffers "Emacs buffers"
    "List live Emacs buffers with file names and modified flags."
    nil
-   (lambda (&rest _) (chat-plugin-emacs--buffers)))
+   (lambda (&rest _) (chat-plugin-emacs--buffers))
+   (lambda (_call) chat-plugin-emacs-allow-all-buffers))
   (chat-plugin-emacs--register-tool
    'emacs_read_buffer "Emacs read buffer"
    "Read a live Emacs buffer. Use name for the buffer name, optional start_line and end_line."
@@ -233,12 +248,14 @@
      (chat-plugin-emacs--read-buffer
       name
       (chat-plugin-emacs--line start-line)
-      (chat-plugin-emacs--line end-line))))
+      (chat-plugin-emacs--line end-line)))
+   #'chat-plugin-emacs--buffer-call-needs-approval-p)
   (chat-plugin-emacs--register-tool
    'emacs_imenu "Emacs imenu"
    "List imenu symbols in a live buffer."
    '((:name "name" :type "string" :required nil))
-   (lambda (&optional name) (chat-plugin-emacs--imenu name)))
+   (lambda (&optional name) (chat-plugin-emacs--imenu name))
+   #'chat-plugin-emacs--buffer-call-needs-approval-p)
   (chat-plugin-emacs--register-tool
    'emacs_xref "Emacs xref"
    "Find definitions of an identifier with Emacs xref."

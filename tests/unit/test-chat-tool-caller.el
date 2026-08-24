@@ -64,6 +64,80 @@
                       :arguments (("command" . "pwd"))))))
        (should (string= result "ran:pwd"))))))
 
+(ert-deftest chat-tool-caller-rejects-mistyped-and-unknown-arguments ()
+  "Test runtime validation rejects schema violations before execution."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         (executions 0))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'validated-tool
+       :name "Validated Tool"
+       :description "Validate inputs"
+       :language 'elisp
+       :parameters '((:name "count" :type "integer" :required t))
+       :compiled-function (lambda (_count) (cl-incf executions) "ok")
+       :is-active t
+       :usage-count 0))
+     (should
+      (string-match-p
+       "must be integer"
+       (chat-tool-caller-execute
+        '(:name "validated-tool" :arguments (("count" . "one"))))))
+     (should
+      (string-match-p
+       "Unknown arguments"
+       (chat-tool-caller-execute
+        '(:name "validated-tool"
+          :arguments (("count" . 1) ("extra" . t))))))
+     (should (= executions 0)))))
+
+(ert-deftest chat-tool-caller-accepts-required-json-false ()
+  "Test required booleans distinguish false from a missing argument."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq)))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'boolean-tool
+       :name "Boolean Tool"
+       :description "Accept false"
+       :language 'elisp
+       :parameters '((:name "enabled" :type "boolean" :required t))
+       :compiled-function (lambda (enabled) (if enabled "true" "false"))
+       :is-active t
+       :usage-count 0))
+     (should
+      (string=
+       (chat-tool-caller-execute
+        '(:name "boolean-tool"
+          :arguments (("enabled" . :json-false))))
+       "false")))))
+
+(ert-deftest chat-tool-caller-zero-argument-tools-reject-extra-input ()
+  "Test zero-argument tools enforce additionalProperties false at runtime."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge-directory temp-dir)
+         (chat-tool-forge--registry (make-hash-table :test 'eq))
+         (executed nil))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'zero-tool
+       :name "Zero Tool"
+       :description "Accept no arguments"
+       :language 'elisp
+       :parameters nil
+       :compiled-function (lambda () (setq executed t) "ok")
+       :is-active t
+       :usage-count 0))
+     (should
+      (string-match-p
+       "Unknown arguments"
+       (chat-tool-caller-execute
+        '(:name "zero-tool" :arguments (("input" . "unexpected"))))))
+     (should-not executed))))
+
 (ert-deftest chat-tool-caller-builds-prompt-with-real-argument-names ()
   "Test that the system prompt advertises declared argument names."
   (chat-test-with-temp-dir

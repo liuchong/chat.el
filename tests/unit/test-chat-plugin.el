@@ -7,6 +7,8 @@
 (require 'chat-plugin-emacs)
 (require 'chat-tool-forge)
 
+(defvar chat-plugin-test-unlisted-loaded nil)
+
 (ert-deftest chat-plugin-waits-for-missing-inject ()
   "Test plugins do not start until inject requirements exist."
   (let ((chat-plugin--registry (make-hash-table :test 'eq))
@@ -22,6 +24,41 @@
     (should (chat-plugin-start 'demo))
     (should started)
     (chat-plugin-stop 'demo)))
+
+(ert-deftest chat-plugin-retries-dependents-after-setup-provides-service ()
+  "Test services provided during setup activate waiting plugins."
+  (let ((chat-plugin--registry (make-hash-table :test 'eq))
+        (chat-plugin--services (make-hash-table :test 'eq))
+        (chat-plugin--started nil)
+        (chat-plugin-enabled '(provider consumer))
+        consumer-started)
+    (chat-plugin-define
+     'consumer
+     :inject '(late-service)
+     :setup (lambda (_ctx) (setq consumer-started t)))
+    (chat-plugin-define
+     'provider
+     :setup (lambda (_ctx) (chat-plugin-provide 'late-service t)))
+    (should-not (chat-plugin-start 'consumer))
+    (should (chat-plugin-start 'provider))
+    (should consumer-started)
+    (should (eq (chat-plugin-state (chat-plugin-get 'consumer)) 'active))))
+
+(ert-deftest chat-plugin-loads-only-explicitly-enabled-user-files ()
+  "Test user plugin loading never evaluates unlisted Lisp files."
+  (chat-test-with-temp-dir
+   (let ((chat-plugin-directory temp-dir)
+         (chat-plugin-load-user-directory t)
+         (chat-plugin-enabled '(allowed))
+         (chat-plugin--registry (make-hash-table :test 'eq))
+         chat-plugin-test-unlisted-loaded)
+     (with-temp-file (expand-file-name "allowed.el" temp-dir)
+       (insert "(chat-plugin-define 'allowed :setup (lambda (_ctx) t))\n"))
+     (with-temp-file (expand-file-name "unlisted.el" temp-dir)
+       (insert "(setq chat-plugin-test-unlisted-loaded t)\n"))
+     (chat-plugin-load-user-files)
+     (should (chat-plugin-get 'allowed))
+     (should-not chat-plugin-test-unlisted-loaded))))
 
 (ert-deftest chat-plugin-tracks-lifecycle-states ()
   "Test plugin state moves through pending active failed and disposed."
@@ -135,6 +172,25 @@
             (chat-plugin-emacs--read-buffer (buffer-name outside-buffer))))
        (when (buffer-live-p inside-buffer)
          (kill-buffer inside-buffer))
+       (when (buffer-live-p outside-buffer)
+         (kill-buffer outside-buffer))))))
+
+(ert-deftest chat-plugin-emacs-requires-approval-for-opted-in-outside-buffers ()
+  "Test allow-all buffer access still requires explicit approval."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project/" temp-dir))
+          (outside-file (expand-file-name "outside.txt" temp-dir))
+          (chat-plugin-emacs-allow-all-buffers t)
+          outside-buffer)
+     (make-directory project-root t)
+     (with-temp-file outside-file (insert "personal"))
+     (setq outside-buffer (find-file-noselect outside-file))
+     (unwind-protect
+         (cl-letf (((symbol-function 'chat-plugin-emacs--project-root)
+                    (lambda () (file-truename project-root))))
+           (should
+            (chat-plugin-emacs--buffer-call-needs-approval-p
+             `(:arguments (("name" . ,(buffer-name outside-buffer)))))))
        (when (buffer-live-p outside-buffer)
          (kill-buffer outside-buffer))))))
 

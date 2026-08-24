@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 
-;; Types for the PI-aligned agent kernel.  The loop works with
+;; Types for the agent kernel.  The loop works with
 ;; `chat-message' throughout.  Provider payloads are produced only at
 ;; the LLM boundary by `chat-llm--format-messages' (convertToLlm).
 ;;

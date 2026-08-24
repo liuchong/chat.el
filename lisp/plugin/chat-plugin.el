@@ -1,4 +1,4 @@
-;;; chat-plugin.el --- Emacs plugin host inspired by Cordis -*- lexical-binding: t -*-
+;;; chat-plugin.el --- Scoped Emacs plugin host -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 chat.el contributors
 ;; License: 1PL (One Public License) - https://license.pub/1pl/
@@ -75,6 +75,9 @@ Disabled by default because those files run as Lisp."
 
 (defvar chat-plugin--current-owner nil
   "Plugin currently running setup or teardown.")
+
+(defvar chat-plugin--retrying nil
+  "Non-nil while pending plugin dependencies are being retried.")
 
 (defvar chat-plugin-before-tool-call-functions nil
   "Hook: (run call) -> nil or (:block t :reason STRING).")
@@ -196,6 +199,8 @@ Disabled by default because those files run as Lisp."
                   (chat-plugin-state plugin) 'active
                   (chat-plugin-error plugin) nil)
             (cl-pushnew name chat-plugin--started)
+            (unless chat-plugin--retrying
+              (chat-plugin-retry-pending))
             plugin)
         (error
          (chat-plugin--rollback-owned plugin)
@@ -221,14 +226,15 @@ Disabled by default because those files run as Lisp."
 
 (defun chat-plugin-retry-pending ()
   "Retry plugins that are pending and explicitly enabled."
-  (maphash
-   (lambda (name plugin)
-     (when (and (eq (chat-plugin-state plugin) 'pending)
-                (memq name chat-plugin-enabled)
-                (not (chat-plugin-active plugin))
-                (chat-plugin--inject-ready-p plugin))
-       (chat-plugin-start name)))
-   chat-plugin--registry))
+  (let ((chat-plugin--retrying t))
+    (maphash
+     (lambda (name plugin)
+       (when (and (eq (chat-plugin-state plugin) 'pending)
+                  (memq name chat-plugin-enabled)
+                  (not (chat-plugin-active plugin))
+                  (chat-plugin--inject-ready-p plugin))
+         (chat-plugin-start name)))
+     chat-plugin--registry)))
 
 (defun chat-plugin-start-enabled ()
   "Start every plugin listed in `chat-plugin-enabled'."
@@ -236,15 +242,21 @@ Disabled by default because those files run as Lisp."
     (chat-plugin-start name)))
 
 (defun chat-plugin-load-user-files ()
-  "Load user plugin files when that is explicitly enabled."
+  "Load explicitly enabled user plugin files when allowed.
+Each enabled plugin NAME maps to NAME.el under `chat-plugin-directory';
+unlisted Lisp files are never evaluated."
   (when (and chat-plugin-load-user-directory
              (file-directory-p chat-plugin-directory))
-    (dolist (file (directory-files chat-plugin-directory t "\\.el\\'"))
-      (condition-case err
-          (load file nil t)
-        (error
-         (chat-log "[plugin] failed to load %s: %s"
-                   file (error-message-string err)))))))
+    (dolist (name chat-plugin-enabled)
+      (let ((file (expand-file-name
+                   (concat (symbol-name name) ".el")
+                   chat-plugin-directory)))
+        (when (file-regular-p file)
+          (condition-case err
+              (load file nil t)
+            (error
+             (chat-log "[plugin] failed to load %s: %s"
+                       file (error-message-string err)))))))))
 
 (provide 'chat-plugin)
 ;;; chat-plugin.el ends here

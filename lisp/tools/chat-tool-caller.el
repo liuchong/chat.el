@@ -346,13 +346,29 @@ examples in prose do not count as attempts."
         (error nil)))
     (nreverse (delete-dups calls))))
 
+(defconst chat-tool-caller--missing-argument
+  (make-symbol "chat-tool-caller-missing-argument")
+  "Sentinel used to distinguish a missing argument from JSON false.")
+
+(defun chat-tool-caller--argument-entry (arguments key)
+  "Return the entry for KEY in ARGUMENTS."
+  (or (assoc key arguments)
+      (assoc (intern key) arguments)))
+
+(defun chat-tool-caller--argument-raw-value (arguments key)
+  "Read raw KEY from ARGUMENTS or return a missing-value sentinel."
+  (let ((entry (chat-tool-caller--argument-entry arguments key)))
+    (if entry
+        (cdr entry)
+      chat-tool-caller--missing-argument)))
+
 (defun chat-tool-caller--argument-value (arguments key)
-  "Read KEY from ARGUMENTS."
-  (let ((value (or (cdr (assoc key arguments))
-                   (cdr (assoc (intern key) arguments)))))
-    (if (eq value :json-false)
-        nil
-      value)))
+  "Read normalized KEY from ARGUMENTS."
+  (let ((value (chat-tool-caller--argument-raw-value arguments key)))
+    (cond
+     ((eq value chat-tool-caller--missing-argument) nil)
+     ((eq value :json-false) nil)
+     (t value))))
 
 (defun chat-tool-caller--required-argument-p (param)
   "Return non-nil when PARAM is required."
@@ -364,24 +380,82 @@ examples in prose do not count as attempts."
     (dolist (param params)
       (let ((name (plist-get param :name)))
         (when (and (chat-tool-caller--required-argument-p param)
-                   (null (chat-tool-caller--argument-value arguments name)))
+                   (eq (chat-tool-caller--argument-raw-value arguments name)
+                       chat-tool-caller--missing-argument))
           (push name missing))))
     (nreverse missing)))
 
+(defun chat-tool-caller--argument-type-valid-p (value type)
+  "Return non-nil when raw VALUE conforms to JSON schema TYPE."
+  (pcase type
+    ("string" (stringp value))
+    ("integer" (integerp value))
+    ("number" (numberp value))
+    ("boolean" (memq value '(t :json-false)))
+    ("array" (or (vectorp value)
+                 (null value)
+                 (and (listp value)
+                      (not (consp (car-safe value))))))
+    ("object" (or (hash-table-p value)
+                  (null value)
+                  (and (listp value)
+                       (cl-every #'consp value))))
+    (_ t)))
+
+(defun chat-tool-caller--argument-name (entry)
+  "Return ENTRY key as a string."
+  (let ((key (car entry)))
+    (if (symbolp key) (symbol-name key) key)))
+
+(defun chat-tool-caller--validate-arguments (tool arguments)
+  "Validate ARGUMENTS against TOOL parameter declarations.
+Signal a user-facing error for missing, unknown, mistyped, or invalid
+enumerated values."
+  (unless (or (null arguments)
+              (and (listp arguments) (cl-every #'consp arguments)))
+    (error "Tool arguments must be a JSON object"))
+  (let* ((params (or (chat-forged-tool-parameters tool) nil))
+         (names (mapcar (lambda (param) (plist-get param :name)) params))
+         (missing (chat-tool-caller--missing-required-arguments params arguments))
+         (unknown
+          (delq nil
+                (mapcar
+                 (lambda (entry)
+                   (let ((name (chat-tool-caller--argument-name entry)))
+                     (unless (member name names) name)))
+                 arguments))))
+    (when missing
+      (error "Missing required arguments: %s"
+             (mapconcat #'identity missing ", ")))
+    (when unknown
+      (error "Unknown arguments: %s"
+             (mapconcat #'identity unknown ", ")))
+    (dolist (param params)
+      (let* ((name (plist-get param :name))
+             (value (chat-tool-caller--argument-raw-value arguments name))
+             (type (or (plist-get param :type) "string"))
+             (enum (plist-get param :enum)))
+        (unless (eq value chat-tool-caller--missing-argument)
+          (unless (chat-tool-caller--argument-type-valid-p value type)
+            (error "Argument '%s' must be %s" name type))
+          (when (and enum (not (member value enum)))
+            (error "Argument '%s' must be one of: %s"
+                   name
+                   (mapconcat (lambda (item) (format "%s" item))
+                              enum ", ")))))))
+  arguments)
+
 (defun chat-tool-caller--arguments-to-argv (tool arguments)
   "Convert TOOL ARGUMENTS alist to an argv list."
+  (chat-tool-caller--validate-arguments tool arguments)
   (let ((params (chat-forged-tool-parameters tool)))
     (cond
      ((and (listp params) params)
-      (let ((missing (chat-tool-caller--missing-required-arguments params arguments)))
-        (when missing
-          (error "Missing required arguments: %s"
-                 (mapconcat #'identity missing ", ")))
-        (mapcar (lambda (param)
-                  (chat-tool-caller--argument-value
-                   arguments
-                   (plist-get param :name)))
-                params)))
+      (mapcar (lambda (param)
+                (chat-tool-caller--argument-value
+                 arguments
+                 (plist-get param :name)))
+              params))
      ((chat-tool-caller--argument-value arguments "input")
       (list (chat-tool-caller--argument-value arguments "input")))
      ((null arguments)

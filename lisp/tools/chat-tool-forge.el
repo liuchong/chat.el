@@ -59,6 +59,7 @@
   owner                 ; Plugin or subsystem that registered the tool
   sensitivity           ; Data sensitivity: public/project/personal/etc.
   effects               ; Effects: read/write/outbound/destructive
+  approval-predicate    ; Optional function called with tool call data
   version               ; Tool version
   created-at            ; Creation timestamp
   updated-at            ; Last update timestamp

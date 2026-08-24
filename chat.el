@@ -16,7 +16,7 @@
 
 ;;; Commentary:
 
-;; Chat.el is a pure Emacs AI executor inspired by OpenClaw.
+;; Chat.el is a pure Emacs AI executor and work platform.
 ;; It provides conversation management, tool forging, file operations,
 ;; and integration with various LLM providers.
 
@@ -138,8 +138,8 @@ Returns the list of files that were loaded."
 (chat-work-register-tools)
 (chat-capability-register-tools)
 (chat-plugin-provide 'tools t)
-(chat-plugin-start-enabled)
 (chat-plugin-load-user-files)
+(chat-plugin-start-enabled)
 
 ;; Load UI after tooling has been registered.
 (require 'chat-request-panel)

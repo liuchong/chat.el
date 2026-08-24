@@ -8,11 +8,12 @@
 
 ## Current Phase
 
-Stage 8 final verification is complete (2026-08-24). The work platform
-now has ordered agent transcripts, kernel parity hooks, scoped plugins,
-durable session recovery, work orchestration, MCP/sub-agent backends,
-and programming/office/daily capability profiles. Final canonical suite:
-556 tests passing.
+Stage 9 safety contract closure is complete (2026-08-24). Runtime tool
+arguments now enforce declared JSON types, required fields, enumerations,
+and additional-properties rejection. Approval is driven by sensitivity,
+effects, and optional call-specific predicates instead of only a fixed
+tool-id list. User plugin files are allowlisted by enabled plugin name
+and loaded before startup. Canonical suite: 564 tests passing.
 
 ## Main Objective
 

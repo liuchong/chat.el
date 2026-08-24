@@ -104,8 +104,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 556 regression tests discovered
-- 556 passing
+- 564 regression tests discovered
+- 564 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -116,6 +116,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - async requests now have timeout timers and cleanup
 - empty assistant messages are filtered before API submission
 - risky tools require approval before execution
+- sensitivity, effects, and call-specific predicates feed the same
+  approval gate, including opted-in out-of-project buffer reads
 - AI generated tools require approval before registration
 - shell execution no longer goes through shell expansion
 - code mode supports stable input, multi turn requests, cancel, preview creation, and explicit `code-edit` parsing
@@ -159,8 +161,12 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - agent runs now support per-step context transforms, next-turn prepare hooks, FIFO/LIFO queue delivery, cancel callbacks, and tool-batch cancellation before later tools run
 - streaming completion now emits a normalized `stream-result` event carrying accumulated text and native tool metadata before regular result handling
 - native provider schemas now encode zero-argument tools as empty objects and forged-tool parameter schemas survive reload
+- runtime tool calls now enforce required fields, JSON types,
+  enumerations, and unknown-field rejection before execution
 - Emacs live-buffer tools now hide credential-like buffers and default to project/session-scoped exposure
 - plugin runtime now tracks lifecycle state, retries pending dependency injection, and rolls back owned services, tools, and hooks
+- optional user plugin loading evaluates only explicitly enabled files
+  and completes registration before enabled plugins start
 - session tool overlays now filter provider-visible tools and direct execution, with tool events carrying owner, sensitivity, and effect metadata
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
 - code mode now also has a native help buffer and `C-c C-h` shortcut so reading commands, preview flow, request-panel usage, and regenerate/edit-resend are discoverable inside the main coding surface

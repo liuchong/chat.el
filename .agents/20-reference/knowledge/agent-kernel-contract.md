@@ -57,6 +57,14 @@ next turn cannot pair `tool_call_id` with results.
 - Tool events carry owner, sensitivity, and effect metadata when a tool
   declares it, so approval and status surfaces share one permission
   contract
+- Runtime argument validation must enforce the same required fields,
+  primitive JSON types, enumerations, and additional-properties boundary
+  advertised to providers. JSON false counts as a present boolean.
+- Approval is required when either a legacy tool id, declared sensitivity,
+  declared effect, or call-specific approval predicate marks the call as
+  sensitive. Metadata is an enforcement contract, not display-only data.
+- Optional user plugin loading evaluates only enabled NAME.el files and
+  registration must happen before `chat-plugin-start-enabled`.
 - Session state may add parent, branch, leaf, and summary entries while
   keeping `chat-session-format-version` stable; old files omit those
   fields and load with defaults
@@ -94,10 +102,13 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-ui.el` and `tests/unit/test-chat-code.el` cover
   ordered transcript persistence and active-run input steering
 - `tests/unit/test-chat-plugin.el` covers buffer privacy scope plus
-  plugin lifecycle states and owned resource rollback
+  call-specific approval, plugin lifecycle states, dependency retry,
+  user-plugin allowlisting, and owned resource rollback
 - `tests/unit/test-chat-tool-caller.el` covers native schema and forged
-  parameter persistence plus session-overlay advertisement/execution
-  filtering
+  parameter persistence, runtime argument validation, plus session-overlay
+  advertisement/execution filtering
+- `tests/unit/test-chat-approval.el` covers metadata-driven and
+  call-specific approval requirements
 - `tests/unit/test-chat-session.el` covers session tool-config
   persistence, branch metadata, append-boundary recovery, interrupted
   tool-pair detection, and safe compaction cut indices

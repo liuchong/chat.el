@@ -1,4 +1,4 @@
-;;; chat-agent-loop.el --- PI-aligned agent loop -*- lexical-binding: t -*-
+;;; chat-agent-loop.el --- Agent execution loop -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 chat.el contributors
 ;; License: 1PL (One Public License) - https://license.pub/1pl/

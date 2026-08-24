@@ -30,6 +30,45 @@
          :is-active t)
         '(:name "files_read" :arguments (("path" . "/tmp/demo.txt")))))
       (should-not prompted))))
+
+(ert-deftest chat-approval-requires-metadata-declared-effects-and-sensitivity ()
+  "Test permission metadata drives the shared approval gate."
+  (let ((chat-approval-required-tools nil))
+    (should
+     (chat-approval-tool-required-p
+      (make-chat-forged-tool
+       :id 'write-record
+       :sensitivity 'project
+       :effects '(write))))
+    (should
+     (chat-approval-tool-required-p
+      (make-chat-forged-tool
+       :id 'read-mail
+       :sensitivity 'correspondence
+       :effects '(read))))
+    (should-not
+     (chat-approval-tool-required-p
+      (make-chat-forged-tool
+       :id 'read-project
+       :sensitivity 'project
+       :effects '(read))))))
+
+(ert-deftest chat-approval-supports-call-specific-predicates ()
+  "Test tools can require approval only for sensitive call targets."
+  (let ((tool (make-chat-forged-tool
+               :id 'dynamic-read
+               :sensitivity 'project
+               :effects '(read)
+               :approval-predicate
+               (lambda (call)
+                 (equal (cdr (assoc "scope" (plist-get call :arguments)))
+                        "personal")))))
+    (should-not
+     (chat-approval-tool-required-p
+      tool '(:arguments (("scope" . "project")))))
+    (should
+     (chat-approval-tool-required-p
+      tool '(:arguments (("scope" . "personal")))))))
 (ert-deftest chat-approval-prompts-for-dangerous-tool ()
   "Test that dangerous tools use the decision hook."
   (let ((chat-approval-required-tools '(files_write))

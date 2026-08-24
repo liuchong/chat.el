@@ -11,6 +11,10 @@
 
 ;; Forward declarations
 (declare-function chat-forged-tool-id "chat-tool-forge" (tool))
+(declare-function chat-forged-tool-p "chat-tool-forge" (tool))
+(declare-function chat-forged-tool-sensitivity "chat-tool-forge" (tool))
+(declare-function chat-forged-tool-effects "chat-tool-forge" (tool))
+(declare-function chat-forged-tool-approval-predicate "chat-tool-forge" (tool))
 (declare-function chat-session-auto-approve-p "chat-session" (session))
 (declare-function chat-session-set-auto-approve "chat-session" (session value))
 (declare-function chat-files--resolved-path "chat-files" (path))
@@ -25,6 +29,16 @@
 (defcustom chat-approval-required-tools
   '(files_write files_replace files_patch apply_patch shell_execute)
   "Tools that require approval before execution."
+  :type '(repeat symbol)
+  :group 'chat-approval)
+(defcustom chat-approval-required-sensitivities
+  '(personal correspondence credential network)
+  "Data sensitivity classes that require explicit approval."
+  :type '(repeat symbol)
+  :group 'chat-approval)
+(defcustom chat-approval-required-effects
+  '(write outbound destructive)
+  "Tool effects that require explicit approval."
   :type '(repeat symbol)
   :group 'chat-approval)
 (defcustom chat-approval-risk-levels
@@ -155,9 +169,21 @@ Only file writing tools with a clear directory scope can use this whitelist."
             directories)))
        chat-approval-always-approve-directories))))
 
-(defun chat-approval-tool-required-p (tool-id)
-  "Return non-nil when TOOL-ID requires approval."
-  (memq tool-id chat-approval-required-tools))
+(defun chat-approval-tool-required-p (tool-or-id &optional call)
+  "Return non-nil when TOOL-OR-ID requires approval for CALL.
+Forged tools are governed by their sensitivity, effects, and optional
+dynamic approval predicate in addition to the legacy tool id list."
+  (let* ((tool (and (chat-forged-tool-p tool-or-id) tool-or-id))
+         (tool-id (if tool (chat-forged-tool-id tool) tool-or-id))
+         (sensitivity (and tool (chat-forged-tool-sensitivity tool)))
+         (effects (and tool (chat-forged-tool-effects tool)))
+         (predicate (and tool (chat-forged-tool-approval-predicate tool))))
+    (or (memq tool-id chat-approval-required-tools)
+        (memq sensitivity chat-approval-required-sensitivities)
+        (seq-some (lambda (effect)
+                    (memq effect chat-approval-required-effects))
+                  effects)
+        (and predicate (funcall predicate call)))))
 
 (defun chat-approval-shortcut-summary (tool-id &optional directory)
   "Return a human-readable shortcut summary for TOOL-ID and DIRECTORY."
@@ -408,7 +434,7 @@ Returns non-nil when execution should proceed."
                          tool-id arguments session)))
     (cond
      ((not chat-approval-enabled) t)
-     ((not (chat-approval-tool-required-p tool-id)) t)
+     ((not (chat-approval-tool-required-p tool call)) t)
      (auto-decision
       (chat-approval--notify
        observer
