@@ -10,7 +10,6 @@ Copyright 2026 chat.el contributors.
 
 ### Safety First
 
-- 不执行会修改 git 历史或远端状态的命令
 - 不信任模型返回的工具参数
 - 危险工具必须先审批
 - 敏感信息只使用 `auth-source`
@@ -37,34 +36,6 @@ Copyright 2026 chat.el contributors.
 - 定时器和进程结束后必须清理
 
 ## Absolutely Forbidden
-
-AI 和 IDE 不得执行以下命令或动作：
-
-- `git push`
-- `git rebase`
-- `git merge`
-- `git cherry-pick`
-- `git reset`
-- `git tag`
-- `gh pr create`
-- `gh pr merge`
-
-允许的 git 命令只限只读：
-
-- `git status`
-- `git log`
-- `git show`
-- `git diff`
-
-违反这一条视为严重错误。
-
-Exception:
-
-- `git commit` 是唯一允许的写历史 git 操作
-- 仅允许在一个明确阶段完成并通过该阶段相关验证后执行
-- 不覆盖 `push` `rebase` `merge` `reset` 等其他历史或远端操作
-- 执行前必须完成本文件要求的调查、实现、验证和知识库更新
-- commit message 必须遵守本文件中的阶段提交格式
 
 ### Stage Commits
 
