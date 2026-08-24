@@ -5,7 +5,7 @@ Last updated: 2026-08-24
 ## Summary
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
-The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, per-step agent context hooks, cancellation callbacks, scoped plugin runtime, session tool overlays, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
+The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, durable session tree metadata, per-step agent context hooks, cancellation callbacks, scoped plugin runtime, session tool overlays, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
@@ -17,6 +17,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Chat Core
 
 - session creation and append-only persistence
+- parent/branch/leaf session metadata and a tabulated-list tree browser
+- durable summary records for branch and compaction workflows
+- interrupted tool-run recovery metadata on load
 - ordered assistant/tool transcript persistence for new agent runs
 - raw request and response inspection
 - async non streaming request path
@@ -78,8 +81,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 537 regression tests discovered
-- 537 passing
+- 542 regression tests discovered
+- 542 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -149,6 +152,9 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - basic `chat-files` operations now have denser regression coverage for partial reads, size guards, overwrite protection, recursive deletion, nested mkdir, and directory type reporting
 - `files_read_lines` now normalizes invalid start lines and keeps empty line ranges coherent when callers ask beyond EOF
 - session helpers now have denser regression coverage for clearing history, missing message ids, default last-message lookup, and invalid saved-session files
+- sessions now persist parent/branch/leaf metadata, message parent/branch fields, durable summary records, and expose a tabulated-list tree browser
+- JSONL appends now isolate partial trailing records before writing new entries, and loading marks unfinished assistant/tool pairs for recovery instead of inventing successful tool results
+- compaction helpers now find tool-pair-safe cut indices so summaries do not split an assistant tool call from its matching tool result
 - file editing helpers now create missing parent directories on write, allow append-to-new-file flows, keep `apply_patch` atomic across multiple operations, and support regexp capture-group replacements
 - `apply_patch` now uses hunk headers to resolve repeated source blocks and accepts the codex-compatible `*** End of File` marker
 - `apply_patch` add-file operations now honor codex-style `*** End of File` newline semantics instead of always forcing a trailing newline

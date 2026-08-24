@@ -91,6 +91,7 @@ Returns the list of files that were loaded."
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-session)
+(require 'chat-session-tree)
 (require 'chat-memory)
 (require 'chat-project)
 (require 'chat-stream)
@@ -174,6 +175,7 @@ Returns the list of files that were loaded."
   /cancel               - Cancel current AI request
   /new                  - Create new session
   /list                 - List all sessions
+  M-x chat-session-tree-open - Browse saved sessions as a tree
   /save                 - Save current session
   /clear                - Clear conversation
   /model <name>         - Switch model

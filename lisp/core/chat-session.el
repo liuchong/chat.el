@@ -52,6 +52,11 @@
   prompt-stack          ; Multi-level prompt stack
   context-window        ; Context window settings
   tool-config           ; Tool configuration
+  parent-session-id     ; Optional parent session for branch trees
+  branch-id             ; Optional branch identifier
+  leaf-message-id       ; Current leaf message ID for branch UIs
+  summaries             ; Durable compaction or branch summary records
+  recovery-state        ; Computed interrupted-run recovery metadata
   auto-approve          ; nil, t, or 'inherit (inherit from global)
   metadata)             ; Additional metadata plist
 
@@ -103,6 +108,11 @@ Returns the newly created chat-session struct."
                    :messages nil
                    :prompt-stack nil
                    :tool-config nil
+                   :parent-session-id nil
+                   :branch-id id
+                   :leaf-message-id nil
+                   :summaries nil
+                   :recovery-state nil
                    :metadata nil)))
     (when chat-session-auto-save
       (chat-session-save session))
@@ -156,6 +166,10 @@ PREFIX defaults to \"msg\"."
                                    (t 'inherit))))
         (cons 'toolConfig (chat-session--plist-to-alist
                            (chat-session-tool-config session)))
+        (cons 'parentSessionId (chat-session-parent-session-id session))
+        (cons 'branchId (chat-session-branch-id session))
+        (cons 'leafMessageId (chat-session-leaf-message-id session))
+        (cons 'summaries (or (chat-session-summaries session) nil))
         (cons 'metadata (or (chat-session-metadata session) nil))))
 
 (defun chat-session--message-entry (message)
@@ -194,6 +208,7 @@ Falls back to a full save when the file is missing."
   (let ((filename (chat-session--file-name (chat-session-id session))))
     (if (not (file-exists-p filename))
         (chat-session-save session)
+      (chat-session--ensure-jsonl-boundary filename)
       (write-region
        (concat (json-encode (chat-session--message-entry message)) "\n"
                (json-encode (chat-session--state-entry session)) "\n")
@@ -202,6 +217,16 @@ Falls back to a full save when the file is missing."
        'append
        'silent)
       t)))
+
+(defun chat-session--ensure-jsonl-boundary (filename)
+  "Ensure FILENAME ends at a JSONL record boundary before appending."
+  (when (and (file-exists-p filename)
+             (> (file-attribute-size (file-attributes filename)) 0))
+    (with-temp-buffer
+      (let ((size (file-attribute-size (file-attributes filename))))
+        (insert-file-contents-literally filename nil (1- size) size)
+        (unless (eq (char-before (point-max)) ?\n)
+          (write-region "\n" nil filename 'append 'silent))))))
 
 (defun chat-session--load-jsonl (filename)
   "Load a session from the JSONL file FILENAME.
@@ -240,6 +265,15 @@ skipped."
                (cons 'toolConfig (and state
                                       (assoc 'toolConfig state)
                                       (cdr (assoc 'toolConfig state))))
+               (cons 'parentSessionId (and state
+                                           (cdr (assoc 'parentSessionId state))))
+               (cons 'branchId (and state
+                                    (cdr (assoc 'branchId state))))
+               (cons 'leafMessageId (and state
+                                         (cdr (assoc 'leafMessageId state))))
+               (cons 'summaries (and state
+                                     (assoc 'summaries state)
+                                     (cdr (assoc 'summaries state))))
                (cons 'metadata (and state
                                     (assoc 'metadata state)
                                     (cdr (assoc 'metadata state))))))))))
@@ -341,6 +375,8 @@ MESSAGE is a chat-message struct."
   (setf (chat-session-messages session)
         (append (chat-session-messages session)
                 (list message)))
+  (setf (chat-session-leaf-message-id session)
+        (chat-message-id message))
   (setf (chat-session-updated-at session)
         (current-time))
   (when chat-session-auto-save
@@ -392,6 +428,9 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
     (when index
       (setf (chat-session-messages session)
             (cl-subseq messages 0 (if include-message index (1+ index))))
+      (setf (chat-session-leaf-message-id session)
+            (when-let ((last-message (car (last (chat-session-messages session)))))
+              (chat-message-id last-message)))
       (setf (chat-session-updated-at session) (current-time))
       (when chat-session-auto-save
         (chat-session-save session))
@@ -433,6 +472,10 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
                             (t 'inherit))))
     (toolConfig . ,(chat-session--plist-to-alist
                     (chat-session-tool-config session)))
+    (parentSessionId . ,(chat-session-parent-session-id session))
+    (branchId . ,(chat-session-branch-id session))
+    (leafMessageId . ,(chat-session-leaf-message-id session))
+    (summaries . ,(or (chat-session-summaries session) nil))
     (metadata . ,(or (chat-session-metadata session) nil))))
 
 (defun chat-session--plist-to-alist (plist)
@@ -487,6 +530,8 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
                    "%Y-%m-%dT%H:%M:%S"
                    (or (chat-message-timestamp message)
                        (current-time))))
+    (parentId . ,(chat-message-parent-id message))
+    (branchIds . ,(or (chat-message-branch-ids message) nil))
     (metadata . ,(or (chat-message-metadata message) nil))
     (toolCalls . ,(mapcar #'chat-session--serialize-tool-call
                           (or (chat-message-tool-calls message) nil)))
@@ -548,25 +593,39 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
 (defun chat-session--deserialize (data)
   "Convert JSON-parsed DATA to chat-session struct."
   (let ((auto-approve-val (chat-session--alist-get data 'autoApprove)))
-    (make-chat-session
-     :id (chat-session--alist-get data 'id)
-     :name (chat-session--alist-get data 'name)
-     :created-at (decode-time
-                  (parse-time-string
-                   (chat-session--alist-get data 'createdAt)))
-     :updated-at (decode-time
-                  (parse-time-string
-                   (chat-session--alist-get data 'updatedAt)))
-     :model-id (intern (chat-session--alist-get data 'modelId))
-     :messages (mapcar #'chat-message--deserialize
-                       (chat-session--alist-get data 'messages))
-     :tool-config (chat-session--alist-to-plist
-                   (chat-session--alist-get data 'toolConfig))
-     :auto-approve (cond ((eq auto-approve-val t) t)
-                         ((eq auto-approve-val :json-false) nil)
-                         ((eq auto-approve-val 'inherit) 'inherit)
-                         (t nil))  ; default to nil (follow global)
-     :metadata (chat-session--alist-get data 'metadata))))
+    (let ((session
+           (make-chat-session
+            :id (chat-session--alist-get data 'id)
+            :name (chat-session--alist-get data 'name)
+            :created-at (decode-time
+                         (parse-time-string
+                          (chat-session--alist-get data 'createdAt)))
+            :updated-at (decode-time
+                         (parse-time-string
+                          (chat-session--alist-get data 'updatedAt)))
+            :model-id (intern (chat-session--alist-get data 'modelId))
+            :messages (mapcar #'chat-message--deserialize
+                              (chat-session--alist-get data 'messages))
+            :tool-config (chat-session--alist-to-plist
+                          (chat-session--alist-get data 'toolConfig))
+            :parent-session-id (chat-session--alist-get data 'parentSessionId)
+            :branch-id (or (chat-session--alist-get data 'branchId)
+                           (chat-session--alist-get data 'id))
+            :leaf-message-id (chat-session--alist-get data 'leafMessageId)
+            :summaries (chat-session--normalize-list
+                        (chat-session--alist-get data 'summaries))
+            :auto-approve (cond ((eq auto-approve-val t) t)
+                                ((eq auto-approve-val :json-false) nil)
+                                ((eq auto-approve-val 'inherit) 'inherit)
+                                (t nil))  ; default to nil (follow global)
+            :metadata (chat-session--alist-get data 'metadata))))
+      (unless (chat-session-leaf-message-id session)
+        (setf (chat-session-leaf-message-id session)
+              (when-let ((last-message (car (last (chat-session-messages session)))))
+                (chat-message-id last-message))))
+      (setf (chat-session-recovery-state session)
+            (chat-session-detect-interrupted-run session))
+      session)))
 
 (defun chat-session-set-tool-config (session config)
   "Set SESSION tool CONFIG and persist the session state."
@@ -585,6 +644,91 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
              (memq tool-id enabled))
          (not (memq tool-id disabled)))))
 
+(defun chat-session-set-tree-info (session &rest plist)
+  "Set SESSION tree metadata from PLIST.
+Recognized keys are `:parent-session-id', `:branch-id', and
+`:leaf-message-id'."
+  (when (plist-member plist :parent-session-id)
+    (setf (chat-session-parent-session-id session)
+          (plist-get plist :parent-session-id)))
+  (when (plist-member plist :branch-id)
+    (setf (chat-session-branch-id session)
+          (plist-get plist :branch-id)))
+  (when (plist-member plist :leaf-message-id)
+    (setf (chat-session-leaf-message-id session)
+          (plist-get plist :leaf-message-id)))
+  (setf (chat-session-updated-at session) (current-time))
+  (when chat-session-auto-save
+    (chat-session-save session))
+  session)
+
+(defun chat-session-add-summary (session summary &optional metadata)
+  "Append durable SUMMARY with optional METADATA to SESSION."
+  (let ((entry `((id . ,(chat-session-new-message-id "summary"))
+                 (createdAt . ,(format-time-string
+                                "%Y-%m-%dT%H:%M:%S"
+                                (current-time)))
+                 (leafMessageId . ,(chat-session-leaf-message-id session))
+                 (summary . ,summary)
+                 (metadata . ,(or metadata nil)))))
+    (setf (chat-session-summaries session)
+          (append (chat-session-summaries session) (list entry)))
+    (setf (chat-session-updated-at session) (current-time))
+    (when chat-session-auto-save
+      (chat-session-save session))
+    entry))
+
+(defun chat-session--tool-call-ids (message)
+  "Return tool call ids declared by assistant MESSAGE."
+  (delq nil
+        (mapcar (lambda (call)
+                  (plist-get call :id))
+                (or (chat-message-tool-calls message) nil))))
+
+(defun chat-session--tool-result-id (message)
+  "Return tool call id satisfied by tool MESSAGE."
+  (plist-get (chat-message-metadata message) :tool-call-id))
+
+(defun chat-session-detect-interrupted-run (session)
+  "Return recovery metadata when SESSION ends with unfinished tool calls."
+  (let ((pending nil)
+        last-assistant-id)
+    (dolist (message (chat-session-messages session))
+      (pcase (chat-message-role message)
+        (:assistant
+         (let ((ids (chat-session--tool-call-ids message)))
+           (when ids
+             (setq pending ids
+                   last-assistant-id (chat-message-id message)))))
+        (:tool
+         (when-let ((id (chat-session--tool-result-id message)))
+           (setq pending (cl-remove id pending :test #'equal))))))
+    (when pending
+      (list :type 'interrupted-tool-run
+            :assistant-message-id last-assistant-id
+            :missing-tool-call-ids pending))))
+
+(defun chat-session-tool-pair-safe-cut-index (session max-index)
+  "Return the largest safe compaction cut index not above MAX-INDEX.
+The returned index never cuts between an assistant tool call and its
+matching `:tool' result."
+  (let ((messages (chat-session-messages session))
+        (index -1)
+        (pending nil)
+        safe-index)
+    (dolist (message messages)
+      (when (<= (cl-incf index) max-index)
+        (pcase (chat-message-role message)
+          (:assistant
+           (setq pending
+                 (append pending (chat-session--tool-call-ids message))))
+          (:tool
+           (when-let ((id (chat-session--tool-result-id message)))
+             (setq pending (cl-remove id pending :test #'equal)))))
+        (unless pending
+          (setq safe-index index))))
+    safe-index))
+
 (defun chat-message--deserialize (data)
   "Convert JSON-parsed DATA to chat-message struct."
   (make-chat-message
@@ -594,6 +738,9 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
    :timestamp (decode-time
                (parse-time-string
                 (chat-session--alist-get data 'timestamp)))
+   :parent-id (chat-session--alist-get data 'parentId)
+   :branch-ids (chat-session--normalize-list
+                (chat-session--alist-get data 'branchIds))
    :metadata (chat-session--alist-get data 'metadata)
    :tool-calls (chat-session--normalize-tool-calls
                 (chat-session--alist-get data 'toolCalls))

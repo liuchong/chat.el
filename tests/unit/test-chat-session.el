@@ -16,6 +16,7 @@
 (require 'ert)
 (require 'test-helper)
 (require 'cl-lib)
+(require 'chat-session-tree)
 
 ;; Test session structure
 (ert-deftest chat-session-structure-test ()
@@ -156,6 +157,38 @@
                         :packs (programming office))))
        (should (chat-session-tool-enabled-p loaded 'safe-tool))
        (should-not (chat-session-tool-enabled-p loaded 'danger-tool))))))
+
+(ert-deftest chat-session-save-and-load-preserves-tree-and-summary-data ()
+  "Test session tree metadata, message branch fields, and summaries persist."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Branch" 'kimi))
+          (session-id (chat-session-id session)))
+     (chat-session-set-tree-info
+      session
+      :parent-session-id "parent-session"
+      :branch-id "branch-a"
+      :leaf-message-id "m1")
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "m1"
+       :role :user
+       :content "hello"
+       :parent-id "root"
+       :branch-ids '("m2")))
+     (chat-session-add-summary session "Earlier context" '((kind . "manual")))
+     (chat-session-save session)
+     (let* ((loaded (chat-session-load session-id))
+            (message (car (chat-session-messages loaded)))
+            (summary (car (chat-session-summaries loaded))))
+       (should (string= (chat-session-parent-session-id loaded)
+                        "parent-session"))
+       (should (string= (chat-session-branch-id loaded) "branch-a"))
+       (should (string= (chat-session-leaf-message-id loaded) "m1"))
+       (should (string= (chat-message-parent-id message) "root"))
+       (should (equal (chat-message-branch-ids message) '("m2")))
+       (should (string= (cdr (assoc 'summary summary)) "Earlier context"))))))
 
 ;; Test session listing
 (ert-deftest chat-session-list-test ()
@@ -410,6 +443,93 @@
        (let ((loaded (chat-session-load (chat-session-id session))))
          (should loaded)
          (should (= (length (chat-session-messages loaded)) 1)))))))
+
+(ert-deftest chat-session-jsonl-append-recovers-after-partial-tail ()
+  "Test append isolates a partial trailing line instead of merging records."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Partial Append" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "m1" :role :user
+                         :content "one" :timestamp (current-time)))
+     (let ((file (expand-file-name
+                  (format "%s.jsonl" (chat-session-id session))
+                  temp-dir)))
+       (write-region "{\"type\":\"message\"" nil file 'append 'silent)
+       (chat-session-add-message
+        session
+        (make-chat-message :id "m2" :role :assistant
+                           :content "two" :timestamp (current-time)))
+       (let ((loaded (chat-session-load (chat-session-id session))))
+         (should loaded)
+         (should (equal (mapcar #'chat-message-id
+                                (chat-session-messages loaded))
+                        '("m1" "m2"))))))))
+
+(ert-deftest chat-session-load-detects-interrupted-tool-pairs ()
+  "Test loading marks missing tool results without inventing success."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Interrupted" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "a1"
+       :role :assistant
+       :content ""
+       :tool-calls '((:id "call-1" :name "demo" :arguments nil))))
+     (let* ((loaded (chat-session-load (chat-session-id session)))
+            (recovery (chat-session-recovery-state loaded)))
+       (should (eq (plist-get recovery :type) 'interrupted-tool-run))
+       (should (equal (plist-get recovery :missing-tool-call-ids)
+                      '("call-1")))))))
+
+(ert-deftest chat-session-tool-pair-safe-cut-index-refuses-open-pair ()
+  "Test compaction cut points do not split assistant/tool pairs."
+  (let ((session (make-chat-session :id "safe-cut")))
+    (chat-session-add-message
+     session
+     (make-chat-message :id "u1" :role :user :content "hello"))
+    (chat-session-add-message
+     session
+     (make-chat-message
+      :id "a1"
+      :role :assistant
+      :content ""
+      :tool-calls '((:id "call-1" :name "demo" :arguments nil))))
+    (should (= (chat-session-tool-pair-safe-cut-index session 1) 0))
+    (chat-session-add-message
+     session
+     (make-chat-message
+      :id "t1"
+      :role :tool
+      :content "done"
+      :metadata '(:tool-call-id "call-1")))
+    (should (= (chat-session-tool-pair-safe-cut-index session 2) 2))))
+
+(ert-deftest chat-session-tree-flatten-orders-children-under-parent ()
+  "Test session tree flattening uses parent session metadata."
+  (let* ((parent (make-chat-session
+                  :id "parent"
+                  :name "Parent"
+                  :created-at (current-time)
+                  :updated-at (current-time)
+                  :model-id 'kimi))
+         (child (make-chat-session
+                 :id "child"
+                 :name "Child"
+                 :created-at (current-time)
+                 :updated-at (current-time)
+                 :model-id 'kimi
+                 :parent-session-id "parent"))
+         (nodes (chat-session-tree-flatten (list child parent))))
+    (should (equal (mapcar (lambda (node)
+                             (chat-session-id
+                              (chat-session-tree-node-session node)))
+                           nodes)
+                   '("parent" "child")))
+    (should (= (chat-session-tree-node-depth (cadr nodes)) 1))))
 
 (ert-deftest chat-session-list-prefers-jsonl-over-legacy ()
   "Test listing counts a session once when both file formats exist."

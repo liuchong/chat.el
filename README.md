@@ -32,6 +32,7 @@ Copyright 2026 chat.el contributors.
 - Queue normal input during an active response as steering for the running agent
 - Rebuild context before each agent step and cancel registered work when a run is stopped
 - Scope tools per session and roll back plugin-owned tools, hooks, and services when a plugin stops
+- Browse durable parent/branch session trees and preserve recovery metadata for interrupted tool runs
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
@@ -156,6 +157,7 @@ Layout rules:
 | `M-x chat` | Open or resume the current chat buffer |
 | `M-x chat-new-session` | Create a new session |
 | `M-x chat-list-sessions` | Switch to an existing session |
+| `M-x chat-session-tree-open` | Browse saved sessions as a parent/branch tree |
 | `M-x chat-show-help` | Open the native chat help buffer |
 | `M-x chat-view-raw-message` | Inspect the last raw API exchange |
 | `M-x chat-view-last-raw-exchange` | Open the latest assistant request and response |

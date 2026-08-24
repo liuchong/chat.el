@@ -298,6 +298,22 @@ Required field order:
 
 **Solution**: persist each loop-emitted assistant and `:tool` message in order. Keep bundled `tool-results` expansion only as compatibility for older sessions.
 
+### JSONL Append Must Preserve Record Boundaries
+
+**Problem**: after a crash during append, the next message can merge with a partial trailing JSON line and become unreadable too.
+
+**Cause**: appending new JSONL records without first checking the existing file's final newline lets the partial line and new record share one line.
+
+**Solution**: before appending, ensure the file ends with a newline. Loading should skip corrupt partial lines while preserving later complete records.
+
+### Interrupted Tool Runs Must Stay Interrupted
+
+**Problem**: a resumed session appears to have completed a tool call even though Emacs stopped before the tool result was saved.
+
+**Cause**: recovery code fabricates a successful result or silently drops the unfinished assistant tool call.
+
+**Solution**: compute recovery metadata during load. Keep the assistant tool call in history, mark missing `tool_call_id` values, and let the UI or next workflow decide how to recover.
+
 ---
 
 ## File Tools and Security

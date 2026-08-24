@@ -57,6 +57,14 @@ next turn cannot pair `tool_call_id` with results.
 - Tool events carry owner, sensitivity, and effect metadata when a tool
   declares it, so approval and status surfaces share one permission
   contract
+- Session state may add parent, branch, leaf, and summary entries while
+  keeping `chat-session-format-version` stable; old files omit those
+  fields and load with defaults
+- JSONL append must preserve record boundaries after a partial trailing
+  line, and load-time recovery must mark unfinished assistant/tool pairs
+  instead of creating synthetic success messages
+- Compaction cut points must not split an assistant `tool_calls` message
+  from its matching `:tool` results
 
 ## Regression Guard
 
@@ -75,4 +83,5 @@ next turn cannot pair `tool_call_id` with results.
   parameter persistence plus session-overlay advertisement/execution
   filtering
 - `tests/unit/test-chat-session.el` covers session tool-config
-  persistence
+  persistence, branch metadata, append-boundary recovery, interrupted
+  tool-pair detection, and safe compaction cut indices
