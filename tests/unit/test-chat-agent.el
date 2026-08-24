@@ -271,6 +271,156 @@ car collects the messages of every request."
       (should (= (plist-get (cadr seen-options) :timeout) 60))
       (should (equal (plist-get (car seen-options) :temperature) 0.7)))))
 
+(ert-deftest chat-agent-transform-context-runs-before-dispatch ()
+  "Test per-step context transforms rewrite messages before transport."
+  (let ((calls (list nil)))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "ok"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :transform-context-fn
+             (lambda (_run messages)
+               (append messages
+                       (list (make-chat-message
+                              :id "context-1"
+                              :role :system
+                              :content "transformed"
+                              :timestamp (current-time)))))))
+      (let ((sent (caar calls)))
+        (should (= (length sent) 2))
+        (should (string= (chat-message-content (car (last sent)))
+                         "transformed"))))))
+
+(ert-deftest chat-agent-prepare-next-turn-appends-before-continuation ()
+  "Test prepare-next-turn can append context before continued tool turns."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (exec-counter (list 0))
+        (calls (list nil)))
+    (chat-agent-test--register-demo-tool exec-counter)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list (list :content chat-agent-test--tool-call-json)
+                      '(:content "done"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :prepare-next-turn-fn
+             (lambda (_run processed)
+               (when (plist-get processed :tool-calls)
+                 (list (make-chat-message
+                        :id "prepared-1"
+                        :role :system
+                        :content "prepared context"
+                        :timestamp (current-time)))))))
+      (let ((second (cadr (car calls))))
+        (should (string= (chat-message-content (car (last second)))
+                         "prepared context"))))))
+
+(ert-deftest chat-agent-lifo-queue-mode-delivers-newest-steering-first ()
+  "Test LIFO queue mode changes steering delivery order."
+  (let ((calls (list nil))
+        saved-success
+        run)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_model messages success _error _options)
+                 (setcar calls (append (car calls) (list messages)))
+                 (setq saved-success success)
+                 'stub-handle)))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :messages (list (chat-agent-test--user-message))
+                   :queue-mode 'lifo)))
+      (chat-agent-steer
+       run
+       (make-chat-message :id "steer-a" :role :user :content "first"))
+      (chat-agent-steer
+       run
+       (make-chat-message :id "steer-b" :role :user :content "second"))
+      (funcall saved-success '(:content "initial"))
+      (let ((second-request (cadr (car calls))))
+        (should (string= (chat-message-content (nth 2 second-request))
+                         "second"))
+        (should (string= (chat-message-content (nth 3 second-request))
+                         "first"))))))
+
+(ert-deftest chat-agent-cancel-runs-registered-cancel-functions ()
+  "Test cancellation propagates through registered callbacks."
+  (let ((saved-success nil)
+        (cancelled nil)
+        run)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_model _messages success _error _options)
+                 (setq saved-success success)
+                 'stub-handle)))
+      (setq run (chat-agent-start
+                 (list :model 'kimi
+                       :messages (list (chat-agent-test--user-message)))))
+      (chat-agent-add-cancel-function
+       run
+       (lambda (_run) (setq cancelled t)))
+      (should (chat-agent-cancel run))
+      (should cancelled)
+      (funcall saved-success '(:content "late"))
+      (should (eq (chat-agent-run-state-status run) 'cancelled)))))
+
+(ert-deftest chat-agent-cancelled-tool-batch-stops-before-next-tool ()
+  "Test cancellation after one tool prevents later tools from running."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (first-count 0)
+        (second-count 0)
+        (calls (list nil))
+        run)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'first-tool
+      :name "First Tool"
+      :description "First"
+      :language 'elisp
+      :compiled-function (lambda (&rest _)
+                           (setq first-count (1+ first-count))
+                           "first")
+      :is-active t
+      :usage-count 0))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'second-tool
+      :name "Second Tool"
+      :description "Second"
+      :language 'elisp
+      :compiled-function (lambda (&rest _)
+                           (setq second-count (1+ second-count))
+                           "second")
+      :is-active t
+      :usage-count 0))
+    (let ((chat-plugin-after-tool-call-functions
+           (list (lambda (active-run _call _result)
+                   (chat-agent-cancel active-run))))
+          (responses
+           (list (list :content ""
+                       :tool-calls
+                       (list (list :id "call-1"
+                                   :name "first-tool"
+                                   :arguments nil)
+                             (list :id "call-2"
+                                   :name "second-tool"
+                                   :arguments nil))))))
+      (cl-letf (((symbol-function 'chat-llm-request-async)
+                 (chat-agent-test--stub-transport
+                  responses
+                  calls)))
+        (setq run
+              (chat-agent-start
+               (list :model 'kimi
+                     :messages (list (chat-agent-test--user-message)))))))
+    (should (= first-count 1))
+    (should (= second-count 0))
+    (should (eq (chat-agent-run-state-status run) 'cancelled))))
+
 (ert-deftest chat-agent-executes-native-tool-calls ()
   "Test provider tool_calls are executed and returned as :tool messages."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))

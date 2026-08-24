@@ -8,13 +8,12 @@
 
 ## Doing Now
 
-Stage 1 correctness is complete. The agent kernel persists ordered
-assistant/tool messages through `chat-agent-transcript`, supports
-mid-run steering before the default stop path, keeps forced stop first,
-preserves provider `tool_call_id`, and exposes zero-argument native tool
-schemas as empty objects. The Emacs plugin defaults live-buffer tools to
-project/current-buffer scope and hard-denies credential-like buffers.
-Suite: 527 tests passing.
+Stage 2 kernel parity is complete. The agent kernel now supports
+per-step context transforms, next-turn prepare hooks, FIFO/LIFO queue
+delivery, explicit queue clearing, cancel callbacks, cancelled
+tool-batch termination, and normalized `stream-result` events. Ordered
+assistant/tool persistence and project-scoped Emacs tools remain the
+active transcript and privacy baseline. Suite: 532 tests passing.
 
 ## Not Doing Now
 
@@ -28,6 +27,6 @@ Suite: 527 tests passing.
 
 ## Immediate Next Step
 
-Stage 2: complete kernel parity with per-step context transforms,
-typed turn/tool events, cancellation propagation, stream contract
-unification, and resource-aware scheduling.
+Stage 3: evolve `lisp/plugin/chat-plugin.el` into an owner-scoped
+runtime with lifecycle state, owned tool/hook rollback, session overlays,
+and unified permission metadata.

@@ -8,18 +8,19 @@
 
 ## Current Phase
 
-Stage 1 correctness work is complete (2026-08-24). The loop lives in
-`lisp/agent/`, emits ordered assistant/tool transcript messages, and
-the UI hosts persist those messages incrementally instead of rebundling
-tool results at request end.
+Stage 2 kernel parity work is complete (2026-08-24). The loop lives in
+`lisp/agent/`, emits ordered assistant/tool transcript messages, rebuilds
+context per step, supports next-turn prepare hooks, and propagates
+cancellation through registered callbacks and tool-batch boundaries.
 
 ## Main Objective
 
 Keep the agent loop as the only driver: `chat-message` throughout,
 `chat-llm--format-messages` as the provider boundary, tool results as
 ordered `:tool` messages, steering and follow-up queues, truncated
-response refusal, and project-scoped Emacs tools. Extend the host
-through `lisp/plugin/` rather than growing the loop.
+response refusal, per-step context transforms, typed events, and
+project-scoped Emacs tools. Extend the host through `lisp/plugin/`
+rather than growing the loop.
 
 ## Active Modules
 
@@ -40,4 +41,5 @@ through `lisp/plugin/` rather than growing the loop.
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-24-work-platform-stage2-kernel-parity.md`
 - `../30-records/logs/stage-2026-08-24-agent-kernel-native-tools.md`

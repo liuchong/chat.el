@@ -209,6 +209,14 @@ Required field order:
 
 **Solution**: validate diagnostics semantically by checking phase and searching the event timeline for the expected response event instead of asserting that one exact event must be last.
 
+### Cancellation Must Reach The Kernel Batch
+
+**Problem**: cancelling a run stops the UI but later tool calls in the same model response still execute.
+
+**Cause**: cancellation is treated only as a transport/UI state and the tool batch loop does not re-check the run state between calls.
+
+**Solution**: register cancellers on the run, mark the run cancelled in the kernel, and check cancellation between tool calls before executing the next item in the batch.
+
 ### Vague Code-Mode Follow-Ups Can Drift Away From The Reviewed File
 
 **Problem**: after reviewing one file, a short follow-up such as "do one round of optimization" can time out or continue analyzing without editing the intended file.

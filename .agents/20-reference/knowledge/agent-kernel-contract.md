@@ -37,6 +37,16 @@ next turn cannot pair `tool_call_id` with results.
   the current no-tool turn would otherwise hit the default stop path.
   Explicit stop predicates remain higher priority.
 - `chat-agent-follow-up` runs only after the loop would stop
+- Per-step pre-step hooks run before `transform-context-fn`, and
+  provider options/tool exposure are rebuilt after that transform
+- `prepare-next-turn-fn` may append structured context before a continued
+  turn after response processing
+- Steering and follow-up queues default to FIFO and can opt into LIFO per
+  run; public clear APIs must keep both queues explicit
+- Cancellation runs registered callbacks and is checked between tool
+  calls so a cancelled batch cannot continue to later tools
+- Streaming completion emits `stream-result` before the normal result
+  path, carrying accumulated text plus native tool metadata
 - Persist assistants that still store `tool-results` on the same struct
   are expanded at the convertToLlm boundary so older sessions keep working
 - Native zero-argument tool schemas encode as an empty object with empty
@@ -46,7 +56,8 @@ next turn cannot pair `tool_call_id` with results.
 
 - `tests/unit/test-chat-agent.el` covers JSON tools, native tools,
   truncated refusal, parse-error follow-up, no-tool steer, follow-up,
-  and plugin block hooks
+  context transforms, next-turn prepare hooks, queue order, cancellation
+  callbacks, cancelled batches, and plugin block hooks
 - `tests/unit/test-chat-llm.el` covers tool role payloads, persisted
   result expansion, null content, and OpenAI `tool_calls` decode
 - `tests/unit/test-chat-stream.el` covers streamed tool_call merging

@@ -11,9 +11,10 @@
 ;;
 ;; Event types delivered through :on-event:
 ;;
-;;   agent-start  turn-start  stream-chunk  tool-event
-;;   truncated    response    followup      steering
-;;   error        agent-end
+;;   agent-start  context-transformed  turn-start  stream-chunk
+;;   stream-result  tool-batch-start  tool-event  tool-batch-end
+;;   message-appended  truncated  response  followup  steering
+;;   prepared-next-turn  error  agent-end
 ;;
 ;; `agent-end' :status is one of completed, stopped, error, cancelled.
 
@@ -41,13 +42,16 @@
                (:constructor chat-agent--run-create)
                (:copier nil))
   model messages session transport on-event should-stop-fn steering-fn
-  followup-fn max-steps request-options followup-request-options
+  followup-fn transform-context-fn prepare-next-turn-fn
+  max-steps request-options followup-request-options
   (step 0)
   content tool-events tool-calls tool-results
   raw-request raw-response
   handle cancelled done status reason
   (steering-queue nil)
   (followup-queue nil)
+  (queue-mode 'fifo)
+  (cancel-functions nil)
   (native-tools t))
 
 (defun chat-agent-tool-call-id (call index)

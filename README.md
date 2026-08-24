@@ -30,6 +30,7 @@ Copyright 2026 chat.el contributors.
 - Expose built in file tools with approval gates for risky operations
 - Feed tool results back into the model through ordered assistant and `:tool` messages with provider `tool_call_id` pairing
 - Queue normal input during an active response as steering for the running agent
+- Rebuild context before each agent step and cancel registered work when a run is stopped
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 

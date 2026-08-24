@@ -5,7 +5,7 @@ Last updated: 2026-08-24
 ## Summary
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
-The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
+The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, per-step agent context hooks, cancellation callbacks, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
 `code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
 Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access.
@@ -22,6 +22,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - async non streaming request path
 - optional streaming UI path
 - response cancellation
+- agent cancellation callbacks and cancelled tool-batch termination
 
 ### LLM Providers
 
@@ -52,6 +53,7 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - leading system message preservation
 - omitted history summary messages
 - summary inclusion of tool calls and tool results
+- per-step agent context transform and next-turn prepare hooks
 
 ### Tool Forging
 
@@ -66,8 +68,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 527 regression tests discovered
-- 527 passing
+- 532 regression tests discovered
+- 532 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -118,6 +120,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 - plain chat now exposes the same shared reading capture model for region, defun, near-point, and bounded current-file questions
 - AI can already open project files in Emacs through the built in `open_file` tool, keeping reading and navigation inside the editor
 - active chat and code-mode input now steers the running agent instead of being rejected when a response is in progress
+- agent runs now support per-step context transforms, next-turn prepare hooks, FIFO/LIFO queue delivery, cancel callbacks, and tool-batch cancellation before later tools run
+- streaming completion now emits a normalized `stream-result` event carrying accumulated text and native tool metadata before regular result handling
 - native provider schemas now encode zero-argument tools as empty objects and forged-tool parameter schemas survive reload
 - Emacs live-buffer tools now hide credential-like buffers and default to project/session-scoped exposure
 - plain chat now has a native help buffer that exposes the new reading commands alongside the existing chat command set
