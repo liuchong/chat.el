@@ -8,10 +8,11 @@
 
 ## Current Phase
 
-Stage 7 capability pack work is complete (2026-08-24). The loop lives
-in `lisp/agent/`, emits ordered assistant/tool transcript messages,
-rebuilds context per step, and now exposes programming, office, and
-daily capability packs through session tool profiles.
+Stage 8 final verification is complete (2026-08-24). The work platform
+now has ordered agent transcripts, kernel parity hooks, scoped plugins,
+durable session recovery, work orchestration, MCP/sub-agent backends,
+and programming/office/daily capability profiles. Final canonical suite:
+556 tests passing.
 
 ## Main Objective
 
@@ -54,6 +55,7 @@ surface advertises only relevant scoped tools.
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-24-work-platform-stage8-final-verification.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage7-capability-packs.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage6-mcp-subagents.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage5-work-orchestration.md`

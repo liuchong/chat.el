@@ -8,13 +8,10 @@
 
 ## Doing Now
 
-Stage 7 capability packs are complete. `chat-capability-packs.el`
-registers programming, office, and daily tools, with session profiles
-for code, office, and daily surfaces. Programming covers diagnostics,
-compile/test background tasks, and read-only status; office covers Org,
-Dired-style file operations, and Calc; daily covers calendar/diary,
-notifications, and unsent mail drafts. Suite: focused Stage 7 tests
-passing; canonical suite pending before commit.
+Stage 8 final verification is complete. All planned work-platform
+stages are implemented and committed through Stage 7, and the final
+canonical suite passed with 556 tests. The current remaining work is
+normal product hardening beyond this plan, not an unfinished plan item.
 
 ## Not Doing Now
 
@@ -34,5 +31,4 @@ passing; canonical suite pending before commit.
 
 ## Immediate Next Step
 
-Stage 8: run final canonical verification, refresh docs if counts drift,
-and create the final verified stage commit.
+No immediate next stage from the attached plan remains.
