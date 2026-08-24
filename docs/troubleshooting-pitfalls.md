@@ -25,6 +25,7 @@ Required field order:
 - Session and Persistence
 - File Tools and Security
 - Tool Calling and Tool Forging
+- Work Orchestration
 - Testing and Batch Mode
 - Development Hygiene
 
@@ -552,6 +553,26 @@ Do not persist tools that only have an in memory compiled function and no source
 **Cause**: `split-string-and-unquote` does not group single quoted segments inside a word.
 
 **Solution**: tokenize shell commands with `chat-tool-shell--split-command`, which handles single quotes, double quotes, and backslash escapes.
+
+---
+
+## Work Orchestration
+
+### Cancelled Tasks Must Stay Cancelled
+
+**Problem**: a background task briefly shows `cancelled` and then changes to `failed`.
+
+**Cause**: the process sentinel runs after `delete-process` and overwrites the explicit cancellation state with the process exit status.
+
+**Solution**: make the sentinel preserve an existing `cancelled` status and only derive `succeeded` or `failed` for tasks that were still running.
+
+### Workflow Records Must Stay Declarative
+
+**Problem**: a saved workflow can run arbitrary code when reloaded or resumed.
+
+**Cause**: workflow steps are stored as executable Lisp forms instead of structured data.
+
+**Solution**: store workflow steps as JSON-compatible records. Execution layers may interpret known step kinds later, but loading and cancellation must never evaluate record contents.
 
 ---
 

@@ -116,6 +116,7 @@ Returns the list of files that were loaded."
 (require 'chat-tool-forge-ai)
 (require 'chat-tool-caller)
 (require 'chat-tool-shell)
+(require 'chat-work)
 
 ;; Load the agent kernel after transports and tooling.
 (require 'chat-agent)
@@ -130,6 +131,8 @@ Returns the list of files that were loaded."
 
 (chat-tool-forge-load-all)
 (chat-files-register-built-in-tools)
+(chat-work-load-tasks)
+(chat-work-register-tools)
 (chat-plugin-provide 'tools t)
 (chat-plugin-start-enabled)
 (chat-plugin-load-user-files)

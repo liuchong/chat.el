@@ -485,7 +485,8 @@ If SESSION is nil, uses `chat--current-session' if bound."
                              (when (boundp 'chat--current-session)
                                chat--current-session))))
     (condition-case err
-        (let ((chat-files-allowed-directories (chat-tool-caller--allowed-directories))
+        (let ((chat-tool-caller-current-session actual-session)
+              (chat-files-allowed-directories (chat-tool-caller--allowed-directories))
               (default-directory (file-name-as-directory
                                   (chat-files--resolved-path
                                    (chat-tool-caller--execution-directory)))))

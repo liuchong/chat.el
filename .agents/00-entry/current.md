@@ -4,15 +4,15 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, kernel, plugin, sessions
+- Tags: current, phase, kernel, plugin, sessions, work
 
 ## Current Phase
 
-Stage 4 durable session runtime work is complete (2026-08-24). The loop
-lives in `lisp/agent/`, emits ordered assistant/tool transcript
-messages, rebuilds context per step, supports next-turn prepare hooks,
-and uses session metadata for branch/tree browsing, compaction records,
-append-boundary recovery, and interrupted tool-run detection.
+Stage 5 work orchestration is complete (2026-08-24). The loop lives in
+`lisp/agent/`, emits ordered assistant/tool transcript messages,
+rebuilds context per step, supports next-turn prepare hooks, and now has
+session-local plan/TODO/goal/workflow state plus cancellable background
+tasks.
 
 ## Main Objective
 
@@ -23,7 +23,9 @@ response refusal, per-step context transforms, typed events, and
 project-scoped Emacs tools. Extend the host through `lisp/plugin/`
 rather than growing the loop; plugin resources must have owner metadata
 and roll back cleanly when stopped. Preserve session durability through
-JSONL-compatible state entries and computed recovery metadata.
+JSONL-compatible state entries and computed recovery metadata. Work
+orchestration must stay declarative and cancellable; no untrusted Lisp
+evaluation is allowed in workflow records.
 
 ## Active Modules
 
@@ -35,6 +37,7 @@ JSONL-compatible state entries and computed recovery metadata.
 - `lisp/plugin/chat-plugin-emacs.el`
 - `lisp/llm/chat-llm.el`
 - `lisp/tools/chat-tool-caller.el`
+- `lisp/tools/chat-work.el`
 - `lisp/core/chat-session.el`
 - `lisp/core/chat-session-tree.el`
 - `lisp/core/chat-agent.el` (load-path shim)
@@ -46,6 +49,7 @@ JSONL-compatible state entries and computed recovery metadata.
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-24-work-platform-stage5-work-orchestration.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage4-session-runtime.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage3-plugin-runtime.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage2-kernel-parity.md`

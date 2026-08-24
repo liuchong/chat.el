@@ -33,6 +33,7 @@ Copyright 2026 chat.el contributors.
 - Rebuild context before each agent step and cancel registered work when a run is stopped
 - Scope tools per session and roll back plugin-owned tools, hooks, and services when a plugin stops
 - Browse durable parent/branch session trees and preserve recovery metadata for interrupted tool runs
+- Run cancellable background tasks and keep session-local plan, TODO, goal, and workflow records
 - Trim long conversations with system message preservation and summary messages
 - Generate custom tools and save them to disk after explicit approval
 
@@ -190,6 +191,21 @@ Built in tools currently focus on coding assistance:
 - `emacs_imenu`
 - `emacs_xref`
 - `emacs_project`
+- `work_task_start`
+- `work_task_list`
+- `work_task_output`
+- `work_task_stop`
+- `work_plan_enter`
+- `work_plan_exit`
+- `work_todo_add`
+- `work_todo_update`
+- `work_todo_list`
+- `work_goal_add`
+- `work_goal_update`
+- `work_goal_list`
+- `work_workflow_start`
+- `work_workflow_cancel`
+- `work_workflow_list`
 
 Risky tools require approval before execution.
 Generated tools also require approval before registration.

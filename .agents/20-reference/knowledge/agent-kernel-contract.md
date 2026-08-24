@@ -65,6 +65,11 @@ next turn cannot pair `tool_call_id` with results.
   instead of creating synthetic success messages
 - Compaction cut points must not split an assistant `tool_calls` message
   from its matching `:tool` results
+- Work orchestration tools must read and write through the executing
+  session when one exists; background process tasks stay cancellable and
+  keep bounded logs
+- Workflow state is declarative data. It may store ordered steps and
+  cancellation state, but must not evaluate arbitrary Lisp from records
 
 ## Regression Guard
 
@@ -85,3 +90,6 @@ next turn cannot pair `tool_call_id` with results.
 - `tests/unit/test-chat-session.el` covers session tool-config
   persistence, branch metadata, append-boundary recovery, interrupted
   tool-pair detection, and safe compaction cut indices
+- `tests/unit/test-chat-work.el` covers background task execution/stop,
+  session-local work records, declarative workflow cancellation, and
+  work tool metadata
