@@ -21,6 +21,16 @@
   :type 'integer
   :group 'chat)
 
+(defcustom chat-context-durable-summary-max-chars 2400
+  "Maximum characters kept in a durable session summary."
+  :type 'integer
+  :group 'chat)
+
+(defcustom chat-context-auto-compact t
+  "When non-nil, persist a summary before an over-budget agent step."
+  :type 'boolean
+  :group 'chat)
+
 (defun chat-context-count-tokens (text)
   "Estimate token count for TEXT (rough approximation)."
   (if (string-blank-p text)
@@ -96,6 +106,177 @@
      :content (concat "Earlier conversation summary:\n" body)
      :timestamp (current-time))))
 
+(defun chat-context--summary-metadata (entry)
+  "Return metadata alist from summary ENTRY."
+  (cdr (assoc 'metadata entry)))
+
+(defun chat-context--summary-through-id (entry)
+  "Return the covered message id from summary ENTRY."
+  (when entry
+    (let ((metadata (chat-context--summary-metadata entry)))
+      (or (cdr (assoc 'throughMessageId metadata))
+          (cdr (assoc "throughMessageId" metadata))))))
+
+(defun chat-context--latest-session-summary (session)
+  "Return the latest durable summary for SESSION."
+  (car (last (chat-session-summaries session))))
+
+(defun chat-context--summary-covered-index (session entry)
+  "Return the message index covered by summary ENTRY in SESSION."
+  (when-let ((id (chat-context--summary-through-id entry)))
+    (cl-position id (chat-session-messages session)
+                 :key #'chat-message-id
+                 :test #'equal)))
+
+(defun chat-context--leading-system-count (messages)
+  "Return the number of leading system MESSAGES."
+  (length (car (chat-context--partition-system-messages messages))))
+
+(defun chat-context--compaction-plan (session max-tokens)
+  "Return a safe compaction plan for SESSION under MAX-TOKENS."
+  (let* ((messages (chat-session-messages session))
+         (latest (chat-context--latest-session-summary session))
+         (covered (chat-context--summary-covered-index session latest))
+         (start (max (chat-context--leading-system-count messages)
+                     (if covered (1+ covered) 0)))
+         (keep-budget (max 1 (floor (* max-tokens 0.55))))
+         (tokens 0)
+         (keep-start (length messages)))
+    (cl-loop for index downfrom (1- (length messages)) to start
+             for message = (nth index messages)
+             for cost = (chat-context-message-tokens message)
+             while (<= (+ tokens cost) keep-budget)
+             do (setq tokens (+ tokens cost)
+                      keep-start index))
+    (let* ((max-cut (- keep-start 1))
+           (safe-cut (and (>= max-cut start)
+                          (chat-session-tool-pair-safe-cut-index
+                           session max-cut))))
+      (when (and safe-cut (>= safe-cut start))
+        (list :start start
+              :cut safe-cut
+              :messages (cl-subseq messages start (1+ safe-cut))
+              :previous latest)))))
+
+(defun chat-context--durable-summary-text (previous messages)
+  "Build a deterministic durable summary from PREVIOUS and MESSAGES."
+  (let* ((previous-text (and previous (cdr (assoc 'summary previous))))
+         (lines
+          (append
+           (when (and previous-text (not (string-blank-p previous-text)))
+             (list (format "Previous summary: %s" previous-text)))
+           (mapcar #'chat-context--summarize-message messages))))
+    (truncate-string-to-width
+     (mapconcat #'identity lines "\n")
+     chat-context-durable-summary-max-chars nil nil t)))
+
+(defun chat-context--persist-compaction
+    (session plan summary kind)
+  "Persist SUMMARY for SESSION according to PLAN and KIND."
+  (let* ((cut (plist-get plan :cut))
+         (through (nth cut (chat-session-messages session))))
+    (chat-session-add-summary
+     session summary
+     `((throughMessageId . ,(chat-message-id through))
+       (messageCount . ,(1+ cut))
+       (kind . ,kind)))))
+
+(defun chat-context-compact-session (session max-tokens &optional summary kind)
+  "Compact one safe prefix of SESSION for MAX-TOKENS.
+When SUMMARY is nil, use the deterministic fallback. KIND labels the
+durable record and defaults to \"automatic\"."
+  (when-let ((plan (chat-context--compaction-plan session max-tokens)))
+    (chat-context--persist-compaction
+     session
+     plan
+     (or summary
+         (chat-context--durable-summary-text
+          (plist-get plan :previous)
+          (plist-get plan :messages)))
+     (or kind "automatic"))))
+
+(defun chat-context--apply-session-summary (messages session)
+  "Replace the covered prefix of MESSAGES with SESSION's latest summary."
+  (let* ((entry (chat-context--latest-session-summary session))
+         (through-id (chat-context--summary-through-id entry)))
+    (if (not through-id)
+        messages
+      (pcase-let* ((`(,systems ,conversation)
+                    (chat-context--partition-system-messages messages))
+                   (index (cl-position through-id conversation
+                                       :key #'chat-message-id
+                                       :test #'equal)))
+        (if (null index)
+            messages
+          (append
+           systems
+           (list
+            (make-chat-message
+             :id (format "durable-summary-%s"
+                         (or (cdr (assoc 'id entry)) through-id))
+             :role :system
+             :content (concat "Earlier conversation summary:\n"
+                              (or (cdr (assoc 'summary entry)) ""))
+             :timestamp (current-time)
+             :metadata (list :durable-summary t
+                             :through-message-id through-id)))
+           (nthcdr (1+ index) conversation)))))))
+
+(defun chat-context-compact-session-with-llm
+    (session callback error-callback &optional max-tokens)
+  "Summarize one SESSION prefix with its model, then invoke CALLBACK.
+ERROR-CALLBACK receives transport errors."
+  (let* ((max (or max-tokens chat-context-max-tokens))
+         (plan (chat-context--compaction-plan session max)))
+    (unless plan
+      (error "No safe session prefix is available for compaction"))
+    (require 'chat-llm)
+    (let* ((previous (plist-get plan :previous))
+           (source (chat-context--durable-summary-text
+                    previous (plist-get plan :messages)))
+           (messages
+            (list
+             (make-chat-message
+              :id (chat-session-new-message-id "compact-system")
+              :role :system
+              :content
+              "Summarize the conversation faithfully. Preserve decisions, constraints, unresolved tasks, and tool outcomes. Do not add facts."
+              :timestamp (current-time))
+             (make-chat-message
+              :id (chat-session-new-message-id "compact-user")
+              :role :user
+              :content source
+              :timestamp (current-time)))))
+      (chat-llm-request-async
+       (chat-session-model-id session)
+       messages
+       (lambda (result)
+         (let ((summary (string-trim (or (plist-get result :content) ""))))
+           (if (string-empty-p summary)
+               (funcall error-callback "Compaction returned an empty summary")
+             (funcall
+              callback
+              (chat-context--persist-compaction
+               session plan summary "llm")))))
+       error-callback
+       (list :temperature 0.1)))))
+
+;;;###autoload
+(defun chat-context-compact-current-session ()
+  "Run durable LLM compaction for the active chat or code session."
+  (interactive)
+  (let ((session
+         (or (and (boundp 'chat--current-session) chat--current-session)
+             (and (fboundp 'chat-code--base-session)
+                  (chat-code--base-session)))))
+    (unless session
+      (user-error "No active session"))
+    (chat-context-compact-session-with-llm
+     session
+     (lambda (_entry) (message "Session compaction completed"))
+     (lambda (error-message)
+       (message "Session compaction failed: %s" error-message)))))
+
 (defun chat-context--partition-system-messages (msgs)
   "Split MSGS into leading system messages and the remaining messages."
   (let ((systems nil)
@@ -151,12 +332,32 @@
               recent))))
 
 ;;;###autoload
-(defun chat-context-prepare-messages (msgs &optional max-tokens)
-  "Prepare MSGS for API request."
+(defun chat-context-prepare-messages
+    (msgs &optional max-tokens session)
+  "Prepare MSGS for API request, optionally using durable SESSION state."
+  (unless (cl-every #'chat-message-p msgs)
+    (cl-return-from chat-context-prepare-messages msgs))
   (let ((max (or max-tokens chat-context-max-tokens)))
-    (if (<= (chat-context-total-tokens msgs) max)
-        msgs
-      (chat-context--recent-window-with-summary msgs max))))
+    (when (and session
+               chat-context-auto-compact
+               (> (chat-context-total-tokens
+                   (chat-context--apply-session-summary msgs session))
+                  max))
+      (let ((attempts 0)
+            compacted)
+        (while (and (< attempts 8)
+                    (> (chat-context-total-tokens
+                        (chat-context--apply-session-summary msgs session))
+                       max)
+                    (setq compacted
+                          (chat-context-compact-session session max)))
+          (setq attempts (1+ attempts)))))
+    (let ((prepared (if session
+                        (chat-context--apply-session-summary msgs session)
+                      msgs)))
+      (if (<= (chat-context-total-tokens prepared) max)
+          prepared
+        (chat-context--recent-window-with-summary prepared max)))))
 
 (provide 'chat-context)
 ;;; chat-context.el ends here

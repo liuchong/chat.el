@@ -724,7 +724,8 @@ assistant response being filled in."
       (setq assistant-start (copy-marker (point))))
     (setq chat-ui--live-response-start assistant-start)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
-           (messages-final (chat-context-prepare-messages messages-with-tools)))
+           (messages-final
+            (chat-context-prepare-messages messages-with-tools nil session)))
       (chat-log "[UI] Starting %s agent run with %d messages"
                 transport (length messages-final))
       (setq chat-ui--active-agent-run
@@ -734,6 +735,10 @@ assistant response being filled in."
                    :session session
                    :transport transport
                    :max-steps chat-ui-tool-loop-max-steps
+                   :transform-context-fn
+                   (lambda (_run step-messages)
+                     (chat-context-prepare-messages
+                      step-messages nil session))
                    :request-options
                    (append
                     (list :temperature 0.7)
@@ -1012,10 +1017,12 @@ This is an ephemeral query - the result is displayed but not persisted."
             :assistant)))
       (unless assistant-msg
         (user-error "No assistant response available to regenerate"))
-      (chat-session-truncate-after-message
-       chat--current-session
-       (chat-message-id assistant-msg)
-       t)
+      (setq chat--current-session
+            (chat-session-create-branch-before-message
+             chat--current-session
+             (chat-message-id assistant-msg)
+             nil
+             '((reason . "regenerate"))))
       (chat-ui--rebuild-buffer)
       (chat-ui--get-response))))
 
@@ -1032,10 +1039,12 @@ This is an ephemeral query - the result is displayed but not persisted."
             :user)))
       (unless user-msg
         (user-error "No user message available to edit"))
-      (chat-session-truncate-after-message
-       chat--current-session
-       (chat-message-id user-msg)
-       t)
+      (setq chat--current-session
+            (chat-session-create-branch-before-message
+             chat--current-session
+             (chat-message-id user-msg)
+             nil
+             '((reason . "edit-resend"))))
       (chat-ui--rebuild-buffer (chat-message-content user-msg)))))
 
 (defun chat-ui-previous-message ()

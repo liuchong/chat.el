@@ -212,8 +212,8 @@
                          (car (chat-agent-run-state-steering-queue run)))
                         "Add this constraint"))))))
 
-(ert-deftest chat-ui-regenerate-last-response-replays-last-user-turn ()
-  "Test regenerating removes the trailing assistant message and replays."
+(ert-deftest chat-ui-regenerate-last-response-creates-sibling-branch ()
+  "Test regenerating branches without removing the original response."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Replay Session" 'kimi))
@@ -235,13 +235,19 @@
          (chat-ui-regenerate-last-response))
        (should replayed)
        (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                      '("u1" "a1")))
+       (should-not (eq chat--current-session session))
+       (should (equal (mapcar #'chat-message-id
+                              (chat-session-messages chat--current-session))
                       '("u1")))
+       (should (equal (chat-session-parent-session-id chat--current-session)
+                      (chat-session-id session)))
        (goto-char (point-min))
        (should (search-forward "Question" nil t))
        (should-not (search-forward "Old answer" nil t))))))
 
-(ert-deftest chat-ui-edit-last-user-message-restores-input-and-truncates-history ()
-  "Test editing the last user message removes later turns and restores input."
+(ert-deftest chat-ui-edit-last-user-message-branches-and-restores-input ()
+  "Test editing branches before restoring the last user message."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Edit Session" 'kimi)))
@@ -262,6 +268,9 @@
        (chat-ui-setup-buffer session)
        (chat-ui-edit-last-user-message)
        (should (equal (mapcar #'chat-message-id (chat-session-messages session))
+                      '("u1" "a1" "u2" "a2")))
+       (should (equal (mapcar #'chat-message-id
+                              (chat-session-messages chat--current-session))
                       '("u1" "a1")))
        (should (string= (buffer-substring-no-properties
                          (marker-position chat-ui--input-overlay)

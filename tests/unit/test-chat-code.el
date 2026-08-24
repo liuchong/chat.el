@@ -122,8 +122,8 @@
                          (chat-code-session-base-session opened-session))
                         "Chat Session"))))))
 
-(ert-deftest chat-code-regenerate-last-response-replays-last-user-turn ()
-  "Test code mode regenerates by dropping the trailing assistant turn."
+(ert-deftest chat-code-regenerate-last-response-creates-sibling-branch ()
+  "Test code mode regenerates on a branch without truncating history."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-code-session-create "Replay Session" temp-dir))
@@ -145,13 +145,20 @@
          (chat-code-regenerate-last-response))
        (should replayed)
        (should (equal (mapcar #'chat-message-id (chat-session-messages base-session))
-                      '("u1")))
+                      '("u1" "a1")))
+       (let ((branch (chat-code-session-base-session session)))
+         (should-not (eq branch base-session))
+         (should (equal (mapcar #'chat-message-id
+                                (chat-session-messages branch))
+                        '("u1")))
+         (should (equal (chat-session-parent-session-id branch)
+                        (chat-session-id base-session))))
        (goto-char (point-min))
        (should (search-forward "Fix bug" nil t))
        (should-not (search-forward "Old fix" nil t))))))
 
-(ert-deftest chat-code-edit-last-user-message-restores-input-and-truncates-history ()
-  "Test code mode restores the last user turn into the input area."
+(ert-deftest chat-code-edit-last-user-message-branches-and-restores-input ()
+  "Test code mode branches before restoring the user turn for editing."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-code-session-create "Edit Session" temp-dir))
@@ -174,7 +181,13 @@
        (chat-code--setup-buffer session)
        (chat-code-edit-last-user-message)
        (should (equal (mapcar #'chat-message-id (chat-session-messages base-session))
-                      '("u1" "a1")))
+                      '("u1" "a1" "u2" "a2")))
+       (should
+        (equal
+         (mapcar #'chat-message-id
+                 (chat-session-messages
+                  (chat-code-session-base-session session)))
+         '("u1" "a1")))
        (should (string= (buffer-substring-no-properties
                          (marker-position chat-code--input-marker)
                          (point-max))

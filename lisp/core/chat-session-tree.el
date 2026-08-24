@@ -100,6 +100,30 @@
                 (chat-session-tree-flatten chat-session-tree--sessions)))
   (tabulated-list-print t))
 
+(defun chat-session-tree-session-at-point ()
+  "Return the session represented by the current row."
+  (when-let ((id (tabulated-list-get-id)))
+    (chat-session-load id)))
+
+(defun chat-session-tree-recover-interrupted ()
+  "Resolve the interrupted tool run for the session at point."
+  (interactive)
+  (let ((session (chat-session-tree-session-at-point)))
+    (unless session
+      (user-error "No session at point"))
+    (unless (chat-session-recovery-state session)
+      (user-error "Session has no interrupted tool run"))
+    (let ((action
+           (intern
+            (completing-read
+             "Recovery action: "
+             '("mark-failed" "discard" "keep")
+             nil t nil nil "mark-failed"))))
+      (chat-session-recover-interrupted-run session action)
+      (setq chat-session-tree--sessions (chat-session-list))
+      (chat-session-tree-refresh)
+      (message "Recovery action applied: %s" action))))
+
 (define-derived-mode chat-session-tree-mode tabulated-list-mode "Chat Session Tree"
   "Major mode for browsing chat session branches."
   (setq tabulated-list-format
@@ -109,6 +133,8 @@
          ("Parent" 20 t)
          ("Updated" 16 t)])
   (setq tabulated-list-padding 2)
+  (define-key chat-session-tree-mode-map
+              (kbd "R") #'chat-session-tree-recover-interrupted)
   (tabulated-list-init-header))
 
 ;;;###autoload

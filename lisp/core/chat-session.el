@@ -208,15 +208,35 @@ Falls back to a full save when the file is missing."
   (let ((filename (chat-session--file-name (chat-session-id session))))
     (if (not (file-exists-p filename))
         (chat-session-save session)
-      (chat-session--ensure-jsonl-boundary filename)
-      (write-region
-       (concat (json-encode (chat-session--message-entry message)) "\n"
-               (json-encode (chat-session--state-entry session)) "\n")
-       nil
+      (chat-session--atomic-append-jsonl
        filename
-       'append
-       'silent)
+       (concat (json-encode (chat-session--message-entry message)) "\n"
+               (json-encode (chat-session--state-entry session)) "\n"))
       t)))
+
+(defun chat-session--atomic-append-jsonl (filename records)
+  "Atomically append complete JSONL RECORDS to FILENAME.
+The existing file is copied into a same-directory temporary file and
+renamed only after complete records are written."
+  (let ((temp-file
+         (make-temp-file
+          (expand-file-name ".append-" (file-name-directory filename))
+          nil ".jsonl"))
+        (modes (file-modes filename)))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-file
+            (insert-file-contents-literally filename)
+            (goto-char (point-max))
+            (unless (or (= (point-max) (point-min))
+                        (eq (char-before (point-max)) ?\n))
+              (insert "\n"))
+            (insert records))
+          (when modes
+            (set-file-modes temp-file modes))
+          (rename-file temp-file filename t))
+      (when (file-exists-p temp-file)
+        (delete-file temp-file)))))
 
 (defun chat-session--ensure-jsonl-boundary (filename)
   "Ensure FILENAME ends at a JSONL record boundary before appending."
@@ -436,6 +456,79 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
         (chat-session-save session))
       t)))
 
+(defun chat-session--copy-message (message)
+  "Return an isolated copy of MESSAGE for a new branch."
+  (let ((copy (copy-chat-message message)))
+    (setf (chat-message-branch-ids copy)
+          (copy-sequence (chat-message-branch-ids message))
+          (chat-message-metadata copy)
+          (copy-tree (chat-message-metadata message))
+          (chat-message-tool-calls copy)
+          (copy-tree (chat-message-tool-calls message))
+          (chat-message-tool-results copy)
+          (copy-tree (chat-message-tool-results message)))
+    copy))
+
+(defun chat-session-create-branch
+    (session &optional through-message-id name metadata)
+  "Create and persist a sibling branch from SESSION.
+The child copies history through THROUGH-MESSAGE-ID. When it is nil the
+branch starts with no messages. SESSION is never truncated."
+  (let* ((messages (chat-session-messages session))
+         (index (and through-message-id
+                     (cl-position through-message-id messages
+                                  :key #'chat-message-id
+                                  :test #'equal))))
+    (when (and through-message-id (null index))
+      (error "Branch point not found: %s" through-message-id))
+    (let* ((id (chat-session--generate-id))
+           (now (current-time))
+           (copied
+            (mapcar #'chat-session--copy-message
+                    (if index (cl-subseq messages 0 (1+ index)) nil)))
+           (branch
+            (make-chat-session
+             :id id
+             :name (or name (format "%s / branch" (chat-session-name session)))
+             :created-at now
+             :updated-at now
+             :model-id (chat-session-model-id session)
+             :messages copied
+             :prompt-stack (copy-tree (chat-session-prompt-stack session))
+             :context-window (copy-tree (chat-session-context-window session))
+             :tool-config (copy-tree (chat-session-tool-config session))
+             :parent-session-id (chat-session-id session)
+             :branch-id id
+             :leaf-message-id (and copied
+                                   (chat-message-id (car (last copied))))
+             :summaries nil
+             :recovery-state nil
+             :auto-approve (chat-session-auto-approve session)
+             :metadata metadata)))
+      (when index
+        (let ((parent-message (nth index messages)))
+          (cl-pushnew id (chat-message-branch-ids parent-message)
+                      :test #'equal)
+          (setf (chat-session-updated-at session) now)
+          (chat-session-save session)))
+      (chat-session-save branch)
+      branch)))
+
+(defun chat-session-create-branch-before-message
+    (session message-id &optional name metadata)
+  "Create a branch of SESSION immediately before MESSAGE-ID."
+  (let* ((messages (chat-session-messages session))
+         (index (cl-position message-id messages
+                             :key #'chat-message-id
+                             :test #'equal)))
+    (unless index
+      (error "Branch message not found: %s" message-id))
+    (chat-session-create-branch
+     session
+     (when (> index 0)
+       (chat-message-id (nth (1- index) messages)))
+     name metadata)))
+
 (defun chat-session-replace-message-content (session message-id new-content)
   "Replace SESSION message MESSAGE-ID content with NEW-CONTENT."
   (let ((message (cl-find message-id
@@ -532,12 +625,47 @@ When INCLUDE-MESSAGE is non nil, also remove the matching message."
                        (current-time))))
     (parentId . ,(chat-message-parent-id message))
     (branchIds . ,(or (chat-message-branch-ids message) nil))
-    (metadata . ,(or (chat-message-metadata message) nil))
+    (metadata . ,(chat-session--message-metadata-to-json
+                  (chat-message-metadata message)))
     (toolCalls . ,(mapcar #'chat-session--serialize-tool-call
                           (or (chat-message-tool-calls message) nil)))
     (toolResults . ,(or (chat-message-tool-results message) nil))
     (rawRequest . ,(chat-message-raw-request message))
     (rawResponse . ,(chat-message-raw-response message))))
+
+(defun chat-session--message-metadata-to-json (metadata)
+  "Convert message METADATA to a JSON object."
+  (cond
+   ((null metadata) nil)
+   ((keywordp (car-safe metadata))
+    (let (entries)
+      (while metadata
+        (let ((key (pop metadata))
+              (value (pop metadata)))
+          (push (cons (substring (symbol-name key) 1)
+                      (if (symbolp value) (symbol-name value) value))
+                entries)))
+      (nreverse entries)))
+   (t metadata)))
+
+(defun chat-session--message-metadata-from-json (metadata)
+  "Normalize decoded message METADATA to a plist."
+  (cond
+   ((null metadata) nil)
+   ((vectorp metadata)
+    (let ((items (append metadata nil))
+          plist)
+      (while items
+        (push (intern (format ":%s" (pop items))) plist)
+        (push (pop items) plist))
+      (nreverse plist)))
+   ((and (listp metadata) (consp (car-safe metadata)))
+    (let (plist)
+      (dolist (entry metadata)
+        (push (intern (format ":%s" (car entry))) plist)
+        (push (cdr entry) plist))
+      (nreverse plist)))
+   (t metadata)))
 
 (defun chat-session--alist-get (alist key)
   "Get value for KEY from ALIST."
@@ -708,6 +836,45 @@ Recognized keys are `:parent-session-id', `:branch-id', and
             :assistant-message-id last-assistant-id
             :missing-tool-call-ids pending))))
 
+(defconst chat-session-interrupted-tool-result-text
+  "Tool call interrupted before completion; no successful result was recorded."
+  "Recovery result used for an unfinished tool call.")
+
+(defun chat-session-recover-interrupted-run (session action)
+  "Resolve SESSION interrupted-run state according to ACTION.
+`mark-failed' appends explicit failed tool results. `discard' removes the
+unfinished assistant turn. `keep' leaves the session unchanged."
+  (let ((recovery (or (chat-session-recovery-state session)
+                      (chat-session-detect-interrupted-run session))))
+    (unless recovery
+      (error "Session has no interrupted tool run"))
+    (pcase action
+      ('keep recovery)
+      ('mark-failed
+       (dolist (tool-call-id (plist-get recovery :missing-tool-call-ids))
+         (chat-session-add-message
+          session
+          (make-chat-message
+           :id (chat-session-new-message-id "recovery-tool")
+           :role :tool
+           :content chat-session-interrupted-tool-result-text
+           :timestamp (current-time)
+           :parent-id (plist-get recovery :assistant-message-id)
+           :metadata (list :tool-call-id tool-call-id
+                           :recovery t
+                           :status 'failed))))
+       (setf (chat-session-recovery-state session) nil)
+       (when chat-session-auto-save
+         (chat-session-save session))
+       nil)
+      ('discard
+       (chat-session-truncate-after-message
+        session (plist-get recovery :assistant-message-id) t)
+       (setf (chat-session-recovery-state session) nil)
+       nil)
+      (_
+       (error "Unknown recovery action: %s" action)))))
+
 (defun chat-session-tool-pair-safe-cut-index (session max-index)
   "Return the largest safe compaction cut index not above MAX-INDEX.
 The returned index never cuts between an assistant tool call and its
@@ -741,7 +908,8 @@ matching `:tool' result."
    :parent-id (chat-session--alist-get data 'parentId)
    :branch-ids (chat-session--normalize-list
                 (chat-session--alist-get data 'branchIds))
-   :metadata (chat-session--alist-get data 'metadata)
+   :metadata (chat-session--message-metadata-from-json
+              (chat-session--alist-get data 'metadata))
    :tool-calls (chat-session--normalize-tool-calls
                 (chat-session--alist-get data 'toolCalls))
    :tool-results (chat-session--normalize-list

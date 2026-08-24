@@ -383,8 +383,8 @@
      (chat-session-save (chat-session-create "atomic" 'kimi))
      (should (null (directory-files temp-dir nil "^\\.session-"))))))
 
-(ert-deftest chat-session-jsonl-appends-messages-without-full-rewrite ()
-  "Test adding messages appends entries instead of rewriting the file."
+(ert-deftest chat-session-jsonl-atomic-append-keeps-complete-records ()
+  "Test atomic append keeps one complete record per line."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Append Session" 'kimi)))
@@ -407,7 +407,8 @@
        ;; header + state, then message + state per added message
        (should (= (length lines) 6))
        (should (string-match-p "\"header\"" (nth 0 lines)))
-       (should (string-match-p "\"message\"" (nth 2 lines)))))))
+       (should (string-match-p "\"message\"" (nth 2 lines)))
+       (should (null (directory-files temp-dir nil "^\\.append-")))))))
 
 (ert-deftest chat-session-load-migrates-legacy-json ()
   "Test legacy JSON session files load and migrate to JSONL."
@@ -484,6 +485,55 @@
        (should (eq (plist-get recovery :type) 'interrupted-tool-run))
        (should (equal (plist-get recovery :missing-tool-call-ids)
                       '("call-1")))))))
+
+(ert-deftest chat-session-recovery-marks-interrupted-tools-failed ()
+  "Test recovery records failure without inventing successful output."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Recover" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "a1"
+       :role :assistant
+       :content ""
+       :tool-calls '((:id "call-1" :name "demo" :arguments nil))))
+     (setf (chat-session-recovery-state session)
+           (chat-session-detect-interrupted-run session))
+     (chat-session-recover-interrupted-run session 'mark-failed)
+     (let ((result (car (last (chat-session-messages session)))))
+       (should (eq (chat-message-role result) :tool))
+       (should (equal (plist-get (chat-message-metadata result)
+                                 :tool-call-id)
+                      "call-1"))
+       (should (eq (plist-get (chat-message-metadata result) :status)
+                   'failed))
+       (should-not (chat-session-detect-interrupted-run session))))))
+
+(ert-deftest chat-session-branching-preserves-original-history ()
+  "Test branches copy a prefix without truncating the source session."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Root" 'kimi))
+          (user (make-chat-message :id "u1" :role :user :content "ask"))
+          (assistant
+           (make-chat-message :id "a1" :role :assistant :content "answer")))
+     (chat-session-add-message session user)
+     (chat-session-add-message session assistant)
+     (let ((branch
+            (chat-session-create-branch-before-message
+             session "a1" nil '((reason . "regenerate")))))
+       (should (equal (mapcar #'chat-message-id
+                              (chat-session-messages session))
+                      '("u1" "a1")))
+       (should (equal (mapcar #'chat-message-id
+                              (chat-session-messages branch))
+                      '("u1")))
+       (should (equal (chat-session-parent-session-id branch)
+                      (chat-session-id session)))
+       (should (member (chat-session-id branch)
+                       (chat-message-branch-ids user)))
+       (should (chat-session-load (chat-session-id branch)))))))
 
 (ert-deftest chat-session-tool-pair-safe-cut-index-refuses-open-pair ()
   "Test compaction cut points do not split assistant/tool pairs."

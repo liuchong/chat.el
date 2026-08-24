@@ -66,5 +66,60 @@
                    :tool-calls '((:name "apply_patch" :arguments (("path" . "demo.el"))))
                    :tool-results '("patched demo.el"))))
     (should (> (chat-context-message-tokens message) 4))))
+
+(ert-deftest chat-context-auto-compaction-persists-and-reuses-summary ()
+  "Test over-budget preparation stores and applies a durable summary."
+  (let* ((chat-session-auto-save nil)
+         (session (make-chat-session :id "compact" :model-id 'kimi))
+         (messages
+          (cl-loop for index from 1 to 8
+                   collect
+                   (make-chat-message
+                    :id (format "m%d" index)
+                    :role (if (cl-oddp index) :user :assistant)
+                    :content (format "message-%d %s"
+                                     index (make-string 180 ?x))))))
+    (setf (chat-session-messages session) messages)
+    (let ((prepared (chat-context-prepare-messages messages 100 session)))
+      (should (chat-session-summaries session))
+      (should
+       (seq-find
+        (lambda (message)
+          (and (eq (chat-message-role message) :system)
+               (string-match-p "Earlier conversation summary"
+                               (chat-message-content message))))
+        prepared))
+      (should (equal (chat-message-id (car (last prepared))) "m8"))
+      (should (< (length prepared) (length messages))))))
+
+(ert-deftest chat-context-llm-compaction-persists-provider-summary ()
+  "Test manual asynchronous compaction stores model-produced text."
+  (let* ((chat-session-auto-save nil)
+         (session (make-chat-session :id "llm-compact" :model-id 'kimi))
+         (messages
+          (cl-loop for index from 1 to 6
+                   collect
+                   (make-chat-message
+                    :id (format "llm-%d" index)
+                    :role (if (cl-oddp index) :user :assistant)
+                    :content (make-string 160 (+ ?a index)))))
+         stored)
+    (setf (chat-session-messages session) messages)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (_model _messages success _error _options)
+                 (funcall success '(:content "Durable model summary"))
+                 'handle)))
+      (chat-context-compact-session-with-llm
+       session
+       (lambda (entry) (setq stored entry))
+       (lambda (message) (ert-fail message))
+       80))
+    (should stored)
+    (should (equal (cdr (assoc 'summary stored))
+                   "Durable model summary"))
+    (should (equal (cdr (assoc 'kind
+                               (cdr (assoc 'metadata stored))))
+                   "llm"))))
+
 (provide 'test-chat-context)
 ;;; test-chat-context.el ends here

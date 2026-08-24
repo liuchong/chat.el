@@ -780,7 +780,8 @@ When SILENT is non-nil, do not show minibuffer feedback."
   "Prepare MESSAGES for MODEL without losing earlier context abruptly."
   (chat-context-prepare-messages
    messages
-   (chat-code--request-message-budget model messages)))
+   (chat-code--request-message-budget model messages)
+   (chat-code--base-session)))
 
 (defun chat-code--compact-text (text &optional max-chars)
   "Normalize TEXT and keep at most MAX-CHARS characters."
@@ -1769,6 +1770,14 @@ CONTENT-START marks the assistant response body."
                :session (chat-code--base-session)
                :transport transport
                :max-steps chat-code-tool-loop-max-steps
+               :transform-context-fn
+               (lambda (_run step-messages)
+                 (if (cl-every #'chat-message-p step-messages)
+                     (chat-context-prepare-messages
+                      step-messages
+                      (chat-code--request-message-budget model step-messages)
+                      (chat-code--base-session))
+                   step-messages))
                :followup-fn
                (lambda (processed)
                  (when (and (null (plist-get processed :tool-calls))
@@ -1911,10 +1920,12 @@ If CONTENT-START is non nil, replace the pending assistant slot."
             (chat-session-find-last-message-by-role base-session :assistant)))
       (unless assistant-msg
         (user-error "No assistant response available to regenerate"))
-      (chat-session-truncate-after-message
-       base-session
-       (chat-message-id assistant-msg)
-       t)
+      (setf (chat-code-session-base-session chat-code--current-session)
+            (chat-session-create-branch-before-message
+             base-session
+             (chat-message-id assistant-msg)
+             nil
+             '((reason . "regenerate"))))
       (chat-code--rebuild-buffer)
       (chat-code--send-to-llm))))
 
@@ -1930,10 +1941,12 @@ If CONTENT-START is non nil, replace the pending assistant slot."
             (chat-session-find-last-message-by-role base-session :user)))
       (unless user-msg
         (user-error "No user message available to edit"))
-      (chat-session-truncate-after-message
-       base-session
-       (chat-message-id user-msg)
-       t)
+      (setf (chat-code-session-base-session chat-code--current-session)
+            (chat-session-create-branch-before-message
+             base-session
+             (chat-message-id user-msg)
+             nil
+             '((reason . "edit-resend"))))
       (chat-code--rebuild-buffer (chat-message-content user-msg)))))
 
 (defun chat-code--display-assistant-response (content)
