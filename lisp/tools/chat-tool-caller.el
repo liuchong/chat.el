@@ -544,9 +544,20 @@ enumerated values."
                (list project-root))
              chat-files-allowed-directories))))
 
-(defun chat-tool-caller--execution-directory ()
-  "Return the working directory for the current tool execution."
-  (or (chat-tool-caller--code-project-root)
+(defun chat-tool-caller--execution-directory (&optional session)
+  "Return the working directory for the current tool execution.
+
+A directory SESSION was pointed at wins over the detected code mode
+project root, so tools follow an explicit change of directory.  The
+ambient value is the last resort, because tools can run from a process
+sentinel where the current buffer is not the chat buffer.
+
+SESSION is passed in rather than read from
+`chat-tool-caller-current-session', which is bound by the same `let' that
+calls this function and so is not yet visible here."
+  (or (chat-session-working-directory
+       (or session chat-tool-caller-current-session))
+      (chat-tool-caller--code-project-root)
       default-directory))
 
 (defun chat-tool-caller-call-tool (call)
@@ -619,7 +630,7 @@ ERROR-CALLBACK and return a cancellable handle."
                   (default-directory
                    (file-name-as-directory
                     (chat-files--resolved-path
-                     (chat-tool-caller--execution-directory)))))
+                     (chat-tool-caller--execution-directory actual-session)))))
               (chat-tool-caller--notify
                observer
                (append (list :type 'tool-call
@@ -688,7 +699,8 @@ If SESSION is nil, uses `chat--current-session' if bound."
               (chat-files-allowed-directories (chat-tool-caller--allowed-directories))
               (default-directory (file-name-as-directory
                                   (chat-files--resolved-path
-                                   (chat-tool-caller--execution-directory)))))
+                                   (chat-tool-caller--execution-directory
+                                    actual-session)))))
           (chat-tool-caller--notify
            observer
            (append

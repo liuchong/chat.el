@@ -140,14 +140,12 @@
 
 (defun chat-ui--session-metadata-get (key)
   "Return current session metadata entry for KEY."
-  (and chat--current-session
-       (plist-get (chat-session-metadata chat--current-session) key)))
+  (chat-session-metadata-get chat--current-session key))
 
 (defun chat-ui--session-metadata-set (key value)
   "Store VALUE under KEY in the current session metadata."
   (when chat--current-session
-    (setf (chat-session-metadata chat--current-session)
-          (plist-put (chat-session-metadata chat--current-session) key value))
+    (chat-session-metadata-set chat--current-session key value)
     (when chat-session-auto-save
       (chat-session-save chat--current-session))))
 

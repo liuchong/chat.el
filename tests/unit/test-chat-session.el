@@ -593,5 +593,58 @@
        (should (= (length sessions) 1))
        (should (string= (chat-session-name (car sessions)) "Dup Session"))))))
 
+(ert-deftest chat-session-metadata-survives-a-reload ()
+  "Metadata written through the API reads back after loading the session.
+A keyword key must keep working, because a JSON round trip turns it into
+a plain symbol."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-auto-save nil)
+          (session (chat-session-create "Metadata Session" 'kimi)))
+     (chat-session-metadata-set session :working-directory "/tmp/")
+     (chat-session-metadata-set session 'other "kept")
+     (chat-session-save session)
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (equal "/tmp/" (chat-session-metadata-get loaded :working-directory)))
+       (should (equal "/tmp/" (chat-session-metadata-get loaded 'working-directory)))
+       (should (equal "kept" (chat-session-metadata-get loaded 'other)))))))
+
+(ert-deftest chat-session-metadata-set-overwrites-one-key ()
+  "Writing a key twice replaces its value and leaves the others alone."
+  (let ((session (make-chat-session :id "x" :name "x")))
+    (chat-session-metadata-set session 'a 1)
+    (chat-session-metadata-set session 'b 2)
+    (chat-session-metadata-set session 'a 3)
+    (should (equal 3 (chat-session-metadata-get session 'a)))
+    (should (equal 2 (chat-session-metadata-get session 'b)))))
+
+(ert-deftest chat-session-metadata-get-reads-a-legacy-plist ()
+  "A keyword plist left in memory by an older writer still reads."
+  (let ((session (make-chat-session :id "x" :name "x")))
+    (setf (chat-session-metadata session) '(:working-directory "/tmp/"))
+    (should (equal "/tmp/" (chat-session-metadata-get session :working-directory)))
+    ;; Writing converts the plist, keeping the entry that was already there.
+    (chat-session-metadata-set session 'other "new")
+    (should (equal "/tmp/" (chat-session-metadata-get session 'working-directory)))
+    (should (equal "new" (chat-session-metadata-get session 'other)))))
+
+(ert-deftest chat-session-working-directory-round-trips ()
+  "A recorded working directory is normalized and survives reopening."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-auto-save t)
+          (session (chat-session-create "Cwd Session" 'kimi))
+          (stored (chat-session-set-working-directory session temp-dir)))
+     (should (string-suffix-p "/" stored))
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (equal (file-name-as-directory (file-truename temp-dir))
+                      (file-truename (chat-session-working-directory loaded))))))))
+
+(ert-deftest chat-session-working-directory-ignores-a-missing-path ()
+  "A directory that no longer exists reads as nil instead of misdirecting."
+  (let ((session (make-chat-session :id "x" :name "x")))
+    (chat-session-metadata-set session 'working-directory "/nonexistent-chat-el-dir/")
+    (should-not (chat-session-working-directory session))))
+
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here

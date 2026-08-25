@@ -58,7 +58,7 @@
   summaries             ; Durable compaction or branch summary records
   recovery-state        ; Computed interrupted-run recovery metadata
   auto-approve          ; nil, t, or 'inherit (inherit from global)
-  metadata)             ; Additional metadata plist
+  metadata)             ; Additional metadata alist keyed by symbols
 
 (cl-defstruct chat-message
   id                    ; Unique identifier
@@ -72,6 +72,78 @@
   tool-results          ; Tool execution results
   raw-request           ; Raw API request JSON (for user messages)
   raw-response)         ; Raw API response JSON (for assistant messages)
+
+;; ------------------------------------------------------------------
+;; Session Metadata
+;; ------------------------------------------------------------------
+
+;; Metadata is stored as an alist keyed by plain symbols because that is
+;; the shape a JSON round trip produces.  A keyword plist written here
+;; reads back as this alist after `chat-session-load', so its keys would
+;; silently stop matching once a session is reopened.
+
+(defun chat-session-metadata-get (session key)
+  "Return the metadata entry KEY of SESSION, or nil.
+KEY may be a keyword or a plain symbol."
+  (when session
+    (let ((metadata (chat-session-metadata session))
+          (symbol (chat-session--metadata-key key)))
+      (cond
+       ((null metadata) nil)
+       ((consp (car metadata)) (cdr (assq symbol metadata)))
+       ;; A plist can only come from a caller that ran before this API
+       ;; existed, within one Emacs process; on disk it is always an alist.
+       (t (or (plist-get metadata key)
+              (plist-get metadata symbol)))))))
+
+(defun chat-session-metadata-set (session key value)
+  "Store VALUE under KEY in the metadata of SESSION.
+KEY may be a keyword or a plain symbol.  Returns the updated metadata."
+  (when session
+    (let* ((symbol (chat-session--metadata-key key))
+           (metadata (chat-session--metadata-as-alist
+                      (chat-session-metadata session)))
+           (entry (assq symbol metadata)))
+      (if entry
+          (setcdr entry value)
+        (setq metadata (cons (cons symbol value) metadata)))
+      (setf (chat-session-metadata session) metadata))))
+
+(defun chat-session-working-directory (session)
+  "Return the working directory recorded for SESSION, or nil.
+A recorded directory that no longer exists reads as nil so a stale value
+cannot redirect commands at a missing path."
+  (let ((directory (chat-session-metadata-get session 'working-directory)))
+    (when (and (stringp directory) (file-directory-p directory))
+      (file-name-as-directory directory))))
+
+(defun chat-session-set-working-directory (session directory)
+  "Record DIRECTORY as the working directory of SESSION.
+Saves the session when `chat-session-auto-save' is enabled, so the
+directory survives reopening.  Returns the stored directory."
+  (let ((expanded (file-name-as-directory (expand-file-name directory))))
+    (chat-session-metadata-set session 'working-directory expanded)
+    (when (and session chat-session-auto-save)
+      (chat-session-save session))
+    expanded))
+
+(defun chat-session--metadata-key (key)
+  "Return KEY as the plain symbol used in stored metadata."
+  (if (keywordp key)
+      (intern (substring (symbol-name key) 1))
+    key))
+
+(defun chat-session--metadata-as-alist (metadata)
+  "Return METADATA as an alist keyed by plain symbols."
+  (if (or (null metadata) (consp (car metadata)))
+      metadata
+    (let ((converted nil))
+      (while (and metadata (cdr metadata))
+        (push (cons (chat-session--metadata-key (car metadata))
+                    (cadr metadata))
+              converted)
+        (setq metadata (cddr metadata)))
+      (nreverse converted))))
 
 ;; ------------------------------------------------------------------
 ;; Session Lifecycle

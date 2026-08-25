@@ -395,6 +395,43 @@
                         :arguments (("command" . "pwd"))))))
          (should (string= (string-trim result) (file-truename project-root))))))))
 
+(ert-deftest chat-tool-caller-uses-session-working-directory-for-shell ()
+  "Test shell tools follow the working directory chosen for the session."
+  (chat-test-with-temp-dir
+   (let* ((session-dir (expand-file-name "chosen" temp-dir))
+          (chat-files-allowed-directories (list "/tmp/"))
+          (chat-session-auto-save nil)
+          (chat-tool-shell-enabled t)
+          (session (chat-session-create "Cwd Session" 'kimi)))
+     (make-directory session-dir t)
+     (chat-session-set-working-directory session session-dir)
+     (let ((result (chat-tool-caller-execute
+                    '(:name "shell_execute"
+                      :arguments (("command" . "pwd")))
+                    session)))
+       (should (string= (string-trim result) (file-truename session-dir)))))))
+
+(ert-deftest chat-tool-caller-session-directory-outranks-project-root ()
+  "Test an explicit session directory wins over the detected project root."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project" temp-dir))
+          (session-dir (expand-file-name "chosen" temp-dir))
+          (chat-files-allowed-directories (list "/tmp/"))
+          (chat-session-auto-save nil)
+          (chat-tool-shell-enabled t)
+          (session (chat-session-create "Cwd Session" 'kimi)))
+     (make-directory project-root t)
+     (make-directory session-dir t)
+     (chat-session-set-working-directory session session-dir)
+     (with-temp-buffer
+       (setq-local chat-code--current-session
+                   (chat-code-session-create "Code Project" project-root nil))
+       (let ((result (chat-tool-caller-execute
+                      '(:name "shell_execute"
+                        :arguments (("command" . "pwd")))
+                      session)))
+         (should (string= (string-trim result) (file-truename session-dir))))))))
+
 (ert-deftest chat-tool-caller-processes-response-without-tools ()
   "Test processing a plain response."
   (let ((result nil))
