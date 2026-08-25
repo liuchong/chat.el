@@ -547,7 +547,8 @@ is absent here is left as ordinary message text.")
                     (t
                      base-prompt)))
            (system-prompt (chat-tool-caller-build-system-prompt
-                           prompt (chat-ui--step-limit))))
+                           prompt (chat-ui--step-limit)
+                           chat--current-session)))
       (chat-log "[TOOLS] System prompt: %s" system-prompt)
       (chat-log "[TOOLS] Adding system message to %d user messages" (length messages))
       (cons (make-chat-message

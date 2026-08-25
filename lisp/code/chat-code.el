@@ -1821,10 +1821,11 @@ CONTENT-START marks the assistant response body."
                                      context-str
                                      (when lsp-str
                                        (concat "\n\n" lsp-str))))
+         (base-session (chat-code--base-session))
          (full-system-prompt (chat-tool-caller-build-system-prompt
                               base-system-prompt
-                              (chat-code--step-limit)))
-         (base-session (chat-code--base-session))
+                              (chat-code--step-limit)
+                              base-session))
          (model (chat-session-model-id base-session))
          (messages (cons
                     (make-chat-message

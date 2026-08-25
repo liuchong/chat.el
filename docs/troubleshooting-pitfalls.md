@@ -1054,4 +1054,60 @@ execution. Keep personal, correspondence, network, write, and outbound
 metadata on every profile tool so profile selection never bypasses
 approval.
 
-Last updated: 2026-08-24
+### A Prompt Block Can Be Larger Than Its Own Share
+
+**Problem**: on a small-window model the system prompt crowds out the
+conversation, and the region doing it is the one meant to help recover
+lost history.
+
+**Cause**: writing a prompt block against a large window and never
+measuring it against the share it lands in. The storage block is 433
+tokens; the system prompt share of an 8K window is 278.
+
+**Solution**: measure the assembled block against
+`chat-context-allocation-tokens` for its category and fall back to a short
+form when it does not fit. Keep the paths and tool names in the short
+form and drop the reasoning — a block trimmed to advice is worse than
+absent, since the run still pays for it and still cannot act on it.
+
+### Advertising A Writable Path The Tools Refuse
+
+**Problem**: the model repeatedly tries to write scratch files and reports
+permission failures it cannot explain.
+
+**Cause**: naming a directory in the system prompt without adding it to
+`chat-files-allowed-directories`. The prompt and the enforcement layer
+disagreed, and only the prompt was visible to the model.
+
+**Solution**: when a prompt block grants access, the corresponding policy
+list has to grant it too. Cover it with a test that reads the policy
+rather than the prompt.
+
+### Tool Arguments Arrive Positionally, Not As A Plist
+
+**Problem**: a tool receives values in the wrong slots and filters on
+nonsense, with no error raised.
+
+**Cause**: writing the implementation as `(&rest args)` and reading a
+plist. `chat-tool-caller--arguments-to-argv` converts a call's arguments
+into an argv list ordered by the tool's declared `:parameters`.
+
+**Solution**: give the function positional parameters in exactly the
+declared order, convert to a plist inside it, and test the tool through
+its real entry point so a reordering of `:parameters` fails a test rather
+than silently mis-binding.
+
+### Injecting A Growing Store Into Every Request
+
+**Problem**: context available for work shrinks over weeks of use with no
+change in configuration.
+
+**Cause**: a store that accumulates — notes, memory, discovered facts —
+being injected whole into the fixed region of every prompt. It grows
+monotonically while the window does not.
+
+**Solution**: put an index in the prompt and read bodies on demand. An
+index costs about a line per entry and stays useful at a hundred of them.
+Cap the index too, since it also appears in every request.
+
+Last updated: 2026-08-25

@@ -167,17 +167,68 @@ The vector is empty when tool calling is disabled."
      "- If a write tool needs approval, wait for approval instead of printing the intended file body in chat.")
    "\n"))
 
-(defun chat-tool-caller-build-system-prompt (base-prompt &optional step-limit)
+(defun chat-tool-caller--storage-note-variant (session terse)
+  "Build the storage block for SESSION at one verbosity, TERSE or not.
+
+Three places, described together because the distinction between them is
+the useful part: the transcript is what already happened, scratch space
+is where this run may put things down, and shared knowledge is what
+should outlive the session.  Told separately, a run tends to keep
+everything in whichever one it noticed first."
+  (let ((parts (delq nil
+                     (list (and (fboundp 'chat-session-log-self-description)
+                                (chat-session-log-self-description
+                                 session terse))
+                           (and (fboundp 'chat-scratch-prompt-note)
+                                (chat-scratch-prompt-note session terse))
+                           (and (fboundp 'chat-knowledge-prompt-note)
+                                (chat-knowledge-prompt-note terse))))))
+    (and parts (string-join parts (if terse "\n" "\n\n")))))
+
+(defun chat-tool-caller--durable-storage-note (session)
+  "Return what SESSION should know about the storage it can reach.
+
+The full block runs to a few hundred tokens, which is nothing against a
+large window and more than the whole system prompt share of a small one.
+So it is measured against the share it actually lands in and shortened
+when it does not fit, rather than tuned per window: the paths and tool
+names survive either way, and only the reasoning is dropped.  Explaining
+at length why a run should consult its transcript is worthless if doing
+so crowds out the conversation it was meant to recover."
+  (let ((full (chat-tool-caller--storage-note-variant session nil)))
+    (if (or (null full)
+            (not (fboundp 'chat-context-allocation-tokens))
+            (not (fboundp 'chat-context-count-tokens)))
+        full
+      (let* ((model (and session (chat-session-model-id session)))
+             (window (and (fboundp 'chat-context-window-for-model)
+                          (chat-context-window-for-model model)))
+             (share (and window
+                         (chat-context-allocation-tokens
+                          'system-prompt window))))
+        (if (and share (> (chat-context-count-tokens full) share))
+            (chat-tool-caller--storage-note-variant session t)
+          full)))))
+
+(defun chat-tool-caller-build-system-prompt
+    (base-prompt &optional step-limit session)
   "Extend BASE-PROMPT with long term memory and tool calling instructions.
 
 STEP-LIMIT, when given, is the step ceiling of the run this prompt opens.
 It is stated here rather than counted down per step: a run should know
 from the start that it has to converge, and the wording stays identical
-across steps so it costs nothing to repeat."
+across steps so it costs nothing to repeat.
+
+SESSION, when given, adds what the run can know about itself: where its
+own transcript is, where it may write scratch files, and what shared
+knowledge already exists.  A run that does not know its record is on disk
+will ask again for something it was already told."
   (let ((base (if-let ((memory (and (fboundp 'chat-memory-snippet)
                                     (chat-memory-snippet))))
                   (concat base-prompt "\n\n" memory)
                 base-prompt)))
+    (when-let ((storage (chat-tool-caller--durable-storage-note session)))
+      (setq base (concat base "\n\n" storage)))
     (if (not chat-tool-caller-enabled)
         base
       (let ((tools (chat-tool-caller--available-tools)))

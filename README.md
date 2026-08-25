@@ -396,6 +396,40 @@ table in tokens per model size, and
 [docs/resident-context.md](docs/resident-context.md) for the residency
 syntax.
 
+## Self-Knowledge and Storage
+
+Compaction means the context a run sees is not the conversation, it is a
+condensed view of one. The full record is still on disk, so the run is told
+where: the session file, its id and name, and the shape of its entries.
+
+`session_log` reads it back. Because the transcript stamps every message
+with turn, step, category and work, the file is already filterable -- by
+kind of content, by time, by literal text -- and results group by turn, so
+a question stays with the steps that answered it instead of being
+interleaved with everything else that happened.
+
+Two directories back that up. Each session gets scratch space under
+`chat-scratch-directory` that the model may write freely -- drafts,
+intermediate output, anything cheaper to re-read than to carry -- pruned
+after `chat-scratch-max-age-days` and always sparing the session in use.
+`chat-knowledge-directory` holds Markdown notes that persist across every
+session and project, which is what makes the tool better the more it is
+used.
+
+Knowledge notes are separate from `chat-memory-file` because the trust
+differs: the memory file is curated by the user and is authoritative,
+while a note the model wrote about its own findings is evidence that may
+be stale. The prompt carries only the note index -- names and titles --
+and bodies are read on demand, since the store grows with use and anything
+in every request must not.
+
+The whole block is measured against the system prompt share and falls back
+to paths alone on a small window. At 8K the full text would be larger than
+the entire share, and a block explaining how to recover a lost
+conversation is worthless if it crowds out the conversation.
+
+See [docs/self-knowledge-and-storage.md](docs/self-knowledge-and-storage.md).
+
 ## File Access Defaults
 
 By default file tools can access:

@@ -32,7 +32,19 @@ step, category and work on every message and projects the record down to
 what a request may carry. **The displays do not render from it yet**, so
 intermediate steps are still invisible on screen; that is the next stage.
 
-Canonical suite: 727 tests passing.
+Storage and self-knowledge landed on the same day. A run is told where its
+own transcript is and can filter it back through `session_log`
+(`lisp/core/chat-session-log.el`), grouped by turn so a question stays
+with the steps that answered it. `lisp/core/chat-scratch.el` gives each
+session a pruned scratch directory the file tools can reach.
+`lisp/core/chat-knowledge.el` keeps a global Markdown note store whose
+index rides in the prompt while its bodies stay on disk — a store that
+grows with use cannot be injected whole without starving the working
+space. The assembled block measures itself against the system prompt share
+and shortens to paths alone when it does not fit, which is what an 8K
+window requires.
+
+Canonical suite: 773 tests passing.
 
 The input command layer completed earlier the same day. Chat input parses
 into commands through `lisp/core/chat-command.el`, covering shell
@@ -69,6 +81,9 @@ surface advertises only relevant scoped tools.
 - `lisp/core/chat-transcript.el`
 - `lisp/core/chat-context-budget.el`
 - `lisp/core/chat-context-resident.el`
+- `lisp/core/chat-session-log.el`
+- `lisp/core/chat-scratch.el`
+- `lisp/core/chat-knowledge.el`
 - `lisp/agent/chat-agent-budget.el`
 - `lisp/agent/chat-agent.el`
 - `lisp/agent/chat-agent-loop.el`
@@ -92,10 +107,12 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0008-self-knowledge-and-shared-storage.md`
 - `../20-reference/decisions/0007-context-budget-and-resident-context.md`
 - `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`
 - `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-25-self-knowledge-and-shared-storage.md`
 - `../30-records/logs/stage-2026-08-25-context-budget-and-resident-context.md`
 - `../30-records/logs/stage-2026-08-25-transcript-model-and-step-budget.md`
 - `../30-records/logs/stage-2026-08-25-input-command-layer.md`

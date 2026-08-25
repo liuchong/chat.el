@@ -37,9 +37,13 @@
   :group 'chat-files)
 
 (defcustom chat-files-allowed-directories
-  '("./" "/tmp/" "/var/tmp/")
+  '("./" "/tmp/" "/var/tmp/" "~/.chat/scratch/")
   "Directories that AI is allowed to access.
-Can be overridden per-session."
+Can be overridden per-session.
+
+The scratch root is included because it exists for the model to write
+in: describing it in the system prompt while the file tools refuse it
+would produce a run that keeps trying and cannot say why it fails."
   :type '(repeat directory)
   :group 'chat-files)
 

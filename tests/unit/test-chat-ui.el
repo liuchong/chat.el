@@ -566,7 +566,7 @@ one that was asked."
        (setq-local chat--current-session session)
        (chat-ui--session-metadata-set :chat-ui-preferred-target-path target-file)
        (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
-                  (lambda (prompt &optional _step-limit)
+                  (lambda (prompt &optional _step-limit _session)
                     (setq captured-prompt prompt)
                     prompt)))
          (chat-ui--prepare-messages-with-tools nil))

@@ -12,7 +12,12 @@ Both budgets are in place: steps in `lisp/agent/chat-agent-budget.el`,
 context in `lisp/core/chat-context-budget.el` with per-category
 allowances and a declared-residency parser beside it. The typed
 transcript model and the request projection are in place too.
-Canonical suite: 727 tests passing.
+
+Storage and self-knowledge landed on top: `chat-session-log.el` tells a
+run where its own transcript is and filters it back by turn, category,
+work and time; `chat-scratch.el` gives each session pruned scratch space;
+`chat-knowledge.el` keeps a global note store whose index — not its
+bodies — rides in the prompt. Canonical suite: 773 tests passing.
 
 The input command layer landed earlier: chat input parses through
 `lisp/core/chat-command.el` and dispatches through a name table in
@@ -51,3 +56,11 @@ environments are intentionally available.
 `chat-wiki-command-handler` has no caller. Either wire the documented
 `/wiki-*` names into `chat-ui--slash-commands` or drop them from
 `chat-commands-help`, so the help text stops promising them.
+
+Only `kimi-code` declares a `:context-window`; every other provider falls
+back to `chat-context-window-default` at 131072. That default is wrong in
+both directions — it over-promises for small models and wastes most of a
+1M window — and now that the allocation table derives every allowance
+from it, a wrong window silently mis-sizes the whole budget. Declaring
+the real window per provider is a small change with a large effect on how
+honest the panel is.

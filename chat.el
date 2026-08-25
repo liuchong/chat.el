@@ -100,6 +100,9 @@ Returns the list of files that were loaded."
 (require 'chat-context)
 (require 'chat-context-budget)
 (require 'chat-context-resident)
+(require 'chat-session-log)
+(require 'chat-scratch)
+(require 'chat-knowledge)
 (require 'chat-files)
 (require 'chat-reading)
 (require 'chat-approval)
@@ -144,6 +147,8 @@ Returns the list of files that were loaded."
 (chat-mcp-register-tools)
 (chat-subagent-register-tools)
 (chat-capability-register-tools)
+(chat-session-log-register-tools)
+(chat-knowledge-register-tools)
 (chat-plugin-provide 'tools t)
 (chat-plugin-load-user-files)
 (chat-plugin-start-enabled)
@@ -319,6 +324,12 @@ SESSION is a chat-session struct."
       ;; session was pointed at.
       (when-let ((directory (chat-session-working-directory session)))
         (setq-local default-directory directory))
+      ;; Scratch space is created here rather than on first write so that
+      ;; the path named in the system prompt exists by the time the model
+      ;; is told about it.  Pruning rides along because this is the moment
+      ;; nothing is mid-write, and it spares the session being opened.
+      (chat-scratch-session-directory session t)
+      (chat-scratch-prune (chat-session-id session))
       (chat-ui-setup-buffer session))
     (setq chat--last-session-id (chat-session-id session))
     (pop-to-buffer buffer)))

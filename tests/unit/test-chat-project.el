@@ -136,7 +136,7 @@ outrank the cap or the declaration means nothing."
      (let ((default-directory b)
            captured-prompt)
        (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
-                  (lambda (prompt &optional _step-limit)
+                  (lambda (prompt &optional _step-limit _session)
                     (setq captured-prompt prompt)
                     prompt)))
          (chat-ui--prepare-messages-with-tools nil))
