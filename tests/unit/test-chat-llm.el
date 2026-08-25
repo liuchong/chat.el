@@ -311,6 +311,19 @@
     (should (equal (plist-get request :model) "kimi-for-coding"))
     (should (equal (plist-get request :system) "Rule"))))
 
+(ert-deftest chat-llm-kimi-code-pins-temperature-to-one ()
+  "Test the Kimi Code provider sends temperature 1 whatever the caller asks.
+
+The endpoint accepts only 1 and answers 400 `invalid temperature' for
+anything else, on k3, k3-256k and kimi-for-coding alike, while
+`chat-ui' always passes 0.7."
+  (let* ((messages (list (make-chat-message :role :user :content "Hello")))
+         (default (chat-llm-kimi-code--build-request messages nil))
+         (overridden (chat-llm-kimi-code--build-request
+                      messages '(:temperature 0.7))))
+    (should (equal (alist-get 'temperature default) 1))
+    (should (equal (alist-get 'temperature overridden) 1))))
+
 (ert-deftest chat-llm-ark-registers-both-protocols ()
   "Test Ark registers OpenAI and Anthropic compatible providers."
   (should (string= (chat-llm--request-url 'ark-code)

@@ -60,12 +60,14 @@ Get your key from: https://www.kimi.com/code"
 Uses OpenAI-compatible format."
   (let* ((model (or (plist-get options :model)
                     chat-llm-kimi-code-default-model))
-         (temperature (or (plist-get options :temperature) 0.7))
          (max-tokens (or (plist-get options :max-tokens) 32768))
          (stream (plist-get options :stream)))
     `((model . ,model)
       (messages . ,(chat-llm--format-messages messages))
-      (temperature . ,temperature)
+      ;; 这个端点只接受 temperature 1，k3、k3-256k、kimi-for-coding 一律
+      ;; 如此，别的值一律 400 invalid temperature。调用方给的值只能丢掉：
+      ;; chat-ui 固定传 0.7，照传过去每个请求都会失败。
+      (temperature . 1)
       (max_tokens . ,max-tokens)
       ,@(when stream `((stream . ,stream)))
       ,@(when-let ((tools (plist-get options :tools)))
@@ -115,12 +117,19 @@ Uses OpenAI-compatible streaming format."
 (defun chat-llm-kimi-code--headers ()
   "Generate headers for Kimi Code API.
 
-Kimi Code API requires User-Agent from an approved coding agent.
-Reference: https://www.kimi.com/code/docs/more/third-party-agents.html"
-  ;; Using claude-code User-Agent as it's a documented compatible agent.
-  ;; The User-Agent must be passed through url-request-extra-headers, not
-  ;; the url-user-agent variable.
-  '(("User-Agent" . "claude-code/0.1.0")
+报自己的真实标识。这里曾经写死 claude-code/0.1.0，理由是服务端只放行
+「已认可的 coding agent」；实测该前提不成立：同一个 key 打
+/coding/v1/chat/completions 和 /coding/v1/messages，用 chat.el 自己的
+标识、curl 的默认标识、乃至完全不发 User-Agent，都是 200。
+而官方社区倡议明确禁止伪造客户端身份，冒用会让会员权益有被暂停的风险，
+所以没有任何理由继续冒用。
+
+如果哪天真的收到 403 access_terminated_error，应先复现确认是 UA 导致
+（服务端先验 key 再验 UA，key 失效时任何 UA 都只会回 401，那种状态下改
+UA 是验证不了的），再走反馈渠道申请把 chat.el 纳入可识别的客户端。
+参考 https://www.kimi.com/code/docs/kimi-code/community-guidelines.html"
+  `(("User-Agent" . ,(format "chat.el/%s"
+                             (or (bound-and-true-p chat-version) "0.1.0")))
     ("Accept" . "application/json")))
 
 ;; ------------------------------------------------------------------

@@ -53,22 +53,62 @@ Required field order:
 (setq chat-default-model 'kimi-code)
 ```
 
+### Wrong Model ID For The Kimi Code Endpoint
+
+**Problem**: The API returns 401 with `Your model id does not exist, recognized as other:<id>`.
+
+**Cause**: Kimi Code and the Kimi open platform use different model IDs for the
+same model. `kimi-k3` belongs to `api.moonshot.cn`; the Kimi Code endpoint only
+accepts `k3`, `k3-256k`, `kimi-for-coding` and `kimi-for-coding-highspeed`. The
+`k3[1m]` spelling is exclusive to Claude Code environment variables and is
+rejected as a model ID in plain API requests.
+
+**Solution**: Use the ID that belongs to the endpoint.
+
+```elisp
+;; Wrong
+(setq chat-llm-kimi-code-default-model "kimi-k3")
+
+;; Right
+(setq chat-llm-kimi-code-default-model "k3")
+```
+
+Both `kimi-code` and `kimi-code-anthropic` snapshot this variable into the
+provider registry at load time, so a `setq` that runs after `chat` is loaded
+only reaches the OpenAI channel, which re-reads the variable on every request.
+Update the registry too when the Anthropic channel matters:
+
+```elisp
+(dolist (p '(kimi-code kimi-code-anthropic))
+  (when-let ((cfg (chat-llm-get-provider-config p)))
+    (plist-put cfg :model chat-llm-kimi-code-default-model)))
+```
+
 ### 403 Access Denied For Kimi Code
 
 **Problem**: The API returns `Kimi For Coding is currently only available for Coding Agents`.
 
-**Cause**: The provider requires a specific `User-Agent` and Emacs `url` does not honor that header reliably when it is passed through regular request headers.
+**Cause**: Historically the endpoint was believed to allow only recognized
+coding agents, which is why the provider used to send `claude-code/0.1.0`. That
+premise did not hold up when measured: with a valid key, `chat.el/0.1.0`,
+`curl/8.0` and even a request with no `User-Agent` at all all returned 200 on
+both `/coding/v1/chat/completions` and `/coding/v1/messages`. The provider now
+reports its own identity, which the community guidelines require — forging
+client identity risks membership suspension.
 
-**Solution**: Bind `url-user-agent` directly instead of trying to set a `User-Agent` header.
+**Solution**: Send the client's real identity. If a genuine 403
+`access_terminated_error` ever appears, reproduce it first, then ask for the
+client to be recognized through the feedback channel.
 
-```elisp
-;; Wrong
-'(("User-Agent" . "claude-code/0.1.0"))
+Two traps when investigating this:
 
-;; Right
-(let ((url-user-agent "claude-code/0.1.0"))
-  (url-retrieve-synchronously ...))
-```
+- The endpoint validates the key **before** the `User-Agent`. With a dead key
+  every UA value returns the same 401, so no UA change can be verified in that
+  state. Get a working key first.
+- Emacs `url` does not reliably pass a `User-Agent` request header through. The
+  transport layer extracts it from the provider headers and binds
+  `url-user-agent`, so declaring it in `:headers` is correct — but a bare
+  `url-retrieve` that ignores that binding will silently drop it.
 
 ### Config File Override Order Can Hide Provider Settings
 
