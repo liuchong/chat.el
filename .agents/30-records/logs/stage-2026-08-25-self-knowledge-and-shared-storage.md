@@ -28,6 +28,10 @@ scratch root joins `chat-files-allowed-directories`.
 `lisp/core/chat-knowledge.el` — a global Markdown note store. Read, write,
 append and search tools; a note's first line is its title. The prompt
 carries the index only, capped at `chat-knowledge-index-max-entries`.
+Content is held to general desensitized knowledge — the technique rather
+than the case — with a deliberately high bar and an instruction to prefer
+writing nothing. Credential-shaped material and absolute paths naming one
+machine are refused mechanically.
 
 Wiring: `chat-tool-caller-build-system-prompt` takes the session and emits
 the three blocks together. `chat.el` requires the modules, registers the
@@ -57,7 +61,7 @@ note a run wrote about its own findings is evidence that may be stale.
 
 ## What Measurement Changed
 
-The full storage block is 433 tokens. The system prompt share of an 8K
+The full storage block is 627 tokens. The system prompt share of an 8K
 window is 278. So on a small window the block explaining how to recover a
 lost conversation would have crowded out the conversation.
 
@@ -66,11 +70,11 @@ block, compare it to `chat-context-allocation-tokens` for its category,
 and fall back to a short form when it does not fit. The short form keeps
 paths and tool names, since a block trimmed to advice is worse than absent
 — the run still pays for it and still cannot find the file. Verified at
-88 tokens on 8K and 433 on 128K.
+88 tokens on 8K and 627 on 32K and above.
 
 ## Verification
 
-- 773 tests pass (was 727); 46 added across the three modules
+- 777 tests pass (was 727); 50 added across the three modules
 - Storage block rendered and measured at 8K and 128K against its share
 - Filters, turn grouping, excerpt truncation, scratch pruning with the
   open session spared, name-traversal rejection, append versus replace,

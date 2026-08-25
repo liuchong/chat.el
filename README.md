@@ -423,6 +423,14 @@ be stale. The prompt carries only the note index -- names and titles --
 and bodies are read on demand, since the store grows with use and anything
 in every request must not.
 
+Because notes are visible in every later session, including unrelated
+work, they are held to general desensitized knowledge: the technique
+rather than the case, no project names, paths, hostnames or credentials.
+The bar is deliberately high and the prompt says to prefer writing
+nothing -- a small store of durable observations beats a large one that
+has to be distrusted. Credentials and machine-specific absolute paths are
+refused outright.
+
 The whole block is measured against the system prompt share and falls back
 to paths alone on a small window. At 8K the full text would be larger than
 the entire share, and a block explaining how to recover a lost

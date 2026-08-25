@@ -89,6 +89,54 @@ only replace will clobber what it did not write."
    (should (string-match-p "empty" (chat-knowledge-write "x" "  " nil)))
    (should-not (file-exists-p (chat-knowledge-note-path "x")))))
 
+(ert-deftest chat-knowledge-refuses-a-credential ()
+  "A note carrying a secret is refused.
+
+The store is global, so a leak here is permanent and reaches unrelated
+work. The prompt carries the policy, but this class is detectable and
+not worth trusting to judgement."
+  (test-knowledge--with-store
+   (should (string-match-p
+            "Refusing"
+            (chat-knowledge-write "creds" "Setup\napi_key = sk-abcdef123456789"
+                                  nil)))
+   (should-not (file-exists-p (chat-knowledge-note-path "creds")))))
+
+(ert-deftest chat-knowledge-refuses-a-machine-specific-path ()
+  "An absolute path under the home directory is refused.
+
+It names one machine and usually one project, which is exactly what a
+globally visible note must not carry."
+  (test-knowledge--with-store
+   (let ((result (chat-knowledge-write
+                  "paths"
+                  (format "Build note\nRun it from %s/somewhere/deep"
+                          (directory-file-name (expand-file-name "~")))
+                  nil)))
+     (should (string-match-p "Refusing" result)))))
+
+(ert-deftest chat-knowledge-accepts-a-generic-tilde-path ()
+  "The tilde form is generic and stays allowed.
+
+Refusing it would block notes about the tool's own configuration, which
+are exactly the reusable kind."
+  (test-knowledge--with-store
+   (chat-knowledge-write "config" "Config location\nSettings live in ~/.chat/."
+                         nil)
+   (should (string-match-p "~/.chat" (chat-knowledge-read "config")))))
+
+(ert-deftest chat-knowledge-prompt-sets-a-high-bar ()
+  "The block asks for general knowledge and says to prefer silence.
+
+The store is global across unrelated projects, so the writing bar is the
+only thing keeping project-specific material out of it."
+  (test-knowledge--with-store
+   (let ((note (chat-knowledge-prompt-note)))
+     (should (string-match-p "general" note))
+     (should (string-match-p "technique, not the case" note))
+     (should (string-match-p "prefer writing nothing" note))
+     (should (string-match-p "credentials" note)))))
+
 (ert-deftest chat-knowledge-read-reports-a-missing-note ()
   "Reading what is not there explains itself."
   (test-knowledge--with-store

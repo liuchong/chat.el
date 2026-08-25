@@ -44,7 +44,7 @@ space. The assembled block measures itself against the system prompt share
 and shortens to paths alone when it does not fit, which is what an 8K
 window requires.
 
-Canonical suite: 773 tests passing.
+Canonical suite: 777 tests passing.
 
 The input command layer completed earlier the same day. Chat input parses
 into commands through `lisp/core/chat-command.el`, covering shell

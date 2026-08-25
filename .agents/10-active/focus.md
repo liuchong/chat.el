@@ -17,7 +17,7 @@ Storage and self-knowledge landed on top: `chat-session-log.el` tells a
 run where its own transcript is and filters it back by turn, category,
 work and time; `chat-scratch.el` gives each session pruned scratch space;
 `chat-knowledge.el` keeps a global note store whose index — not its
-bodies — rides in the prompt. Canonical suite: 773 tests passing.
+bodies — rides in the prompt. Canonical suite: 777 tests passing.
 
 The input command layer landed earlier: chat input parses through
 `lisp/core/chat-command.el` and dispatches through a name table in

@@ -82,6 +82,23 @@ Append is offered alongside replace. A note earns its value by being
 corrected and extended, and a run that can only replace will either
 clobber what it did not write or start a near-duplicate.
 
+The store stays one global directory rather than being partitioned per
+project, and pays for that with a content rule: general, desensitized
+knowledge only — the technique rather than the case. Partitioning would
+enforce isolation structurally but would also defeat the point, since a
+note that only applies where it was written is close to worthless. The
+value is in observations that transfer, and those are the same ones that
+carry nothing project-specific, so the constraint and the purpose point
+the same way.
+
+The bar is set deliberately high and the prompt says to prefer writing
+nothing, because this starts as an unvalidated idea: a small store whose
+notes turn out to be worth reading tells us more than a large one that
+has to be distrusted. Enforcement is prompt-level, since what counts as
+project-specific needs judgement. Two classes do not — credential-shaped
+material and absolute paths naming one machine — and those are refused
+mechanically, following the precedent of `chat-files-deny-patterns`.
+
 ### The block sizes itself
 
 Measured: the full storage block is 433 tokens, and the system prompt

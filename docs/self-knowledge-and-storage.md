@@ -91,8 +91,34 @@ so explicitly.
 
 `chat-knowledge-directory` holds Markdown notes that persist across every
 session and project. This is what makes the tool better the more it is
-used: a constraint discovered the hard way, a non-obvious command, an
-approach that failed and why.
+used: a constraint discovered the hard way, a technique that generalizes,
+an approach that failed and why.
+
+### General knowledge only
+
+The store is global, and that cuts both ways. A note is visible in every
+future session, including work for entirely unrelated parties, so it must
+be knowledge that stays true away from the work that produced it.
+
+The prompt asks for the technique rather than the case. "A tool's
+parameters arrive positionally, so an implementation reading a keyword
+list mis-binds silently" belongs here. "Service X on host Y needs flag Z"
+does not — it is useless elsewhere and it carries information out of the
+project it came from. Project and repository names, paths, hostnames,
+internal identifiers and credentials are out.
+
+The bar is deliberately high, and the prompt says to prefer writing
+nothing: a small store of durable observations is worth more than a large
+one that has to be distrusted. Start conservative and see whether the
+notes that do get written turn out to be worth reading.
+
+Policy is a prompt-level control, since what counts as project-specific
+needs judgement. Two classes do not, and are refused mechanically by
+`chat-knowledge-reject-patterns` and a home-directory path check:
+credential-looking material, and absolute paths that name one machine.
+The tilde form stays allowed — `~/.chat/` is generic, and refusing it
+would block notes about the tool's own configuration, which are exactly
+the reusable kind.
 
 ### Not the long term memory file
 
@@ -147,8 +173,8 @@ shortened when it does not fit, rather than tuned per window:
 | Window | System prompt share | Block | Form |
 | --- | --- | --- | --- |
 | 8K | 278 | 88 | Short |
-| 32K | 1,114 | 433 | Full |
-| 128K | 4,456 | 433 | Full |
+| 32K | 1,114 | 627 | Full |
+| 128K | 4,456 | 627 | Full |
 
 The short form keeps the paths and tool names and drops the reasoning.
 That is the right thing to lose: explaining at length why a run should
