@@ -8,12 +8,28 @@
 
 ## Doing Now
 
-The input command layer is in place. Chat input parses through
+Both budgets are in place: steps in `lisp/agent/chat-agent-budget.el`,
+context in `lisp/core/chat-context-budget.el` with per-category
+allowances and a declared-residency parser beside it. The typed
+transcript model and the request projection are in place too.
+Canonical suite: 727 tests passing.
+
+The input command layer landed earlier: chat input parses through
 `lisp/core/chat-command.el` and dispatches through a name table in
-`chat-ui.el`. Shell execution, history repeat, the session working
-directory, ephemeral queries and a literal escape all work, and command
-syntax accepts fullwidth punctuation without touching arguments.
-Canonical suite: 627 tests passing.
+`chat-ui.el`, with shell execution, history repeat, the session working
+directory, ephemeral queries and a literal escape.
+
+## Next Stage
+
+Render from `chat-transcript-plan`. The model is complete and the data is
+stored, but both displays still draw an assistant turn into one mutable
+region, so intermediate steps remain invisible on screen. That is the
+whole reason the transcript work was started, and it is not finished
+until a display reads it.
+
+After that: fold interaction, the `auto` mechanism (declarative
+`:repeatable` on commands plus session default-command continuation),
+and specs for `/subagent`, `/send` and an external-AI prefix.
 
 ## Not Doing Now
 

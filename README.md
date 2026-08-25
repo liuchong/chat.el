@@ -379,11 +379,22 @@ whatever sat at the end.
 A declaration is bounded: `chat-context-protected-max-ratio` (35% of usable
 context by default) caps the fixed region, and the excess is demoted to
 compactable in document order rather than obeyed, so no file can leave a
-session with no room to work in. `M-x chat-context-budget-report` shows
-where a session stands.
+session with no room to work in.
 
-See [docs/resident-context.md](docs/resident-context.md) for the full
-syntax and the ordering rules.
+The window is divided per category, and each category declares what happens
+when it overflows -- history summarizes, file excerpts are dropped and read
+again, resident text demotes in document order, and tool schemas only warn,
+because a missing definition produces a call that fails at the provider
+rather than a context that fits.
+
+`M-x chat-context-budget-panel` shows the allowances beside what the
+session actually holds, and names the window an oversized tool set would
+need.
+
+See [docs/context-budget.md](docs/context-budget.md) for the allowance
+table in tokens per model size, and
+[docs/resident-context.md](docs/resident-context.md) for the residency
+syntax.
 
 ## File Access Defaults
 
@@ -604,6 +615,7 @@ emacs -Q -batch -l tests/run-e2e-tests.el -f ert-run-tests-batch-and-exit
 - `docs/README.md` for the document index
 - `docs/PROJECT_STATUS.md` for the current status snapshot
 - `docs/troubleshooting-pitfalls.md` for known issues and fixes
+- `docs/context-budget.md` for the per-category context allowances and overflow policy
 - `docs/resident-context.md` for declaring instructions that must not be summarized
 - `.agents/` for agent workflow records, decisions, logs, and stage history
 

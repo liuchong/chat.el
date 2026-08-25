@@ -21,6 +21,7 @@ Code Mode 是 chat.el 的 AI 编程功能，提供代码生成、重构、测试
 
 | 文档 | 说明 |
 |------|------|
+| [context-budget.md](context-budget.md) | **上下文预算** - 各类别额度表、溢出策略、各窗口下的具体 token 数、查看面板 |
 | [resident-context.md](resident-context.md) | **常驻上下文** - 在 AGENTS.md 中声明哪些内容不可被压缩，标记语法、上限与优先级规则 |
 
 ### 设计文档

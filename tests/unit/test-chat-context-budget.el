@@ -57,6 +57,83 @@ rejected, so the fallback leans small."
     (should (equal (chat-context-budget-usable 1000) 850))))
 
 ;; ------------------------------------------------------------------
+;; Allocation
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-context-allocation-does-not-promise-the-window-twice ()
+  "The whole table fits inside usable context.
+
+A table that sums past 1.0 hands the same tokens to two categories, and
+the overrun shows up as a rejected request rather than as a warning."
+  (let ((total (cl-loop for (_category . plist) in chat-context-allocation
+                        sum (plist-get plist :share))))
+    (should (<= total 1.0))))
+
+(ert-deftest chat-context-allocation-fixed-region-honours-its-cap ()
+  "The fixed shares stay inside the protected cap.
+
+`chat-context-protected-max-ratio' is what stops standing content from
+crowding out the work, so the per-category table has to respect it or the
+two disagree about the same tokens."
+  (should (<= (chat-context-allocation-region-share 'fixed)
+              chat-context-protected-max-ratio)))
+
+(ert-deftest chat-context-allocation-every-entry-is-complete ()
+  "Each category declares a region and a known policy."
+  (dolist (entry chat-context-allocation)
+    (let ((plist (cdr entry)))
+      (should (memq (plist-get plist :region) '(fixed compactable)))
+      (should (memq (plist-get plist :policy) '(demote compact trim warn)))
+      (should (stringp (plist-get plist :label)))
+      (should (numberp (plist-get plist :share))))))
+
+(ert-deftest chat-context-allocation-scales-with-the-window ()
+  "A share converts to tokens against usable context, not the raw window."
+  (let ((chat-context-reply-reserve-ratio 0.0))
+    (should (equal (chat-context-allocation-tokens 'tool-definitions 100000)
+                   12000))
+    (should (equal (chat-context-allocation-tokens 'tool-definitions 200000)
+                   24000))))
+
+(ert-deftest chat-context-allocation-table-covers-every-category ()
+  "The rendered table carries one complete row per category."
+  (let ((table (chat-context-allocation-table 200000)))
+    (should (equal (length table) (length chat-context-allocation)))
+    (dolist (row table)
+      (should (plist-get row :label))
+      (should (plist-get row :policy))
+      (should (> (plist-get row :tokens) 0)))))
+
+(ert-deftest chat-context-allocation-reports-the-window-a-tool-set-needs ()
+  "An oversized category answers which models it would fit on.
+
+The useful question about a tool set is not whether it is too big but
+where it fits, since schemas cost the same on every model."
+  (let* ((chat-context-reply-reserve-ratio 0.0)
+         (needed (chat-context-allocation-minimum-window
+                  'tool-definitions 30000)))
+    (should (equal needed 250000))
+    (should (>= (chat-context-allocation-tokens 'tool-definitions needed)
+                30000))))
+
+(ert-deftest chat-context-allocation-check-is-silent-within-the-share ()
+  "A category inside its share raises nothing."
+  (should-not (chat-context-allocation-check 'tool-definitions 100 200000)))
+
+(ert-deftest chat-context-allocation-check-follows-the-category-policy ()
+  "The remedy named matches what can actually be done about the overflow.
+
+Schemas cannot be dropped silently: a missing definition produces a call
+that fails at the provider, so the fix belongs to whoever enabled them."
+  (let ((schemas (chat-context-allocation-check 'tool-definitions 999999 8000))
+        (files (chat-context-allocation-check 'file-context 999999 8000))
+        (rules (chat-context-allocation-check 'resident-rules 999999 8000)))
+    (should (string-match-p "Disable" schemas))
+    (should (string-match-p "at least" schemas))
+    (should (string-match-p "read again" files))
+    (should (string-match-p "document order" rules))))
+
+;; ------------------------------------------------------------------
 ;; State
 ;; ------------------------------------------------------------------
 
@@ -227,6 +304,31 @@ to write down conclusions while the raw material is still in view."
       (should reminder)
       (should (string-match-p "summarized soon" reminder))
       (should (string-match-p "conclusion" reminder)))))
+
+(ert-deftest chat-context-budget-measurements-omit-what-it-cannot-see ()
+  "A source with no honest measurement is absent, not estimated.
+
+A number nobody can trace back to something counted is worse than an
+admitted gap in the panel."
+  (cl-letf (((symbol-function 'chat-tool-caller-provider-tools)
+             (lambda () nil))
+            ((symbol-function 'chat-memory-snippet) (lambda () nil)))
+    (let ((measured (chat-context-budget-measurements nil)))
+      (should-not (assq 'tool-definitions measured))
+      (should-not (assq 'memory measured))
+      (should-not (assq 'conversation measured)))))
+
+(ert-deftest chat-context-budget-measures-tool-schemas-by-encoded-size ()
+  "Tool cost is the size of the schemas, not the number of tools.
+
+Counting tools would call one sprawling schema cheap and one terse schema
+expensive, which is backwards for filling a window."
+  (cl-letf (((symbol-function 'chat-tool-caller-provider-tools)
+             (lambda ()
+               (list (list :name "t"
+                           :description (make-string 400 ?d))))))
+    (let ((measured (chat-context-budget-measurements nil)))
+      (should (> (cdr (assq 'tool-definitions measured)) 50)))))
 
 (ert-deftest chat-context-budget-compaction-limit-follows-the-model ()
   "Compaction aims at the model's own window rather than a flat figure."

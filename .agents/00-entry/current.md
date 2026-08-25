@@ -8,14 +8,37 @@
 
 ## Current Phase
 
-The input command layer is complete (2026-08-25). Chat input now parses
+Budget work is complete (2026-08-25), covering both meanings of the word.
+
+The step budget lives in `lisp/agent/chat-agent-budget.el`:
+`chat-agent-max-steps` is 300 and accepts `unlimited`, disclosure is
+tiered so a run hears nothing while it has room, and the final step
+withdraws tools so a ceiling produces a handoff rather than a death
+mid-tool-call. Every mention of the budget also says running out is
+survivable, because a run that reads a countdown as "answer now"
+discards work it was close to finishing.
+
+The context budget lives in `lisp/core/chat-context-budget.el`, with
+per-category allowances in `chat-context-allocation`: shares of usable
+context, a region (`fixed` or `compactable`), and an overflow policy per
+category (`demote`, `compact`, `trim`, `warn`). Tool schemas are `warn`
+only, since dropping a definition yields a failed provider call rather
+than a context that fits. `lisp/core/chat-context-resident.el` lets an
+instructions file declare spans that must never be summarized, using
+HTML-comment markers that Markdown hides and other tools ignore.
+
+The typed transcript model in `lisp/core/chat-transcript.el` stamps turn,
+step, category and work on every message and projects the record down to
+what a request may carry. **The displays do not render from it yet**, so
+intermediate steps are still invisible on screen; that is the next stage.
+
+Canonical suite: 727 tests passing.
+
+The input command layer completed earlier the same day. Chat input parses
 into commands through `lisp/core/chat-command.el`, covering shell
 execution, history repeat, a session working directory, ephemeral
 queries, and a literal escape. Command syntax accepts fullwidth
-punctuation while arguments stay byte for byte. The working directory
-lives on the session and the AI tool path follows it, so typed shell
-commands and agent tools share one directory. Canonical suite: 627 tests
-passing.
+punctuation while arguments stay byte for byte.
 
 Stage 15 capability-pack completion landed before it (2026-08-24).
 Programming includes native completion and rendered web reading; office
@@ -43,6 +66,10 @@ surface advertises only relevant scoped tools.
 ## Active Modules
 
 - `lisp/core/chat-command.el`
+- `lisp/core/chat-transcript.el`
+- `lisp/core/chat-context-budget.el`
+- `lisp/core/chat-context-resident.el`
+- `lisp/agent/chat-agent-budget.el`
 - `lisp/agent/chat-agent.el`
 - `lisp/agent/chat-agent-loop.el`
 - `lisp/agent/chat-agent-transcript.el`
@@ -65,8 +92,12 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0007-context-budget-and-resident-context.md`
+- `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`
 - `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-25-context-budget-and-resident-context.md`
+- `../30-records/logs/stage-2026-08-25-transcript-model-and-step-budget.md`
 - `../30-records/logs/stage-2026-08-25-input-command-layer.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage8-final-verification.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage7-capability-packs.md`
