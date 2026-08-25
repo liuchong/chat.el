@@ -188,7 +188,7 @@ Returns the list of files that were loaded."
   M-x chat-session-tree-open - Browse saved sessions as a tree
   /save                 - Save current session
   /clear                - Clear conversation
-  /model <name>         - Switch model
+  /model <name>         - Switch this session's model (C-c C-m, no name prompts)
 
 Quick Shell (Hybrid Mode):
   !<cmd>                - Execute shell command directly
@@ -336,6 +336,7 @@ SESSION is a chat-session struct."
     (define-key map (kbd "C-c C-a") 'chat-toggle-auto-approve-session)
     (define-key map (kbd "C-c C-s") 'chat-show-current-request-status)
     (define-key map (kbd "C-c C-p") 'chat-ui-toggle-request-panel)
+    (define-key map (kbd "C-c C-m") 'chat-set-model)
     map)
   "Keymap for chat mode buffers.")
 

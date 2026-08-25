@@ -97,6 +97,19 @@
         (format "Model: %s | %s" model label)
       (format "Model: %s" model))))
 
+(defun chat-ui--render-status-line ()
+  "Rewrite the status line in place from the current session."
+  (save-excursion
+    (let ((inhibit-read-only t))
+      (goto-char (point-min))
+      (forward-line 1)
+      (delete-region (line-beginning-position) (line-end-position))
+      (insert (propertize
+               (chat-ui--status-line
+                (and (boundp 'chat--current-session)
+                     chat--current-session))
+               'face 'shadow)))))
+
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
   (or (chat-agent-active-p chat-ui--active-agent-run)
@@ -378,6 +391,13 @@
         (goto-char input-start)
         (chat-ui-cancel-response)
         (message "Request cancelled."))
+       ((string-match "\\`/model\\(?:[[:space:]]+\\(.+\\)\\)?\\'" content)
+        (let ((name (match-string 1 content)))
+          (delete-region input-start input-end)
+          (goto-char input-start)
+          (if name
+              (chat-set-model (intern (string-trim name)))
+            (call-interactively #'chat-set-model))))
        ((chat-agent-active-p chat-ui--active-agent-run)
         (delete-region input-start input-end)
         (goto-char input-start)
@@ -541,16 +561,9 @@ manual scrolling is never overridden."
          ui-buffer
          chat-ui--current-request-id
          tool-events))
+      (chat-ui--render-status-line)
       (save-excursion
         (let ((inhibit-read-only t))
-          (goto-char (point-min))
-          (forward-line 1)
-          (delete-region (line-beginning-position) (line-end-position))
-          (insert (propertize
-                   (chat-ui--status-line
-                    (and (boundp 'chat--current-session)
-                         chat--current-session))
-                   'face 'shadow))
           (let* ((last chat-ui--last-render)
                  (old-content (and last (plist-get last :content)))
                  (fast (and old-content
@@ -833,6 +846,38 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
 ;; ------------------------------------------------------------------
 ;; Interactive Commands
 ;; ------------------------------------------------------------------
+
+;;;###autoload
+(defun chat-set-model (model)
+  "Point the current chat session at provider MODEL.
+
+Every session stores its own provider, so `chat-default-model' only
+decides what new sessions start with; a session restored from disk keeps
+whatever it was created with, even after the default changes or its
+provider stops working. This retargets the session in front of you and
+persists the change.
+
+Refuses while a response is in flight, because the reply would come back
+from a different provider than the one that was asked."
+  (interactive
+   (list (intern
+          (completing-read
+           "Model: "
+           (mapcar #'symbol-name (chat-llm-enabled-providers))
+           nil t nil nil
+           (and chat--current-session
+                (symbol-name (chat-session-model-id chat--current-session)))))))
+  (unless chat--current-session
+    (user-error "No chat session in this buffer"))
+  (unless (chat-llm-get-provider-config model)
+    (user-error "Unknown provider: %s" model))
+  (when (chat-ui--response-active-p)
+    (user-error "Response in progress; cancel it before switching model"))
+  (setf (chat-session-model-id chat--current-session) model)
+  (when chat-session-auto-save
+    (chat-session-save chat--current-session))
+  (chat-ui--render-status-line)
+  (message "Model switched to %s" model))
 
 (defun chat-ui--handle-tool-creation (content)
   "Handle tool creation request from CONTENT."

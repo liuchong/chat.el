@@ -100,6 +100,10 @@
   (should (commandp 'chat-show-help))
   (should (eq (lookup-key chat-mode-map (kbd "C-c C-h")) 'chat-show-help)))
 
+(ert-deftest chat-set-model-command-is-bound ()
+  (should (commandp 'chat-set-model))
+  (should (eq (lookup-key chat-mode-map (kbd "C-c C-m")) 'chat-set-model)))
+
 (ert-deftest chat-reading-commands-are-bound ()
   (should (commandp 'chat-quote-region))
   (should (commandp 'chat-ask-region))

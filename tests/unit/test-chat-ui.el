@@ -34,6 +34,70 @@
        (goto-char (point-max))
        (should (search-backward ">" nil t))))))
 
+(ert-deftest chat-set-model-retargets-and-persists-session ()
+  "Test switching model updates the session, the status line and the file."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-auto-save t)
+          (session (chat-session-create "Switch Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-test-silently (chat-set-model 'kimi-code))
+       (should (eq (chat-session-model-id session) 'kimi-code))
+       (goto-char (point-min))
+       (should (search-forward "Model: kimi-code" nil t))
+       ;; Reload from disk: the switch has to survive a restart.
+       (let ((reloaded (chat-session-load (chat-session-id session))))
+         (should (eq (chat-session-model-id reloaded) 'kimi-code)))))))
+
+(ert-deftest chat-set-model-slash-command-switches-without-sending ()
+  "Test /model <name> in the input area switches instead of being sent.
+
+The help text has always advertised this command."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-session-create "Slash Session" 'kimi))
+          sent)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "/model kimi-code")
+       (cl-letf (((symbol-function 'chat-ui--get-response)
+                  (lambda () (setq sent t))))
+         (chat-test-silently (chat-ui-send-message)))
+       (should-not sent)
+       (should-not (chat-session-messages session))
+       (should (eq (chat-session-model-id session) 'kimi-code))))))
+
+(ert-deftest chat-set-model-rejects-unknown-provider ()
+  "Test switching to an unregistered provider leaves the session alone."
+  (chat-test-with-temp-dir
+   (let ((session (chat-session-create "Switch Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (should-error (chat-set-model 'no-such-provider) :type 'user-error)
+       (should (eq (chat-session-model-id session) 'kimi))))))
+
+(ert-deftest chat-set-model-refuses-while-response-in-flight ()
+  "Test switching model is refused while a response is still arriving.
+
+Letting it through would return the reply from a provider other than the
+one that was asked."
+  (chat-test-with-temp-dir
+   (let ((session (chat-session-create "Switch Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (setq-local chat-ui--active-request-handle 'pending)
+       (should-error (chat-set-model 'kimi-code) :type 'user-error)
+       (should (eq (chat-session-model-id session) 'kimi))))))
+
+(ert-deftest chat-set-model-offers-enabled-providers-for-completion ()
+  "Test completion candidates come from the enabled provider registry."
+  (let ((chat-llm-enabled-providers '(kimi kimi-code)))
+    (should (equal (sort (mapcar #'symbol-name (chat-llm-enabled-providers))
+                         #'string<)
+                   '("kimi" "kimi-code")))))
+
 (ert-deftest chat-ui-finalize-response-renders-without-rebundling-tools ()
   "Test finalized responses render without writing bundled tool history."
   (chat-test-with-temp-dir
