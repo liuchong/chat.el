@@ -16,6 +16,7 @@
 
 (require 'chat-command)
 (require 'chat-session)
+(require 'chat-transcript)
 (require 'chat-llm)
 (require 'chat-stream)
 (require 'chat-tool-forge-ai)
@@ -544,7 +545,8 @@ is absent here is left as ordinary message text.")
                              base-prompt instructions))
                     (t
                      base-prompt)))
-           (system-prompt (chat-tool-caller-build-system-prompt prompt)))
+           (system-prompt (chat-tool-caller-build-system-prompt
+                           prompt (chat-ui--step-limit))))
       (chat-log "[TOOLS] System prompt: %s" system-prompt)
       (chat-log "[TOOLS] Adding system message to %d user messages" (length messages))
       (cons (make-chat-message
@@ -691,10 +693,19 @@ manual scrolling is never overridden."
    "If another tool is needed, call one tool as JSON.\n"
    "Otherwise answer normally."))
 
-(defcustom chat-ui-tool-loop-max-steps 100
-  "Maximum number of tool loop follow-up requests."
-  :type 'integer
+(defcustom chat-ui-tool-loop-max-steps nil
+  "Step ceiling for a chat run, or nil to follow the global budget.
+
+Set this only to hold this display to a tighter limit than
+`chat-agent-max-steps'; `unlimited' lifts the ceiling entirely."
+  :type '(choice (const :tag "Follow chat-agent-max-steps" nil)
+                 (integer :tag "Steps")
+                 (const :tag "Unlimited" unlimited))
   :group 'chat)
+
+(defun chat-ui--step-limit ()
+  "Return the step ceiling in force for this display."
+  (chat-agent-budget-effective-limit chat-ui-tool-loop-max-steps))
 
 (defun chat-ui--make-agent-event-handler (session msg-id ui-buffer content-start request-id)
   "Return an agent event handler rendering into UI-BUFFER.
@@ -767,8 +778,9 @@ assistant response being filled in."
                  (chat-ui--cleanup-request-state
                   'completed
                   (if (eq (plist-get event :status) 'stopped)
-                      (format "Stopped after tool loop limit (%d)"
-                              chat-ui-tool-loop-max-steps)
+                      (format "Stopped after step limit (%s)"
+                              (chat-agent-budget-label
+                               (chat-ui--step-limit)))
                     "Request completed"))))
              (message "%s" (if (eq (plist-get event :status) 'stopped)
                                "Stopped after tool loop limit"
@@ -797,7 +809,10 @@ assistant response being filled in."
   (message "Getting response from AI...")
   (let* ((session chat--current-session)
          (model (chat-session-model-id session))
-         (messages (chat-session-messages session))
+         ;; The session records more than a request should carry: command
+         ;; replies and captured shell output are there for the reader.
+         (messages (chat-transcript-model-messages
+                    (chat-session-messages session)))
          (msg-id (chat-session-new-message-id))
          (ui-buffer (current-buffer))
          assistant-start

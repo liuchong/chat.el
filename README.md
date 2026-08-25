@@ -319,6 +319,40 @@ Emacs live-buffer tools are scoped by default: buffer listing and reads stay wit
 Generated elisp tools must be a single top level `lambda` form.
 This prevents compile time side effects from arbitrary wrapper forms.
 
+## Step Budget
+
+A run works in steps: one model turn, which may call tools, then another
+turn that reads the results. `chat-agent-max-steps` caps how many steps one
+run may take and defaults to 300. Set it to `unlimited` to lift the ceiling
+while keeping the parameter in place:
+
+```elisp
+(setq chat-agent-max-steps 300)        ; the default
+(setq chat-agent-max-steps 'unlimited) ; no ceiling
+```
+
+The final step withdraws the tools, so a run that reaches its ceiling still
+has to write a handoff -- what it finished, what is left, what to do next --
+instead of dying mid-tool-call with nothing to show. You can then continue in
+a new round from that summary.
+
+How much of this the model is told is configurable:
+
+| `chat-agent-budget-disclosure` | Behaviour |
+|---|---|
+| `nearing` (default) | Silent until the budget is tight, then asks the run to converge |
+| `always` | Reports the step count on every step |
+| `final-only` | Speaks once, on the final step |
+| `never` | Keeps the budget entirely on this side |
+
+`nearing` is the default because a countdown delivered early makes runs wrap
+up work they had not finished. `chat-agent-budget-nearing-ratio` (default
+`0.75`) sets when "tight" begins.
+
+`chat-ui-tool-loop-max-steps` and `chat-code-tool-loop-max-steps` default to
+nil and follow the global budget. Set one only to hold that display to a
+tighter ceiling.
+
 ## File Access Defaults
 
 By default file tools can access:

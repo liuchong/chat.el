@@ -93,6 +93,7 @@ Returns the list of files that were loaded."
 (require 'chat-command)
 (require 'chat-session)
 (require 'chat-session-tree)
+(require 'chat-transcript)
 (require 'chat-memory)
 (require 'chat-project)
 (require 'chat-stream)

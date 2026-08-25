@@ -566,7 +566,7 @@ one that was asked."
        (setq-local chat--current-session session)
        (chat-ui--session-metadata-set :chat-ui-preferred-target-path target-file)
        (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
-                  (lambda (prompt)
+                  (lambda (prompt &optional _step-limit)
                     (setq captured-prompt prompt)
                     prompt)))
          (chat-ui--prepare-messages-with-tools nil))
@@ -782,8 +782,8 @@ one that was asked."
                     nil)))
          (chat-ui--get-response-sync)
          (should (eq (plist-get captured-config :transport) 'sync))
-         (should (= (plist-get captured-config :max-steps)
-                    chat-ui-tool-loop-max-steps)))))))
+         (should (equal (plist-get captured-config :max-steps)
+                        chat-ui-tool-loop-max-steps)))))))
 
 (ert-deftest chat-ui-render-response-state-appends-only-delta-on-growth ()
   "Test growing content reuses the slot and only appends the delta."

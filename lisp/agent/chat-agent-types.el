@@ -21,11 +21,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-
-(defcustom chat-agent-max-steps 100
-  "Maximum number of agent loop steps per run."
-  :type 'integer
-  :group 'chat)
+(require 'chat-agent-budget)
 
 (defcustom chat-agent-native-tools t
   "When non-nil, advertise tools through the provider tool-calling API."

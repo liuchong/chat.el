@@ -65,8 +65,9 @@
   (cond
    ((chat-agent-run-state-cancelled run)
     (chat-agent--finish run 'cancelled nil))
-   ((>= (chat-agent-run-state-step run)
-        (chat-agent-run-state-max-steps run))
+   ((chat-agent-budget-exhausted-p
+     (chat-agent-run-state-max-steps run)
+     (chat-agent-run-state-step run))
     (chat-agent--finish run 'stopped 'max-steps))
    (t
     (setf (chat-agent-run-state-step run)
@@ -146,15 +147,42 @@
     (when (and (> (chat-agent-run-state-step run) 1) followup)
       (cl-loop for (key value) on followup by #'cddr
                do (setq base (plist-put base key value))))
-    (when (and (chat-agent-run-state-native-tools run)
-               (null (plist-get base :tools))
-               (fboundp 'chat-tool-caller-provider-tools))
-      (let* ((chat-tool-caller-current-session
-              (chat-agent-run-state-session run))
-             (tools (chat-tool-caller-provider-tools)))
-        (when tools
-          (setq base (plist-put base :tools tools)))))
+    (if (chat-agent-budget-final-step-p
+         (chat-agent-run-state-max-steps run)
+         (chat-agent-run-state-step run))
+        ;; The last step has to produce an answer, so it is offered no tools
+        ;; to reach for.  Asking the model to stop calling tools works far
+        ;; less reliably than not advertising any.
+        (setq base (plist-put base :tools nil))
+      (when (and (chat-agent-run-state-native-tools run)
+                 (null (plist-get base :tools))
+                 (fboundp 'chat-tool-caller-provider-tools))
+        (let* ((chat-tool-caller-current-session
+                (chat-agent-run-state-session run))
+               (tools (chat-tool-caller-provider-tools)))
+          (when tools
+            (setq base (plist-put base :tools tools))))))
     base))
+
+(defun chat-agent--request-messages (run)
+  "Return the context for this turn of RUN, with any budget reminder.
+
+The reminder is appended here rather than stored on the run: it describes
+the step about to happen, so keeping it would leave a trail of stale
+counts in the transcript and repeat them in every later request.  It goes
+last because that is where a short instruction is actually noticed."
+  (let ((messages (chat-agent-run-state-messages run))
+        (reminder (chat-agent-budget-reminder
+                   (chat-agent-run-state-max-steps run)
+                   (chat-agent-run-state-step run))))
+    (if reminder
+        (append messages
+                (list (make-chat-message
+                       :id (chat-session-new-message-id "step-budget")
+                       :role :system
+                       :content reminder
+                       :timestamp (current-time))))
+      messages)))
 
 (defun chat-agent--dispatch (run)
   "Send the current RUN messages through the configured transport."
@@ -171,7 +199,7 @@
   (setf (chat-agent-run-state-handle run)
         (chat-llm-request-async
          (chat-agent-run-state-model run)
-         (chat-agent-run-state-messages run)
+         (chat-agent--request-messages run)
          (lambda (result)
            (unless (chat-agent-run-state-cancelled run)
              (chat-agent--handle-result run result)))
@@ -188,7 +216,7 @@
     (let ((proc
            (chat-stream-request
             (chat-agent-run-state-model run)
-            (chat-agent-run-state-messages run)
+            (chat-agent--request-messages run)
             (lambda (chunk)
               (when (and chunk (> (length chunk) 0))
                 (setq content-acc (concat content-acc chunk))

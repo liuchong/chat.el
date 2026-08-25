@@ -31,6 +31,7 @@
 (require 'project)
 (require 'subr-x)
 (require 'chat-session)
+(require 'chat-transcript)
 (require 'chat-llm)
 (require 'chat-files)
 (require 'chat-reading)
@@ -335,10 +336,19 @@ Inherits from chat-session with additional code-specific fields."
   "Face for fenced code blocks in code mode buffers."
   :group 'chat-code)
 
-(defcustom chat-code-tool-loop-max-steps 100
-  "Maximum number of follow-up tool resolution requests in code mode."
-  :type 'integer
+(defcustom chat-code-tool-loop-max-steps nil
+  "Step ceiling for a code-mode run, or nil to follow the global budget.
+
+Set this only to hold code mode to a tighter limit than
+`chat-agent-max-steps'; `unlimited' lifts the ceiling entirely."
+  :type '(choice (const :tag "Follow chat-agent-max-steps" nil)
+                 (integer :tag "Steps")
+                 (const :tag "Unlimited" unlimited))
   :group 'chat-code)
+
+(defun chat-code--step-limit ()
+  "Return the step ceiling in force for code mode."
+  (chat-agent-budget-effective-limit chat-code-tool-loop-max-steps))
 
 (defvar-local chat-code--status-state 'idle
   "Current status state for the code mode buffer.")
@@ -1671,9 +1681,9 @@ using C-x b or C-c C-v."
               (chat-code--set-status
                'running
                (if (> (plist-get event :step) 1)
-                   (format "Resolving tools (%d/%d)"
+                   (format "Resolving tools (%d/%s)"
                            (1- (plist-get event :step))
-                           chat-code-tool-loop-max-steps)
+                           (chat-agent-budget-label (chat-code--step-limit)))
                  "Waiting for model")))))
          ((eq type 'stream-chunk)
           (when (buffer-live-p ui-buffer)
@@ -1741,8 +1751,9 @@ using C-x b or C-c C-v."
                    (chat-code--set-status
                     (if (eq status 'stopped) 'stopped 'success)
                     (if (eq status 'stopped)
-                        (format "Stopped after tool loop limit (%d)"
-                                chat-code-tool-loop-max-steps)
+                        (format "Stopped after step limit (%s)"
+                                (chat-agent-budget-label
+                                 (chat-code--step-limit)))
                       "Completed"))
                    (let ((processed
                           (list :content (plist-get event :content)
@@ -1811,7 +1822,8 @@ CONTENT-START marks the assistant response body."
                                      (when lsp-str
                                        (concat "\n\n" lsp-str))))
          (full-system-prompt (chat-tool-caller-build-system-prompt
-                              base-system-prompt))
+                              base-system-prompt
+                              (chat-code--step-limit)))
          (base-session (chat-code--base-session))
          (model (chat-session-model-id base-session))
          (messages (cons
@@ -1820,7 +1832,11 @@ CONTENT-START marks the assistant response body."
                      :role :system
                      :content full-system-prompt
                      :timestamp (current-time))
-                    (chat-session-messages base-session)))
+                    ;; The session records more than a request should carry:
+                    ;; command replies and captured shell output are there
+                    ;; for the reader.
+                    (chat-transcript-model-messages
+                     (chat-session-messages base-session))))
          (prepared-messages (chat-code--prepare-request-messages model messages))
          (content-start (chat-code--show-assistant-indicator)))
     (setq chat-code--active-request-model model)

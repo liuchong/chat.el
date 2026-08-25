@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'chat-agent-budget)
 (require 'chat-approval)
 (require 'chat-files)
 (require 'chat-session)
@@ -166,8 +167,13 @@ The vector is empty when tool calling is disabled."
      "- If a write tool needs approval, wait for approval instead of printing the intended file body in chat.")
    "\n"))
 
-(defun chat-tool-caller-build-system-prompt (base-prompt)
-  "Extend BASE-PROMPT with long term memory and tool calling instructions."
+(defun chat-tool-caller-build-system-prompt (base-prompt &optional step-limit)
+  "Extend BASE-PROMPT with long term memory and tool calling instructions.
+
+STEP-LIMIT, when given, is the step ceiling of the run this prompt opens.
+It is stated here rather than counted down per step: a run should know
+from the start that it has to converge, and the wording stays identical
+across steps so it costs nothing to repeat."
   (let ((base (if-let ((memory (and (fboundp 'chat-memory-snippet)
                                     (chat-memory-snippet))))
                   (concat base-prompt "\n\n" memory)
@@ -180,6 +186,11 @@ The vector is empty when tool calling is disabled."
           (concat
            base
          "\n\n"
+         ;; Only stated when tools exist: without them a run is a single
+         ;; step and there is no budget to plan against.
+         (if step-limit
+             (concat (chat-agent-budget-system-note step-limit) "\n\n")
+           "")
          "You can call tools when they are necessary.\n"
          "Prefer the provider tool-calling API. Multiple tools may be issued in one response.\n"
          "If the provider has no tool API, respond with JSON objects of the form below.\n"

@@ -548,8 +548,8 @@
        (should (equal (plist-get captured-config :messages)
                       '(message-a message-b)))
        (should (plist-get captured-config :on-event))
-       (should (= (plist-get captured-config :max-steps)
-                  chat-code-tool-loop-max-steps))))))
+       (should (equal (plist-get captured-config :max-steps)
+                      chat-code-tool-loop-max-steps))))))
 
 (ert-deftest chat-code-agent-run-persists-assistant-message ()
   "Test code mode stores assistant replies and keeps the prompt ready."
@@ -1060,8 +1060,10 @@ file contents instead of only a short summary."
       (should-not (string-match-p "APPROVAL" mode)))))
 
 (ert-deftest chat-code-tool-loop-default-is-production-sized ()
-  "Test code mode tool loop default is production sized."
-  (should (= chat-code-tool-loop-max-steps 100)))
+  "Code mode defers to the global step budget, which is production sized."
+  (should-not chat-code-tool-loop-max-steps)
+  (should (= (chat-code--step-limit) chat-agent-max-steps))
+  (should (>= chat-agent-max-steps 300)))
 
 (ert-deftest chat-code-tool-result-lines-keep-real-content ()
   "Test follow-up lines carry real multi-line tool results."

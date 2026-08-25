@@ -386,6 +386,46 @@ Two traps when investigating this:
 
 **Solution**: compute recovery metadata during load. Keep the assistant tool call in history, mark missing `tool_call_id` values, and let the UI or next workflow decide how to recover.
 
+### One Mutable Response Region Destroys Every Intermediate Step
+
+**Problem**: after a run that used tools, the transcript shows the first question and the last answer, and everything the run did in between is gone.
+
+**Cause**: the display allocated a single region for the whole assistant turn and redrew it on every event, deleting from the region start to the end marker each time. A run emits many things -- reasoning, prose before a tool call, the call, its result, more prose -- so each step overwrote the previous one and only the last survived. The session file was always complete; only the drawing threw work away.
+
+**Solution**: render an append-only list of typed parts from `chat-transcript-plan`. Keep at most one replaceable region, for the streaming tail of the step currently arriving. Never reuse a region across steps.
+
+### Session Messages Double As The Request Context
+
+**Problem**: a display-only entry added to the session for the reader shows up in the next request, and the model starts imitating the client's own chrome.
+
+**Cause**: `chat-session-messages` is both the stored record and the source of the request context. Anything appended for display is sent.
+
+**Solution**: keep the record as the superset and project it. `chat-transcript-model-messages` drops the categories that exist for the reader alone. Every request path must go through it; there is one per display.
+
+### Excluding On A Fallback Category Drops The System Prompt
+
+**Problem**: after adding a request projection, the model loses its instructions and any recovered history.
+
+**Cause**: unstamped `:system` messages fall back to the `system-detail` category, and `system-detail` is display-only. But an unstamped system message is a system prompt or a compaction summary, both of which the model must see.
+
+**Solution**: exclude only on an **explicit** stamp. Read the raw metadata field, not the role-based fallback, when deciding what a request may carry.
+
+### Message Metadata Comes Back As Strings
+
+**Problem**: a symbol or number stored in message metadata fails a `eq` or arithmetic comparison after the session is reloaded.
+
+**Cause**: `chat-session--message-metadata-to-json` stringifies symbols, and JSON numbers can decode as strings, so `'thinking` returns as `"thinking"`.
+
+**Solution**: coerce on read. Never compare a metadata value against a symbol or number without normalizing it first.
+
+### A Budget Countdown Makes A Run Quit Early
+
+**Problem**: telling the model how many steps remain makes it abandon tasks it was close to finishing.
+
+**Cause**: a shrinking budget is read as "produce a final answer immediately", so the run discards work in progress to get something out.
+
+**Solution**: state that running out is survivable in the same breath as the count -- the user can open another round that continues from the summary -- and stay silent while there is comfortable room left. Withdraw tools on the final step instead of asking the model not to call them.
+
 ---
 
 ## File Tools and Security

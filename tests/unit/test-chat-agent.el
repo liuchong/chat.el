@@ -667,5 +667,141 @@ car collects the messages of every request."
       (should (= cancel-count 2))
       (should (eq (chat-agent-run-state-status run) 'cancelled)))))
 
+;; ------------------------------------------------------------------
+;; Step budget reaching the request
+;; ------------------------------------------------------------------
+
+(defun chat-agent-test--capturing-transport (responses calls options)
+  "Like `chat-agent-test--stub-transport' but also record request options.
+RESPONSES are served in order, CALLS collects messages in its car and
+OPTIONS collects the options plist of every request in its car."
+  (let ((remaining responses))
+    (lambda (_model messages success _error request-options)
+      (setcar calls (append (car calls) (list messages)))
+      (setcar options (append (car options) (list request-options)))
+      (let ((next (pop remaining)))
+        (when (functionp next)
+          (setq next (funcall next)))
+        (when next
+          (funcall success next)))
+      'stub-handle)))
+
+(defun chat-agent-test--budget-notes (messages)
+  "Return the budget reminders present in MESSAGES."
+  (cl-remove-if-not
+   (lambda (message)
+     (string-match-p "\\[step budget\\]" (or (chat-message-content message) "")))
+   messages))
+
+(ert-deftest chat-agent-says-nothing-about-a-budget-with-room-to-spare ()
+  "No reminder is spent on a step that has plenty of budget left."
+  (let ((calls (list nil))
+        (chat-agent-budget-disclosure 'nearing))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "done" :raw-request "r" :raw-response "s"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :max-steps 300
+             :on-event #'ignore))
+      (should-not (chat-agent-test--budget-notes (car (car calls)))))))
+
+(ert-deftest chat-agent-appends-the-wrap-up-instruction-on-the-final-step ()
+  "The last allowed step is told to answer, and told it at the end.
+
+Placing it last is deliberate: a short instruction buried mid-context is
+the one the model skips."
+  (let ((calls (list nil)))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "done" :raw-request "r" :raw-response "s"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :max-steps 1
+             :on-event #'ignore))
+      (let* ((request (car (car calls)))
+             (notes (chat-agent-test--budget-notes request)))
+        (should (equal (length notes) 1))
+        (should (string-match-p "Final step (1 of 1)"
+                                (chat-message-content (car notes))))
+        (should (eq (car (last request)) (car notes)))))))
+
+(ert-deftest chat-agent-withdraws-tools-on-the-final-step ()
+  "Tools are not advertised on the step that has to produce an answer.
+
+Asking a model to stop calling tools is far less reliable than giving it
+nothing to call."
+  (let ((calls (list nil))
+        (options (list nil)))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--capturing-transport
+                '((:content "done" :raw-request "r" :raw-response "s"))
+                calls options))
+              ((symbol-function 'chat-tool-caller-provider-tools)
+               (lambda () '((:name "demo")))))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :max-steps 1
+             :on-event #'ignore))
+      (should-not (plist-get (car (car options)) :tools)))))
+
+(ert-deftest chat-agent-advertises-tools-while-budget-remains ()
+  "A step with budget left still gets its tools."
+  (let ((calls (list nil))
+        (options (list nil)))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--capturing-transport
+                '((:content "done" :raw-request "r" :raw-response "s"))
+                calls options))
+              ((symbol-function 'chat-tool-caller-provider-tools)
+               (lambda () '((:name "demo")))))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :max-steps 10
+             :on-event #'ignore))
+      (should (plist-get (car (car options)) :tools)))))
+
+(ert-deftest chat-agent-reminder-does-not-persist-into-the-transcript ()
+  "A reminder describes one step and must not accumulate in the run.
+
+Storing it would repeat a stale count in every later request and leave
+budget chatter in the saved history."
+  (let ((calls (list nil))
+        run)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "done" :raw-request "r" :raw-response "s"))
+                calls)))
+      (setq run (chat-agent-start
+                 (list :model 'kimi
+                       :messages (list (chat-agent-test--user-message))
+                       :max-steps 1
+                       :on-event #'ignore)))
+      (should (chat-agent-test--budget-notes (car (car calls))))
+      (should-not (chat-agent-test--budget-notes
+                   (chat-agent-run-state-messages run))))))
+
+(ert-deftest chat-agent-runs-with-an-unlimited-budget ()
+  "An unlimited ceiling is a symbol, and the loop must not compare it as a number."
+  (let ((calls (list nil))
+        (events nil))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "done" :raw-request "r" :raw-response "s"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :max-steps 'unlimited
+             :on-event (lambda (event) (setq events (append events (list event))))))
+      (let ((end (car (last events))))
+        (should (eq (plist-get end :status) 'completed))))))
+
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here
