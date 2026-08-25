@@ -90,6 +90,7 @@ Returns the list of files that were loaded."
 ;; Load core modules.
 (require 'chat-log)
 (require 'chat-request-diagnostics)
+(require 'chat-command)
 (require 'chat-session)
 (require 'chat-session-tree)
 (require 'chat-memory)
