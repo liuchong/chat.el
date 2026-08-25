@@ -14,6 +14,7 @@
 
 ;;; Code:
 
+(require 'chat-command)
 (require 'chat-session)
 (require 'chat-llm)
 (require 'chat-stream)
@@ -374,73 +375,146 @@
 ;; Message Sending
 ;; ------------------------------------------------------------------
 
+(defconst chat-ui--slash-commands
+  '(("cancel"   . chat-ui--command-cancel)
+    ("model"    . chat-ui--command-model)
+    ("cmd"      . chat-ui--command-shell)
+    ("!"        . chat-ui--command-shell)
+    ("cd"       . chat-ui--command-cd)
+    ("pwd"      . chat-ui--command-pwd)
+    ("question" . chat-ui--command-question)
+    ("ask"      . chat-ui--command-question)
+    ("?"        . chat-ui--command-question))
+  "Slash command names mapped to the function that runs them.
+Each function takes the argument text, which may be empty.  A name that
+is absent here is left as ordinary message text.")
+
+(defconst chat-ui--control-slash-commands '("cancel" "model")
+  "Slash commands that stay available while a response is in flight.")
+
 (defun chat-ui-send-message ()
-  "Send message from input area."
+  "Act on the input area, either as a command or as a message."
   (interactive)
   (when chat--current-session
     (let* ((input-start (marker-position chat-ui--input-overlay))
            (input-end (point-max))
-           (content (string-trim (buffer-substring-no-properties input-start input-end))))
+           (content (string-trim (buffer-substring-no-properties input-start input-end)))
+           (command (chat-command-parse content))
+           (control (chat-ui--control-command command)))
       (cond
-       ((string-empty-p content)
+       ((eq (plist-get command :kind) 'empty)
         (message "Cannot send empty message"))
-       ((string-equal "/cancel" content)
-        (delete-region input-start input-end)
-        (goto-char input-start)
-        (chat-ui-cancel-response)
-        (message "Request cancelled."))
-       ((string-match "\\`/model\\(?:[[:space:]]+\\(.+\\)\\)?\\'" content)
-        (let ((name (match-string 1 content)))
-          (delete-region input-start input-end)
-          (goto-char input-start)
-          (if name
-              (chat-set-model (intern (string-trim name)))
-            (call-interactively #'chat-set-model))))
+       (control
+        (chat-ui--clear-input input-start input-end)
+        (funcall control (plist-get command :arg)))
        ((chat-agent-active-p chat-ui--active-agent-run)
-        (delete-region input-start input-end)
-        (goto-char input-start)
-        (let ((user-msg (make-chat-message
-                         :id (chat-session-new-message-id)
-                         :role :user
-                         :content content
-                         :timestamp (current-time))))
-          (chat-session-add-message chat--current-session user-msg)
-          (save-excursion
-            (goto-char chat-ui--messages-end)
-            (chat-ui--insert-message user-msg)
-            (set-marker chat-ui--messages-end (point)))
-          (chat-agent-steer chat-ui--active-agent-run user-msg)
-          (message "Message queued for the active response.")))
+        (chat-ui--clear-input input-start input-end)
+        (chat-ui--steer-active-agent (chat-ui--command-message-text command)))
        ((chat-ui--response-active-p)
         (message "A response is already in progress. Cancel it before sending another message."))
        (t
-        (delete-region input-start input-end)
-        (goto-char input-start)
-        (cond
-         ;; Shell command with ! prefix
-         ((string-prefix-p "!" content)
-          (chat-ui--handle-shell-command (substring content 1)))
-         ;; Direct AI query with ? prefix
-         ((string-prefix-p "?" content)
-          (chat-ui--handle-direct-query (substring content 1)))
-         ;; Tool creation request
-         ((chat-tool-forge-ai--tool-request-p content)
-          (chat-ui--handle-tool-creation content))
-         ;; Normal message flow
-         (t
-          (let ((user-msg (make-chat-message
-                           :id (chat-session-new-message-id)
-                           :role :user
-                           :content content
-                           :timestamp (current-time))))
-            (chat-session-add-message chat--current-session user-msg)
-            ;; Insert in buffer
-            (save-excursion
-              (goto-char chat-ui--messages-end)
-              (chat-ui--insert-message user-msg)
-              (set-marker chat-ui--messages-end (point)))
-            ;; Get AI response
-            (chat-ui--get-response)))))))))
+        (chat-ui--clear-input input-start input-end)
+        (chat-ui--dispatch-command command))))))
+
+(defun chat-ui--clear-input (input-start input-end)
+  "Remove the text between INPUT-START and INPUT-END from the input area."
+  (delete-region input-start input-end)
+  (goto-char input-start))
+
+(defun chat-ui--control-command (command)
+  "Return the handler for COMMAND when it may run during a response."
+  (and (eq (plist-get command :kind) 'slash)
+       (member (plist-get command :name) chat-ui--control-slash-commands)
+       (cdr (assoc (plist-get command :name) chat-ui--slash-commands))))
+
+(defun chat-ui--command-message-text (command)
+  "Return the text COMMAND should contribute as an ordinary message."
+  (if (memq (plist-get command :kind) '(literal note))
+      (plist-get command :arg)
+    (plist-get command :text)))
+
+(defun chat-ui--dispatch-command (command)
+  "Run COMMAND, which was parsed from the input area."
+  (let ((arg (plist-get command :arg)))
+    (pcase (plist-get command :kind)
+      ('shell (chat-ui--command-shell arg))
+      ('shell-repeat (chat-ui--repeat-shell-command))
+      ('query (chat-ui--command-question arg))
+      ('slash
+       (let ((handler (cdr (assoc (plist-get command :name)
+                                  chat-ui--slash-commands))))
+         (if handler
+             (funcall handler arg)
+           ;; An unknown name is not an error: the model may still make
+           ;; sense of it, and refusing would break slash-prefixed prose.
+           (chat-ui--send-user-message (plist-get command :text)))))
+      ('literal (chat-ui--send-user-message arg))
+      (_ (chat-ui--send-user-message (plist-get command :text))))))
+
+(defun chat-ui--send-user-message (content)
+  "Record CONTENT as a user message and ask the model to respond."
+  (if (string-empty-p content)
+      (message "Cannot send empty message")
+    (if (chat-tool-forge-ai--tool-request-p content)
+        (chat-ui--handle-tool-creation content)
+      (let ((user-msg (make-chat-message
+                       :id (chat-session-new-message-id)
+                       :role :user
+                       :content content
+                       :timestamp (current-time))))
+        (chat-session-add-message chat--current-session user-msg)
+        (save-excursion
+          (goto-char chat-ui--messages-end)
+          (chat-ui--insert-message user-msg)
+          (set-marker chat-ui--messages-end (point)))
+        (chat-ui--get-response)))))
+
+(defun chat-ui--steer-active-agent (content)
+  "Queue CONTENT for the response that is already running."
+  (let ((user-msg (make-chat-message
+                   :id (chat-session-new-message-id)
+                   :role :user
+                   :content content
+                   :timestamp (current-time))))
+    (chat-session-add-message chat--current-session user-msg)
+    (save-excursion
+      (goto-char chat-ui--messages-end)
+      (chat-ui--insert-message user-msg)
+      (set-marker chat-ui--messages-end (point)))
+    (chat-agent-steer chat-ui--active-agent-run user-msg)
+    (message "Message queued for the active response.")))
+
+(defun chat-ui--command-cancel (_arg)
+  "Cancel the response that is in flight."
+  (chat-ui-cancel-response)
+  (message "Request cancelled."))
+
+(defun chat-ui--command-model (arg)
+  "Point this session at the provider named ARG, prompting when empty."
+  (if (string-empty-p arg)
+      (call-interactively #'chat-set-model)
+    (chat-set-model (intern arg))))
+
+(defun chat-ui--command-shell (arg)
+  "Run ARG as a shell command."
+  (if (string-empty-p arg)
+      (message "Usage: !<command>")
+    (chat-ui--handle-shell-command arg)))
+
+(defun chat-ui--command-question (arg)
+  "Ask the model ARG without recording it in the session."
+  (chat-ui--handle-direct-query arg))
+
+(defun chat-ui--command-cd (arg)
+  "Point this session at directory ARG, prompting when empty."
+  (chat-ui--change-directory
+   (if (string-empty-p arg)
+       (read-directory-name "Working directory: " default-directory nil t)
+     arg)))
+
+(defun chat-ui--command-pwd (_arg)
+  "Report the working directory of this session."
+  (chat-ui--insert-system-message (format "📁 %s" default-directory)))
 
 (defun chat-ui--followup-target-note ()
   "Return a system note about the most recent file target."
@@ -920,47 +994,90 @@ from a different provider than the one that was asked."
 ;; Hybrid Mode - Shell & Direct Query
 ;; ------------------------------------------------------------------
 
+(defcustom chat-ui-shell-unrestricted t
+  "Whether a shell command typed by the user bypasses the AI tool limits.
+
+A command the model proposes always stays on the restricted path, which
+accepts only `chat-tool-shell-allowed-commands' and rejects shell
+metacharacters.  A command a person typed is a different trust level, so
+by default it runs through the system shell, where pipes, redirection and
+variables work.  Set this to nil to hold typed commands to the same
+restrictions as the model."
+  :type 'boolean
+  :group 'chat)
+
+(defvar-local chat-ui--last-shell-command nil
+  "The most recent shell command run from this buffer.")
+
 (defun chat-ui--handle-shell-command (command)
-  "Execute shell COMMAND and display result in chat buffer.
-Handles special case: cd <dir> changes default-directory."
+  "Run COMMAND and report the result in the chat buffer.
+
+A lone `cd' is handled here instead of in the shell, because a subprocess
+cannot change the directory this session works in."
   (let* ((trimmed (string-trim command))
-         ;; `string-match' (not -p) so `match-end' below sees this match.
-         (is-cd (string-match "^cd\\s-+" trimmed)))
-    (if (and is-cd (not (string-match-p ";\\|&&\\|||" trimmed)))
-        ;; Handle cd specially
-        (let ((dir (substring trimmed (match-end 0))))
-          (setq dir (string-trim dir))
-          ;; Expand ~ to home
-          (when (string-prefix-p "~" dir)
-            (setq dir (concat (getenv "HOME") (substring dir 1))))
-          ;; Check if directory exists
-          (if (file-directory-p dir)
-              (progn
-                (setq default-directory (file-name-as-directory (expand-file-name dir)))
-                (chat-ui--insert-system-message (format "📁 Changed directory to: %s" default-directory)))
-            (chat-ui--insert-system-message (format "❌ Directory not found: %s" dir))))
-      ;; Normal shell command
-      (progn
-        (chat-ui--insert-system-message (format "$ %s" trimmed))
-        (let ((output (chat-ui--execute-shell-safe trimmed)))
-          (if output
-              (chat-ui--insert-system-message output)
-            (chat-ui--insert-system-message "⚠️ Shell execution disabled or failed")))))))
+         (directory (chat-ui--directory-command-target trimmed)))
+    (if directory
+        (chat-ui--change-directory directory)
+      (setq chat-ui--last-shell-command trimmed)
+      (chat-ui--insert-system-message (format "$ %s" trimmed))
+      (let ((output (chat-ui--execute-shell-safe trimmed)))
+        (chat-ui--insert-system-message
+         (if (and output (not (string-empty-p (string-trim output))))
+             output
+           "(no output)"))))))
+
+(defun chat-ui--directory-command-target (command)
+  "Return the directory a lone `cd' COMMAND asks for, or nil.
+
+A compound command returns nil so that it reaches the shell, where its
+own `cd' applies to that subprocess only.  A bare `cd' means home, as it
+does in a shell."
+  (when (string-match "\\`cd\\(?:[ \t]+\\(.*\\)\\)?\\'" command)
+    (let ((target (string-trim (or (match-string 1 command) ""))))
+      (unless (string-match-p "[;&|<>`$]" target)
+        (if (string-empty-p target) "~" target)))))
+
+(defun chat-ui--change-directory (directory)
+  "Point this session at DIRECTORY.
+
+Records it on the session so it outlives the buffer, and sets the buffer
+default so typed shell commands and the tools the agent runs share one
+working directory."
+  (let* ((requested (chat-command-fold-path (string-trim directory)))
+         (expanded (expand-file-name requested)))
+    (if (not (file-directory-p expanded))
+        (chat-ui--insert-system-message
+         (format "❌ Directory not found: %s" requested))
+      (setq default-directory (file-name-as-directory expanded))
+      (when chat--current-session
+        (chat-session-set-working-directory chat--current-session
+                                            default-directory))
+      (chat-ui--insert-system-message
+       (format "📁 Changed directory to: %s" default-directory)))))
+
+(defun chat-ui--repeat-shell-command ()
+  "Run the shell command this buffer ran most recently."
+  (if chat-ui--last-shell-command
+      (chat-ui--handle-shell-command chat-ui--last-shell-command)
+    (chat-ui--insert-system-message "⚠️ No shell command to repeat yet")))
 
 (defun chat-ui--execute-shell-safe (command)
-  "Safely execute shell COMMAND and return output.
-Uses chat-tool-shell if available, otherwise basic shell execution."
+  "Run COMMAND for the chat buffer and return its output."
   (condition-case err
-      (if (and (featurep 'chat-tool-shell)
-               (fboundp 'chat-tool-shell-execute)
-               (boundp 'chat-tool-shell-enabled)
-               chat-tool-shell-enabled)
-          ;; Use chat-tool-shell if available and enabled
-          (chat-tool-shell-execute command)
-        ;; Fallback to basic shell execution
+      (cond
+       ((and chat-ui-shell-unrestricted
+             (require 'chat-tool-shell nil t)
+             (fboundp 'chat-tool-shell-execute-unrestricted))
+        (chat-tool-shell-execute-unrestricted command))
+       ((and (featurep 'chat-tool-shell)
+             (fboundp 'chat-tool-shell-execute)
+             (boundp 'chat-tool-shell-enabled)
+             chat-tool-shell-enabled)
+        (chat-tool-shell-execute command))
+       (t
         (with-output-to-string
           (with-current-buffer standard-output
-            (call-process-shell-command command nil t))))
+            (call-process-shell-command command nil t)))))
     (error (format "Error: %s" (error-message-string err)))))
 
 (defun chat-ui--handle-direct-query (question)

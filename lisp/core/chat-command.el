@@ -64,19 +64,24 @@ The plist always carries `:kind', one of these symbols:
 `slash'         run the command named `:name' with `:arg'
 `note'          ordinary message text in `:arg'
 
+`:text' always holds the trimmed input, which a caller needs when it
+decides to treat an unrecognized command as ordinary text.
+
 Arguments are returned as typed.  Only prefixes and slash command names
 are folded to ASCII."
   (let ((text (chat-command-trim input)))
-    (if (string-empty-p text)
-        (list :kind 'empty)
-      (let ((lead (chat-command-fold-char (aref text 0)))
-            (rest (substring text 1)))
-        (cond
-         ((eq lead ?\\) (list :kind 'literal :arg rest))
-         ((eq lead ?!) (chat-command--parse-bang rest))
-         ((eq lead ??) (list :kind 'query :arg (chat-command-trim rest)))
-         ((eq lead ?/) (chat-command--parse-slash rest))
-         (t (list :kind 'note :arg text)))))))
+    (append
+     (if (string-empty-p text)
+         (list :kind 'empty)
+       (let ((lead (chat-command-fold-char (aref text 0)))
+             (rest (substring text 1)))
+         (cond
+          ((eq lead ?\\) (list :kind 'literal :arg rest))
+          ((eq lead ?!) (chat-command--parse-bang rest))
+          ((eq lead ??) (list :kind 'query :arg (chat-command-trim rest)))
+          ((eq lead ?/) (chat-command--parse-slash rest))
+          (t (list :kind 'note :arg text)))))
+     (list :text text))))
 
 (defun chat-command--parse-bang (rest)
   "Parse REST, the input that followed a leading bang."

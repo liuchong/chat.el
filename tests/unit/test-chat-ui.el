@@ -588,6 +588,143 @@ one that was asked."
          (chat-ui--handle-shell-command (concat "cd " temp-dir " && ls"))
          (should shell-ran))))))
 
+(ert-deftest chat-ui-change-directory-persists-onto-the-session ()
+  "A directory change records itself so a reopened session keeps it."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-auto-save t)
+          (target (expand-file-name "target" temp-dir))
+          (session (chat-session-create "Cd Session" 'kimi)))
+     (make-directory target t)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message) #'ignore))
+         (chat-ui--change-directory target)
+         (should (string= default-directory (file-name-as-directory target)))))
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (string= (file-name-as-directory target)
+                        (chat-session-working-directory loaded)))))))
+
+(ert-deftest chat-ui-change-directory-reports-a-missing-directory ()
+  "A directory that does not exist is reported and changes nothing."
+  (chat-test-with-temp-dir
+   (let ((messages nil))
+     (with-temp-buffer
+       (let ((original default-directory))
+         (cl-letf (((symbol-function 'chat-ui--insert-system-message)
+                    (lambda (text) (push text messages))))
+           (chat-ui--change-directory "/nonexistent-chat-el-target/")
+           (should (string= default-directory original))
+           (should (string-match-p "not found" (car messages)))))))))
+
+(ert-deftest chat-ui-change-directory-accepts-fullwidth-path-punctuation ()
+  "A path typed with fullwidth slash and tilde still resolves."
+  (chat-test-with-temp-dir
+   (with-temp-buffer
+     (cl-letf (((symbol-function 'chat-ui--insert-system-message) #'ignore))
+       (let* ((home (expand-file-name "home" temp-dir))
+              (nested (expand-file-name "nested" home)))
+         (make-directory nested t)
+         (let ((process-environment (cons (concat "HOME=" home)
+                                          process-environment)))
+           (chat-ui--change-directory "～／nested")
+           (should (string= default-directory
+                            (file-name-as-directory nested)))))))))
+
+(ert-deftest chat-ui-directory-command-target-reads-a-lone-cd ()
+  "Only a lone cd is intercepted; a compound command reaches the shell."
+  (should (equal "/tmp" (chat-ui--directory-command-target "cd /tmp")))
+  (should (equal "~" (chat-ui--directory-command-target "cd")))
+  (should-not (chat-ui--directory-command-target "cd /tmp && ls"))
+  (should-not (chat-ui--directory-command-target "cd /tmp; ls"))
+  (should-not (chat-ui--directory-command-target "cdate")))
+
+(ert-deftest chat-ui-repeat-shell-command-reruns-the-last-one ()
+  "A doubled bang reruns the previous command and reports when there is none."
+  (chat-test-with-temp-dir
+   (let ((ran nil)
+         (messages nil))
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message)
+                  (lambda (text) (push text messages)))
+                 ((symbol-function 'chat-ui--execute-shell-safe)
+                  (lambda (cmd) (push cmd ran) "out")))
+         (chat-ui--repeat-shell-command)
+         (should-not ran)
+         (should (string-match-p "repeat" (car messages)))
+         (chat-ui--handle-shell-command "echo one")
+         (chat-ui--repeat-shell-command)
+         (should (equal '("echo one" "echo one") ran)))))))
+
+(ert-deftest chat-ui-shell-command-does-not-record-a-directory-change ()
+  "A cd is not remembered as the command to repeat."
+  (chat-test-with-temp-dir
+   (let ((ran nil))
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message) #'ignore)
+                 ((symbol-function 'chat-ui--execute-shell-safe)
+                  (lambda (cmd) (push cmd ran) "out")))
+         (chat-ui--handle-shell-command "echo one")
+         (chat-ui--handle-shell-command (concat "cd " temp-dir))
+         (chat-ui--repeat-shell-command)
+         (should (equal '("echo one" "echo one") ran)))))))
+
+(ert-deftest chat-ui-execute-shell-safe-uses-a-real-shell-when-unrestricted ()
+  "A typed command reaches the system shell, so a pipe works."
+  (let ((chat-ui-shell-unrestricted t))
+    (should (string-match-p
+             "\\`2"
+             (string-trim (chat-ui--execute-shell-safe "printf 'a\\nb\\n' | wc -l")))))
+  ;; Held to the tool restrictions, the same command is refused.
+  (let ((chat-ui-shell-unrestricted nil)
+        (chat-tool-shell-enabled t))
+    (should (string-match-p "not allowed"
+                            (chat-ui--execute-shell-safe "printf x | wc -l")))))
+
+(ert-deftest chat-ui-slash-commands-cover-the-documented-names ()
+  "Every command named in the help text has a handler."
+  (dolist (name '("cancel" "model" "cmd" "!" "cd" "pwd" "question" "ask" "?"))
+    (let ((handler (cdr (assoc name chat-ui--slash-commands))))
+      (should handler)
+      (should (fboundp handler)))))
+
+(ert-deftest chat-ui-control-command-limits-what-runs-during-a-response ()
+  "Only cancel and model are reachable while a response is in flight."
+  (should (chat-ui--control-command (chat-command-parse "/cancel")))
+  (should (chat-ui--control-command (chat-command-parse "／model kimi")))
+  (should-not (chat-ui--control-command (chat-command-parse "/cd /tmp")))
+  (should-not (chat-ui--control-command (chat-command-parse "!ls")))
+  (should-not (chat-ui--control-command (chat-command-parse "hello"))))
+
+(ert-deftest chat-ui-dispatch-routes-parsed-commands ()
+  "Each command kind reaches its handler, and an unknown name is text."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'chat-ui--command-shell)
+               (lambda (arg) (push (cons 'shell arg) calls)))
+              ((symbol-function 'chat-ui--repeat-shell-command)
+               (lambda () (push '(repeat) calls)))
+              ((symbol-function 'chat-ui--command-question)
+               (lambda (arg) (push (cons 'question arg) calls)))
+              ((symbol-function 'chat-ui--command-cd)
+               (lambda (arg) (push (cons 'cd arg) calls)))
+              ((symbol-function 'chat-ui--send-user-message)
+               (lambda (arg) (push (cons 'message arg) calls))))
+      (chat-ui--dispatch-command (chat-command-parse "！ls -l"))
+      (chat-ui--dispatch-command (chat-command-parse "！！"))
+      (chat-ui--dispatch-command (chat-command-parse "？why"))
+      (chat-ui--dispatch-command (chat-command-parse "／cd /tmp"))
+      (chat-ui--dispatch-command (chat-command-parse "/wiki-lint now"))
+      (chat-ui--dispatch-command (chat-command-parse "\\!literal"))
+      (chat-ui--dispatch-command (chat-command-parse "plain text"))
+      (should (equal '((shell . "ls -l")
+                       (repeat)
+                       (question . "why")
+                       (cd . "/tmp")
+                       (message . "/wiki-lint now")
+                       (message . "!literal")
+                       (message . "plain text"))
+                     (nreverse calls))))))
+
 (ert-deftest chat-ui-tool-result-lines-truncate-long-results ()
   "Test oversized tool results are truncated with an omission marker."
   (let* ((chat-tool-caller-result-max-chars 20)

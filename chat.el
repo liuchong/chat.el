@@ -193,8 +193,21 @@ Returns the list of files that were loaded."
 
 Quick Shell (Hybrid Mode):
   !<cmd>                - Execute shell command directly
-  !cd <dir>             - Change working directory
+  /cmd <cmd>            - Same as !<cmd>
+  !!                    - Repeat the last shell command
+  !cd <dir>             - Change working directory (bare cd goes home)
+  /cd [dir]             - Change working directory (no dir prompts)
+  /pwd                  - Show the working directory
   ?<question>           - Ask AI directly (not saved to history)
+  \\<text>               - Send text as is, even if it starts with ! or /
+
+The working directory belongs to the session, so it is restored when the
+session is reopened, and the AI tools run there too.
+
+Fullwidth punctuation works wherever command syntax appears, so ！ ？ ／
+and an ideographic space all reach the same commands.  A command argument
+is never rewritten, so a shell body or question keeps its own
+punctuation.
 
 Reading Workflow:
   M-x chat-quote-region       - Quote active region into chat
@@ -298,6 +311,11 @@ SESSION is a chat-session struct."
     (with-current-buffer buffer
       (chat-mode)
       (setq-local chat--current-session session)
+      ;; Without this the buffer would inherit the directory of whatever
+      ;; buffer happened to be current, discarding the directory this
+      ;; session was pointed at.
+      (when-let ((directory (chat-session-working-directory session)))
+        (setq-local default-directory directory))
       (chat-ui-setup-buffer session))
     (setq chat--last-session-id (chat-session-id session))
     (pop-to-buffer buffer)))

@@ -8,12 +8,21 @@
 
 ## Current Phase
 
-Stage 15 capability-pack completion is complete (2026-08-24).
-Programming now includes native completion and rendered web reading;
-office includes Org agenda/capture/TODO/scheduling, Dired operations, and
-unit conversion; daily work includes web reading and unsent message-mode
+The input command layer is complete (2026-08-25). Chat input now parses
+into commands through `lisp/core/chat-command.el`, covering shell
+execution, history repeat, a session working directory, ephemeral
+queries, and a literal escape. Command syntax accepts fullwidth
+punctuation while arguments stay byte for byte. The working directory
+lives on the session and the AI tool path follows it, so typed shell
+commands and agent tools share one directory. Canonical suite: 627 tests
+passing.
+
+Stage 15 capability-pack completion landed before it (2026-08-24).
+Programming includes native completion and rendered web reading; office
+includes Org agenda/capture/TODO/scheduling, Dired operations, and unit
+conversion; daily work includes web reading and unsent message-mode
 drafts. Profile overlays filter provider-visible schemas and all sensitive
-actions use shared approvals. Canonical suite: 591 tests passing.
+actions use shared approvals.
 
 ## Main Objective
 
@@ -33,6 +42,7 @@ surface advertises only relevant scoped tools.
 
 ## Active Modules
 
+- `lisp/core/chat-command.el`
 - `lisp/agent/chat-agent.el`
 - `lisp/agent/chat-agent-loop.el`
 - `lisp/agent/chat-agent-transcript.el`
@@ -55,7 +65,9 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-25-input-command-layer.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage8-final-verification.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage7-capability-packs.md`
 - `../30-records/logs/stage-2026-08-24-work-platform-stage6-mcp-subagents.md`

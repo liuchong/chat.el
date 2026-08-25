@@ -184,6 +184,60 @@ Layout rules:
 | `M-x chat-ask-near-point` | Ask AI about nearby context in a chat session |
 | `M-x chat-ask-current-file` | Ask AI about the current file in a chat session |
 
+## In-Buffer Commands
+
+Text typed in the input area is sent to the model unless it starts with a
+command prefix.
+
+| Input | Purpose |
+|-------|---------|
+| `!<cmd>` | Run a shell command |
+| `/cmd <cmd>` | Same as `!<cmd>` |
+| `!!` | Repeat the last shell command |
+| `!cd <dir>` | Change the working directory; a bare `cd` goes home |
+| `/cd [dir]` | Change the working directory; with no argument, prompt for one |
+| `/pwd` | Show the working directory |
+| `?<question>` | Ask the model without recording the exchange in the session |
+| `/question <q>`, `/ask <q>` | Same as `?<question>` |
+| `/model [name]` | Retarget this session; with no name, prompt for one |
+| `/cancel` | Cancel the response in flight |
+| `\<text>` | Send text as is, even when it starts with `!` or `/` |
+
+A slash command that is not listed here stays ordinary text and reaches
+the model, so prose that begins with a slash still works.
+
+### Working Directory
+
+The working directory belongs to the session rather than the buffer. It is
+saved with the session and restored when the session is reopened, and the
+tools the agent runs use it too, so `!` commands and the model act on the
+same directory. An explicit change also outranks the project root that
+code mode detects.
+
+File tools still honor `chat-files-allowed-directories`, so pointing a
+session at a directory does not by itself grant the model access to it.
+
+### Shell Commands And Trust
+
+A command the model proposes goes through the restricted tool path, which
+accepts only `chat-tool-shell-allowed-commands` and rejects shell
+metacharacters. A command a person typed is treated as a different trust
+level: by default it runs through the system shell, so pipes, redirection
+and variables work. Set `chat-ui-shell-unrestricted` to nil to hold typed
+commands to the same restrictions as the model.
+
+### Fullwidth Punctuation
+
+Command syntax accepts fullwidth punctuation, so an input method that
+produces CJK punctuation reaches the same commands. `！ls`, `／cd /tmp`,
+`？why` and a name separated by an ideographic space all work.
+
+Folding applies only where command syntax appears: the leading prefix, the
+slash command name, and the separator before the argument. Arguments are
+never rewritten, so `!echo "你好，世界"` reaches the shell exactly as
+typed. Directory arguments additionally accept `／` and `～` for the path
+separator and home.
+
 ## Tool Model
 
 Built-in tools cover coding, work orchestration, external capabilities,

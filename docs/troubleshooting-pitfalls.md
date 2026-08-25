@@ -333,6 +333,19 @@ Two traps when investigating this:
 
 **Solution**: keep runtime only session state in buffer local variables or serialize only primitive metadata values into `chat-session-metadata`.
 
+### Session Metadata Reads Back As An Alist Keyed By Plain Symbols
+
+**Problem**: metadata written with `plist-put` and a keyword key reads as `nil` after the session is reopened, even though the value is present in the session file.
+
+**Cause**: metadata goes through JSON. A keyword plist encodes as a JSON object and decodes as an alist whose keys are plain symbols, so `:working-directory` comes back as `working-directory` and `plist-get` no longer matches. The value is intact; only the lookup fails, which makes this look like data loss.
+
+**Solution**: go through `chat-session-metadata-get` and `chat-session-metadata-set`, which store an alist keyed by plain symbols so the in-memory and on-disk shapes agree. Accept either a keyword or a plain symbol as the key.
+
+```elisp
+(chat-session-metadata-set session 'working-directory "/tmp/")
+(chat-session-metadata-get session :working-directory) ; => "/tmp/"
+```
+
 ### Persistence Stubs Must Not Masquerade As Real Load Paths
 
 **Problem**: higher level features like incremental indexing appear to exist but silently rebuild everything every time.

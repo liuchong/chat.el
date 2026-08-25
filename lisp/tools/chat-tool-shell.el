@@ -207,13 +207,31 @@ a temporary file and NOTE reports its path."
                                  (and notes (string-join notes "\n"))))
                  "\n")))
 
+(defun chat-tool-shell-execute-unrestricted (command &optional timeout)
+  "Execute COMMAND through the system shell and return the output.
+
+Unlike `chat-tool-shell-execute' this applies neither the allowed command
+list nor the shell metacharacter check, so pipes, redirection and
+variables all work.  It is meant for a command a person typed, where the
+person already decided what to run.  Never route model-supplied arguments
+here; the AI tool path stays on `chat-tool-shell-execute'.
+
+Runs in `default-directory' and reuses the timeout and output limits of
+the argv path."
+  (chat-tool-shell--run-argv
+   (list shell-file-name shell-command-switch command)
+   timeout))
+
 (defun chat-tool-shell--execute-argv (command &optional timeout)
-  "Execute COMMAND as a subprocess with TIMEOUT and output limits.
+  "Execute COMMAND as a subprocess with TIMEOUT and output limits."
+  (chat-tool-shell--run-argv (chat-tool-shell--split-command command) timeout))
+
+(defun chat-tool-shell--run-argv (argv &optional timeout)
+  "Run ARGV as a subprocess with TIMEOUT and output limits.
 The wait pumps `accept-process-output', so Emacs stays responsive
 while the command runs.  Output beyond the configured limits is
 truncated and spills into a temporary file."
-  (let* ((argv (chat-tool-shell--split-command command))
-         (default-directory (if (file-directory-p default-directory)
+  (let* ((default-directory (if (file-directory-p default-directory)
                                 (file-name-as-directory default-directory)
                               (file-name-as-directory temporary-file-directory)))
          (timeout (min (or timeout chat-tool-shell-timeout)
