@@ -418,6 +418,24 @@ Two traps when investigating this:
 
 **Solution**: coerce on read. Never compare a metadata value against a symbol or number without normalizing it first.
 
+### An `nreverse` In A Constructor Silently Shortens A Later Field
+
+**Problem**: a plist reported an overflow of 14 tokens when the demoted text was over 19000, while the text itself was correct.
+
+**Cause**: the constructor called `nreverse` on the accumulator for one field and then read the same variable for a later field. `nreverse` rewires the list in place, so the variable was left pointing at what had become the last cons -- a one-element list. Argument order made the corruption invisible: the field built first was right, the one built after it measured a fragment.
+
+**Solution**: build each string once, into a `let`, before assembling the return value, and derive the counts from those strings. A test asserting only `(> overflow 0)` passes on the broken version; assert that the count equals the measurement of the text actually returned.
+
+**Detection**: found by running the code against a real 20228-token instructions file and checking that kept plus overflow equalled the input. Unit tests with small fixtures did not surface it.
+
+### A Character Cap On Instructions Drops The Last Rules
+
+**Problem**: a long `AGENTS.md` loses the rules at its end, with no warning.
+
+**Cause**: merged instructions were truncated at `chat-project-instructions-max-chars` by taking a prefix, so whatever sat past that offset disappeared. Rule files put important material at the end as often as anywhere else.
+
+**Solution**: apply the cap to the compactable part only, and exempt declared resident spans. Over-long history should be summarized, which keeps a trace, rather than cut, which does not.
+
 ### A Budget Countdown Makes A Run Quit Early
 
 **Problem**: telling the model how many steps remain makes it abandon tasks it was close to finishing.

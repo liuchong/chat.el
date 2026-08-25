@@ -17,6 +17,12 @@ Code Mode 是 chat.el 的 AI 编程功能，提供代码生成、重构、测试
 |------|------|
 | [tips/long-document-workflow.md](tips/long-document-workflow.md) | **长文档工作流** - 如何分段起草、修改和审查较长文档 |
 
+### 上下文管理
+
+| 文档 | 说明 |
+|------|------|
+| [resident-context.md](resident-context.md) | **常驻上下文** - 在 AGENTS.md 中声明哪些内容不可被压缩，标记语法、上限与优先级规则 |
+
 ### 设计文档
 
 | 文档 | 说明 |

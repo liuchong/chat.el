@@ -353,6 +353,38 @@ up work they had not finished. `chat-agent-budget-nearing-ratio` (default
 nil and follow the global budget. Set one only to hold that display to a
 tighter ceiling.
 
+## Context Budget
+
+The step budget is a count this client picks; the context window is a
+ceiling the provider imposes. When the context fills up, earlier history is
+summarized rather than dropped, and the run is told so -- a run that knows
+its record will be condensed writes down conclusions, while a run that
+merely knows it is running out of room starts hoarding.
+
+Instruction files can declare which of their spans must never be
+summarized:
+
+```markdown
+## Non-negotiables <!-- chat:resident -->
+
+- RULE-01 — never thin these out
+```
+
+The marker is an HTML comment, so Markdown hides it and tools that do not
+implement the scheme see an ordinary comment and behave as before.
+Declared spans are also exempt from `chat-project-instructions-max-chars`,
+which previously cut instructions at a character count and silently dropped
+whatever sat at the end.
+
+A declaration is bounded: `chat-context-protected-max-ratio` (35% of usable
+context by default) caps the fixed region, and the excess is demoted to
+compactable in document order rather than obeyed, so no file can leave a
+session with no room to work in. `M-x chat-context-budget-report` shows
+where a session stands.
+
+See [docs/resident-context.md](docs/resident-context.md) for the full
+syntax and the ordering rules.
+
 ## File Access Defaults
 
 By default file tools can access:
@@ -572,6 +604,7 @@ emacs -Q -batch -l tests/run-e2e-tests.el -f ert-run-tests-batch-and-exit
 - `docs/README.md` for the document index
 - `docs/PROJECT_STATUS.md` for the current status snapshot
 - `docs/troubleshooting-pitfalls.md` for known issues and fixes
+- `docs/resident-context.md` for declaring instructions that must not be summarized
 - `.agents/` for agent workflow records, decisions, logs, and stage history
 
 ## Notes For Contributors

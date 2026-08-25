@@ -98,6 +98,8 @@ Returns the list of files that were loaded."
 (require 'chat-project)
 (require 'chat-stream)
 (require 'chat-context)
+(require 'chat-context-budget)
+(require 'chat-context-resident)
 (require 'chat-files)
 (require 'chat-reading)
 (require 'chat-approval)

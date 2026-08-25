@@ -22,6 +22,7 @@
 (require 'chat-tool-forge-ai)
 (require 'chat-tool-caller)
 (require 'chat-context)
+(require 'chat-context-budget)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-request-panel)
@@ -825,7 +826,14 @@ assistant response being filled in."
     (setq chat-ui--live-response-start assistant-start)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
            (messages-final
-            (chat-context-prepare-messages messages-with-tools nil session)))
+            (chat-context-prepare-messages
+             messages-with-tools
+             ;; Without a limit derived from the model this compacted
+             ;; against a flat figure, throwing away history a large
+             ;; window had ample room for.
+             (chat-context-budget-compaction-limit
+              (chat-session-model-id session))
+             session)))
       (chat-log "[UI] Starting %s agent run with %d messages"
                 transport (length messages-final))
       (setq chat-ui--active-agent-run
@@ -838,7 +846,10 @@ assistant response being filled in."
                    :transform-context-fn
                    (lambda (_run step-messages)
                      (chat-context-prepare-messages
-                      step-messages nil session))
+                      step-messages
+                      (chat-context-budget-compaction-limit
+                       (chat-session-model-id session))
+                      session))
                    :request-options
                    (append
                     (list :temperature 0.7)

@@ -20,6 +20,7 @@
 (require 'subr-x)
 (require 'chat-agent-types)
 (require 'chat-session)
+(require 'chat-context-budget)
 (require 'chat-tool-caller)
 (require 'chat-llm)
 (require 'chat-stream)
@@ -171,17 +172,30 @@ The reminder is appended here rather than stored on the run: it describes
 the step about to happen, so keeping it would leave a trail of stale
 counts in the transcript and repeat them in every later request.  It goes
 last because that is where a short instruction is actually noticed."
-  (let ((messages (chat-agent-run-state-messages run))
-        (reminder (chat-agent-budget-reminder
-                   (chat-agent-run-state-max-steps run)
-                   (chat-agent-run-state-step run))))
-    (if reminder
+  (let* ((messages (chat-agent-run-state-messages run))
+         (context (chat-context-budget-state
+                   messages (chat-agent-run-state-model run)))
+         (reminders
+          (delq nil
+                (list (chat-agent-budget-reminder
+                       (chat-agent-run-state-max-steps run)
+                       (chat-agent-run-state-step run))
+                      (chat-context-budget-reminder context)))))
+    ;; Reported once per run rather than per step: it is a configuration
+    ;; problem for a person to fix, and repeating it every step would bury
+    ;; the run's own output.
+    (when (and (= (chat-agent-run-state-step run) 1)
+               (chat-context-budget-protected-overflow-p context))
+      (message "%s" (chat-context-budget-overflow-warning context)))
+    (if reminders
         (append messages
-                (list (make-chat-message
-                       :id (chat-session-new-message-id "step-budget")
-                       :role :system
-                       :content reminder
-                       :timestamp (current-time))))
+                (mapcar (lambda (reminder)
+                          (make-chat-message
+                           :id (chat-session-new-message-id "budget")
+                           :role :system
+                           :content reminder
+                           :timestamp (current-time)))
+                        reminders))
       messages)))
 
 (defun chat-agent--dispatch (run)

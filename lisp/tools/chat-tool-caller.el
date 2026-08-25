@@ -191,6 +191,11 @@ across steps so it costs nothing to repeat."
          (if step-limit
              (concat (chat-agent-budget-system-note step-limit) "\n\n")
            "")
+         ;; The policy is stated here and the numbers are not: usage changes
+         ;; every step, and a figure baked into the prompt would be wrong by
+         ;; the time it is read.
+         (chat-context-budget-policy-note)
+         "\n\n"
          "You can call tools when they are necessary.\n"
          "Prefer the provider tool-calling API. Multiple tools may be issued in one response.\n"
          "If the provider has no tool API, respond with JSON objects of the form below.\n"

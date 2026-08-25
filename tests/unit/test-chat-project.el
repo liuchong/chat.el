@@ -66,6 +66,58 @@
      (let ((text (chat-project-instructions b)))
        (should (string-match-p "project instructions truncated" text))))))
 
+(ert-deftest chat-project-instructions-partition-declared-residency ()
+  "Test a marked span is separated from the rest of the instructions."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "## Resident Rules <!-- chat:resident -->\n"
+               "- RULE-01 never thin out rules\n"
+               "## Notes\n"
+               "background chatter\n"))
+     (let ((parts (chat-project-instructions-partitioned b)))
+       (should (string-match-p "RULE-01" (plist-get parts :resident)))
+       (should-not (string-match-p "chatter" (plist-get parts :resident)))
+       (should (string-match-p "chatter" (plist-get parts :compactable)))))))
+
+(ert-deftest chat-project-instructions-cap-spares-resident-text ()
+  "Test a declared span survives a size cap that the rest does not.
+
+Truncating the merged text by character count cut whatever sat at the
+end, so a long file lost its last rules silently.  A declared span has to
+outrank the cap or the declaration means nothing."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (chat-project-instructions-max-chars 80))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert (make-string 500 ?r)
+               "\n<!-- chat:resident -->\n"
+               "RULE-01 must survive\n"
+               "<!-- chat:end -->\n"))
+     (let ((parts (chat-project-instructions-partitioned b))
+           (text (chat-project-instructions b)))
+       (should (string-match-p "RULE-01 must survive"
+                               (plist-get parts :resident)))
+       (should (string-match-p "project instructions truncated"
+                               (plist-get parts :compactable)))
+       ;; The merged form keeps it too, and puts it first.
+       (should (string-match-p "RULE-01 must survive" text))
+       (should (< (string-match "RULE-01 must survive" text)
+                  (string-match "project instructions truncated" text)))))))
+
+(ert-deftest chat-project-instructions-unmarked-file-behaves-as-before ()
+  "Test an unmarked instructions file is unchanged by the new scheme."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "## Rules\n- one\n"))
+     (let ((parts (chat-project-instructions-partitioned b)))
+       (should-not (plist-get parts :resident))
+       (should (string-match-p "- one" (plist-get parts :compactable)))))))
+
 (ert-deftest chat-project-instructions-nil-without-files ()
   "Test no instructions are produced without any instruction files."
   (chat-project-test--with-tree
