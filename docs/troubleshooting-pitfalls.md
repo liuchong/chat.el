@@ -1715,4 +1715,31 @@ is at the bottom, and no arrangement of one can tell the two cases apart.
 arguments and test the rule. Worth doing regardless -- the rule was the
 whole of a user-facing promise and it was three lines buried in a loop.
 
+### An Editable Prompt That Nothing Ever Redraws
+
+**Problem**: the input prompt disappeared and never came back. Reopening
+the session was the only way to get it, so a session could be left with
+no prompt for as long as it stayed open.
+
+**Cause**: two omissions that only matter together. The prompt was plain
+unprotected text in the region the reader types in, so an ordinary edit
+could take it; and nothing on the send path drew it, so once taken it was
+taken for good. Either alone is survivable. Together they turn a
+keystroke into a permanent broken state, and the trigger is impossible to
+find afterwards because any edit will do.
+
+**Solution**: both halves. The prompt is read-only, front-sticky and
+rear-nonsticky, as every shell in Emacs concluded; and it is checked and
+redrawn on every send, which is free when it is already right. Do not
+look for the trigger when the real defect is that nothing repairs it.
+
+### Recovery That Measures Instead Of Marking
+
+**Problem**: finding a drawn prompt by counting back from the input marker
+works on an intact prompt and fails on a half-eaten one -- the only case
+recovery is for.
+
+**Solution**: mark it with its own text property and find it by that. A
+recovery path tested only against undamaged input is untested.
+
 Last updated: 2026-08-26

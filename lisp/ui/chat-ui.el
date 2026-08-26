@@ -1146,6 +1146,20 @@ all produce the same screen."
   "Face for the input prompt while a command other than the baseline holds it."
   :group 'chat-ui)
 
+(defconst chat-ui--input-prompt-properties
+  '(chat-ui-prompt t read-only t front-sticky (read-only) rear-nonsticky t)
+  "Properties every drawn prompt carries.
+
+Read-only because the prompt sits inside the region the reader types in,
+where an unprotected one is a single backspace from being gone -- which
+is what every shell in Emacs concluded too.  Front-sticky so nothing can
+be typed into it from the left, rear-nonsticky so what is typed after it
+inherits neither the protection nor the face.
+
+Tagged with `chat-ui-prompt' so it can be found again by what it is.
+Measuring back from the input marker instead would fail in the one case
+that matters: a prompt that has already been partly eaten.")
+
 (defun chat-ui--input-prompt ()
   "Return the text that opens the input area.
 
@@ -1153,24 +1167,53 @@ Names the command plain input will run through when that is not the
 baseline.  The status line says so too, but it is at the top of a buffer
 that scrolls and the cursor is down here: a shell that looks like a chat
 box is how a question ends up being run as a command."
-  (if (chat-ui-default-command-claimed-p)
-      (propertize (format "%s> " (chat-ui--display-command-name
-                                 (chat-ui-default-command)))
-                  'face 'chat-ui-claimed-prompt)
-    "> "))
+  (let ((claimed (chat-ui-default-command-claimed-p)))
+    (apply #'propertize
+           (if claimed
+               (format "%s> " (chat-ui--display-command-name
+                               (chat-ui-default-command)))
+             "> ")
+           (append (when claimed '(face chat-ui-claimed-prompt))
+                   chat-ui--input-prompt-properties))))
+
+(defun chat-ui--input-prompt-bounds ()
+  "Return the extent of the drawn prompt as a cons, or nil when none is drawn."
+  (let ((end (and (markerp chat-ui--input-overlay)
+                  (marker-position chat-ui--input-overlay))))
+    (when (and end
+               (> end (point-min))
+               (get-text-property (1- end) 'chat-ui-prompt))
+      (cons (or (previous-single-property-change end 'chat-ui-prompt)
+                (point-min))
+            end))))
 
 (defun chat-ui--render-input-prompt ()
-  "Rewrite the input prompt in place, keeping the input marker after it."
+  "Draw the input prompt, keeping the input marker just after it.
+
+Returns without touching the buffer when the prompt already on screen is
+the one wanted, which is what makes this cheap enough to call on every
+send.  Calling it there is the point: the prompt is ordinary buffer text
+and nothing else on the send path draws it, so a prompt that got eaten
+used to stay eaten for the life of the buffer.  Now it costs one RET.
+
+Draws at the marker when no prompt is found rather than declining to, so
+the case where the whole prompt is gone recovers as well as the case
+where some of it is."
   (when (and (markerp chat-ui--input-overlay)
              (marker-position chat-ui--input-overlay))
-    (save-excursion
-      (let* ((inhibit-read-only t)
-             (end (marker-position chat-ui--input-overlay))
-             (start (progn (goto-char end) (line-beginning-position))))
-        (delete-region start end)
-        (goto-char start)
-        (insert (chat-ui--input-prompt))
-        (set-marker chat-ui--input-overlay (point))))))
+    (let* ((wanted (chat-ui--input-prompt))
+           (bounds (chat-ui--input-prompt-bounds))
+           (drawn (and bounds (buffer-substring (car bounds) (cdr bounds)))))
+      (unless (equal-including-properties drawn wanted)
+        (save-excursion
+          (let ((inhibit-read-only t)
+                (start (or (car bounds)
+                           (marker-position chat-ui--input-overlay))))
+            (when bounds
+              (delete-region (car bounds) (cdr bounds)))
+            (goto-char start)
+            (insert wanted)
+            (set-marker chat-ui--input-overlay (point))))))))
 
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
@@ -1187,6 +1230,11 @@ box is how a question ends up being run as a command."
   "Act on the input area, either as a command or as a message."
   (interactive)
   (when chat--current-session
+    ;; Before reading the input rather than after clearing it, so a prompt
+    ;; that went missing is back on screen at the moment the reader looks
+    ;; for it.  Reading the input afterwards is safe: repairing the prompt
+    ;; moves the marker with the typed text, not through it.
+    (chat-ui--render-input-prompt)
     (let* ((input-start (marker-position chat-ui--input-overlay))
            (input-end (point-max))
            (content (string-trim (buffer-substring-no-properties input-start input-end)))

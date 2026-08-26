@@ -1420,6 +1420,80 @@ same thing any unrecognized slash does."
                     (marker-position chat-ui--input-overlay)
                     (point-max))))))
 
+(ert-deftest chat-ui-the-prompt-cannot-be-backspaced-away ()
+  "The prompt sits where the reader types, so it has to defend itself."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (goto-char (point-max))
+    (should-error (delete-char -1) :type 'text-read-only)
+    (should (equal "cmd> "
+                   (buffer-substring-no-properties
+                    (line-beginning-position)
+                    (marker-position chat-ui--input-overlay))))))
+
+(ert-deftest chat-ui-typing-after-the-prompt-is-not-protected-too ()
+  "Protection that spread to the input would make the input unusable."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (goto-char (point-max))
+    (insert-and-inherit "echo hi")
+    (should (equal "echo hi" (chat-ui--input-text)))
+    ;; Clearing what was typed must not be refused either.
+    (chat-ui--clear-input (marker-position chat-ui--input-overlay) (point-max))
+    (should (equal "" (chat-ui--input-text)))))
+
+(ert-deftest chat-ui-a-lost-prompt-comes-back-on-the-next-send ()
+  "A prompt that goes missing used to stay missing for the life of the buffer.
+
+Nothing on the send path drew it, so whatever ate it -- a completion UI
+replacing a region, a kill that reached too far -- left a buffer with no
+prompt and no way back short of reopening the session."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (let ((end (marker-position chat-ui--input-overlay))
+          (inhibit-read-only t))
+      (goto-char end)
+      (delete-region (line-beginning-position) end))
+    (should (equal "" (buffer-substring-no-properties
+                       (line-beginning-position)
+                       (marker-position chat-ui--input-overlay))))
+    (goto-char (point-max))
+    (insert "echo hi")
+    (chat-ui-send-message)
+    (should (equal "cmd> "
+                   (buffer-substring-no-properties
+                    (line-beginning-position)
+                    (marker-position chat-ui--input-overlay))))
+    ;; The repair must not have swallowed what was typed.
+    (should (equal (car shell-calls) "echo hi"))))
+
+(ert-deftest chat-ui-half-a-prompt-is-repaired-rather-than-doubled ()
+  "Recovery keys off what the prompt is, not off how wide it should be."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (let ((end (marker-position chat-ui--input-overlay))
+          (inhibit-read-only t))
+      (delete-region (- end 2) end))
+    (chat-ui--render-input-prompt)
+    (should (equal "cmd> "
+                   (buffer-substring-no-properties
+                    (line-beginning-position)
+                    (marker-position chat-ui--input-overlay))))))
+
+(ert-deftest chat-ui-sending-leaves-the-prompt-alone-when-it-is-intact ()
+  "The common case must not churn the buffer on every RET."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (let ((before (marker-position chat-ui--input-overlay)))
+      (goto-char (point-max))
+      (insert "echo hi")
+      (chat-ui-send-message)
+      (should (= before (marker-position chat-ui--input-overlay)))
+      (should (equal "cmd> "
+                     (buffer-substring-no-properties
+                      (line-beginning-position)
+                      (marker-position chat-ui--input-overlay)))))))
+
 (ert-deftest chat-ui-a-slash-command-still-runs-while-auto-is-on ()
   "Auto claims plain input only.  An explicit command still means itself."
   (chat-ui-auto-test--with-session

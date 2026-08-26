@@ -650,7 +650,10 @@ the header and in which commands do anything."
   (add-hook 'post-self-insert-hook
             #'chat-ui--maybe-complete-path-after-insert
             nil t)
-  (erase-buffer))
+  ;; The prompt is read-only text, so re-running the mode over a buffer
+  ;; that already has one has to be allowed to clear it.
+  (let ((inhibit-read-only t))
+    (erase-buffer)))
 
 (defun chat--refresh-buffer ()
   "Refresh current chat buffer with session content."
