@@ -290,6 +290,18 @@ can change mid-session, and only a full rewrite refreshes the header.
   (cons (cons 'type "message")
         (chat-message--serialize message)))
 
+(defvar chat-session-after-save-functions nil
+  "Functions called with a session once it has reached disk.
+
+For things derived from a session rather than part of it -- an index of
+what exists, for instance.  Errors are swallowed: nothing derived may
+turn a successful save into a failed one.")
+
+(defun chat-session--after-save (session)
+  "Tell `chat-session-after-save-functions' that SESSION was written."
+  (dolist (fn chat-session-after-save-functions)
+    (condition-case nil (funcall fn session) (error nil))))
+
 (defun chat-session-save (session)
   "Save SESSION to disk as a JSONL file.
 
@@ -311,6 +323,7 @@ Returns t on success, nil on failure."
             (dolist (message (chat-session-messages session))
               (insert (json-encode (chat-session--message-entry message)) "\n")))
           (rename-file temp-file filename t)
+          (chat-session--after-save session)
           t)
       (when (file-exists-p temp-file)
         (delete-file temp-file)))))
@@ -325,6 +338,7 @@ Falls back to a full save when the file is missing."
        filename
        (concat (json-encode (chat-session--message-entry message)) "\n"
                (json-encode (chat-session--state-entry session)) "\n"))
+      (chat-session--after-save session)
       t)))
 
 (defun chat-session--atomic-append-jsonl (filename records)

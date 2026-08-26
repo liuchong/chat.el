@@ -1395,7 +1395,7 @@ where some of it is."
   "Act on the input area, either as a command or as a message."
   (interactive)
   (when chat--current-session
-    (chat-ui--clock-start)
+    (chat-ui--clock-start (chat-session-id chat--current-session))
     ;; Before reading the input rather than after clearing it, so a prompt
     ;; that went missing is back on screen at the moment the reader looks
     ;; for it.  Reading the input afterwards is safe: repairing the prompt

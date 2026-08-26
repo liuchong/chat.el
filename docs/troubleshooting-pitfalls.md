@@ -2094,4 +2094,88 @@ size came from volume of lines.
 reported 3KB each and 0% of the log. The units have to be the record, not
 the line -- bytes from the marker to the next timestamp.
 
+### A Directory Whose Glob Decides What Its Files Are
+
+**Problem**: adding a per-session event stream at
+`~/.chat/sessions/<id>.wire.jsonl` would have handed every stream to
+`chat-session-load` as though it were a session, on every listing.
+
+**Cause**: `chat-session-list` decides what a session is by globbing:
+
+```elisp
+(dolist (file (directory-files chat-session-directory t "\\.jsonl$"))
+  (let ((id (file-name-base file)))            ; "abc.wire" is now an id
+    ...(chat-session-load id)))
+```
+
+Anything ending in `.jsonl` in that directory is a session by definition,
+so a sibling file is not a new file -- it is a new session that fails to
+load. Quietly, because the load is wrapped in `condition-case`. The same
+trap caught the index: `index.jsonl` in there would be read as a session by
+the very rebuild that walks the sessions to regenerate it.
+
+**Solution**: a subdirectory for the streams, and the index outside the
+session directory. Not a filter on the glob -- a filter is a rule someone
+has to remember when adding the next file.
+
+**General rule**: when a directory's contents are identified by pattern
+rather than by a manifest, that pattern is a namespace, and putting an
+unrelated file in it is a collision. Check what globs a directory before
+adding a file to it.
+
+### A Form Added To The End Of A Function Is Its Return Value
+
+**Problem**: a compaction test began failing with
+`(wrong-type-argument listp 392)`. The callback that should have received a
+summary entry received the number 392.
+
+**Cause**: recording compaction as an event, appended after the work:
+
+```elisp
+(defun chat-context--persist-compaction (session plan summary kind)
+  (let* (...)
+    (chat-session-add-summary ...)          ; used to be the value
+    (when (fboundp 'chat-session-wire-record)
+      (chat-session-wire-record ...))))     ; now the value
+```
+
+`chat-session-wire-record` returned the byte count from the `puthash` that
+tracks file size, so the function returned 390-odd bytes where its caller
+expected an alist. Nothing about the added code was wrong in itself.
+
+**Solution**: bind what the function returns before adding anything after
+it, and return it explicitly. Separately, a recording function should
+return `t` rather than an incidental value, so that leaking it is harmless.
+
+**General rule**: in Lisp every function ends in a return value, so
+appending a statement to one is an interface change. Instrumentation is
+where this bites, because instrumentation is added at the end by nature.
+
+### Logging Costs Its Arguments Even When It Is Off
+
+**Problem**: `chat-log` checked `chat-log-enabled` before writing, so
+turning logging off appeared to make it free. It did not: the arguments
+were evaluated at the call site, before the check was reached. One call
+formatted a 250KB request payload on every send in order to hand it to a
+function that would discard it.
+
+**Cause**: it was a function. `(chat-log "%S" (expensive))` evaluates
+`(expensive)` to build the call.
+
+**Solution**: make it a macro, so the arguments sit inside the condition:
+
+```elisp
+(defmacro chat-log (format-string &rest args)
+  `(when chat-log-enabled
+     (chat-log--write ,format-string (list ,@args))))
+```
+
+Two things to check before doing this to an existing logger: no `.elc`
+files that were compiled against the function, and no site that takes it as
+a value -- `funcall`, `apply`, `mapcar`, `add-hook`. A macro in any of
+those positions fails at runtime, not at compile time.
+
+**General rule**: a guard inside a function guards the body, not the call.
+When the arguments are the expensive part, the guard has to be outside.
+
 Last updated: 2026-08-27

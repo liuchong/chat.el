@@ -94,6 +94,9 @@ Returns the list of files that were loaded."
 (require 'chat-request-diagnostics)
 (require 'chat-command)
 (require 'chat-session)
+(require 'chat-session-wire)
+(require 'chat-session-index)
+(chat-session-index-install)
 (require 'chat-session-tree)
 (require 'chat-transcript)
 (require 'chat-memory)
@@ -132,6 +135,8 @@ Returns the list of files that were loaded."
 
 ;; Load the agent kernel after transports and tooling.
 (require 'chat-agent)
+(require 'chat-agent-wire)
+(chat-agent-wire-install)
 
 ;; Plugin host: Emacs-native tools and optional user plugins.
 (require 'chat-plugin)

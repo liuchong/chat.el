@@ -222,12 +222,26 @@ this is a cheap head rather than a promise."
     (session plan summary kind)
   "Persist SUMMARY for SESSION according to PLAN and KIND."
   (let* ((cut (plist-get plan :cut))
-         (through (nth cut (chat-session-messages session))))
-    (chat-session-add-summary
-     session summary
-     `((throughMessageId . ,(chat-message-id through))
-       (messageCount . ,(1+ cut))
-       (kind . ,kind)))))
+         (through (nth cut (chat-session-messages session)))
+         ;; Held rather than returned from the tail: callers take the entry
+         ;; from this function's value, so anything added after it must not
+         ;; be the last form.
+         (entry (chat-session-add-summary
+                 session summary
+                 `((throughMessageId . ,(chat-message-id through))
+                   (messageCount . ,(1+ cut))
+                   (kind . ,kind)))))
+    ;; Recorded as an event because compaction is the one thing that makes
+    ;; a session's history disagree with what the model was shown, and a
+    ;; reader comparing the two needs to know where the disagreement began.
+    (when (fboundp 'chat-session-wire-record)
+      (funcall 'chat-session-wire-record
+               (chat-session-id session) 'compaction
+               (list (cons 'kind kind)
+                     (cons 'through_message_id (chat-message-id through))
+                     (cons 'message_count (1+ cut))
+                     (cons 'summary_chars (length summary)))))
+    entry))
 
 (defun chat-context-compact-session (session max-tokens &optional summary kind)
   "Compact one safe prefix of SESSION for MAX-TOKENS.

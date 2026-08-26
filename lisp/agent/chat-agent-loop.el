@@ -32,16 +32,24 @@
 (defvar chat-plugin-pre-step-functions nil)
 (defvar chat-plugin-post-turn-functions nil)
 
+(defvar chat-agent-event-functions nil
+  "Functions called with every agent event, besides the run's own reader.
+
+For observers that are not the run's caller: recording it, measuring it.
+Each is called with the event and its errors are swallowed, because
+watching a run must not be able to change what the run does.")
+
 (defun chat-agent--emit (run type &rest props)
   "Deliver an event of TYPE with PROPS to the RUN event callback."
-  (when-let ((on-event (chat-agent-run-state-on-event run)))
-    (condition-case nil
-        (funcall on-event
-                 (append (list :type type
-                               :step (chat-agent-run-state-step run)
-                               :run run)
-                         props))
-      (error nil))))
+  (let ((event (append (list :type type
+                             :step (chat-agent-run-state-step run)
+                             :turn (chat-agent-run-state-turn run)
+                             :run run)
+                       props)))
+    (when-let ((on-event (chat-agent-run-state-on-event run)))
+      (condition-case nil (funcall on-event event) (error nil)))
+    (dolist (observe chat-agent-event-functions)
+      (condition-case nil (funcall observe event) (error nil)))))
 
 (defun chat-agent--queue-order (run queue)
   "Return QUEUE in the delivery order configured for RUN."
