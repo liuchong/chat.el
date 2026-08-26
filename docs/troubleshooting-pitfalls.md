@@ -1628,4 +1628,91 @@ whose behaviour a command already covers, is a second implementation to
 keep in step. Check callers before assuming a public-looking function has
 any.
 
+### A Cond With No Final Clause, On An Event Stream
+
+**Problem**: a reasoning model thought for a minute with the chat buffer
+perfectly still, then painted its whole reply at once. No error anywhere,
+and the transport log showed bytes arriving continuously the entire time.
+
+**Cause**: the UI event handler was a `cond` with six branches and no `t`
+clause, while the agent emitted seventeen event types. `stream-reasoning`
+fell off the end and was discarded silently, and reasoning is where a
+reasoning model spends its time.
+
+**Solution**: a handler over someone else's event stream needs a
+catch-all, and a test that reads both sides and fails when the sender
+gains a type the receiver neither handles nor names. A dropped event has
+no symptom of its own -- not an error, not a wrong value, just an absence
+that looks exactly like a hang.
+
+### A Field Named Two Ways On Sibling Events
+
+**Problem**: reading `:content` from a reasoning event yielded nothing, on
+every event, silently.
+
+**Cause**: `stream-chunk` carries its accumulation as `:content` and its
+delta as `:text`. `stream-reasoning`, emitted twelve lines away, carries
+its accumulation as `:reasoning` and its delta as `:text`. Reaching for the
+name the sibling uses returns nil rather than failing.
+
+**Solution**: check the emit site rather than the neighbouring one. A plist
+read for a key that is not there is indistinguishable from a key holding
+an empty value, so nothing about the mistake is loud.
+
+### A Defcustom Under A Defvar Of The Same Name
+
+**Problem**: a flag had a `defvar` near the top of a file and a
+`defcustom` near the bottom. Changing the `defcustom` default had no
+effect, and `customize` edited a setting the code did not read.
+
+**Cause**: `custom-declare-variable` leaves an already-bound variable
+alone, so the `defvar` won. Both defaults were the same value, which is why
+it went unnoticed for as long as it did.
+
+**Solution**: one declaration, and make it the customizable one, placed
+where the earliest reference can see it. Note that removing the `defvar`
+moves the declaration below its first use, which the byte-compiler will
+report as a free variable -- move the `defcustom` up rather than leaving
+the pair.
+
+### A Progress Message That Never Changes
+
+**Problem**: twenty seconds between starting the request and the first
+token, with `Streaming, waiting for first chunk` on screen throughout, and
+users concluding the program had hung.
+
+**Cause**: the message was accurate and static. A reader cannot tell a
+working request from a dead one by looking at text that does not move.
+
+**Solution**: put a number in it that changes. The surface already
+refreshed once a second, so counting the seconds cost nothing and turned
+the same message into evidence the request is alive.
+
+### A Typed Record Model With No Writer
+
+**Problem**: the transcript carried turn, step, category, work and
+reasoning, with fold styles and faces keyed to them, and the display still
+had to infer everything from message roles.
+
+**Cause**: the stamping API was called only from tests. Production built
+its messages plain, so the model existed and nothing populated it.
+
+**Solution**: grep for callers before trusting that a model is in use.
+An API used only by its own tests is worse than a missing one -- a missing
+one is visibly missing, while this made the codebase look finished.
+
+### A Batch Window Reports Its End As The End Of The Buffer
+
+**Problem**: a test that arranged a window at the top of a long buffer and
+asserted that live output did not scroll it failed: the window had
+followed to the bottom.
+
+**Cause**: under `-batch` there is no real display, so `window-end`
+returns `point-max` whatever the buffer holds. Every window looks like it
+is at the bottom, and no arrangement of one can tell the two cases apart.
+
+**Solution**: extract the decision into a function taking the positions as
+arguments and test the rule. Worth doing regardless -- the rule was the
+whole of a user-facing promise and it was three lines buried in a loop.
+
 Last updated: 2026-08-26

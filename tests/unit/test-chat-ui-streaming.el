@@ -139,6 +139,98 @@ The chunk event names its two the other way round, `:content' and
   (should (eq (default-value 'chat-ui-use-streaming) t))
   (should (custom-variable-p 'chat-ui-use-streaming)))
 
+;; ------------------------------------------------------------------
+;; Nothing on the request path may block
+;; ------------------------------------------------------------------
+
+(defconst test-chat-ui--blocking-calls
+  '(url-retrieve-synchronously accept-process-output sleep-for sit-for
+                               call-process call-process-shell-command)
+  "Calls that stop the Emacs main loop.
+
+Banned on the request path only.  `chat-llm--post-sync' exists on purpose
+for callers that want to wait, and the file tools shell out; the rule is
+that sending a message and drawing the reply must never wait.")
+
+(defconst test-chat-ui--request-path
+  '(("lisp/ui/chat-ui.el"
+     chat-ui-send-message chat-ui--send-user-message chat-ui--get-response
+     chat-ui--start-agent-run chat-ui--render-live-region
+     chat-ui--insert-live-reasoning chat-ui--follow-live-output
+     chat-ui--make-agent-event-handler)
+    ("lisp/agent/chat-agent-loop.el"
+     chat-agent--dispatch chat-agent--dispatch-stream
+     chat-agent--dispatch-sync chat-agent--handle-result
+     chat-agent--complete-result)
+    ("lisp/core/chat-stream.el"
+     chat-stream-request chat-stream--handle-output)
+    ("lisp/llm/chat-llm.el"
+     chat-llm-request-async chat-llm--post-async))
+  "Functions a message passes through, by file.")
+
+(defun test-chat-ui--function-source (file name)
+  "Return the source sexp of NAME as written in FILE."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name file chat-test-root-dir))
+    (goto-char (point-min))
+    (when (re-search-forward
+           (format "^(\\(?:cl-\\)?defun %s[ \n]" (regexp-quote (symbol-name name)))
+           nil t)
+      (goto-char (match-beginning 0))
+      (read (current-buffer)))))
+
+(defun test-chat-ui--calls-in (form)
+  "Return every symbol in FORM, flattened."
+  (cond
+   ((symbolp form) (list form))
+   ((consp form) (append (test-chat-ui--calls-in (car form))
+                         (test-chat-ui--calls-in (cdr form))))
+   (t nil)))
+
+(ert-deftest chat-ui-the-request-path-never-blocks ()
+  "Sending a message and drawing the reply must not stop the main loop.
+
+Acceptance item 21 of specs/004.  A blocking call anywhere along here
+freezes the frame the user is trying to read and scroll while the answer
+arrives."
+  (let ((offenders nil))
+    (dolist (entry test-chat-ui--request-path)
+      (let ((file (car entry)))
+        (dolist (name (cdr entry))
+          (let ((source (test-chat-ui--function-source file name)))
+            ;; A name that has been renamed away would pass vacuously.
+            (should source)
+            (dolist (call (test-chat-ui--calls-in source))
+              (when (memq call test-chat-ui--blocking-calls)
+                (push (list file name call) offenders)))))))
+    (should-not offenders)))
+
+;; The rule is tested rather than the scrolling, because a batch window
+;; reports its end as the end of the buffer whatever the buffer holds, so
+;; every window looks like it is at the bottom and no arrangement of one
+;; can tell the two cases apart.
+
+(ert-deftest chat-ui-a-scrolled-reader-is-left-alone ()
+  "Being pulled back to the bottom mid-read is worse than no following."
+  (should-not (chat-ui-window-follows-p 100 400 nil 1 5000)))
+
+(ert-deftest chat-ui-a-reader-at-the-edge-keeps-up ()
+  "Someone already at the end does want the new output."
+  (should (chat-ui-window-follows-p 4900 5000 nil 1 5000)))
+
+(ert-deftest chat-ui-a-window-just-short-of-the-end-still-follows ()
+  "Exactly at the end is too strict; a line or two of slack is not."
+  (should (chat-ui-window-follows-p 4900 4950 nil 1 5000))
+  (should-not (chat-ui-window-follows-p 4900 4800 nil 1 5000)))
+
+(ert-deftest chat-ui-a-cursor-in-the-input-area-is-never-moved ()
+  "Following while someone types would take the cursor out from under them."
+  (should-not (chat-ui-window-follows-p 4990 5000 4980 1 5000)))
+
+(ert-deftest chat-ui-a-short-buffer-always-follows ()
+  "A buffer smaller than the slack has no scrolled-up state to protect."
+  (should (chat-ui-window-follows-p 1 20 nil 1 20)))
+
 (ert-deftest chat-ui-streaming-timer-lexical-binding ()
   "Test that run-with-idle-timer callback works with lexical binding."
   (let ((result nil)

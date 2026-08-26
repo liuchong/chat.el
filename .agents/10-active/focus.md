@@ -134,7 +134,7 @@ hand-wrote the frontmatter that the real path failed to write. A helper
 that constructs valid input by hand tests the reader and not the writer.
 Decision 0015 records it.
 
-Canonical suite: 945 tests passing.
+Canonical suite: 984 tests passing.
 
 ## Next Stage
 

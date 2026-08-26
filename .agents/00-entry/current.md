@@ -88,7 +88,40 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 945 tests passing.
+Canonical suite: 984 tests passing.
+
+A run is now something you can watch happen. It used to be that a
+reasoning model thought for a minute with the screen perfectly still and
+then painted its whole reply at once, and the log proves the transport was
+never at fault -- bytes arrived continuously for the whole minute. The UI
+event handler was a six-branch `cond` with no final clause, and
+`stream-reasoning` was one of eleven event types that fell off the end and
+were discarded without a word. Reasoning now renders as it arrives, dim
+and folded away once the answer starts; the handler has a catch-all; and a
+test reads both source files and fails if the agent gains an event the UI
+neither handles nor names. Streaming is on by default, and the flag is
+declared once rather than as a `defvar` that silently beat the `defcustom`
+below it.
+
+Waiting is now legible. Twenty seconds passed between starting curl and
+the first token on a 308KB prompt, and nothing on screen said so. Reasoning
+counts as arriving data in the trace, the live line names the phase it is
+in, and the seconds tick while the first token is outstanding -- a number
+that moves is the difference between a reader who waits and one who
+assumes a hang. A stall after reasoning says reasoning stalled instead of
+claiming nothing ever came.
+
+The typed transcript record finally has a writer. Turn, step, category,
+work and reasoning existed with fold styles and faces keyed to them, and
+grep found the stamping API called only from tests, so a multi-round run
+reached disk as a flat list the display had to guess at. Messages are
+stamped where they are made, the turn number is settled once per run so
+steering cannot push later steps into the next turn, and reasoning rides
+on the step that produced it rather than becoming a message a later
+request would send back. A session can also name its own history file.
+
+`M-p` and `M-n` recall what was sent, persisted across restarts. The stub
+that printed "History navigation not yet implemented" is gone.
 
 The wiki became a feature. `lisp/wiki/chat-wiki.el` had been in the tree
 four months with five documented `/wiki-*` names, no handler behind any of

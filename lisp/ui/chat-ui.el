@@ -1796,11 +1796,30 @@ there is no second request path to hold it."
       tool-events
       "\n"))))
 
+(defconst chat-ui-follow-slack 80
+  "How far from the end a window may be and still be counted as at it.")
+
+(defun chat-ui-window-follows-p (window-point window-end input-start
+                                              buffer-min buffer-max)
+  "Return non-nil when a window at WINDOW-POINT should follow new output.
+
+WINDOW-END is where the window's view stops, INPUT-START where the input
+area begins or nil, and BUFFER-MIN and BUFFER-MAX the buffer's bounds.
+
+A named rule rather than a condition buried in a loop, because it is the
+whole of the promise that a reader who has scrolled up is left alone: only
+a window already at the end follows, and never one whose point sits in the
+input area, where following would move the cursor out from under someone
+who is typing."
+  (and (or (null input-start) (< window-point input-start))
+       (>= window-end (max buffer-min (- buffer-max chat-ui-follow-slack)))))
+
 (defun chat-ui--follow-live-output (ui-buffer)
   "Scroll windows showing UI-BUFFER to the live response edge.
-Only windows already near the bottom follow, and only when their
-point is outside the input area, so typing is never interrupted and
-manual scrolling is never overridden."
+
+Only windows already near the bottom follow, and only when their point is
+outside the input area, so typing is never interrupted and manual
+scrolling is never overridden."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (let ((edge (and (markerp chat-ui--messages-end)
@@ -1810,10 +1829,12 @@ manual scrolling is never overridden."
         (when edge
           (dolist (window (get-buffer-window-list ui-buffer nil t))
             (when (and (window-live-p window)
-                       (or (null input-start)
-                           (< (window-point window) input-start))
-                       (>= (window-end window t)
-                           (max (point-min) (- (point-max) 80))))
+                       (chat-ui-window-follows-p
+                        (window-point window)
+                        (window-end window t)
+                        input-start
+                        (point-min)
+                        (point-max)))
               (set-window-point window edge))))))))
 
 (defface chat-ui-shell-prompt-face
