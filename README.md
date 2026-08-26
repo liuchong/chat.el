@@ -460,6 +460,31 @@ You can override this with `chat-files-allowed-directories`.
       (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
+## Auto: The Default Command
+
+Shell work comes in runs. Prefixing every line with `!` is the friction
+that makes people give up on the surface and open a terminal, so a
+command declared repeatable can claim plain input:
+
+```
+!ls                 ; runs ls, and makes /cmd the default
+wc -l *.el          ; runs as a shell command, no prefix needed
+\what does that do  ; one line straight to the model
+/auto off           ; plain input goes back to the model
+```
+
+It is a mode, so it is visible: the status line reads `auto: /cmd` while
+it is on, turning it on says so, and `/auto` reports the current state.
+An explicit `/command` always means itself, and while a response is
+running plain input steers that run rather than the default command.
+
+Only commands declared `:repeatable` in `chat-ui--command-table` can
+become the default. Asking the model is not one: it is already what plain
+input does, and `/ask` asks *without recording*, so as a sticky default it
+would quietly stop the conversation being written down.
+
+The default lives on the session, so it survives reopening.
+
 ## Reading a Reply
 
 A run is not one answer. It reasons, calls a tool, reads the result,

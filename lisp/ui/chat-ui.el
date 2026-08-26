@@ -136,10 +136,15 @@ whole rather than to any one part of it.")
 
 (defun chat-ui--status-line (session)
   "Return top status line text for SESSION."
-  (let ((model (and session (chat-session-model-id session))))
-    (if-let ((label (chat-status-persistent-label chat-ui--request-tool-events)))
-        (format "Model: %s | %s" model label)
-      (format "Model: %s" model))))
+  (let* ((model (and session (chat-session-model-id session)))
+         (label (chat-status-persistent-label chat-ui--request-tool-events))
+         ;; The default command changes what plain input does, so it
+         ;; belongs where the reader already looks for what this session
+         ;; is.  An invisible mode that eats prose is the failure here.
+         (auto (chat-ui-default-command session)))
+    (concat (format "Model: %s" model)
+            (when auto (format " | auto: /%s" auto))
+            (when label (format " | %s" label)))))
 
 (defun chat-ui--render-status-line ()
   "Rewrite the status line in place from the current session."
@@ -844,22 +849,56 @@ all produce the same screen."
 ;; Message Sending
 ;; ------------------------------------------------------------------
 
-(defconst chat-ui--slash-commands
-  '(("cancel"   . chat-ui--command-cancel)
-    ("model"    . chat-ui--command-model)
-    ("cmd"      . chat-ui--command-shell)
-    ("!"        . chat-ui--command-shell)
-    ("cd"       . chat-ui--command-cd)
-    ("pwd"      . chat-ui--command-pwd)
-    ("question" . chat-ui--command-question)
-    ("ask"      . chat-ui--command-question)
-    ("?"        . chat-ui--command-question))
-  "Slash command names mapped to the function that runs them.
-Each function takes the argument text, which may be empty.  A name that
-is absent here is left as ordinary message text.")
+(defconst chat-ui--command-table
+  '((:name "cancel"   :handler chat-ui--command-cancel :while-busy t)
+    (:name "model"    :handler chat-ui--command-model  :while-busy t)
+    (:name "cmd"      :handler chat-ui--command-shell  :repeatable t)
+    (:name "!"        :handler chat-ui--command-shell  :repeatable t)
+    (:name "cd"       :handler chat-ui--command-cd)
+    (:name "pwd"      :handler chat-ui--command-pwd)
+    (:name "question" :handler chat-ui--command-question)
+    (:name "ask"      :handler chat-ui--command-question)
+    (:name "?"        :handler chat-ui--command-question)
+    (:name "auto"     :handler chat-ui--command-auto))
+  "What each slash command is, declared rather than listed per property.
 
-(defconst chat-ui--control-slash-commands '("cancel" "model")
-  "Slash commands that stay available while a response is in flight.")
+`:handler' takes the argument text, which may be empty.  A name absent
+from this table is left as ordinary message text.
+
+`:while-busy' means the command still runs while a response is in flight.
+
+`:repeatable' means the command is worth running several times in a row,
+so it may become the session's default command: plain input then goes to
+it instead of to the model, until `/auto off'.  Shell work is the case
+that wants this -- you rarely run one command.
+
+Asking the model is deliberately not repeatable, because it is already
+what plain input does.  Neither is `/ask', which asks without recording:
+as a sticky default it would quietly stop the conversation being written
+down, and a footgun that only shows up later is worse than typing four
+characters.")
+
+(defun chat-ui--command-entry (name)
+  "Return the table entry for slash command NAME, or nil."
+  (seq-find (lambda (entry) (equal (plist-get entry :name) name))
+            chat-ui--command-table))
+
+(defun chat-ui--command-handler (name)
+  "Return the handler for slash command NAME, or nil."
+  (plist-get (chat-ui--command-entry name) :handler))
+
+(defun chat-ui--command-repeatable-p (name)
+  "Return non-nil when slash command NAME may become the default."
+  (and (plist-get (chat-ui--command-entry name) :repeatable) t))
+
+(defun chat-ui--repeatable-command-names ()
+  "Return the names of every command that may become the default."
+  (delete-dups
+   (delq nil
+         (mapcar (lambda (entry)
+                   (and (plist-get entry :repeatable)
+                        (plist-get entry :name)))
+                 chat-ui--command-table))))
 
 (defun chat-ui-send-message ()
   "Act on the input area, either as a command or as a message."
@@ -893,8 +932,8 @@ is absent here is left as ordinary message text.")
 (defun chat-ui--control-command (command)
   "Return the handler for COMMAND when it may run during a response."
   (and (eq (plist-get command :kind) 'slash)
-       (member (plist-get command :name) chat-ui--control-slash-commands)
-       (cdr (assoc (plist-get command :name) chat-ui--slash-commands))))
+       (plist-get (chat-ui--command-entry (plist-get command :name)) :while-busy)
+       (chat-ui--command-handler (plist-get command :name))))
 
 (defun chat-ui--command-message-text (command)
   "Return the text COMMAND should contribute as an ordinary message."
@@ -902,23 +941,115 @@ is absent here is left as ordinary message text.")
       (plist-get command :arg)
     (plist-get command :text)))
 
+;; ------------------------------------------------------------------
+;; The default command
+;; ------------------------------------------------------------------
+;;
+;; Shell work comes in runs.  Having to prefix every line of a run with
+;; `!' is the kind of friction that makes people stop using the surface
+;; and open a terminal instead.  So a repeatable command can become the
+;; session's default: plain input goes to it until `/auto off'.
+;;
+;; It is a mode, and an invisible mode that eats your prose is worse than
+;; typing the prefix.  Three things keep it visible: the header says what
+;; is on, a message says so when it turns on, and the literal escape is
+;; always available for one line that must not be interpreted.
+
+(defun chat-ui-default-command (&optional session)
+  "Return the command plain input runs through in SESSION, or nil.
+
+SESSION defaults to the current one.  It is taken as an argument because
+the status line is drawn for a session that may not be the buffer's yet,
+and a header that disagrees with the behaviour is worse than no header.
+
+Kept on the session so it survives a reopen: a mode you cannot see is
+bad, and a mode that silently expires is worse."
+  (when-let ((session (or session chat--current-session)))
+    (chat-session-metadata-get session :chat-ui-default-command)))
+
+(defun chat-ui--set-default-command (name)
+  "Make NAME the command plain input runs through, or clear it when nil."
+  (chat-ui--session-metadata-set :chat-ui-default-command name))
+
+(defun chat-ui--command-default-name (command)
+  "Return the name COMMAND would become the default under, or nil.
+
+`!ls' and `/cmd ls' are the same command reached two ways, so the bare
+prefix engages auto exactly as the slash name does."
+  (let ((name (pcase (plist-get command :kind)
+                ('slash (plist-get command :name))
+                ((or 'shell 'shell-repeat) "cmd")
+                (_ nil))))
+    (and name (chat-ui--command-repeatable-p name) name)))
+
+(defun chat-ui--note-repeatable-command (command)
+  "Keep COMMAND as the default when it is repeatable and not already so."
+  (when-let ((_ chat--current-session)
+             (name (chat-ui--command-default-name command)))
+    (unless (equal (chat-ui-default-command) name)
+      (chat-ui--set-default-command name)
+      (chat-ui--render-status-line)
+      (message "Plain input now runs through /%s. /auto off to stop." name))))
+
+(defun chat-ui--command-auto (arg)
+  "Report, set or clear the default command according to ARG."
+  (let ((request (downcase (string-trim (or arg "")))))
+    (cond
+     ((string-empty-p request)
+      (chat-ui--insert-system-message
+       (if-let ((name (chat-ui-default-command)))
+           (format "Auto: plain input runs through /%s. /auto off to stop."
+                   name)
+         (format "Auto: off -- plain input goes to the model. Repeatable: %s"
+                 (mapconcat (lambda (name) (concat "/" name))
+                            (chat-ui--repeatable-command-names) " ")))))
+     ((member request '("off" "none" "stop"))
+      (chat-ui--set-default-command nil)
+      (chat-ui--render-status-line)
+      (chat-ui--insert-system-message "Auto: off -- plain input goes to the model."))
+     ((chat-ui--command-repeatable-p request)
+      (chat-ui--set-default-command request)
+      (chat-ui--render-status-line)
+      (chat-ui--insert-system-message
+       (format "Auto: plain input runs through /%s. /auto off to stop."
+               request)))
+     (t
+      (chat-ui--insert-system-message
+       (format "/%s cannot be a default command. Repeatable: %s"
+               request
+               (mapconcat (lambda (name) (concat "/" name))
+                          (chat-ui--repeatable-command-names) " ")))))))
+
 (defun chat-ui--dispatch-command (command)
   "Run COMMAND, which was parsed from the input area."
   (let ((arg (plist-get command :arg)))
     (pcase (plist-get command :kind)
-      ('shell (chat-ui--command-shell arg))
-      ('shell-repeat (chat-ui--repeat-shell-command))
+      ('shell
+       (chat-ui--command-shell arg)
+       (chat-ui--note-repeatable-command command))
+      ('shell-repeat
+       (chat-ui--repeat-shell-command)
+       (chat-ui--note-repeatable-command command))
       ('query (chat-ui--command-question arg))
       ('slash
-       (let ((handler (cdr (assoc (plist-get command :name)
-                                  chat-ui--slash-commands))))
+       (let ((handler (chat-ui--command-handler (plist-get command :name))))
          (if handler
-             (funcall handler arg)
+             (progn
+               (funcall handler arg)
+               (chat-ui--note-repeatable-command command))
            ;; An unknown name is not an error: the model may still make
            ;; sense of it, and refusing would break slash-prefixed prose.
            (chat-ui--send-user-message (plist-get command :text)))))
       ('literal (chat-ui--send-user-message arg))
+      ('note (chat-ui--dispatch-plain-input (plist-get command :text)))
       (_ (chat-ui--send-user-message (plist-get command :text))))))
+
+(defun chat-ui--dispatch-plain-input (text)
+  "Run TEXT through the default command, or send it to the model."
+  (if-let* ((name (chat-ui-default-command))
+            (handler (chat-ui--command-handler name)))
+      (funcall handler text)
+    (chat-ui--send-user-message text)))
 
 (defun chat-ui--send-user-message (content)
   "Record CONTENT as a user message and ask the model to respond."

@@ -916,9 +916,20 @@ both arrive from the same place."
 
 (ert-deftest chat-ui-slash-commands-cover-the-documented-names ()
   "Every command named in the help text has a handler."
-  (dolist (name '("cancel" "model" "cmd" "!" "cd" "pwd" "question" "ask" "?"))
-    (let ((handler (cdr (assoc name chat-ui--slash-commands))))
+  (dolist (name '("cancel" "model" "cmd" "!" "cd" "pwd" "question" "ask" "?"
+                  "auto"))
+    (let ((handler (chat-ui--command-handler name)))
       (should handler)
+      (should (fboundp handler)))))
+
+(ert-deftest chat-ui-every-command-entry-is-complete ()
+  "A table entry without a name or a callable handler is unreachable."
+  (should chat-ui--command-table)
+  (dolist (entry chat-ui--command-table)
+    (let ((name (plist-get entry :name))
+          (handler (plist-get entry :handler)))
+      (should (stringp name))
+      (should (not (string-empty-p name)))
       (should (fboundp handler)))))
 
 (ert-deftest chat-ui-control-command-limits-what-runs-during-a-response ()
@@ -957,6 +968,139 @@ both arrive from the same place."
                        (message . "!literal")
                        (message . "plain text"))
                      (nreverse calls))))))
+
+;; ------------------------------------------------------------------
+;; The default command
+;; ------------------------------------------------------------------
+
+(defmacro chat-ui-auto-test--with-session (&rest body)
+  "Evaluate BODY in a buffer holding a saved session and a stubbed shell."
+  (declare (indent 0))
+  `(chat-test-with-temp-dir
+    (let* ((chat-session-directory temp-dir)
+           (session (chat-session-create "Auto" 'kimi))
+           (shell-calls nil)
+           (sent nil))
+      (with-temp-buffer
+        (setq-local chat--current-session session)
+        (chat-ui-setup-buffer session)
+        (cl-letf (((symbol-function 'chat-ui--handle-shell-command)
+                   (lambda (command) (push command shell-calls)))
+                  ((symbol-function 'chat-ui--send-user-message)
+                   (lambda (content) (push content sent))))
+          ,@body)))))
+
+(ert-deftest chat-ui-auto-is-off-until-a-repeatable-command-runs ()
+  "Plain input goes to the model until something claims it."
+  (chat-ui-auto-test--with-session
+    (should-not (chat-ui-default-command))
+    (chat-ui--dispatch-command (chat-command-parse "hello there"))
+    (should (equal sent '("hello there")))
+    (should-not shell-calls)))
+
+(ert-deftest chat-ui-a-shell-command-claims-plain-input ()
+  "Shell work comes in runs, so the prefix is needed once."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (should (equal (chat-ui-default-command) "cmd"))
+    (chat-ui--dispatch-command (chat-command-parse "pwd"))
+    (should (equal shell-calls '("pwd" "ls")))
+    ;; The model was never asked, which is the whole point and also the
+    ;; risk: it has to be visible.
+    (should-not sent)))
+
+(ert-deftest chat-ui-auto-says-so-in-the-status-line ()
+  "A mode nobody can see is a mode that eats prose."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (should (string-match-p "auto: /cmd" (chat-ui--status-line session)))
+    (should (string-match-p
+             "auto: /cmd"
+             (buffer-substring-no-properties (point-min) (point-max))))))
+
+(ert-deftest chat-ui-auto-off-returns-plain-input-to-the-model ()
+  "There is a way back, and it is one command."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (chat-ui--dispatch-command (chat-command-parse "/auto off"))
+    (should-not (chat-ui-default-command))
+    (chat-ui--dispatch-command (chat-command-parse "hello"))
+    (should (equal sent '("hello")))
+    (should (equal shell-calls '("ls")))
+    (should-not (string-match-p "auto:" (chat-ui--status-line session)))))
+
+(ert-deftest chat-ui-a-slash-command-still-runs-while-auto-is-on ()
+  "Auto claims plain input only.  An explicit command still means itself."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (cl-letf (((symbol-function 'chat-ui--command-pwd)
+               (lambda (_arg) (push "pwd-command" sent))))
+      (chat-ui--dispatch-command (chat-command-parse "/pwd")))
+    (should (equal sent '("pwd-command")))
+    (should (equal shell-calls '("ls")))))
+
+(ert-deftest chat-ui-the-literal-escape-outruns-auto ()
+  "One line must always be able to reach the model unread."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (chat-ui--dispatch-command (chat-command-parse "\\what does ls do?"))
+    (should (equal sent '("what does ls do?")))
+    (should (equal shell-calls '("ls")))))
+
+(ert-deftest chat-ui-auto-survives-a-reopen ()
+  "The default is on the session, so reopening does not silently drop it."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (chat-session-save session)
+    (let ((reloaded (chat-session-load (chat-session-id session))))
+      (with-temp-buffer
+        (setq-local chat--current-session reloaded)
+        (chat-ui-setup-buffer reloaded)
+        (should (equal (chat-ui-default-command) "cmd"))
+        ;; And the reopened buffer says so, rather than leaving auto on
+        ;; with nothing on screen to explain it.
+        (should (string-match-p
+                 "auto: /cmd"
+                 (buffer-substring-no-properties (point-min) (point-max))))))))
+
+(ert-deftest chat-ui-steering-a-live-run-outranks-auto ()
+  "While a run is going, plain input is talking to it.
+
+Auto claims plain input when nothing else has a claim on it.  A live
+agent does: sending its input to a shell instead would race the run and
+lose what you meant to tell it."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (let ((steered nil))
+      (cl-letf (((symbol-function 'chat-agent-active-p) (lambda (_run) t))
+                ((symbol-function 'chat-ui--steer-active-agent)
+                 (lambda (content) (push content steered))))
+        (setq-local chat-ui--active-agent-run 'run)
+        (goto-char (point-max))
+        (insert "also check the tests")
+        (chat-ui-send-message))
+      (should (equal steered '("also check the tests")))
+      (should (equal shell-calls '("ls"))))))
+
+(ert-deftest chat-ui-auto-refuses-a-command-that-cannot-be-default ()
+  "Only repeatable commands may claim plain input."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/auto cd"))
+    (should-not (chat-ui-default-command))
+    (chat-ui--dispatch-command (chat-command-parse "/auto cmd"))
+    (should (equal (chat-ui-default-command) "cmd"))))
+
+(ert-deftest chat-ui-asking-the-model-is-not-a-default-command ()
+  "It is already what plain input does, and /ask does not record.
+
+As a sticky default `/ask' would quietly stop the conversation being
+written down."
+  (should-not (chat-ui--command-repeatable-p "ask"))
+  (should-not (chat-ui--command-repeatable-p "question"))
+  (should-not (chat-ui--command-repeatable-p "?"))
+  (should-not (chat-ui--command-repeatable-p "cd"))
+  (should-not (chat-ui--command-repeatable-p "pwd"))
+  (should (chat-ui--command-repeatable-p "cmd")))
 
 (ert-deftest chat-ui-tool-result-lines-truncate-long-results ()
   "Test oversized tool results are truncated with an omission marker."

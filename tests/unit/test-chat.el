@@ -174,6 +174,51 @@ became one keymap, one of the two would have lost silently."
         (push key undocumented)))
     (should-not undocumented)))
 
+(defconst chat-test--unimplemented-slash-commands
+  '("new" "list" "save" "clear"
+    "wiki-ingest" "wiki-query" "wiki-lint" "wiki-index" "wiki-log")
+  "Slash names the help promises that no handler answers.
+
+Listed here rather than left implicit, because a documented command that
+does nothing is a bug report waiting to happen and this is the only place
+that says so out loud.  Either implement them or take them out of
+`chat-commands-help'; do not grow this list.")
+
+(defun chat-test--help-slash-names ()
+  "Return the slash command names `chat-commands-help' promises."
+  (let (names)
+    (with-temp-buffer
+      (insert chat-commands-help)
+      (goto-char (point-min))
+      ;; Only at the start of a help line, so prose mentioning a path
+      ;; does not read as a command.
+      (while (re-search-forward "^ +/\\([a-z?!-]+\\)" nil t)
+        (push (match-string 1) names)))
+    (delete-dups names)))
+
+(ert-deftest chat-every-slash-command-the-help-promises-is-answered ()
+  "A slash command in the help has to reach a handler.
+
+The keymap already has this guarantee; slash commands did not, and the
+list of names that answer nothing was buried in a planning note rather
+than anywhere a reader would look."
+  (let ((promised (chat-test--help-slash-names))
+        (unanswered nil))
+    ;; A regexp that stopped matching would pass the loop vacuously.
+    (should (member "cmd" promised))
+    (should (member "auto" promised))
+    (should (> (length promised) 8))
+    (dolist (name promised)
+      (unless (or (chat-ui--command-handler name)
+                  (member name chat-test--unimplemented-slash-commands))
+        (push name unanswered)))
+    (should-not unanswered)))
+
+(ert-deftest chat-the-unimplemented-list-does-not-cover-live-commands ()
+  "A name that now works must leave the list, or the list hides a promise."
+  (dolist (name chat-test--unimplemented-slash-commands)
+    (should-not (chat-ui--command-handler name))))
+
 (ert-deftest chat-accepting-an-edit-and-approving-tools-are-different-keys ()
   "The one collision the merge had to resolve, held in place."
   (let ((accept (lookup-key chat-mode-map (kbd "C-c C-a")))

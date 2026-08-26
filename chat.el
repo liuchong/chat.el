@@ -230,6 +230,17 @@ Keys:
   C-c C-d               - Show or fold all detail
   C-c C-h               - This help
 
+Auto (Default Command):
+  Shell work comes in runs, so `!ls' also makes /cmd the default: plain
+  input goes to the shell until you say otherwise.  The status line says
+  `auto: /cmd' while it is on.
+  /auto            - Say what plain input currently runs through
+  /auto cmd        - Send plain input to the shell
+  /auto off        - Send plain input back to the model
+  \\<text>          - One line straight to the model, whatever auto says
+  An explicit /command always means itself, and while a response is
+  running plain input steers that run rather than the default command.
+
 Reading a Reply:
   A run reasons, calls tools, reads results and only then answers, and
   all of it is kept.  Reasoning and tool work start folded behind a

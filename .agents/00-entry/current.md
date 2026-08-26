@@ -63,7 +63,7 @@ space. The assembled block measures itself against the system prompt share
 and shortens to paths alone when it does not fit, which is what an 8K
 window requires.
 
-Canonical suite: 781 tests passing.
+Canonical suite: 794 tests passing.
 
 The input command layer completed earlier the same day. Chat input parses
 into commands through `lisp/core/chat-command.el`, covering shell
@@ -129,6 +129,7 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0011-auto-and-the-command-table.md`
 - `../20-reference/decisions/0010-rendering-the-transcript.md`
 - `../20-reference/decisions/0009-one-chat-surface.md`
 - `../20-reference/decisions/0008-self-knowledge-and-shared-storage.md`
@@ -136,6 +137,7 @@ surface advertises only relevant scoped tools.
 - `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`
 - `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-26-auto-default-command.md`
 - `../30-records/logs/stage-2026-08-26-transcript-rendering.md`
 - `../30-records/logs/stage-2026-08-25-self-knowledge-and-shared-storage.md`
 - `../30-records/logs/stage-2026-08-25-context-budget-and-resident-context.md`

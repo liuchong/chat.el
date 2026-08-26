@@ -38,9 +38,9 @@ work and time; `chat-scratch.el` gives each session pruned scratch space;
 bodies — rides in the prompt.
 
 The input command layer landed earlier: chat input parses through
-`lisp/core/chat-command.el` and dispatches through a name table in
-`chat-ui.el`, with shell execution, history repeat, the session working
-directory, ephemeral queries and a literal escape.
+`lisp/core/chat-command.el` and dispatches through `chat-ui--command-table`,
+with shell execution, history repeat, the session working directory,
+ephemeral queries and a literal escape.
 
 The display now draws that record instead of keeping its own copy.
 Committed history is redrawn from `chat-session-messages`; a live tail
@@ -50,23 +50,35 @@ screen. Reasoning and tool work fold behind a summary row, interim prose
 is italic, the answer is ordinary text and never folds. Decision 0010
 records the shape and what it replaced.
 
-Canonical suite: 781 tests passing.
+Auto's first sense is in: a repeatable command claims plain input until
+`/auto off`. Commands declare `:repeatable` and `:while-busy` in one
+`chat-ui--command-table` rather than being spread across a handler alist
+and a separate control list. Shell is repeatable; asking the model is not,
+because plain input already does that and `/ask` does not record.
+Decision 0011 records the reasoning, including where it departs from the
+request.
+
+Slash commands now have the consistency guarantee the keymap got: a test
+reads the names out of `chat-commands-help` and requires each to reach a
+handler, with the nine that answer nothing named explicitly in the test.
+
+Canonical suite: 794 tests passing.
 
 ## Next Stage
 
-The `auto` mechanism. Two things share the name and both are wanted: a
-session's default command continuing without being retyped, and an agent
-running multiple rounds until its goal is met. `!!`, `/ask`, `/agent`,
-`/plan` and external-AI calls are repeatable and should engage it;
-`/goal`, `/cd`, `/pwd` and `/status` are not — a goal is a standing
-objective, not a loop.
+Auto's second sense: an agent running rounds until its goal is met rather
+than until it stops calling tools. The step budget already bounds the
+rounds and tells the model where it stands, and the transcript records
+each one. What is missing is the completion criterion — and a criterion
+that stops on "looks done" either quits early or never quits, so it needs
+designing rather than guessing.
 
-The intended shape is declarative: `:repeatable` on a command definition
-rather than a list of names checked at the call site.
+Then `/subagent` and `/send [agent-id]`, and whether external AI tools
+arrive as one `/call_ai <tool>` rather than a command per vendor.
 
-After that: specs for `/subagent` and `/send [agent-id]`, and an
-external-AI prefix — `/call_ai <tool>` rather than one command per
-vendor.
+Standing debt, now visible in a test rather than only here: `/new`,
+`/list`, `/save`, `/clear` and the five `/wiki-*` names are in the help
+and answer nothing. Build them or take them out.
 
 ## Not Doing Now
 
