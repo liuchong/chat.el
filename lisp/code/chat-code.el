@@ -405,12 +405,30 @@ When SILENT is non-nil, do not show minibuffer feedback."
                      rules
                      "\n")))
 
+(defun chat-code--persona-prompt ()
+  "Return the coding persona, localized unless it has been customized.
+
+A value the user set wins over any translation of it, on the same
+principle as `chat-commands-help': the English in the defcustom is both
+the default and the reference a translation is checked against."
+  (if (equal chat-code-system-prompt
+             (eval (car (get 'chat-code-system-prompt 'standard-value)) t))
+      (chat-i18n-prompt 'code-persona chat-code-system-prompt)
+    chat-code-system-prompt))
+
 (defun chat-code--compose-system-prompt ()
-  "Compose the full code mode system prompt."
+  "Compose the full code mode system prompt.
+
+The rule sections stay in the language they were written in.  They are
+dense with things a parser matches literally -- tool names, `AGENTS.md',
+patch envelopes -- and a translation has to carry those through untouched
+while changing everything around them.  That is a lot of surface for no
+change in what the model does, so the persona is translated and the rules
+are not."
   (mapconcat
    #'identity
    (list
-    chat-code-system-prompt
+    (chat-code--persona-prompt)
     (chat-code--format-rule-section
      "Non-negotiable rules:"
      chat-code--hard-rules)

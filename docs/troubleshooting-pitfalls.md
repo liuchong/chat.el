@@ -1287,4 +1287,94 @@ what being stuck means.
 is in flight, since being stuck is not less true while the model is
 talking. Then test that every name the help promises reaches a handler.
 
+### A One-Way Consistency Test Is A Blind Spot With A Passing Badge
+
+**Problem**: four slash commands worked and appeared nowhere in the help,
+with a slash-command consistency test passing the whole time.
+
+**Cause**: it checked that every documented name reached a handler, and
+not that every handler was documented. The keymap tests had both
+directions; nobody noticed the slash tests had one, because the test that
+existed passed.
+
+**Solution**: write both directions when you write either, and check that
+the pair is symmetric. Both directions of this one failed on their first
+run — one caught undocumented commands, and the other caught `/help`
+being dropped from the help while the help was being restructured.
+
+### Advice That Is True Somewhere Else
+
+**Problem**: the help ended with "press RET to send" and RET did nothing.
+
+**Cause**: the line describes the chat buffer and was being read in
+`*Chat Help*`, where `view-mode` owns RET and scrolls with it. Perfectly
+true text, shown in the one place it is false.
+
+**Solution**: text that names a key has to be written for the buffer it
+appears in. Say which buffer, and give the help buffer its own footer
+about its own keys.
+
+### Four Names For The Aside And None For The Conversation
+
+**Problem**: a user asked what `/ask` and `/question` differed in. Nothing
+— they were separate table entries sharing a handler. With `/?` and the
+`?text` prefix, four names reached the ephemeral one-shot ask, while the
+recorded multi-step conversation that is the whole point of the surface
+could only be reached by typing with no prefix at all.
+
+**Cause**: aliases added as table entries rather than as aliases. Each one
+was a one-line change that looked harmless, and nothing counted them.
+Meanwhile the main path needed no name to work, so it never got one — and
+without a name it could not be defaulted to, documented as a command, or
+returned to.
+
+**Solution**: one entry per command, everything else an alias through one
+mechanism. Then name the thing that works by default, because "it is
+already what plain input does" is a description of a behaviour that
+deserves a name.
+
+### A Sticky Mode With No Way Back Except A Word You Have To Remember
+
+**Problem**: after one `!ls`, every plain line went to the shell. An
+explicit question worked and changed nothing, and the next line went to
+the shell again. Only `/auto off` got out.
+
+**Cause**: exactly one command could claim plain input and nothing could
+release it. The design had thought carefully about which commands were
+safe to make sticky and not at all about what the default was when none of
+them were.
+
+**Solution**: give the baseline a name, so releasing a claim is returning
+to a command rather than clearing a variable. Then let commands declare
+`reset` as well as `sticky`, and put the current holder in the input
+prompt — the status line is at the top of a buffer that scrolls and the
+cursor is at the bottom.
+
+### An Alias List Built With `push` Reverses Its Own Priority
+
+**Problem**: two Chinese names both meant `/send`, and completion offered
+the second one.
+
+**Cause**: registration used `setf` on `alist-get`, which prepends for a
+key that is not present. Declaration order became reverse order, so the
+last synonym declared became the primary name.
+
+**Solution**: append for a new key and replace in place for an existing
+one, and test that the first alias declared is the one offered. The
+shipped catalog looked fine either way; only a two-synonym command showed
+it.
+
+### A Marker Found By Searching For Its Own Translated Text
+
+**Problem**: none yet — caught while translating.
+
+**Cause**: the "asking the model" indicator was removed by searching the
+buffer for the literal `🤖 Asking AI...`. Translate that string and the
+search stops finding it, leaving the note on screen underneath the answer
+it was supposed to be replaced by.
+
+**Solution**: mark it with a text property and find it by property. Any
+literal used both to write and to find text is a latent version of this
+bug, and localization is what triggers it.
+
 Last updated: 2026-08-26

@@ -460,14 +460,85 @@ You can override this with `chat-files-allowed-directories`.
       (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
+## Two Ways of Asking
+
+`/send` and `/quick` both reach the model, and the difference is what is
+kept.
+
+```
+/send <message>     ; the conversation: recorded, tools, several steps
+<message>           ; the same thing -- plain input is /send
+/quick <question>   ; asked beside it: nothing recorded, no tools
+?<question>         ; the same thing, shorter
+```
+
+`/send` is the surface. It writes the turn into the session, and the run
+answering it can read files, call tools and work over several steps.
+`/ask` and `/question` are other spellings of it, because "ask the model"
+is what a reader means by them.
+
+`/quick` is a question asked next to the conversation. Nothing is
+recorded and no tools are used, which is what makes it cheap and what
+makes it forgettable. Its answer is labeled `Assistant (quick)` so a
+reply that will not be there next turn does not look like one that will.
+
+## Deferred Send
+
+A request rarely arrives in one piece. It arrives as "also check X", "and
+the file is at Y" -- each of which, sent on its own, spends a turn on a
+fragment. Collect them instead:
+
+```
+/queue check the tests   ; collected, not sent; /queue also claims plain input
+and the docs             ; another note
+/queue                   ; list what is collected
+/drop                    ; take the last one back (/drop all for everything)
+/flush                   ; send them as one message
+/send                    ; same thing, if that is the word you reach for
+```
+
+They go out as a single numbered user message rather than as several,
+because consecutive messages in one role are not something every provider
+accepts. The count shows in the status line, and the queue lives on the
+session, so closing the buffer does not lose what you typed.
+
+## Auto: The Default Command
+
+Plain input runs through one command, and by default that command is
+`/send`. Work that comes in runs claims it, so the prefix is needed once
+rather than every line:
+
+```
+!ls                 ; runs ls, and makes /cmd the default
+wc -l *.el          ; runs as a shell command, no prefix needed
+?what does that do  ; asks the model -- and hands plain input back
+\literally this     ; one line straight to the model, whatever auto says
+/auto off           ; back to /send explicitly
+```
+
+Anything that asks the model releases the claim, which is the thing that
+was wrong before: with only `/cmd` able to hold plain input, a session
+that had run one shell command stayed a shell, and a question got an
+answer without getting you out.
+
+It is a mode, so it is visible in two places. The status line reads
+`auto: /cmd`, and the input prompt itself becomes `cmd>` -- the status
+line is at the top of a buffer that scrolls, and the cursor is at the
+bottom. An explicit `/command` always means itself, and while a response
+is running plain input steers that run rather than the default command.
+
+`:default sticky` in `chat-ui--command-table` says a command may claim
+plain input; `:default reset` says using it hands the claim back. `/quick`
+resets rather than sticking: as a sticky default it would answer every
+following line and record none of them, and nothing on screen
+distinguishes an answer that was written down from one that was not.
+
 ## Language
 
-Text you read is localized; text you type is not. Key sequences, command
-names and slash names stay in ASCII, because translating them would make
-the help describe a program that does not exist.
-
 ```elisp
-(setq chat-language 'zh-CN)   ; or 'en, or 'auto (the default)
+(setq chat-language 'zh-CN)      ; or 'en, or 'auto (the default)
+(setq chat-reply-language 'follow)   ; what the model is told to answer in
+(setq chat-prompt-language 'follow)  ; the language of the instructions sent
 ```
 
 `auto` follows the Emacs language environment, then `LC_ALL`,
@@ -475,32 +546,36 @@ the help describe a program that does not exist.
 as English rather than as nothing, so a partial translation degrades to
 readable. `M-x chat-i18n-report` says how complete each catalog is.
 
-Simplified Chinese ships complete. Adding a language means one call to
-`chat-i18n-register`; the tests require any shipped translation of the
-help to name exactly the keys and slash commands the English one does.
+**Command names** have translations: `/auto` and `/自动` are the same
+command, resolved to one table entry so every property of it is declared
+once. Completion offers the names of the language in use; names from any
+language are always accepted, because refusing a name the user knows in
+order to be consistent about locale is pedantry with no upside. Key
+sequences stay in ASCII -- they are what you press, not what you read.
 
-## Auto: The Default Command
+**What the model is told** is switched separately, because it is not
+cosmetic. `chat-reply-language` is the reliable lever: models follow
+"answer in Japanese" well regardless of what language the instruction
+arrived in, and stating it beats leaving the model to infer it from
+phrasing. `chat-prompt-language` is the language of the instructions
+themselves, and translated guidance changes what a model does in ways
+that cannot be measured from inside Emacs -- pin it to `en` if a
+translated prompt starts behaving worse than the English one.
 
-Shell work comes in runs. Prefixing every line with `!` is the friction
-that makes people give up on the surface and open a terminal, so a
-command declared repeatable can claim plain input:
+Machine-read parts of a prompt are never translated at either setting:
+JSON keys, tool names, the `*** Begin Patch` envelope, the `code-edit`
+fence language. A parser matches those literally. For the same reason the
+coding rule lists stay English while the persona around them is
+translated: they are dense with literal tool names, and a translation
+would have to carry all of them through untouched for no change in what
+the model does.
 
-```
-!ls                 ; runs ls, and makes /cmd the default
-wc -l *.el          ; runs as a shell command, no prefix needed
-\what does that do  ; one line straight to the model
-/auto off           ; plain input goes back to the model
-```
-
-It is a mode, so it is visible: the status line reads `auto: /cmd` while
-it is on, turning it on says so, and `/auto` reports the current state.
-An explicit `/command` always means itself, and while a response is
-running plain input steers that run rather than the default command.
-
-Only commands declared `:repeatable` in `chat-ui--command-table` can
-become the default. Asking the model is not one: it is already what plain
-input does, and `/ask` asks *without recording*, so as a sticky default it
-would quietly stop the conversation being written down.
+Simplified Chinese ships complete. Adding a language means calls to
+`chat-i18n-register`, `chat-i18n-register-aliases` and optionally
+`chat-i18n-register-prompts`; the tests require any shipped translation
+of the help to name exactly the keys and slash commands the English one
+does, and require every command to have an alias so a half-translated
+command list cannot ship.
 
 The default lives on the session, so it survives reopening.
 

@@ -198,8 +198,7 @@ became one keymap, one of the two would have lost silently."
     (should-not undocumented)))
 
 (defconst chat-test--unimplemented-slash-commands
-  '("new" "list" "save" "clear"
-    "wiki-ingest" "wiki-query" "wiki-lint" "wiki-index" "wiki-log")
+  '("wiki-ingest" "wiki-query" "wiki-lint" "wiki-index" "wiki-log")
   "Slash names the help promises that no handler answers.
 
 Listed here rather than left implicit, because a documented command that
@@ -241,6 +240,37 @@ than anywhere a reader would look."
   "A name that now works must leave the list, or the list hides a promise."
   (dolist (name chat-test--unimplemented-slash-commands)
     (should-not (chat-ui--command-handler name))))
+
+(defun chat-test--help-mentions-command-p (name)
+  "Return non-nil when the help mentions slash command NAME.
+
+Anywhere, not only opening a line: an alias is best documented on the
+line of the command it aliases, and pushing each one onto a line of its
+own would pad the help to make a test happy."
+  (string-match-p (concat "/" (regexp-quote name) "\\(\\b\\|[^a-z-]\\|\\'\\)")
+                  chat-commands-help))
+
+(ert-deftest chat-every-live-slash-command-appears-in-the-help ()
+  "A command that works and is not documented is a command nobody uses.
+
+This is the direction the slash tests were missing.  The keymap has had
+both for a while; slashes only checked that documented names worked, so
+`/ask', `/question' and `/?' all ran and none of them were written down
+anywhere.  A one-way consistency test is a blind spot with a passing
+badge on it."
+  (let (undocumented)
+    (dolist (entry chat-ui--command-table)
+      (let ((name (plist-get entry :name)))
+        (unless (chat-test--help-mentions-command-p name)
+          (push name undocumented))))
+    (should-not undocumented)))
+
+(ert-deftest chat-the-help-names-both-ways-of-asking ()
+  "The difference between them is the thing a reader most needs told."
+  (should (string-match-p "/send" chat-commands-help))
+  (should (string-match-p "/quick" chat-commands-help))
+  ;; And says what separates them, not just that both exist.
+  (should (string-match-p "recorded\\|written down" chat-commands-help)))
 
 (ert-deftest chat-accepting-an-edit-and-approving-tools-are-different-keys ()
   "The one collision the merge had to resolve, held in place."

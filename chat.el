@@ -192,24 +192,41 @@ Returns the list of files that were loaded."
   :group 'chat)
 
 (defcustom chat-commands-help
-  "Chat Commands:
-  /help [topic]         - This help, or only the lines mentioning topic
+  "Talking to the Model:
+  /send <message>       - Send and record it; the model may use tools and
+                          take several steps. Same as typing with no prefix.
+                          Also /ask and /question.
+  /send                 - Send whatever /queue has collected
+  /quick <question>     - Ask once, without recording it or using tools.
+                          Also /? and the shorthand ?<question>
+  /queue <note>         - Collect a note to go out with the next /flush
+  /queue                - List what is queued
+  /flush [note]         - Send the queue as one message
+  /drop [all]           - Discard the last queued note, or all of them
   /cancel               - Cancel current AI request
+  /help [topic]         - This help, or only the lines mentioning topic
+  /model <name>         - Switch this session's model (C-c C-m, no name prompts)
+
+/send and /quick are the two ways of asking, and the difference is what
+is kept: /send is the conversation, written down and answered by a run
+that can read files and work in steps. /quick is a question asked beside
+the conversation -- nothing is recorded and no tools are used, which is
+what makes it cheap and what makes it forgettable.
+
+Sessions:
   /new                  - Create new session
   /list                 - List all sessions
-  M-x chat-session-tree-open - Browse saved sessions as a tree
   /save                 - Save current session
-  /clear                - Clear conversation
-  /model <name>         - Switch this session's model (C-c C-m, no name prompts)
+  /clear                - Discard this conversation, keeping the session
+  M-x chat-session-tree-open - Browse saved sessions as a tree
 
 Quick Shell (Hybrid Mode):
   !<cmd>                - Execute shell command directly
-  /cmd <cmd>            - Same as !<cmd>
+  /cmd <cmd>            - Same as !<cmd>. Also /!
   !!                    - Repeat the last shell command
   !cd <dir>             - Change working directory (bare cd goes home)
   /cd [dir]             - Change working directory (no dir prompts)
   /pwd                  - Show the working directory
-  ?<question>           - Ask AI directly (not saved to history)
   \\<text>               - Send text as is, even if it starts with ! or /
 
 The working directory belongs to the session, so it is restored when the
@@ -236,15 +253,29 @@ Keys:
   C-c C-h               - This help
 
 Auto (Default Command):
-  Shell work comes in runs, so `!ls' also makes /cmd the default: plain
-  input goes to the shell until you say otherwise.  The status line says
-  `auto: /cmd' while it is on.
+  Plain input runs through one command, and by default that command is
+  /send. Work that comes in runs claims it: `!ls' makes /cmd the default
+  so the next line is another shell command, and /queue does the same for
+  notes. Anything that asks the model hands it back to /send, so a
+  question always gets you out of shell mode.
   /auto            - Say what plain input currently runs through
   /auto cmd        - Send plain input to the shell
   /auto off        - Send plain input back to the model
   \\<text>          - One line straight to the model, whatever auto says
-  An explicit /command always means itself, and while a response is
-  running plain input steers that run rather than the default command.
+  While it is not /send, the input prompt says which command holds it and
+  the status line says `auto: /cmd'. An explicit /command always means
+  itself, and while a response is running plain input steers that run
+  rather than the default command.
+
+Language:
+  Set `chat-language' for the interface, or leave it at `auto' to follow
+  the Emacs language environment. Command names have translations: /auto
+  and /自动 are the same command, and completion offers the names of the
+  language in use. Names from any language are always accepted.
+  `chat-reply-language' is what the model is told to answer in, and
+  `chat-prompt-language' is the language of the instructions it is sent.
+  Both follow `chat-language' unless set. Pin `chat-prompt-language' to
+  `en' if a translated prompt starts behaving worse than the English one.
 
 Reading a Reply:
   A run reasons, calls tools, reads results and only then answers, and
@@ -295,7 +326,7 @@ Wiki Commands:
   /wiki-index           - Open wiki index
   /wiki-log             - Open wiki log
 
-Type your message and press RET to send."
+In the chat buffer, type a message and press RET to send it."
   "Help text displayed for chat commands.
 
 This is the English text and the reference every translation is checked
@@ -439,12 +470,22 @@ how it is drawn, which is why it does not belong in either display."
   "Most recently opened chat session id.")
 
 (defun chat-show-help ()
-  "Display the chat help buffer."
+  "Display the chat help buffer.
+
+The help ends with a line about the chat buffer, and this is not the chat
+buffer: RET here scrolls, because `view-mode' owns it.  So the footer
+says what the keys do where the reader actually is.  Advice that is true
+somewhere else is the same as advice that is wrong."
   (interactive)
   (with-current-buffer (get-buffer-create "*Chat Help*")
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert (chat-help-text))
+      (insert "\n\n")
+      (insert (chat-i18n
+               'help-buffer-footer
+               "This is the help buffer: SPC and DEL scroll it, q closes it."))
+      (insert "\n")
       (goto-char (point-min))
       (view-mode 1))
     (pop-to-buffer (current-buffer))))

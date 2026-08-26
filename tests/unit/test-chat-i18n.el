@@ -24,9 +24,11 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'test-helper)
 (require 'chat-i18n)
 (require 'chat)
+(require 'chat-code)
 
 ;; ------------------------------------------------------------------
 ;; Resolution
@@ -167,8 +169,185 @@ check cannot go stale as the help changes."
     (should (string-match-p "[一-龥]" translated))
     ;; And it is not a token gesture: the prose is translated too, not
     ;; just a heading over English text.
-    (should-not (string-match-p "Type your message and press RET" translated))
-    (should-not (string-match-p "Shell work comes in runs" translated))))
+    (should-not (string-match-p "In the chat buffer, type a message" translated))
+    (should-not (string-match-p "Plain input runs through one command" translated))))
+
+;; ------------------------------------------------------------------
+;; Command names
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-i18n-a-translated-command-name-reaches-the-handler ()
+  "`/自动' and `/auto' are one command, so it is declared once."
+  (should (equal (chat-i18n-resolve-alias "自动") "auto"))
+  (should (eq (chat-ui--command-handler "自动")
+              (chat-ui--command-handler "auto")))
+  (should (eq (chat-ui--command-handler "发送")
+              (chat-ui--command-handler "send")))
+  ;; Including the properties, which is the reason for resolving rather
+  ;; than for a second table.
+  (should (chat-ui--command-repeatable-p "命令"))
+  (should (eq (chat-ui--command-default-effect "快问") 'reset)))
+
+(ert-deftest chat-i18n-a-translated-name-parses-and-dispatches ()
+  "The whole path, not just the lookup: parse, resolve, run."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Alias" 'kimi))
+          (shell-calls nil))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-ui--handle-shell-command)
+                  (lambda (command) (push command shell-calls))))
+         (chat-ui--dispatch-command (chat-command-parse "/命令 ls"))
+         (should (equal shell-calls '("ls")))
+         ;; And it claimed plain input under its canonical name, so the
+         ;; state does not depend on which spelling was typed.
+         (should (equal (chat-ui-default-command) "cmd")))))))
+
+(ert-deftest chat-i18n-an-alias-is-accepted-whatever-the-language ()
+  "Refusing a name the user knows, to be consistent about locale, is
+pedantry with no upside."
+  (let ((chat-language 'en))
+    (should (eq (chat-ui--command-handler "自动")
+                (chat-ui--command-handler "auto")))))
+
+(ert-deftest chat-i18n-no-alias-shadows-a-command ()
+  "An alias that collided with a real name would silently redirect it."
+  (dolist (catalog chat-i18n-aliases)
+    (dolist (alias (cdr catalog))
+      (should-not (seq-find (lambda (entry)
+                              (equal (plist-get entry :name) (car alias)))
+                            chat-ui--command-table))
+      ;; And it has to point at something that exists.
+      (should (seq-find (lambda (entry)
+                          (equal (plist-get entry :name) (cdr alias)))
+                        chat-ui--command-table)))))
+
+(ert-deftest chat-i18n-an-alias-name-has-no-whitespace ()
+  "A name is read up to the first space, so one with a space in it could
+never be typed."
+  (dolist (catalog chat-i18n-aliases)
+    (dolist (alias (cdr catalog))
+      (should-not (string-match-p "[ \t\u3000]" (car alias))))))
+
+(ert-deftest chat-i18n-completion-offers-the-language-in-use ()
+  "Every alias at once would be a list that is mostly noise."
+  (let ((chat-language 'zh-CN))
+    (let ((offered (chat-ui--command-completion-table)))
+      (should (member "自动" offered))
+      (should-not (member "auto" offered))))
+  (let ((chat-language 'en))
+    (let ((offered (chat-ui--command-completion-table)))
+      (should (member "auto" offered))
+      (should-not (member "自动" offered)))))
+
+(ert-deftest chat-i18n-the-shipped-aliases-cover-every-command ()
+  "A half-translated command list is worse than an English one: the
+reader cannot tell which names have a translation and which do not."
+  (let (untranslated)
+    (dolist (entry chat-ui--command-table)
+      (let ((name (plist-get entry :name)))
+        (unless (chat-i18n-localized-name name 'zh-CN)
+          (push name untranslated))))
+    (should-not untranslated)))
+
+(ert-deftest chat-i18n-the-first-alias-declared-is-the-one-offered ()
+  "Two names for one command is fine; which one is shown is not arbitrary.
+
+`发送' and `提问' both mean /send, and the completion list has to show the
+one that matches the help.  Built with `push', the list would have handed
+back whichever synonym happened to be declared last."
+  (should (equal (chat-i18n-localized-name "send" 'zh-CN) "发送"))
+  (let ((chat-i18n-aliases (copy-tree chat-i18n-aliases)))
+    (chat-i18n-register-aliases 'probe-lang '(("first" . "send")
+                                              ("second" . "send")))
+    (should (equal (chat-i18n-localized-name "send" 'probe-lang) "first"))
+    ;; Re-registering replaces in place rather than shuffling the order.
+    (chat-i18n-register-aliases 'probe-lang '(("first" . "send")))
+    (should (equal (chat-i18n-localized-name "send" 'probe-lang) "first"))))
+
+(ert-deftest chat-i18n-english-aliases-are-spellings-not-translations ()
+  "`/ask' is another way to write `/send', so completion still offers
+`send': the canonical name is the one the rest of the surface uses."
+  (should (equal (chat-i18n-resolve-alias "ask") "send"))
+  (should-not (chat-i18n-localized-name "send" 'en))
+  (let ((chat-language 'en))
+    (should (equal (chat-ui--display-command-name "send") "send"))))
+
+;; ------------------------------------------------------------------
+;; What the model is told
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-reply-language-follows-the-interface-by-default ()
+  (let ((chat-reply-language 'follow)
+        (chat-language 'zh-CN))
+    (should (equal (chat-reply-language-name) "Simplified Chinese")))
+  (let ((chat-reply-language 'follow)
+        (chat-language 'en))
+    (should (equal (chat-reply-language-name) "English"))))
+
+(ert-deftest chat-reply-language-can-be-pinned-or-silenced ()
+  "A language with no catalog can still be asked for; nil says nothing."
+  (let ((chat-reply-language 'en)
+        (chat-language 'zh-CN))
+    (should (equal (chat-reply-language-name) "English")))
+  (let ((chat-reply-language "Japanese"))
+    (should (equal (chat-reply-language-name) "Japanese")))
+  (let ((chat-reply-language nil))
+    (should-not (chat-reply-language-name))))
+
+(ert-deftest chat-reply-language-reaches-the-system-prompt ()
+  "Stated to the model rather than inferred from how the user phrased it."
+  (let ((chat-reply-language 'zh-CN))
+    (let ((prompt (chat-tool-caller-build-system-prompt "Base.")))
+      (should (string-match-p "Simplified Chinese" prompt))
+      ;; And it says not to translate the things that have to stay
+      ;; searchable, which is the failure mode of asking for a language.
+      (should (string-match-p "file paths" prompt))))
+  (let ((chat-reply-language nil))
+    (should-not (string-match-p "Answer in"
+                                (chat-tool-caller-build-system-prompt "Base.")))))
+
+(ert-deftest chat-prompt-language-is-a-separate-switch ()
+  "What the user reads is cosmetic.  What the model reads is not."
+  (let ((chat-language 'zh-CN)
+        (chat-prompt-language 'follow))
+    (should (eq (chat-prompt-language-resolved) 'zh-CN)))
+  (let ((chat-language 'zh-CN)
+        (chat-prompt-language 'en))
+    (should (eq (chat-prompt-language-resolved) 'en))
+    ;; Pinned to English, a Chinese interface still sends English
+    ;; instructions -- which is the point of having the switch.
+    (should (equal (chat-i18n-prompt 'assistant-persona "You are helpful.")
+                   "You are helpful."))))
+
+(ert-deftest chat-prompt-language-falls-back-per-key ()
+  "A catalog that translates half the prompts leaves the other half in
+English rather than dropping back wholesale."
+  (let ((chat-prompt-language 'zh-CN))
+    (should (string-match-p "[一-龥]"
+                            (chat-i18n-prompt 'assistant-persona "You are helpful.")))
+    (should (equal (chat-i18n-prompt 'no-such-prompt-key "untranslated")
+                   "untranslated"))))
+
+(ert-deftest chat-prompt-language-leaves-the-contracts-alone ()
+  "Tool names and JSON keys are matched literally by a parser.
+
+A translated prompt that renamed them would break tool calling, which is
+why only prose is in the prompt catalog."
+  (let ((chat-language 'zh-CN)
+        (chat-prompt-language 'zh-CN))
+    (let ((prompt (chat-tool-caller-build-system-prompt "Base.")))
+      (should (string-match-p "function_call" prompt))
+      (should (string-match-p "apply_patch" prompt))
+      (should (string-match-p "\\*\\*\\* Begin Patch" prompt)))))
+
+(ert-deftest chat-prompt-a-customized-prompt-wins-over-its-translation ()
+  "A value the user set is not a default to be localized away."
+  (let ((chat-prompt-language 'zh-CN)
+        (chat-code-system-prompt "Only do what I said."))
+    (should (equal (chat-code--persona-prompt) "Only do what I said."))))
 
 (ert-deftest chat-help-text-follows-the-language ()
   "The surface shows the catalog entry, not the English constant."

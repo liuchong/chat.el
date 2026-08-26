@@ -18,7 +18,10 @@
 (require 'chat-command)
 ;; Owned by `chat.el', which loads after this file.
 (defvar chat-commands-help)
+(defvar chat-auto-save-sessions)
 (declare-function chat-help-text "chat" ())
+(declare-function chat-new-session "chat" (&optional name model))
+(declare-function chat-list-sessions "chat" ())
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
 (require 'chat-transcript)
@@ -146,9 +149,16 @@ whole rather than to any one part of it.")
          ;; The default command changes what plain input does, so it
          ;; belongs where the reader already looks for what this session
          ;; is.  An invisible mode that eats prose is the failure here.
-         (auto (chat-ui-default-command session)))
-    (concat (format "Model: %s" model)
-            (when auto (format " | auto: /%s" auto))
+         ;; The baseline is not announced: naming it every time would
+         ;; train the reader to stop reading the field that matters.
+         (auto (and (chat-ui-default-command-claimed-p session)
+                    (chat-ui--display-command-name
+                     (chat-ui-default-command session))))
+         (queued (chat-ui--queue-length session)))
+    (concat (chat-i18n 'status-model "Model: %s" model)
+            (when auto (format " | %s" (chat-i18n 'status-auto "auto: /%s" auto)))
+            (when (> queued 0)
+              (format " | %s" (chat-i18n 'status-queued "queued: %d" queued)))
             (when label (format " | %s" label)))))
 
 (defun chat-ui--render-status-line ()
@@ -421,55 +431,105 @@ started on.  A session without code capability has no focus to move."
           (when (<= (marker-position chat-ui--input-overlay) start)
             (cons start end)))))))
 
+(defconst chat-ui-baseline-command "send"
+  "The command plain input runs through when nothing has claimed it.
+
+Typing a line and pressing RET has always meant `talk to the model, and
+write it down'.  Naming that behaviour makes it a command like any other,
+which is what lets auto return to it: a default you can only leave by
+remembering a magic word is a trap, and that is exactly what the previous
+design was.")
+
 (defconst chat-ui--command-table
   '((:name "cancel"   :handler chat-ui--command-cancel :while-busy t)
+    (:name "help"     :handler chat-ui--command-help   :while-busy t)
     (:name "model"    :handler chat-ui--command-model  :while-busy t)
-    (:name "cmd"      :handler chat-ui--command-shell  :repeatable t)
-    (:name "!"        :handler chat-ui--command-shell  :repeatable t)
+    (:name "send"     :handler chat-ui--command-send   :default sticky)
+    (:name "quick"    :handler chat-ui--command-quick  :default reset)
+    (:name "cmd"      :handler chat-ui--command-shell  :default sticky)
+    (:name "queue"    :handler chat-ui--command-queue  :default sticky)
+    (:name "flush"    :handler chat-ui--command-flush  :default reset)
+    (:name "drop"     :handler chat-ui--command-drop)
     (:name "cd"       :handler chat-ui--command-cd)
     (:name "pwd"      :handler chat-ui--command-pwd)
-    (:name "question" :handler chat-ui--command-question)
-    (:name "ask"      :handler chat-ui--command-question)
-    (:name "?"        :handler chat-ui--command-question)
-    (:name "auto"     :handler chat-ui--command-auto)
-    (:name "help"     :handler chat-ui--command-help :while-busy t))
+    (:name "new"      :handler chat-ui--command-new)
+    (:name "list"     :handler chat-ui--command-list)
+    (:name "save"     :handler chat-ui--command-save)
+    (:name "clear"    :handler chat-ui--command-clear)
+    (:name "auto"     :handler chat-ui--command-auto))
   "What each slash command is, declared rather than listed per property.
 
 `:handler' takes the argument text, which may be empty.  A name absent
-from this table is left as ordinary message text.
+from this table, and not an alias of one, is left as ordinary message
+text.
 
 `:while-busy' means the command still runs while a response is in flight.
 
-`:repeatable' means the command is worth running several times in a row,
-so it may become the session's default command: plain input then goes to
-it instead of to the model, until `/auto off'.  Shell work is the case
-that wants this -- you rarely run one command.
+`:default' says what using the command does to the session's default
+command, which is what plain input runs through:
 
-Asking the model is deliberately not repeatable, because it is already
-what plain input does.  Neither is `/ask', which asks without recording:
-as a sticky default it would quietly stop the conversation being written
-down, and a footgun that only shows up later is worse than typing four
-characters.")
+  sticky  Becomes the default.  For work that comes in runs -- you rarely
+          run one shell command, or queue one note.
+  reset   Returns the default to `chat-ui-baseline-command'.
+  nil     Leaves the default alone.  A command you reach for once says
+          nothing about what the next line means.
+
+`/quick' asks without recording, so it resets rather than sticking.  As a
+sticky default it would quietly stop the conversation being written down,
+and a footgun that only surfaces later is the worst kind.  Resetting
+still gets a reader out of shell mode, which is the thing that actually
+went wrong when only `/cmd' could hold plain input.
+
+One entry per command, and every other spelling is an alias.  `/ask' and
+`/question' were once entries of their own sharing a handler, which is
+how they came to have three names between them for the aside and none at
+all for the conversation.")
+
+;; `/ask' reads as `ask the model', so it is the recorded conversation
+;; rather than the aside beside it -- which is what a reader means by it
+;; and, for a long time, was not what it did.  These are declared as
+;; aliases so the table stays one entry per command; being registered as
+;; a language means they are accepted whatever `chat-language' says.
+(chat-i18n-register-aliases
+ 'en
+ '(("ask" . "send")
+   ("question" . "send")
+   ("?" . "quick")
+   ("!" . "cmd")))
 
 (defun chat-ui--command-entry (name)
-  "Return the table entry for slash command NAME, or nil."
-  (seq-find (lambda (entry) (equal (plist-get entry :name) name))
-            chat-ui--command-table))
+  "Return the table entry for slash command NAME, or nil.
+
+NAME may be a localized alias, which resolves to the canonical entry so
+that every property of a command is declared once."
+  (let ((canonical (or (and (fboundp 'chat-i18n-resolve-alias)
+                            (chat-i18n-resolve-alias name))
+                       name)))
+    (seq-find (lambda (entry) (equal (plist-get entry :name) canonical))
+              chat-ui--command-table)))
+
+(defun chat-ui--command-canonical-name (name)
+  "Return the canonical name for slash command NAME, or nil."
+  (plist-get (chat-ui--command-entry name) :name))
 
 (defun chat-ui--command-handler (name)
   "Return the handler for slash command NAME, or nil."
   (plist-get (chat-ui--command-entry name) :handler))
 
+(defun chat-ui--command-default-effect (name)
+  "Return what using command NAME does to the default: `sticky', `reset' or nil."
+  (plist-get (chat-ui--command-entry name) :default))
+
 (defun chat-ui--command-repeatable-p (name)
   "Return non-nil when slash command NAME may become the default."
-  (and (plist-get (chat-ui--command-entry name) :repeatable) t))
+  (eq (chat-ui--command-default-effect name) 'sticky))
 
 (defun chat-ui--repeatable-command-names ()
   "Return the names of every command that may become the default."
   (delete-dups
    (delq nil
          (mapcar (lambda (entry)
-                   (and (plist-get entry :repeatable)
+                   (and (eq (plist-get entry :default) 'sticky)
                         (plist-get entry :name)))
                  chat-ui--command-table))))
 
@@ -502,16 +562,28 @@ for the command list with the contents of the root directory."
           :company-kind (lambda (_candidate) 'keyword))))
 
 (defun chat-ui--command-completion-table ()
-  "Return the slash command names offered for completion."
-  (mapcar (lambda (entry) (plist-get entry :name)) chat-ui--command-table))
+  "Return the slash command names offered for completion.
+
+Every language's aliases are accepted, but only the current language's
+are offered: a list that showed all of them would be mostly noise to
+whoever is reading it."
+  (delete-dups
+   (mapcar (lambda (entry)
+             (let ((name (plist-get entry :name)))
+               (or (and (fboundp 'chat-i18n-localized-name)
+                        (chat-i18n-localized-name name))
+                   name)))
+           chat-ui--command-table)))
 
 (defun chat-ui--command-annotation (name)
   "Return a short annotation for slash command NAME."
-  (let ((entry (chat-ui--command-entry name)))
-    (cond
-     ((plist-get entry :repeatable) "  can hold plain input")
-     ((plist-get entry :while-busy) "  works while busy")
-     (t ""))))
+  (pcase (chat-ui--command-default-effect name)
+    ('sticky (concat "  " (chat-i18n 'command-annotation-sticky
+                                     "can hold plain input")))
+    (_ (if (plist-get (chat-ui--command-entry name) :while-busy)
+           (concat "  " (chat-i18n 'command-annotation-while-busy
+                                   "works while busy"))
+         ""))))
 
 (defun chat-ui--path-token-p (token)
   "Return non-nil when TOKEN looks like a file path fragment."
@@ -735,13 +807,16 @@ still sends the message everywhere else.")
                         'keymap chat-ui-fold-row-map
                         'mouse-face 'highlight
                         'help-echo (if (plist-get instruction :open)
-                                       "RET or mouse-1 to fold"
-                                     "RET or mouse-1 to expand")))))
+                                       (chat-i18n 'fold-echo-close
+                                                  "RET or mouse-1 to fold")
+                                     (chat-i18n 'fold-echo-open
+                                                "RET or mouse-1 to expand"))))))
 
 (defun chat-ui--insert-detail (label text face)
   "Insert TEXT as a detail block titled LABEL, drawn in FACE."
   (let* ((body (string-trim-right (or text "")))
-         (title (concat chat-ui-detail-indent (or label "Detail"))))
+         (title (concat chat-ui-detail-indent
+                        (or label (chat-i18n 'detail-label "Detail")))))
     (if (string-empty-p body)
         (insert (propertize (concat title "\n") 'face face))
       (if (and (not (string-match-p "\n" body))
@@ -766,6 +841,33 @@ that block."
                    (eq (char-before (1- (point))) ?\n)))
     (insert "\n")))
 
+(defconst chat-ui--pending-query-property 'chat-ui-pending-query
+  "Property marking the note that says a one-off question is in flight.
+
+Marked rather than found by searching for its own text: the text is
+translated, and a search for the English would quietly stop finding it in
+any other language, leaving the note on screen under the answer.")
+
+(defconst chat-ui--role-faces
+  '((user . font-lock-keyword-face)
+    (assistant . font-lock-function-name-face)
+    (assistant-quick . font-lock-function-name-face)
+    (system . font-lock-comment-face))
+  "The face each role label is drawn in.")
+
+(defun chat-ui--role-label (role)
+  "Return the text naming ROLE in the reader's language."
+  (pcase role
+    ('user (chat-i18n 'role-you "You"))
+    ('assistant (chat-i18n 'role-assistant "Assistant"))
+    ('assistant-quick (chat-i18n 'role-assistant-quick "Assistant (quick)"))
+    ('system (chat-i18n 'role-system "System"))))
+
+(defun chat-ui--insert-role-label (role)
+  "Insert the label for ROLE and the newline that follows it."
+  (insert (propertize (concat (chat-ui--role-label role) ":\n")
+                      'face (alist-get role chat-ui--role-faces))))
+
 (defun chat-ui--insert-part (part)
   "Insert transcript PART at point.
 
@@ -777,12 +879,12 @@ answer for the reader's attention."
     (pcase (plist-get part :category)
       ('user
        (chat-ui--open-block)
-       (insert (propertize "You:\n" 'face 'font-lock-keyword-face))
+       (chat-ui--insert-role-label 'user)
        (insert text)
        (insert "\n\n"))
       ('ai-final
        (chat-ui--open-block)
-       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
+       (chat-ui--insert-role-label 'assistant)
        (chat-ui--insert-formatted-response text)
        (insert "\n\n"))
       (_
@@ -837,13 +939,16 @@ it would be counted in a fold row standing for nothing."
     (insert (propertize (concat chat-ui-detail-indent line "\n")
                         'face 'chat-transcript-fold-row)))
   (when-let ((summary (plist-get chat-ui--live-trailers :tool-summary)))
-    (insert (propertize (format "%sTools used: %s\n"
-                                chat-ui-detail-indent summary)
+    (insert (propertize (concat chat-ui-detail-indent
+                                (chat-i18n 'tools-used "Tools used: %s" summary)
+                                "\n")
                         'face 'chat-transcript-system)))
   (when (plist-get chat-ui--live-trailers :limit-reached)
     (insert (propertize
-             (format "%sTool loop stopped after reaching the safety limit.\n"
-                     chat-ui-detail-indent)
+             (concat chat-ui-detail-indent
+                     (chat-i18n 'tool-loop-stopped
+                                "Tool loop stopped after reaching the safety limit.")
+                     "\n")
              'face 'chat-transcript-system))))
 
 (defun chat-ui--render-live-region ()
@@ -880,8 +985,7 @@ prose, and the fence that would have closed it is never reconsidered."
           (delete-region chat-ui--live-start chat-ui--messages-end)
           (setq body nil)
           (unless (string-empty-p content)
-            (insert (propertize "Assistant:\n"
-                                'face 'font-lock-function-name-face))
+            (chat-ui--insert-role-label 'assistant)
             (setq body (point))
             (chat-ui--insert-formatted-response content)
             (insert "\n\n")))
@@ -952,14 +1056,45 @@ all produce the same screen."
             groups))
     (chat-ui--redraw-conversation)
     (message "%s" (if chat-ui--opened-fold-groups
-                      "Showing all detail"
-                    "Detail folded"))))
+                      (chat-i18n 'detail-shown "Showing all detail")
+                    (chat-i18n 'detail-folded "Detail folded")))))
+
+(defface chat-ui-claimed-prompt
+  '((t :inherit warning))
+  "Face for the input prompt while a command other than the baseline holds it."
+  :group 'chat-ui)
+
+(defun chat-ui--input-prompt ()
+  "Return the text that opens the input area.
+
+Names the command plain input will run through when that is not the
+baseline.  The status line says so too, but it is at the top of a buffer
+that scrolls and the cursor is down here: a shell that looks like a chat
+box is how a question ends up being run as a command."
+  (if (chat-ui-default-command-claimed-p)
+      (propertize (format "%s> " (chat-ui--display-command-name
+                                 (chat-ui-default-command)))
+                  'face 'chat-ui-claimed-prompt)
+    "> "))
+
+(defun chat-ui--render-input-prompt ()
+  "Rewrite the input prompt in place, keeping the input marker after it."
+  (when (and (markerp chat-ui--input-overlay)
+             (marker-position chat-ui--input-overlay))
+    (save-excursion
+      (let* ((inhibit-read-only t)
+             (end (marker-position chat-ui--input-overlay))
+             (start (progn (goto-char end) (line-beginning-position))))
+        (delete-region start end)
+        (goto-char start)
+        (insert (chat-ui--input-prompt))
+        (set-marker chat-ui--input-overlay (point))))))
 
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
   (goto-char (point-max))
   (insert (propertize "───\n" 'face 'shadow))
-  (insert "> ")
+  (insert (chat-ui--input-prompt))
   (setq chat-ui--input-overlay (point-marker)))
 
 ;; ------------------------------------------------------------------
@@ -1023,69 +1158,104 @@ all produce the same screen."
 ;; always available for one line that must not be interpreted.
 
 (defun chat-ui-default-command (&optional session)
-  "Return the command plain input runs through in SESSION, or nil.
+  "Return the command plain input runs through in SESSION.
 
-SESSION defaults to the current one.  It is taken as an argument because
-the status line is drawn for a session that may not be the buffer's yet,
-and a header that disagrees with the behaviour is worse than no header.
+Always a name: `chat-ui-baseline-command' when nothing has claimed plain
+input.  SESSION defaults to the current one.  It is taken as an argument
+because the status line is drawn for a session that may not be the
+buffer's yet, and a header that disagrees with the behaviour is worse
+than no header.
 
 Kept on the session so it survives a reopen: a mode you cannot see is
 bad, and a mode that silently expires is worse."
-  (when-let ((session (or session chat--current-session)))
-    (chat-session-metadata-get session :chat-ui-default-command)))
+  (or (when-let ((session (or session chat--current-session)))
+        (chat-session-metadata-get session :chat-ui-default-command))
+      chat-ui-baseline-command))
+
+(defun chat-ui-default-command-claimed-p (&optional session)
+  "Return non-nil when something other than the baseline holds plain input."
+  (not (equal (chat-ui-default-command session) chat-ui-baseline-command)))
 
 (defun chat-ui--set-default-command (name)
-  "Make NAME the command plain input runs through, or clear it when nil."
-  (chat-ui--session-metadata-set :chat-ui-default-command name))
+  "Make NAME the command plain input runs through.
 
-(defun chat-ui--command-default-name (command)
-  "Return the name COMMAND would become the default under, or nil.
+The baseline is stored as nil so there is one representation of `nothing
+has claimed plain input' rather than two that have to be kept in step."
+  (chat-ui--session-metadata-set
+   :chat-ui-default-command
+   (and name (not (equal name chat-ui-baseline-command)) name)))
+
+(defun chat-ui--render-default-command ()
+  "Redraw both places that say what plain input will do."
+  (chat-ui--render-status-line)
+  (chat-ui--render-input-prompt))
+
+(defun chat-ui--command-name-of (command)
+  "Return the canonical command name COMMAND invokes, or nil.
 
 `!ls' and `/cmd ls' are the same command reached two ways, so the bare
-prefix engages auto exactly as the slash name does."
-  (let ((name (pcase (plist-get command :kind)
-                ('slash (plist-get command :name))
-                ((or 'shell 'shell-repeat) "cmd")
-                (_ nil))))
-    (and name (chat-ui--command-repeatable-p name) name)))
+prefix affects the default exactly as the slash name does."
+  (pcase (plist-get command :kind)
+    ('slash (chat-ui--command-canonical-name (plist-get command :name)))
+    ((or 'shell 'shell-repeat) "cmd")
+    ('query "quick")
+    (_ nil)))
 
-(defun chat-ui--note-repeatable-command (command)
-  "Keep COMMAND as the default when it is repeatable and not already so."
-  (when-let ((_ chat--current-session)
-             (name (chat-ui--command-default-name command)))
-    (unless (equal (chat-ui-default-command) name)
-      (chat-ui--set-default-command name)
-      (chat-ui--render-status-line)
-      (message "%s" (chat-i18n 'auto-claimed
-                               "Plain input now runs through /%s. /auto off to stop."
-                               name)))))
+(defun chat-ui--note-command-default (command)
+  "Apply COMMAND's effect on which command holds plain input.
+
+A sticky command claims plain input; one that resets hands it back to the
+baseline.  Both are announced, because the whole failure mode here is a
+mode the reader cannot see."
+  (when-let* ((_ chat--current-session)
+              (name (chat-ui--command-name-of command))
+              (effect (chat-ui--command-default-effect name)))
+    (let ((wanted (if (eq effect 'reset) chat-ui-baseline-command name)))
+      (unless (equal (chat-ui-default-command) wanted)
+        (chat-ui--set-default-command wanted)
+        (chat-ui--render-default-command)
+        (message "%s"
+                 (if (equal wanted chat-ui-baseline-command)
+                     (chat-i18n 'auto-released
+                                "Plain input goes to the model again.")
+                   (chat-i18n 'auto-claimed
+                              "Plain input now runs through /%s. /auto off to stop."
+                              (chat-ui--display-command-name wanted))))))))
+
+(defun chat-ui--display-command-name (name)
+  "Return NAME as the reader's language calls it."
+  (or (and (fboundp 'chat-i18n-localized-name)
+           (chat-i18n-localized-name name))
+      name))
 
 (defun chat-ui--command-auto (arg)
   "Report, set or clear the default command according to ARG."
-  (let ((request (downcase (string-trim (or arg "")))))
+  (let* ((request (downcase (string-trim (or arg ""))))
+         (canonical (chat-ui--command-canonical-name request)))
     (cond
      ((string-empty-p request)
       (chat-ui--insert-system-message
-       (if-let ((name (chat-ui-default-command)))
+       (if (chat-ui-default-command-claimed-p)
            (chat-i18n 'auto-state-on
                       "Auto: plain input runs through /%s. /auto off to stop."
-                      name)
+                      (chat-ui--display-command-name (chat-ui-default-command)))
          (chat-i18n 'auto-state-off
                     "Auto: off -- plain input goes to the model. Repeatable: %s"
                     (chat-ui--repeatable-command-list)))))
-     ((member request '("off" "none" "stop"))
+     ((or (member request '("off" "none" "stop"))
+          (equal canonical chat-ui-baseline-command))
       (chat-ui--set-default-command nil)
-      (chat-ui--render-status-line)
+      (chat-ui--render-default-command)
       (chat-ui--insert-system-message
        (chat-i18n 'auto-turned-off
                   "Auto: off -- plain input goes to the model.")))
-     ((chat-ui--command-repeatable-p request)
-      (chat-ui--set-default-command request)
-      (chat-ui--render-status-line)
+     ((and canonical (chat-ui--command-repeatable-p canonical))
+      (chat-ui--set-default-command canonical)
+      (chat-ui--render-default-command)
       (chat-ui--insert-system-message
        (chat-i18n 'auto-state-on
                   "Auto: plain input runs through /%s. /auto off to stop."
-                  request)))
+                  (chat-ui--display-command-name canonical))))
      (t
       (chat-ui--insert-system-message
        (chat-i18n 'auto-not-repeatable
@@ -1095,7 +1265,8 @@ prefix engages auto exactly as the slash name does."
 
 (defun chat-ui--repeatable-command-list ()
   "Return the repeatable command names as slash-prefixed display text."
-  (mapconcat (lambda (name) (concat "/" name))
+  (mapconcat (lambda (name)
+               (concat "/" (chat-ui--display-command-name name)))
              (chat-ui--repeatable-command-names) " "))
 
 (defun chat-ui--dispatch-command (command)
@@ -1104,17 +1275,19 @@ prefix engages auto exactly as the slash name does."
     (pcase (plist-get command :kind)
       ('shell
        (chat-ui--command-shell arg)
-       (chat-ui--note-repeatable-command command))
+       (chat-ui--note-command-default command))
       ('shell-repeat
        (chat-ui--repeat-shell-command)
-       (chat-ui--note-repeatable-command command))
-      ('query (chat-ui--command-question arg))
+       (chat-ui--note-command-default command))
+      ('query
+       (chat-ui--command-quick arg)
+       (chat-ui--note-command-default command))
       ('slash
        (let ((handler (chat-ui--command-handler (plist-get command :name))))
          (if handler
              (progn
                (funcall handler arg)
-               (chat-ui--note-repeatable-command command))
+               (chat-ui--note-command-default command))
            ;; An unknown name is not an error: the model may still make
            ;; sense of it, and refusing would break slash-prefixed prose.
            (chat-ui--send-user-message (plist-get command :text)))))
@@ -1123,11 +1296,11 @@ prefix engages auto exactly as the slash name does."
       (_ (chat-ui--send-user-message (plist-get command :text))))))
 
 (defun chat-ui--dispatch-plain-input (text)
-  "Run TEXT through the default command, or send it to the model."
-  (if-let* ((name (chat-ui-default-command))
-            (handler (chat-ui--command-handler name)))
-      (funcall handler text)
-    (chat-ui--send-user-message text)))
+  "Run TEXT through the command that currently holds plain input."
+  (let ((handler (chat-ui--command-handler (chat-ui-default-command))))
+    (if handler
+        (funcall handler text)
+      (chat-ui--send-user-message text))))
 
 (defun chat-ui--send-user-message (content)
   "Record CONTENT as a user message and ask the model to respond."
@@ -1159,6 +1332,111 @@ prefix engages auto exactly as the slash name does."
     (message "%s" (chat-i18n 'message-queued
                           "Message queued for the active response."))))
 
+;;; The queue: several notes, one turn
+;;
+;; Writing a request in one go is not how a request arrives.  It arrives
+;; as `also check X', `and the file is at Y' -- each of which, sent on its
+;; own, spends a whole turn on a fragment and gets an answer to the
+;; fragment.  The queue lets those land as notes and go out together.
+;;
+;; They are joined into a single user message rather than sent as several,
+;; because consecutive messages in the same role are not something every
+;; provider accepts, and a batching feature that works on some models is
+;; worse than one that reads slightly less faithfully on all of them.
+
+(defun chat-ui--queue-entries (&optional session)
+  "Return the notes queued in SESSION, oldest first."
+  (when-let ((session (or session chat--current-session)))
+    (let ((stored (chat-session-metadata-get session :chat-ui-queued-messages)))
+      ;; A round trip through JSON brings a list of strings back as a
+      ;; vector, and a queue that empties itself on reopen would be a
+      ;; quiet way to lose what someone typed.
+      (append (if (vectorp stored) (append stored nil) stored) nil))))
+
+(defun chat-ui--queue-length (&optional session)
+  "Return how many notes are queued in SESSION."
+  (length (chat-ui--queue-entries session)))
+
+(defun chat-ui--set-queue (entries)
+  "Make ENTRIES the queued notes of the current session."
+  (chat-ui--session-metadata-set :chat-ui-queued-messages entries)
+  (chat-ui--render-status-line))
+
+(defun chat-ui--queue-joined-text (entries)
+  "Return ENTRIES as the text of one message.
+
+Numbered when there are several, so the model can see it was given
+distinct requests rather than one rambling one; left alone when there is
+only one, because numbering a list of one is noise."
+  (if (cdr entries)
+      (string-join
+       (seq-map-indexed (lambda (entry index)
+                          (format "%d. %s" (1+ index) entry))
+                        entries)
+       "\n\n")
+    (car entries)))
+
+(defun chat-ui--command-queue (arg)
+  "Queue ARG to go out later, or list what is queued when ARG is empty."
+  (let ((note (string-trim (or arg ""))))
+    (if (string-empty-p note)
+        (chat-ui--report-queue)
+      (let ((entries (append (chat-ui--queue-entries) (list note))))
+        (chat-ui--set-queue entries)
+        (chat-ui--insert-system-message
+         (chat-i18n 'queue-added
+                    "Queued %d: %s  (/flush to send, /queue to review)"
+                    (length entries) note))))))
+
+(defun chat-ui--report-queue ()
+  "Say what is queued, and how to send or discard it."
+  (let ((entries (chat-ui--queue-entries)))
+    (chat-ui--insert-system-message
+     (if (null entries)
+         (chat-i18n 'queue-empty
+                    "Nothing queued. /queue <note> collects notes to send together.")
+       (concat (chat-i18n 'queue-heading "Queued (%d), /flush to send:"
+                          (length entries))
+               "\n"
+               (string-join
+                (seq-map-indexed (lambda (entry index)
+                                   (format "  %d. %s" (1+ index) entry))
+                                 entries)
+                "\n"))))))
+
+(defun chat-ui--command-flush (arg)
+  "Send the queue as one turn, with ARG appended when it is given."
+  (let* ((extra (string-trim (or arg "")))
+         (entries (append (chat-ui--queue-entries)
+                          (and (not (string-empty-p extra)) (list extra)))))
+    (if (null entries)
+        (chat-ui--insert-system-message
+         (chat-i18n 'queue-empty
+                    "Nothing queued. /queue <note> collects notes to send together."))
+      ;; Cleared before sending: a failed request that left the notes
+      ;; queued would send them twice on the next flush.
+      (chat-ui--set-queue nil)
+      (chat-ui--send-user-message (chat-ui--queue-joined-text entries)))))
+
+(defun chat-ui--command-drop (arg)
+  "Drop the last queued note, or all of them when ARG says `all'."
+  (let ((entries (chat-ui--queue-entries))
+        (request (downcase (string-trim (or arg "")))))
+    (cond
+     ((null entries)
+      (chat-ui--insert-system-message
+       (chat-i18n 'queue-empty
+                  "Nothing queued. /queue <note> collects notes to send together.")))
+     ((member request '("all" "*"))
+      (chat-ui--set-queue nil)
+      (chat-ui--insert-system-message
+       (chat-i18n 'queue-dropped-all "Dropped all %d queued notes."
+                  (length entries))))
+     (t
+      (chat-ui--set-queue (butlast entries))
+      (chat-ui--insert-system-message
+       (chat-i18n 'queue-dropped "Dropped: %s" (car (last entries))))))))
+
 (defun chat-ui--command-cancel (_arg)
   "Cancel the response that is in flight."
   (chat-ui-cancel-response)
@@ -1176,8 +1454,23 @@ prefix engages auto exactly as the slash name does."
       (message "%s" (chat-i18n 'shell-usage "Usage: !<command>"))
     (chat-ui--handle-shell-command arg)))
 
-(defun chat-ui--command-question (arg)
-  "Ask the model ARG without recording it in the session."
+(defun chat-ui--command-send (arg)
+  "Send ARG to the model as a recorded turn, or flush the queue when empty.
+
+This is the name of what plain input has always done: recorded in the
+session, answered by a run that may reason and use tools over several
+steps.  It needed a name so that auto has somewhere to return to, and so
+that the main way of using the surface is not the only thing on it with
+no name."
+  (if (string-empty-p arg)
+      (if (chat-ui--queue-entries)
+          (chat-ui--command-flush "")
+        (message "%s" (chat-i18n 'send-usage
+                                 "Usage: /send <message>, or /send alone to send the queue.")))
+    (chat-ui--send-user-message arg)))
+
+(defun chat-ui--command-quick (arg)
+  "Ask the model ARG once, without recording it in the session."
   (chat-ui--handle-direct-query arg))
 
 (defun chat-ui--command-cd (arg)
@@ -1190,6 +1483,42 @@ prefix engages auto exactly as the slash name does."
 (defun chat-ui--command-pwd (_arg)
   "Report the working directory of this session."
   (chat-ui--insert-system-message (format "📁 %s" default-directory)))
+
+(defun chat-ui--command-new (_arg)
+  "Start a new session."
+  (call-interactively #'chat-new-session))
+
+(defun chat-ui--command-list (_arg)
+  "Show the saved sessions."
+  (call-interactively #'chat-list-sessions))
+
+(defun chat-ui--command-save (_arg)
+  "Write this session to disk now."
+  (if (null chat--current-session)
+      (message "%s" (chat-i18n 'no-session "No session here."))
+    (chat-session-save chat--current-session)
+    (chat-ui--insert-system-message
+     (chat-i18n 'session-saved "Saved: %s"
+                (chat-session-name chat--current-session)))))
+
+(defun chat-ui--command-clear (_arg)
+  "Drop the conversation from this session, keeping the session itself.
+
+Asks first: the messages are the session, and there is no undo for
+throwing them away."
+  (cond
+   ((null chat--current-session)
+    (message "%s" (chat-i18n 'no-session "No session here.")))
+   ((not (yes-or-no-p (chat-i18n 'clear-confirm
+                                 "Discard this conversation? ")))
+    (message "%s" (chat-i18n 'clear-cancelled "Kept the conversation.")))
+   (t
+    (chat-session-clear-messages chat--current-session)
+    (when chat-auto-save-sessions
+      (chat-session-save chat--current-session))
+    (chat-ui-setup-buffer chat--current-session)
+    (chat-ui--insert-system-message
+     (chat-i18n 'conversation-cleared "Conversation cleared.")))))
 
 (defun chat-ui--command-help (arg)
   "Show help, filtered to lines matching ARG when it is given.
@@ -1272,7 +1601,9 @@ there is no second request path to hold it."
         (chat-log "[TOOLS] Tool calling disabled, using original messages")
         messages)
     (let* ((code-prompt (chat-ui--code-capability-prompt chat--current-session))
-           (base-prompt (or code-prompt "You are a helpful AI assistant."))
+           (base-prompt (or code-prompt
+                            (chat-i18n-prompt 'assistant-persona
+                                              "You are a helpful AI assistant.")))
            (target-note (chat-ui--followup-target-note))
            (instructions (and (fboundp 'chat-project-instructions)
                               (chat-project-instructions default-directory)))
@@ -1772,7 +2103,7 @@ assistant response being filled in."
 
 (defun chat-ui--start-agent-run (transport)
   "Start an agent run for the current session through TRANSPORT."
-  (message "Getting response from AI...")
+  (message "%s" (chat-i18n 'response-starting "Getting response from AI..."))
   (let* ((session chat--current-session)
          (model (chat-session-model-id session))
          ;; The session records more than a request should carry: command
@@ -2011,8 +2342,9 @@ from a different provider than the one that was asked."
   ;; Show thinking message
   (save-excursion
     (goto-char chat-ui--messages-end)
-    (insert (propertize "System:\n" 'face 'font-lock-comment-face))
-    (insert "🔨 Creating tool from your request...\n\n")
+    (chat-ui--insert-role-label 'system)
+    (insert (chat-i18n 'tool-forge-creating "🔨 Creating tool from your request..."))
+    (insert "\n\n")
     (set-marker chat-ui--messages-end (point)))
   ;; Generate tool asynchronously
   (run-with-timer
@@ -2025,10 +2357,12 @@ from a different provider than the one that was asked."
              ;; Success message
              (save-excursion
                (goto-char chat-ui--messages-end)
-               (insert (propertize "System:\n" 'face 'font-lock-comment-face))
-               (insert (format "✅ Tool '%s' (%s) created and registered!\n\n"
-                              (chat-forged-tool-name tool)
-                              (chat-forged-tool-id tool)))
+               (chat-ui--insert-role-label 'system)
+               (insert (chat-i18n 'tool-forge-created
+                                  "✅ Tool '%s' (%s) created and registered!"
+                                  (chat-forged-tool-name tool)
+                                  (chat-forged-tool-id tool)))
+               (insert "\n\n")
                (set-marker chat-ui--messages-end (point)))
              ;; Add to session messages
              (chat-session-add-message
@@ -2041,8 +2375,10 @@ from a different provider than the one that was asked."
          ;; Failure message
          (save-excursion
            (goto-char chat-ui--messages-end)
-           (insert (propertize "System:\n" 'face 'font-lock-comment-face))
-           (insert "❌ Failed to create tool. Please try again with a clearer description.\n\n")
+           (chat-ui--insert-role-label 'system)
+           (insert (chat-i18n 'tool-forge-failed
+                              "❌ Failed to create tool. Please try again with a clearer description."))
+           (insert "\n\n")
            (set-marker chat-ui--messages-end (point))))))))
 
 ;; ------------------------------------------------------------------
@@ -2192,19 +2528,20 @@ working directory."
          (expanded (expand-file-name requested)))
     (if (not (file-directory-p expanded))
         (chat-ui--insert-system-message
-         (format "❌ Directory not found: %s" requested))
+         (chat-i18n 'directory-missing "❌ Directory not found: %s" requested))
       (setq default-directory (file-name-as-directory expanded))
       (when chat--current-session
         (chat-session-set-working-directory chat--current-session
                                             default-directory))
       (chat-ui--insert-system-message
-       (format "📁 Changed directory to: %s" default-directory)))))
+       (chat-i18n 'directory-changed "📁 Changed directory to: %s" default-directory)))))
 
 (defun chat-ui--repeat-shell-command ()
   "Run the shell command this buffer ran most recently."
   (if chat-ui--last-shell-command
       (chat-ui--handle-shell-command chat-ui--last-shell-command)
-    (chat-ui--insert-system-message "⚠️ No shell command to repeat yet")))
+    (chat-ui--insert-system-message
+     (chat-i18n 'shell-nothing-to-repeat "⚠️ No shell command to repeat yet"))))
 
 (defun chat-ui--execute-shell-safe (command)
   "Run COMMAND for the chat buffer and return its output."
@@ -2232,7 +2569,9 @@ This is an ephemeral query - the result is displayed but not persisted."
     (if (string-empty-p trimmed)
         (message "Empty question. Usage: ?<your question>")
       (chat-ui--insert-user-message (format "?%s" trimmed))
-      (chat-ui--insert-system-message "🤖 Asking AI...")
+      (chat-ui--insert-system-message
+       (propertize (chat-i18n 'query-asking "🤖 Asking AI...")
+                   chat-ui--pending-query-property t))
       ;; Get AI response asynchronously
       (let* ((session chat--current-session)
              (model (chat-session-model-id session))
@@ -2252,14 +2591,14 @@ This is an ephemeral query - the result is displayed but not persisted."
          (lambda (err)
            (when (buffer-live-p buffer)
              (with-current-buffer buffer
-               (chat-ui--insert-system-message (format "❌ Error: %s" err)))))
+               (chat-ui--insert-system-message (chat-i18n 'error-note "❌ Error: %s" err)))))
          '(:temperature 0.7))))))
 
 (defun chat-ui--insert-system-message (content)
   "Insert a system message CONTENT into chat buffer."
   (save-excursion
     (goto-char chat-ui--messages-end)
-    (insert (propertize "System:\n" 'face 'font-lock-comment-face))
+    (chat-ui--insert-role-label 'system)
     (insert content)
     (insert "\n\n")
     (set-marker chat-ui--messages-end (point))))
@@ -2268,7 +2607,7 @@ This is an ephemeral query - the result is displayed but not persisted."
   "Insert a user message CONTENT into chat buffer (ephemeral)."
   (save-excursion
     (goto-char chat-ui--messages-end)
-    (insert (propertize "You:\n" 'face 'font-lock-keyword-face))
+    (chat-ui--insert-role-label 'user)
     (insert (propertize content 'face 'italic))
     (insert "\n\n")
     (set-marker chat-ui--messages-end (point))))
@@ -2277,18 +2616,29 @@ This is an ephemeral query - the result is displayed but not persisted."
   "Insert an ephemeral AI response CONTENT into chat buffer."
   (save-excursion
     (goto-char chat-ui--messages-end)
-    ;; Remove the "Asking AI..." message
-    (let ((search-start (max (point-min) (- chat-ui--messages-end 500))))
-      (goto-char search-start)
-      (when (search-forward "🤖 Asking AI..." chat-ui--messages-end t)
-        (let ((beg (line-beginning-position)))
-          (goto-char chat-ui--messages-end)
-          (delete-region beg chat-ui--messages-end)
-          (goto-char beg))))
-    (insert (propertize "Assistant (quick):\n" 'face 'font-lock-function-name-face))
+    (chat-ui--delete-pending-query-note)
+    (chat-ui--insert-role-label 'assistant-quick)
     (insert content)
     (insert "\n\n")
     (set-marker chat-ui--messages-end (point))))
+
+(defun chat-ui--delete-pending-query-note ()
+  "Remove the `asking' note, wherever in the transcript it ended up."
+  (let ((position (point-min)))
+    (while (and position (< position chat-ui--messages-end))
+      (if (get-text-property position chat-ui--pending-query-property)
+          (let ((end (or (next-single-property-change
+                          position chat-ui--pending-query-property
+                          nil (marker-position chat-ui--messages-end))
+                         (marker-position chat-ui--messages-end))))
+            (delete-region position (min end (marker-position chat-ui--messages-end)))
+            (setq position nil))
+        (setq position (next-single-property-change
+                        position chat-ui--pending-query-property
+                        nil (marker-position chat-ui--messages-end)))
+        (when (and position (>= position (marker-position chat-ui--messages-end)))
+          (setq position nil))))
+    (goto-char (marker-position chat-ui--messages-end))))
 
 (defun chat-ui-clear-input ()
   "Clear current input."

@@ -19,6 +19,7 @@
 (require 'chat-agent-budget)
 (require 'chat-approval)
 (require 'chat-files)
+(require 'chat-i18n)
 (require 'chat-session)
 (require 'chat-tool-forge)
 (require 'json)
@@ -213,6 +214,25 @@ so crowds out the conversation it was meant to recover."
             (chat-tool-caller--storage-note-variant session t)
           full)))))
 
+(defun chat-tool-caller--reply-language-note ()
+  "Return the instruction naming the language to answer in, or nil.
+
+Stated rather than inferred.  A model asked in one language about text
+written in another has to guess which one the answer is for, and the
+guess is not stable across models or across turns of the same
+conversation.  The exception is quoted material: translating an error
+message or a line of code on the way out makes it unsearchable."
+  (when-let ((language (and (fboundp 'chat-reply-language-name)
+                            (chat-reply-language-name))))
+    (format
+     (chat-i18n-prompt
+      'reply-language
+      (concat "Answer in %s. Keep identifiers, file paths, commands, error"
+              " text and quoted code exactly as they appear -- translating"
+              " those makes them impossible to search for. If the user"
+              " writes in another language, follow the user."))
+     language)))
+
 (defun chat-tool-caller-build-system-prompt
     (base-prompt &optional step-limit session)
   "Extend BASE-PROMPT with long term memory and tool calling instructions.
@@ -232,6 +252,8 @@ will ask again for something it was already told."
                 base-prompt)))
     (when-let ((storage (chat-tool-caller--durable-storage-note session)))
       (setq base (concat base "\n\n" storage)))
+    (when-let ((language (chat-tool-caller--reply-language-note)))
+      (setq base (concat base "\n\n" language)))
     (if (not chat-tool-caller-enabled)
         base
       (let ((tools (chat-tool-caller--available-tools)))

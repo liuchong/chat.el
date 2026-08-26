@@ -47,6 +47,7 @@
 
 (require 'cl-lib)
 (require 'chat-session)
+(require 'chat-i18n)
 
 (defgroup chat-transcript nil
   "Typed conversation parts shared by the chat displays."
@@ -92,14 +93,24 @@ channel and is never folded."
                                     (const expanded)))
   :group 'chat-transcript)
 
-(defcustom chat-transcript-channel-labels
-  '((thinking . "Thinking")
-    (tool-work . "Tool work")
-    (interim . "Progress")
-    (system-detail . "System"))
-  "Text naming each channel in a fold row."
+(defcustom chat-transcript-channel-labels nil
+  "Overrides for the text naming each channel in a fold row.
+
+An entry here wins over the localized label, so customizing one channel
+does not mean restating the rest of them in whatever language the
+interface is set to."
   :type '(alist :key-type symbol :value-type string)
   :group 'chat-transcript)
+
+(defun chat-transcript-channel-label (channel)
+  "Return the text naming CHANNEL in a fold row."
+  (or (alist-get channel chat-transcript-channel-labels)
+      (pcase channel
+        ('thinking (chat-i18n 'channel-thinking "Thinking"))
+        ('tool-work (chat-i18n 'channel-tool-work "Tool work"))
+        ('interim (chat-i18n 'channel-interim "Progress"))
+        ('system-detail (chat-i18n 'channel-system "System"))
+        (_ (symbol-name channel)))))
 
 (defface chat-transcript-thinking
   '((t :inherit shadow))
@@ -441,11 +452,6 @@ display-only categories are dropped here."
   "Return the configured fold style for CHANNEL."
   (or (cdr (assq channel chat-transcript-fold-styles)) 'expanded))
 
-(defun chat-transcript-channel-label (channel)
-  "Return the display name of CHANNEL."
-  (or (cdr (assq channel chat-transcript-channel-labels))
-      (symbol-name channel)))
-
 (defun chat-transcript-part-face (part)
   "Return the face a display should use for PART, or nil for ordinary text."
   (pcase (plist-get part :category)
@@ -465,10 +471,10 @@ display-only categories are dropped here."
   (pcase (plist-get part :category)
     ('ai-progress
      (pcase (plist-get part :work)
-       ('thinking "Thinking")
-       ('tool-call "Tool call")
-       ('tool-result "Tool result")
-       (_ "Progress")))
+       ('thinking (chat-i18n 'part-thinking "Thinking"))
+       ('tool-call (chat-i18n 'part-tool-call "Tool call"))
+       ('tool-result (chat-i18n 'part-tool-result "Tool result"))
+       (_ (chat-i18n 'part-progress "Progress"))))
     (_ nil)))
 
 (defun chat-transcript-final-part-p (part)

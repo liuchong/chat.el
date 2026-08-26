@@ -50,17 +50,29 @@ screen. Reasoning and tool work fold behind a summary row, interim prose
 is italic, the answer is ordinary text and never folds. Decision 0010
 records the shape and what it replaced.
 
-Auto's first sense is in: a repeatable command claims plain input until
-`/auto off`. Commands declare `:repeatable` and `:while-busy` in one
-`chat-ui--command-table` rather than being spread across a handler alist
-and a separate control list. Shell is repeatable; asking the model is not,
-because plain input already does that and `/ask` does not record.
-Decision 0011 records the reasoning, including where it departs from the
-request.
+The commands have names that mean what they say. `/send` is the recorded
+multi-step conversation, which until now was the one behaviour on the
+surface with no name; `/quick` is the ephemeral aside it was being
+confused with. `/ask`, `/question`, `/?` and `/!` are aliases through one
+mechanism, so the table is one entry per command. Decision 0013 records
+why four names had accumulated for the aside and none for the
+conversation.
 
-Slash commands now have the consistency guarantee the keymap got: a test
-reads the names out of `chat-commands-help` and requires each to reach a
-handler, with the nine that answer nothing named explicitly in the test.
+Auto returns to a command rather than to a cleared variable. Commands
+declare `:default sticky` or `:default reset`; the baseline is `/send`,
+and anything that asks the model releases the claim -- which is the bug
+that was reported, a session staying a shell after one `!ls` with no
+question able to get it out. The holder shows in the input prompt as
+`cmd> `, not only in a status line at the top of a scrolling buffer.
+
+`/new`, `/list`, `/save` and `/clear` are implemented. `/queue`, `/flush`
+and `/drop` collect notes and send them as one numbered message, on the
+session so they survive a reopen.
+
+Slash commands have the consistency guarantee the keymap got, now in both
+directions. The one-way version passed while four live commands were
+undocumented; both directions failed on their first run, the second
+catching `/help` being dropped from the help while it was restructured.
 
 Six problems reported from real use are fixed, and five of them were on
 the path a person takes in their first minute: `C-a` landing before the
@@ -71,12 +83,17 @@ help-key extraction to unprefixed keys found two more the old consistency
 test had been passing over: `S-RET` documented while `<S-return>` was
 bound, and TAB unbound. Decision 0012 records it.
 
-Language is in: `chat-i18n` resolves from `chat-language`, the Emacs
-language environment, then the locale. English lives at the call sites as
-the fallback, so an untranslated key reads as English. Simplified Chinese
-ships complete, the help text being the point.
+Language covers the surface, not just the help. `chat-i18n` resolves from
+`chat-language`, the Emacs language environment, then the locale, with
+English at the call sites as the fallback. Command names have aliases, so
+`/auto` and `/自动` are one entry; completion offers the language in use and
+any language's names are accepted. Role labels, fold rows, status line and
+messages are localized. Two further switches cover what the model is
+told: `chat-reply-language` for the answer, `chat-prompt-language` for the
+instructions, with JSON keys, tool names and patch envelopes never
+translated at either.
 
-Canonical suite: 828 tests passing.
+Canonical suite: 861 tests passing.
 
 ## Next Stage
 
@@ -90,8 +107,11 @@ designing rather than guessing.
 Then `/subagent` and `/send [agent-id]`, and whether external AI tools
 arrive as one `/call_ai <tool>` rather than a command per vendor.
 
-Standing debt, now visible in a test rather than only here: `/new`,
-`/list`, `/save`, `/clear` and the five `/wiki-*` names are in the help
+`/goal` was asked for alongside `/new` and `/save` and is not built: it
+has nothing underneath it, and a standing objective is not a command with
+a handler. It needs designing before it gets a name.
+
+Standing debt, visible in a test: the five `/wiki-*` names are in the help
 and answer nothing. Build them or take them out.
 
 ## Not Doing Now
@@ -101,8 +121,8 @@ and answer nothing. Build them or take them out.
   draft-only
 - User plugin files under `~/.chat/plugins/` stay off unless
   `chat-plugin-load-user-directory` is set
-- `/new`, `/list`, `/save`, `/clear` and the `/wiki-*` help entries stay
-  unimplemented, and unknown slash commands stay ordinary text
+- The `/wiki-*` help entries stay unimplemented, and unknown slash
+  commands stay ordinary text
 - Shell history for `!!` stays per buffer rather than persisted
 
 ## Immediate Next Step
@@ -112,7 +132,7 @@ Run credential-dependent provider or live-server checks only when their
 environments are intentionally available.
 
 `chat-wiki-command-handler` has no caller. Either wire the documented
-`/wiki-*` names into `chat-ui--slash-commands` or drop them from
+`/wiki-*` names into `chat-ui--command-table` or drop them from
 `chat-commands-help`, so the help text stops promising them.
 
 Only `kimi-code` declares a `:context-window`; every other provider falls

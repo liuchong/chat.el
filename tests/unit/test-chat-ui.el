@@ -947,8 +947,8 @@ both arrive from the same place."
                (lambda (arg) (push (cons 'shell arg) calls)))
               ((symbol-function 'chat-ui--repeat-shell-command)
                (lambda () (push '(repeat) calls)))
-              ((symbol-function 'chat-ui--command-question)
-               (lambda (arg) (push (cons 'question arg) calls)))
+              ((symbol-function 'chat-ui--command-quick)
+               (lambda (arg) (push (cons 'quick arg) calls)))
               ((symbol-function 'chat-ui--command-cd)
                (lambda (arg) (push (cons 'cd arg) calls)))
               ((symbol-function 'chat-ui--send-user-message)
@@ -962,7 +962,7 @@ both arrive from the same place."
       (chat-ui--dispatch-command (chat-command-parse "plain text"))
       (should (equal '((shell . "ls -l")
                        (repeat)
-                       (question . "why")
+                       (quick . "why")
                        (cd . "/tmp")
                        (message . "/wiki-lint now")
                        (message . "!literal")
@@ -1167,7 +1167,8 @@ request for the command list with a tool error."
 (ert-deftest chat-ui-auto-is-off-until-a-repeatable-command-runs ()
   "Plain input goes to the model until something claims it."
   (chat-ui-auto-test--with-session
-    (should-not (chat-ui-default-command))
+    (should (equal (chat-ui-default-command) chat-ui-baseline-command))
+    (should-not (chat-ui-default-command-claimed-p))
     (chat-ui--dispatch-command (chat-command-parse "hello there"))
     (should (equal sent '("hello there")))
     (should-not shell-calls)))
@@ -1197,11 +1198,88 @@ request for the command list with a tool error."
   (chat-ui-auto-test--with-session
     (chat-ui--dispatch-command (chat-command-parse "!ls"))
     (chat-ui--dispatch-command (chat-command-parse "/auto off"))
-    (should-not (chat-ui-default-command))
+    (should-not (chat-ui-default-command-claimed-p))
     (chat-ui--dispatch-command (chat-command-parse "hello"))
     (should (equal sent '("hello")))
     (should (equal shell-calls '("ls")))
     (should-not (string-match-p "auto:" (chat-ui--status-line session)))))
+
+(ert-deftest chat-ui-asking-the-model-gets-you-out-of-shell-mode ()
+  "A question hands plain input back, whichever way it is asked.
+
+This is the bug this design replaced.  With only `/cmd' able to hold
+plain input, a session that had run one shell command stayed a shell: an
+explicit question worked, and then the next line went to the shell again.
+Every way of reaching the model now releases the claim."
+  (chat-ui-auto-test--with-session
+    (cl-letf (((symbol-function 'chat-ui--handle-direct-query) #'ignore))
+      (chat-ui--dispatch-command (chat-command-parse "!ls"))
+      (should (equal (chat-ui-default-command) "cmd"))
+      ;; The `?' shorthand, which is what a reader reaches for first.
+      (chat-ui--dispatch-command (chat-command-parse "?what does ls do"))
+      (should-not (chat-ui-default-command-claimed-p))
+      (chat-ui--dispatch-command (chat-command-parse "and what about du"))
+      (should (equal sent '("and what about du")))
+      (should (equal shell-calls '("ls")))
+      ;; And again by name, to be sure the release is on the command
+      ;; rather than on the prefix that reached it.
+      (chat-ui--dispatch-command (chat-command-parse "!du"))
+      (should (equal (chat-ui-default-command) "cmd"))
+      (chat-ui--dispatch-command (chat-command-parse "/quick why"))
+      (should-not (chat-ui-default-command-claimed-p)))))
+
+(ert-deftest chat-ui-sending-is-a-command-with-a-name ()
+  "The main path is nameable, which is what auto returns to."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (chat-ui--dispatch-command (chat-command-parse "/send back to talking"))
+    (should (equal sent '("back to talking")))
+    (should-not (chat-ui-default-command-claimed-p))))
+
+(ert-deftest chat-ui-ask-and-question-are-the-recorded-path ()
+  "Four names for the ephemeral ask and none for the conversation was
+backwards.  `/ask' is the conversation; `/quick' is the aside."
+  (should (eq (chat-ui--command-handler "ask")
+              (chat-ui--command-handler "send")))
+  (should (eq (chat-ui--command-handler "question")
+              (chat-ui--command-handler "send")))
+  (should (eq (chat-ui--command-handler "?")
+              (chat-ui--command-handler "quick")))
+  (should-not (eq (chat-ui--command-handler "ask")
+                  (chat-ui--command-handler "quick"))))
+
+(ert-deftest chat-ui-the-prompt-says-which-command-holds-the-line ()
+  "The status line is at the top; the cursor is at the bottom."
+  (chat-ui-auto-test--with-session
+    (should (equal (chat-ui--input-prompt) "> "))
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (should (string-prefix-p "cmd> " (chat-ui--input-prompt)))
+    (should (string-match-p
+             "cmd> "
+             (buffer-substring-no-properties (point-min) (point-max))))
+    ;; And the marker still points just past it, or C-a and sending would
+    ;; both be off by the width of the word.
+    (should (equal "cmd> "
+                   (buffer-substring-no-properties
+                    (line-beginning-position)
+                    (marker-position chat-ui--input-overlay))))
+    (chat-ui--dispatch-command (chat-command-parse "/auto off"))
+    (should (equal (chat-ui--input-prompt) "> "))
+    (should-not (string-match-p
+                 "cmd> "
+                 (buffer-substring-no-properties (point-min) (point-max))))))
+
+(ert-deftest chat-ui-typing-survives-the-prompt-being-rewritten ()
+  "The prompt is redrawn in a live input area, which may not be empty."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-max))
+    (insert "half a thought")
+    (chat-ui--set-default-command "cmd")
+    (chat-ui--render-input-prompt)
+    (should (equal "half a thought"
+                   (buffer-substring-no-properties
+                    (marker-position chat-ui--input-overlay)
+                    (point-max))))))
 
 (ert-deftest chat-ui-a-slash-command-still-runs-while-auto-is-on ()
   "Auto claims plain input only.  An explicit command still means itself."
@@ -1260,21 +1338,133 @@ lose what you meant to tell it."
   "Only repeatable commands may claim plain input."
   (chat-ui-auto-test--with-session
     (chat-ui--dispatch-command (chat-command-parse "/auto cd"))
-    (should-not (chat-ui-default-command))
+    (should-not (chat-ui-default-command-claimed-p))
     (chat-ui--dispatch-command (chat-command-parse "/auto cmd"))
     (should (equal (chat-ui-default-command) "cmd"))))
 
-(ert-deftest chat-ui-asking-the-model-is-not-a-default-command ()
-  "It is already what plain input does, and /ask does not record.
+(ert-deftest chat-ui-a-question-without-a-record-cannot-hold-plain-input ()
+  "`/quick' releases the claim rather than taking it.
 
-As a sticky default `/ask' would quietly stop the conversation being
-written down."
-  (should-not (chat-ui--command-repeatable-p "ask"))
-  (should-not (chat-ui--command-repeatable-p "question"))
+Taking it would be worse than the trap it replaces: every following line
+would be answered and none of them written down, and nothing on screen
+distinguishes an answer that was recorded from one that was not."
+  (should-not (chat-ui--command-repeatable-p "quick"))
   (should-not (chat-ui--command-repeatable-p "?"))
-  (should-not (chat-ui--command-repeatable-p "cd"))
-  (should-not (chat-ui--command-repeatable-p "pwd"))
-  (should (chat-ui--command-repeatable-p "cmd")))
+  (should (eq (chat-ui--command-default-effect "quick") 'reset))
+  (should (eq (chat-ui--command-default-effect "?") 'reset))
+  ;; The recorded path may hold it, because holding it changes nothing.
+  (should (chat-ui--command-repeatable-p "send"))
+  (should (chat-ui--command-repeatable-p "cmd"))
+  (should (chat-ui--command-repeatable-p "queue"))
+  ;; A command you reach for once says nothing about the next line.
+  (should-not (chat-ui--command-default-effect "cd"))
+  (should-not (chat-ui--command-default-effect "pwd"))
+  (should-not (chat-ui--command-default-effect "help")))
+
+;; ------------------------------------------------------------------
+;; The queue: several notes, one turn
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-ui-a-queued-note-does-not-reach-the-model ()
+  "Collecting is the whole point: nothing goes out until it is flushed."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue check the tests"))
+    (should (equal (chat-ui--queue-entries) '("check the tests")))
+    (should-not sent)
+    (chat-ui--dispatch-command (chat-command-parse "/queue and the docs"))
+    (should (equal (chat-ui--queue-entries) '("check the tests" "and the docs")))
+    (should-not sent)))
+
+(ert-deftest chat-ui-queueing-claims-plain-input ()
+  "Notes come in runs, the same way shell commands do."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (should (equal (chat-ui-default-command) "queue"))
+    (chat-ui--dispatch-command (chat-command-parse "second"))
+    (chat-ui--dispatch-command (chat-command-parse "third"))
+    (should (equal (chat-ui--queue-entries) '("first" "second" "third")))
+    (should-not sent)))
+
+(ert-deftest chat-ui-flushing-sends-one-message-and-empties-the-queue ()
+  "One message rather than several: not every provider accepts two user
+messages in a row, and a batch that works on some models is worse than
+one that reads slightly less faithfully on all of them."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "second"))
+    (chat-ui--dispatch-command (chat-command-parse "/flush"))
+    (should (= 1 (length sent)))
+    (should (string-match-p "1\\. first" (car sent)))
+    (should (string-match-p "2\\. second" (car sent)))
+    (should-not (chat-ui--queue-entries))
+    ;; And plain input is back with the model, so the next line is not
+    ;; silently queued after the batch went out.
+    (should-not (chat-ui-default-command-claimed-p))))
+
+(ert-deftest chat-ui-a-queue-of-one-is-not-numbered ()
+  "Numbering a list of one is noise the model has to read past."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue just this"))
+    (chat-ui--dispatch-command (chat-command-parse "/flush"))
+    (should (equal sent '("just this")))))
+
+(ert-deftest chat-ui-flush-can-add-a-last-note ()
+  "The thought that makes you send is often the last item."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "/flush and finally this"))
+    (should (string-match-p "and finally this" (car sent)))
+    (should-not (chat-ui--queue-entries))))
+
+(ert-deftest chat-ui-send-with-no-argument-flushes-the-queue ()
+  "Having collected notes, `send' is the word you reach for."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue something"))
+    (chat-ui--dispatch-command (chat-command-parse "/send"))
+    (should (equal sent '("something")))))
+
+(ert-deftest chat-ui-dropping-takes-back-the-last-note ()
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "second"))
+    (chat-ui--dispatch-command (chat-command-parse "/drop"))
+    (should (equal (chat-ui--queue-entries) '("first")))
+    (chat-ui--dispatch-command (chat-command-parse "/drop all"))
+    (should-not (chat-ui--queue-entries))))
+
+(ert-deftest chat-ui-the-queue-survives-a-reopen ()
+  "Notes are on the session.  Losing them on reopen would lose typing."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue remember this"))
+    (chat-session-save session)
+    (let ((reloaded (chat-session-load (chat-session-id session))))
+      (with-temp-buffer
+        (setq-local chat--current-session reloaded)
+        (chat-ui-setup-buffer reloaded)
+        (should (equal (chat-ui--queue-entries) '("remember this")))
+        ;; A round trip through JSON hands a list of strings back as a
+        ;; vector, and code that appended to it would fail here.
+        (chat-ui--command-queue "and this")
+        (should (equal (chat-ui--queue-entries)
+                       '("remember this" "and this")))))))
+
+(ert-deftest chat-ui-the-queue-count-is-on-screen ()
+  "Text that was typed and not sent has to be visible somewhere."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue one"))
+    (chat-ui--dispatch-command (chat-command-parse "two"))
+    (should (string-match-p "queued: 2" (chat-ui--status-line session)))
+    (should (string-match-p
+             "queued: 2"
+             (buffer-substring-no-properties (point-min) (point-max))))))
+
+(ert-deftest chat-ui-flushing-nothing-says-so ()
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/flush"))
+    (should-not sent)
+    (should (string-match-p
+             "Nothing queued"
+             (buffer-substring-no-properties (point-min) (point-max))))))
 
 (ert-deftest chat-ui-tool-result-lines-truncate-long-results ()
   "Test oversized tool results are truncated with an omission marker."

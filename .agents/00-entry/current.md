@@ -63,13 +63,37 @@ space. The assembled block measures itself against the system prompt share
 and shortens to paths alone when it does not fit, which is what an 8K
 window requires.
 
-Canonical suite: 828 tests passing.
+The commands were given names that mean what they say. `/send` is the
+recorded multi-step conversation -- the main behaviour of the surface,
+which had no name until now -- and `/quick` is the ephemeral aside it was
+being confused with. `/ask`, `/question`, `/?` and `/!` are aliases
+through one mechanism, so `chat-ui--command-table` holds one entry per
+command. Auto returns to `/send` rather than to a cleared variable:
+commands declare `:default sticky` or `reset`, anything that asks the
+model releases the claim, and the holder shows in the input prompt as
+`cmd> `. `/queue`, `/flush` and `/drop` collect notes and send them as one
+numbered message. Decision 0013 records it.
 
-The input command layer completed earlier the same day. Chat input parses
-into commands through `lisp/core/chat-command.el`, covering shell
-execution, history repeat, a session working directory, ephemeral
-queries, and a literal escape. Command syntax accepts fullwidth
-punctuation while arguments stay byte for byte.
+Language covers the surface rather than only the help. Command names have
+aliases, so `/auto` and `/自动` resolve to one entry and any language's
+names are accepted while completion offers the language in use. Role
+labels, fold rows, the status line and every message go through
+`chat-i18n`. What the model is told has its own two switches:
+`chat-reply-language` for the language of the answer, which is the
+reliable lever, and `chat-prompt-language` for the language of the
+instructions, which is separate because translated guidance changes
+behaviour in ways that cannot be measured from here. JSON keys, tool
+names, patch envelopes and fence languages are never translated at either
+setting, since a parser matches them literally.
+
+Canonical suite: 861 tests passing.
+
+The input command layer completed earlier. Chat input parses into commands
+through `lisp/core/chat-command.el`, covering shell execution, history
+repeat, a session working directory, ephemeral queries, and a literal
+escape. Command syntax accepts fullwidth punctuation while arguments stay
+byte for byte, and a command name may be non-ASCII, which is what lets a
+translated name reach the same handler.
 
 Stage 15 capability-pack completion landed before it (2026-08-24).
 Programming includes native completion and rendered web reading; office
@@ -130,6 +154,7 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0013-naming-the-commands.md`
 - `../20-reference/decisions/0012-input-surface-and-language.md`
 - `../20-reference/decisions/0011-auto-and-the-command-table.md`
 - `../20-reference/decisions/0010-rendering-the-transcript.md`
@@ -139,6 +164,7 @@ surface advertises only relevant scoped tools.
 - `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`
 - `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-26-commands-and-language.md`
 - `../30-records/logs/stage-2026-08-26-input-surface-and-language.md`
 - `../30-records/logs/stage-2026-08-26-auto-default-command.md`
 - `../30-records/logs/stage-2026-08-26-transcript-rendering.md`
