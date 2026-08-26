@@ -298,7 +298,41 @@ the fork. Deferring the work onto an idle timer was considered and
 rejected for now — a timer blocks input just the same when it fires, so
 it relocates the pause rather than removing it.
 
-Canonical suite: 1088 tests passing.
+Asking why a stall lands on RET when RET has not sent anything yet is
+what found the next thing. `gc-cons-threshold` counts bytes consed since
+the last collection without regard to who consed them, so a send's chance
+of being the one that crosses is its share of the threshold — and the
+threshold is already 100MB, since Spacemacs sets it there. A send
+allocated 12.4MB of that, so roughly one in eight, against one stall in
+four timed sends.
+
+Of that 12.4MB, 5.73MB was `chat-context-message-tokens`, and it was not
+a performance finding. It counted the 120-character *snippet* of each
+message's tool calls and results, the one a durable summary shows, while
+the request carries both in full: 5,295 tokens counted for a payload of
+about 63,000, 8.4x under. Auto-compaction therefore sat still on any
+tool-heavy session because by its own arithmetic there was nothing to
+compact. Counting the fields that go out, by `length`, made it 0.2ms and
+0.09MB and made the count match. 1088 tests passed with it 8.4x wrong,
+because every budget test built its own messages and none asserted the
+count tracks the wire.
+
+The other 5.19MB was the cold project-instructions read, which the cache
+already reduces to once per Emacs. Per-send allocation is now ~1.6MB.
+
+Which leaves the streaming accumulator as the dominant allocator, and it
+is a design question rather than a fix. `chat-agent-loop.el` rebuilds the
+whole response per chunk; replaying the log's worst response — 340
+chunks, 321KB — through the real handler allocates 59MB, 52MB of it the
+accumulator. Two responses fill the threshold alone. Clojure would not
+help here: its structure sharing is for vectors and maps, and its strings
+are flat and immutable like Emacs's. A buffer would fix the accumulation
+but not the handover, because both consumers want the whole string every
+chunk — tool-call detection across chunk boundaries, and a live render
+that is deliberately a pure function of the whole content. Making the
+live tail append is the real fix and is not started.
+
+Canonical suite: 1091 tests passing.
 
 ## Next Stage
 

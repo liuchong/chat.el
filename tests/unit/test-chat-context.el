@@ -121,5 +121,57 @@
                                (cdr (assoc 'metadata stored))))
                    "llm"))))
 
+(ert-deftest chat-context-a-tool-result-is-counted-as-it-is-sent ()
+  "The estimate was taken from the snippet a summary would show.
+
+Snippets cap at 120 characters, and the request carries the tool result in
+full, so a 100KB result counted as 30 tokens instead of 25,000.  Measured
+on a 41-message coding session the context came out 8.4x under, which is
+how auto-compaction comes to sit still while the payload passes the
+provider's window."
+  (let* ((result (make-string 100000 ?x))
+         (msg (make-chat-message
+               :id "a"
+               :role :assistant
+               :content ""
+               :tool-calls '((:id "c1" :name "files_read"))
+               :tool-results (list result)))
+         (counted (chat-context-message-tokens msg)))
+    ;; Within a hair of length/4, which is what the estimator claims to be.
+    (should (> counted 24000))
+    (should (< counted 26000))))
+
+(ert-deftest chat-context-tool-call-arguments-are-counted-too ()
+  "Arguments go on the wire as a string, or as JSON when they are not one."
+  (let* ((written (make-string 40000 ?y))
+         (as-string (make-chat-message
+                     :id "a" :role :assistant :content ""
+                     :tool-calls `((:id "c1" :name "files_write"
+                                        :arguments ,written))))
+         (as-data (make-chat-message
+                   :id "b" :role :assistant :content ""
+                   :tool-calls `((:id "c1" :name "files_write"
+                                      :arguments ((path . "x")
+                                                  (content . ,written)))))))
+    (should (> (chat-context-message-tokens as-string) 9000))
+    ;; The JSON form is longer, never shorter, since it adds the keys.
+    (should (>= (chat-context-message-tokens as-data)
+                (chat-context-message-tokens as-string)))))
+
+(ert-deftest chat-context-a-summary-snippet-stays-a-snippet ()
+  "Counting changed; summarizing did not.
+
+The snippet is still capped, and it no longer collapses whitespace across
+a whole file to keep 120 characters of it."
+  (let* ((msg (make-chat-message
+               :id "a" :role :assistant :content ""
+               :tool-results (list (concat "head of it"
+                                           (make-string 200000 ?\s)
+                                           "tail nobody sees"))))
+         (snippet (chat-context--tool-results-snippet msg)))
+    (should (<= (string-width snippet) 120))
+    (should (string-prefix-p "head of it" snippet))
+    (should-not (string-match-p "tail nobody sees" snippet))))
+
 (provide 'test-chat-context)
 ;;; test-chat-context.el ends here

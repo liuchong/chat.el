@@ -1888,6 +1888,43 @@ say the room is slow but not which piece of furniture: the marks had to
 go into the transport and the request builder themselves, which is why
 the clock lives in `chat-log` rather than in the UI that starts it.
 
+### Counting The Preview Instead Of The Payload
+
+**Problem**: the context budget reported 5,295 tokens for a request that
+carried about 63,000. Auto-compaction was on and sat still, because by
+its own arithmetic there was nothing to compact.
+
+**Cause**: `chat-context-message-tokens` counted the *snippet* of each
+message's tool calls and tool results -- the same 120-character preview a
+durable summary shows -- while the request carries both in full. A 100KB
+tool result is some 25,000 tokens on the wire and was counted as the 30
+of its preview. On a 41-message coding session that under-counted the
+context by 8.4x.
+
+The same line was also the largest allocator on the keystroke path. To
+produce a number it did not use, it concatenated every tool result into
+one string, ran a whitespace regexp over the whole thing, trimmed it, and
+kept 120 characters: 5.7MB allocated and 22.6ms spent per send, for an
+answer that `length` gives for nothing.
+
+**Solution**: count the fields the request will carry, by `length`, and
+mirror the transport's own encoding rule for anything that is not already
+a string. 22.6ms and 5.7MB became 0.2ms and 0.09MB, and the count went
+from 8.4x under to matching. An estimator that samples what it is about
+to send is not measuring what it is about to send.
+
+**The general shape**: building a large thing to keep a small part of it.
+Where the small part is all that is wanted, bound the input first --
+`chat-context--message-snippet` now takes a head of a few times the
+column cap before collapsing whitespace, because collapsing 200KB to keep
+120 characters copies the 200KB twice. Where the small part is a
+*measurement*, do not build anything at all.
+
+**Not tested, which is why it survived**: 1088 tests passed with the
+count 8.4x wrong. Every test that touched the budget asserted behaviour
+around a threshold using messages it had built itself, and none asserted
+that the count tracks what goes out.
+
 ### A Log Line On The Keystroke Path Is Work
 
 **Problem**: 250ms of every send sat in the handover to the transport,

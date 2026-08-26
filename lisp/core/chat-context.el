@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'chat-session)
+(require 'json)
 (require 'subr-x)
 
 (defcustom chat-context-max-tokens 8000
@@ -42,18 +43,47 @@
   (when-let ((tool-calls (chat-message-tool-calls msg)))
     (chat-context--message-snippet
      (mapconcat (lambda (call)
+                  ;; Each piece is cut to snippet length before being
+                  ;; joined, so one tool call carrying a file does not
+                  ;; get copied whole to contribute a few words.
                   (format "%s %s"
                           (plist-get call :name)
-                          (or (plist-get call :arguments) "")))
+                          (chat-context--snippet-head
+                           (format "%s" (or (plist-get call :arguments) "")))))
                 tool-calls
                 " | "))))
 
+(defun chat-context--argument-tokens (arguments)
+  "Estimate tokens for tool call ARGUMENTS as the request will encode them.
+Mirrors `chat-llm--tool-call-payload': a string goes out as itself, and
+anything else is JSON on the wire."
+  (cond
+   ((stringp arguments) (chat-context-count-tokens arguments))
+   ((null arguments) 0)
+   (t (chat-context-count-tokens (json-encode arguments)))))
+
 (defun chat-context-message-tokens (msg)
-  "Estimate token count for MSG."
+  "Estimate token count for MSG as the request will carry it.
+
+Counted from the fields that go on the wire, not from the snippets a
+summary would show.  Those snippets are capped at 120 characters, so a
+100KB tool result -- which the request carries in full and which is some
+25,000 tokens -- was counted as 30.  Measured on a 41-message coding
+session, that under-counted the context by 8.4x, which is how a budget
+comes to believe it has room the provider will refuse.
+
+Counting by `length' also stops the estimate from building the strings it
+was throwing away: the snippets concatenated every tool result and ran a
+regexp over the whole thing to keep a preview, and this runs for every
+message on every send."
   (+ 4
      (chat-context-count-tokens (or (chat-message-content msg) ""))
-     (chat-context-count-tokens (or (chat-context--tool-calls-snippet msg) ""))
-     (chat-context-count-tokens (or (chat-context--tool-results-snippet msg) ""))))
+     (cl-loop for call in (chat-message-tool-calls msg)
+              sum (+ (chat-context-count-tokens (or (plist-get call :name) ""))
+                     (chat-context--argument-tokens
+                      (plist-get call :arguments))))
+     (cl-loop for result in (chat-message-tool-results msg)
+              sum (chat-context-count-tokens (or result "")))))
 
 (defun chat-context-total-tokens (msgs)
   "Calculate total token count for MSGS."
@@ -65,17 +95,35 @@
   "Return a readable role name for MSG."
   (string-remove-prefix ":" (symbol-name (chat-message-role msg))))
 
+(defconst chat-context--snippet-columns 120
+  "Display columns a snippet is allowed.")
+
+(defun chat-context--snippet-head (text)
+  "Return enough of TEXT for a snippet, and no more.
+
+The cap is in columns and the input can be a whole file, so the head is
+taken first: collapsing whitespace across 100KB to keep 120 characters of
+it allocates the 100KB twice over.  Four characters per column covers
+whitespace runs collapsing and leaves the truncation below to do the
+exact work.  Zero-width and combining characters can defeat the bound, so
+this is a cheap head rather than a promise."
+  (let ((text (or text "")))
+    (if (<= (length text) (* 4 chat-context--snippet-columns))
+        text
+      (substring text 0 (* 4 chat-context--snippet-columns)))))
+
 (defun chat-context--message-snippet (text)
   "Return a short snippet for TEXT."
-  (let* ((clean (replace-regexp-in-string "[\n\r\t ]+" " " (or text "")))
+  (let* ((head (chat-context--snippet-head text))
+         (clean (replace-regexp-in-string "[\n\r\t ]+" " " head))
          (trimmed (string-trim clean)))
-    (truncate-string-to-width trimmed 120 nil nil t)))
+    (truncate-string-to-width trimmed chat-context--snippet-columns nil nil t)))
 
 (defun chat-context--tool-results-snippet (msg)
   "Return a short snippet of tool results from MSG."
   (when-let ((tool-results (chat-message-tool-results msg)))
     (chat-context--message-snippet
-     (mapconcat #'identity tool-results " | "))))
+     (mapconcat #'chat-context--snippet-head tool-results " | "))))
 
 (defun chat-context--summarize-message (msg)
   "Return a one line summary for MSG."
