@@ -93,7 +93,7 @@ Canonical suite: 861 tests passing.
 The input command layer completed earlier. Chat input parses into commands
 through `lisp/core/chat-command.el`, covering shell execution, history
 repeat, a session working directory, ephemeral queries, and a literal
-escape. Command syntax accepts fullwidth punctuation while arguments stay
+escape. Command syntax accepts fullwidth characters while arguments stay
 byte for byte, and a command name may be non-ASCII, which is what lets a
 translated name reach the same handler.
 

@@ -1139,6 +1139,15 @@ request for the command list with a tool error."
       (should (string-match-p "auto" shown))
       (should-not (string-match-p "Quote active region" shown)))))
 
+(ert-deftest chat-ui-help-takes-a-fullwidth-topic ()
+  "A topic is matched against the help text, so it is folded like a name."
+  (with-temp-buffer
+    (setq-local chat-ui--messages-end (point-max-marker))
+    (chat-ui--command-help "ａｕｔｏ")
+    (let ((shown (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p "auto" shown))
+      (should-not (string-match-p "Quote active region" shown)))))
+
 (ert-deftest chat-ui-help-on-an-unknown-topic-says-so ()
   "Silence would read as a broken command."
   (with-temp-buffer
@@ -1188,6 +1197,17 @@ request for the command list with a tool error."
     ;; The model was never asked, which is the whole point and also the
     ;; risk: it has to be visible.
     (should-not sent)))
+
+(ert-deftest chat-ui-auto-takes-a-fullwidth-command-name ()
+  "`/auto' reads its argument as a command name, so it folds it.
+
+The parser cannot: the same position after `/cmd' is a shell body, where a
+fullwidth character may be what was meant."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "／ａｕｔｏ\u3000ｃｍｄ"))
+    (should (equal (chat-ui-default-command) "cmd"))
+    (chat-ui--dispatch-command (chat-command-parse "/auto ｏｆｆ"))
+    (should-not (chat-ui-default-command-claimed-p))))
 
 (ert-deftest chat-ui-auto-says-so-in-the-status-line ()
   "A mode nobody can see is a mode that eats prose."
@@ -1454,6 +1474,20 @@ one that reads slightly less faithfully on all of them."
     (should (equal (chat-ui--queue-entries) '("first")))
     (chat-ui--dispatch-command (chat-command-parse "/drop all"))
     (should-not (chat-ui--queue-entries))))
+
+(ert-deftest chat-ui-dropping-all-accepts-a-fullwidth-keyword ()
+  "`all' is a keyword the command compares against, not text to keep."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "second"))
+    (chat-ui--dispatch-command (chat-command-parse "／ｄｒｏｐ\u3000ａｌｌ"))
+    (should-not (chat-ui--queue-entries))))
+
+(ert-deftest chat-ui-a-queued-note-keeps-its-fullwidth-characters ()
+  "A note is data.  Folding it would rewrite what the user is sending."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/queue 搜索 ＡＢＣ"))
+    (should (equal (chat-ui--queue-entries) '("搜索 ＡＢＣ")))))
 
 (ert-deftest chat-ui-the-queue-survives-a-reopen ()
   "Notes are on the session.  Losing them on reopen would lose typing."

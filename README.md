@@ -228,17 +228,38 @@ level: by default it runs through the system shell, so pipes, redirection
 and variables work. Set `chat-ui-shell-unrestricted` to nil to hold typed
 commands to the same restrictions as the model.
 
-### Fullwidth Punctuation
+### Fullwidth Input
 
-Command syntax accepts fullwidth punctuation, so an input method that
-produces CJK punctuation reaches the same commands. `！ls`, `／cd /tmp`,
-`？why` and a name separated by an ideographic space all work.
+Command syntax accepts fullwidth characters, letters and digits as well as
+punctuation, so an input method left in fullwidth mode reaches the same
+commands. Folding is per character, so the prefix and the name may each be
+either width, in any combination:
 
-Folding applies only where command syntax appears: the leading prefix, the
-slash command name, and the separator before the argument. Arguments are
-never rewritten, so `!echo "你好，世界"` reaches the shell exactly as
-typed. Directory arguments additionally accept `／` and `～` for the path
-separator and home.
+```
+/help    ／help    /ｈｅｌｐ    ／ｈｅｌｐ    ／ＨＥＬＰ    /ｈeｌp
+```
+
+`！ls`, `！！`, `？why`, `＼literal` and a name separated by an ideographic
+space all work the same way.
+
+Folding covers the positions the program reads as syntax or as a name:
+
+| Position | Folded | Why |
+| --- | --- | --- |
+| Prefix, slash command name, separator | yes | syntax |
+| `/auto`, `/drop`, `/model`, `/help` argument | yes | read as a name or keyword |
+| `/cd` argument | `／` and `～` only | a directory name may contain the rest |
+| Shell body, prompt, queued note, literal | no | data |
+
+Everything else is passed on as typed, so `!echo "你好，世界"` reaches the
+shell unchanged and `/queue 搜索 ＡＢＣ` sends the characters you meant. A
+command named in Chinese is untouched: the fold covers one Unicode block,
+and ideographs are outside it, so `/发送` and `/自动` are unaffected.
+
+One consequence of the last row: a shell body typed entirely in fullwidth
+mode, `！ｌｓ`, reaches the shell as `ｌｓ` and fails there. That is
+deliberate — folding it would rewrite a search for fullwidth text — but it
+does mean the shell reports the confusion rather than absorbing it.
 
 ## Tool Model
 

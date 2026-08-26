@@ -2,8 +2,11 @@
 
 ;;; Commentary:
 ;; Parses a line of chat input into a command description.  Input methods
-;; that produce CJK punctuation must reach the same commands as ASCII, so
-;; fullwidth punctuation is accepted wherever command syntax appears.
+;; that produce fullwidth characters must reach the same commands as
+;; ASCII, so fullwidth forms are accepted wherever command syntax appears
+;; -- letters and digits as well as punctuation, because an input method
+;; left in fullwidth mode turns a typed `/help' into `／ｈｅｌｐ' and the
+;; name is as affected as the slash.
 ;;
 ;; Folding is limited to syntax positions: the leading prefix, the slash
 ;; command name, and the whitespace that separates a name from its
@@ -18,16 +21,26 @@
 (defconst chat-command--whitespace-regexp "[ \t\n\r\u3000]"
   "Whitespace that can separate a command name from its argument.")
 
-(defconst chat-command--fullwidth-punctuation
-  (let ((table (make-hash-table :test #'eq))
-        ;; Aligned pairs: each fullwidth character stands for the ASCII
-        ;; character directly below it.  The last pair is U+3000.
-        (fullwidth "！？／＼～：，；（）［］｛｝＂＇　")
-        (ascii     "!?/\\~:,;()[]{}\"' "))
-    (dotimes (i (length fullwidth))
-      (puthash (aref fullwidth i) (aref ascii i) table))
-    table)
-  "Fullwidth punctuation accepted in command syntax positions.")
+(defconst chat-command--fullwidth-offset #xFEE0
+  "Distance from a fullwidth form to the ASCII character it stands for.
+The Halfwidth and Fullwidth Forms block lays U+FF01 to U+FF5E out in the
+same order as ASCII #x21 to #x7E, so one subtraction covers the whole
+range.")
+
+(defun chat-command--fullwidth-ascii (char)
+  "Return the ASCII character CHAR is the fullwidth form of, or nil.
+
+Letters and digits are included, not only punctuation.  An input method
+left in fullwidth mode produces `／ｈｅｌｐ' for a typed `/help', and
+listing punctuation alone got the slash but left the name unreadable, so
+the command was not found and the line was sent to the model as text.
+
+Deliberately limited to this one block: CJK ideographs are outside it, so
+a command named in Chinese is not touched."
+  (cond
+   ((eq char ?\u3000) ?\s)
+   ((and (>= char ?\uFF01) (<= char ?\uFF5E))
+    (- char chat-command--fullwidth-offset))))
 
 (defun chat-command-trim (text)
   "Return TEXT without surrounding whitespace.
@@ -37,12 +50,26 @@ Trims the ideographic space as well as ASCII whitespace."
 
 (defun chat-command-fold-char (char)
   "Return the ASCII character CHAR stands for in command syntax."
-  (or (gethash char chat-command--fullwidth-punctuation) char))
+  (or (chat-command--fullwidth-ascii char) char))
 
 (defun chat-command-fold-syntax (text)
   "Return TEXT with fullwidth punctuation folded to ASCII.
 Only call this on text the parser owns, never on a shell body or prompt."
   (apply #'string (mapcar #'chat-command-fold-char (string-to-list (or text "")))))
+
+(defun chat-command-fold-name (text)
+  "Return TEXT folded to ASCII, for an argument read as a name.
+
+For the arguments a command interprets rather than passes on: the command
+name after `/auto', the keyword after `/drop', a model id, a help topic.
+The parser cannot fold these itself, because the same position in another
+command holds a shell body or a prompt, where a fullwidth character may be
+exactly what was meant.  So the parser folds syntax and a handler folds an
+argument it is going to compare against a fixed name.
+
+Case is left alone; callers that match case-insensitively already
+`downcase' on top of this."
+  (chat-command-fold-syntax (chat-command-trim text)))
 
 (defun chat-command-fold-path (path)
   "Return PATH with fullwidth slash and tilde folded to ASCII.

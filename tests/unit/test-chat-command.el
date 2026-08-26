@@ -106,5 +106,68 @@ shell or the model exactly as typed."
   (should (equal "~/tmp" (chat-command-fold-path "～／tmp")))
   (should (equal "/tmp/a，b" (chat-command-fold-path "／tmp／a，b"))))
 
+(ert-deftest chat-command-fold-syntax-covers-letters-and-digits ()
+  "An input method in fullwidth mode affects the name, not only the slash.
+
+Folding punctuation alone got `／' and left `ｈｅｌｐ', so the command was
+not found and the line went to the model as text."
+  (should (equal "help" (chat-command-fold-syntax "ｈｅｌｐ")))
+  (should (equal "HELP" (chat-command-fold-syntax "ＨＥＬＰ")))
+  (should (equal "gpt-4o" (chat-command-fold-syntax "ｇｐｔ－４ｏ"))))
+
+(ert-deftest chat-command-fold-syntax-leaves-cjk-alone ()
+  "The fold covers one Unicode block, and ideographs are outside it.
+
+A command named in Chinese has to survive this untouched, and so does
+punctuation that belongs to the language rather than to the syntax."
+  (should (equal "发送" (chat-command-fold-syntax "发送")))
+  (should (equal "。、「」" (chat-command-fold-syntax "。、「」"))))
+
+(ert-deftest chat-command-parse-accepts-any-mix-of-widths ()
+  "Prefix and name are folded per character, so mixing them is allowed.
+
+Both halves come from the same keystrokes, and an input method may be
+switched mid-word, so no combination of the two can be assumed."
+  (dolist (input '("/help" "／help" "/ｈｅｌｐ" "／ｈｅｌｐ"
+                   "/ｈeｌp" "／ＨＥＬＰ" "／Ｈelｐ"))
+    (let ((parsed (chat-command-parse input)))
+      (should (eq 'slash (plist-get parsed :kind)))
+      (should (equal "help" (plist-get parsed :name))))))
+
+(ert-deftest chat-command-parse-accepts-fullwidth-prefixes ()
+  "Each prefix has a fullwidth form, and the body after it may mix too."
+  (should (eq 'shell (plist-get (chat-command-parse "！ls") :kind)))
+  (should (eq 'shell-repeat (plist-get (chat-command-parse "！！") :kind)))
+  ;; One of each: the two bangs need not agree on width.
+  (should (eq 'shell-repeat (plist-get (chat-command-parse "!！") :kind)))
+  (should (eq 'query (plist-get (chat-command-parse "？q") :kind)))
+  (should (eq 'literal (plist-get (chat-command-parse "＼text") :kind))))
+
+(ert-deftest chat-command-parse-separates-on-a-fullwidth-space ()
+  "The space between a name and its argument may be ideographic."
+  (let ((parsed (chat-command-parse "／ｈｅｌｐ\u3000queue")))
+    (should (equal "help" (plist-get parsed :name)))
+    (should (equal "queue" (plist-get parsed :arg)))))
+
+(ert-deftest chat-command-parse-keeps-an-argument-as-typed ()
+  "Folding stops at the name.
+
+The same position holds a shell body in one command and a prompt in
+another, where a fullwidth character may be exactly what was meant --
+searching for fullwidth text, or writing ordinary Chinese."
+  (should (equal "grep 中文，测试"
+                 (plist-get (chat-command-parse "！grep 中文，测试") :arg)))
+  (should (equal "echo ａｂｃ"
+                 (plist-get (chat-command-parse "/cmd echo ａｂｃ") :arg)))
+  (should (equal "这是什么项目？"
+                 (plist-get (chat-command-parse "？这是什么项目？") :arg))))
+
+(ert-deftest chat-command-fold-name-is-for-an-argument-read-as-a-name ()
+  "The handler side of the same rule."
+  (should (equal "cmd" (chat-command-fold-name "　ｃｍｄ　")))
+  (should (equal "off" (chat-command-fold-name "ｏｆｆ")))
+  ;; Case is the caller's business.
+  (should (equal "KIMI" (chat-command-fold-name "ＫＩＭＩ"))))
+
 (provide 'test-chat-command)
 ;;; test-chat-command.el ends here

@@ -1230,7 +1230,7 @@ mode the reader cannot see."
 
 (defun chat-ui--command-auto (arg)
   "Report, set or clear the default command according to ARG."
-  (let* ((request (downcase (string-trim (or arg ""))))
+  (let* ((request (downcase (chat-command-fold-name arg)))
          (canonical (chat-ui--command-canonical-name request)))
     (cond
      ((string-empty-p request)
@@ -1421,7 +1421,7 @@ only one, because numbering a list of one is noise."
 (defun chat-ui--command-drop (arg)
   "Drop the last queued note, or all of them when ARG says `all'."
   (let ((entries (chat-ui--queue-entries))
-        (request (downcase (string-trim (or arg "")))))
+        (request (downcase (chat-command-fold-name arg))))
     (cond
      ((null entries)
       (chat-ui--insert-system-message
@@ -1443,10 +1443,15 @@ only one, because numbering a list of one is noise."
   (message "%s" (chat-i18n 'request-cancelled "Request cancelled.")))
 
 (defun chat-ui--command-model (arg)
-  "Point this session at the provider named ARG, prompting when empty."
-  (if (string-empty-p arg)
-      (call-interactively #'chat-set-model)
-    (chat-set-model (intern arg))))
+  "Point this session at the provider named ARG, prompting when empty.
+
+ARG is a provider id, so it is folded and lowercased: an input method left
+in fullwidth mode would otherwise intern `ｋｉｍｉ', which is not a
+provider and reads identically to the one that is."
+  (let ((name (downcase (chat-command-fold-name arg))))
+    (if (string-empty-p name)
+        (call-interactively #'chat-set-model)
+      (chat-set-model (intern name)))))
 
 (defun chat-ui--command-shell (arg)
   "Run ARG as a shell command."
@@ -1526,7 +1531,7 @@ throwing them away."
 `/help' is the first thing someone types when they cannot see what to do
 next, so it has to work from the input area rather than only from a key
 binding nobody has found yet."
-  (let ((topic (string-trim (or arg ""))))
+  (let ((topic (chat-command-fold-name arg)))
     (if (string-empty-p topic)
         (chat-ui--show-help)
       (chat-ui--show-help-matching topic))))

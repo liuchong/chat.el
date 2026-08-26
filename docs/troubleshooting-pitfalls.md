@@ -1439,4 +1439,38 @@ than the object — save, load, and compare against the value that went in.
 Test the second reopen too: a loader that corrupts and re-saves needs one
 cycle to lose the data and another to look stable.
 
+### A Character Class Named After The Examples That Prompted It
+
+**Problem**: `/ｈｅｌｐ` was not a command. The slash was understood and
+the name was not, so the line went to the model as text.
+
+**Cause**: the fold from fullwidth to ASCII was a hand-listed table of
+punctuation, because punctuation was what the first report was about. But
+an input method is not in fullwidth mode for the punctuation only — it
+produces `／ｈｅｌｐ`, and the name is affected exactly as much as the
+slash. The table could not have been right: it was a list of instances
+where the real rule was a Unicode block.
+
+**Solution**: map U+FF01–U+FF5E arithmetically, which subsumes the table
+and covers letters and digits. When a fold, escape or normalization is
+implemented as a list, check whether the list is standing in for a range —
+and test a member of the range that is not in the list.
+
+### Folding The Syntax Is Not Folding The Argument
+
+**Problem**: `/auto ｃｍｄ` did nothing useful after the fold above was
+widened. The command was found; its argument was not.
+
+**Cause**: the parser deliberately does not fold arguments, because the
+same position holds a shell body in `/cmd` and a prompt in `/send`, where a
+fullwidth character may be exactly what was meant. That rule is right, and
+it leaves a gap: some arguments are not data. `/auto` takes a command name,
+`/drop` a keyword, `/model` an id, `/help` a topic — all compared against
+fixed names.
+
+**Solution**: the parser folds syntax; a handler folds an argument it
+interprets. Guard both directions — a widening fold needs tests that the
+data positions were *not* folded, or the next widening will quietly rewrite
+what someone is sending.
+
 Last updated: 2026-08-26
