@@ -460,28 +460,34 @@ You can override this with `chat-files-allowed-directories`.
       (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
-## Code Mode (AI Programming IDE)
+## Code Capability (AI Programming)
 
-chat.el includes a **Code Mode** for AI-assisted programming.
-The current stable path is the single buffer code chat flow in `lisp/code/chat-code.el`.
-Refactoring, git assistance, indexing extras, and performance helpers are still under repair and should be treated as experimental.
+Code capability is a property of a chat session, not a second interface.
+Turning it on adds project context, coding prompts and edit proposals to
+the same chat buffer; everything else -- rendering, streaming, status,
+tool display, keys -- is the one implementation every session uses.
 
-### Starting Code Mode
+The capability travels with the session, so a coding session reopened
+from `M-x chat-list-sessions` still knows its project root, focus file
+and context strategy.
+
+Refactoring, git assistance, indexing extras and performance helpers are
+still under repair and should be treated as experimental.
+
+### Turning It On
 
 | Command | Description |
 |---------|-------------|
-| `M-x chat-code-start` | Start code mode for current project |
-| `M-x chat-code-for-file` | Focus on specific file |
-| `M-x chat-code-for-selection` | Use current selection as context |
-| `M-x chat-code-quote-region` | Quote the active region into the code-mode input |
-| `M-x chat-code-quote-defun` | Quote the defun at point into the code-mode input |
-| `M-x chat-code-quote-near-point` | Quote nearby context around point into the code-mode input |
-| `M-x chat-code-quote-current-file` | Quote the current file into the code-mode input |
-| `M-x chat-code-ask-region` | Ask AI about the active region immediately |
-| `M-x chat-code-ask-defun` | Ask AI about the defun at point immediately |
-| `M-x chat-code-ask-near-point` | Ask AI about nearby context immediately |
-| `M-x chat-code-ask-current-file` | Ask AI about the current file immediately |
-| `M-x chat-code-show-help` | Open the native code-mode help buffer |
+| `M-x chat-code-start` | Start a session with the current project's context |
+| `M-x chat-code-for-file` | Focus on a specific file |
+| `M-x chat-code-for-selection` | Use the current selection as context |
+| `M-x chat-code-from-chat` | Give the current session code capability, without restarting the conversation |
+
+Reading commands are not code-specific: `M-x chat-quote-region`,
+`chat-quote-defun`, `chat-quote-near-point` and
+`chat-quote-current-file` fill the input area so you can refine the
+question, and the matching `chat-ask-*` commands send immediately.
+`M-x chat-show-help` covers every key in one place.
 
 ### Inline Editing Commands
 

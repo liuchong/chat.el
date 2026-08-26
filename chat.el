@@ -217,6 +217,42 @@ and an ideographic space all reach the same commands.  A command argument
 is never rewritten, so a shell body or question keeps its own
 punctuation.
 
+Keys:
+  RET                   - Send
+  S-RET                 - New line without sending
+  C-g                   - Cancel the current request
+  C-c C-n / C-c C-l     - New session / list sessions
+  C-c C-m               - Switch model
+  C-c C-e / C-c C-g     - Edit last message / regenerate last response
+  C-c C-s / C-c C-p     - Request status / request panel
+  C-c C-t               - Toggle auto-approval for this session
+  C-c C-q / C-c C-SPC   - Quote active region / ask about it
+  C-c C-h               - This help
+
+Coding Sessions:
+  M-x chat-code-start        - Start a session with project context
+  M-x chat-code-from-chat    - Give this session code capability
+  C-c C-a / C-c C-k          - Accept / reject a proposed edit
+  C-c C-v                    - View the proposed edit as a diff
+  C-c C-f                    - Focus a file
+  C-c C-r                    - Rebuild project context
+
+Code capability is a property of the session, not a separate buffer: it
+adds project context, coding rules and edit proposals to the same chat.
+The edit and context keys do nothing in a session without it.
+
+Working Notes:
+  - Quote commands fill the input area so you can refine the question;
+    ask commands send immediately.
+  - The request panel shows execution detail without filling the
+    transcript with it.
+  - Preview an edit in *chat-preview* before accepting it.
+  - A file write approval can also allow one directory subtree.
+  - Typing a path-like token in the input area completes file names.
+  - For long documents, work section by section rather than asking for
+    one giant response; use targeted edits on existing files and whole
+    writes only for new ones.
+
 Reading Workflow:
   M-x chat-quote-region       - Quote active region into chat
   M-x chat-quote-defun        - Quote defun at point into chat
@@ -313,14 +349,13 @@ MODEL is an optional model identifier, uses chat-default-model if not provided."
 (defun chat--open-session (session)
   "Open SESSION in a chat buffer.
 
-SESSION is a chat-session struct.  A session that recorded code
-capability reopens on the code surface, since resuming a project
-conversation without its project context is not resuming it."
-  (if (and (fboundp 'chat-code-session-p)
-           (fboundp 'chat-code--open-session)
-           (chat-code-session-p session))
-      (chat-code--open-session session)
-    (chat--open-chat-session session)))
+SESSION is a chat-session struct.  There is one surface: code capability
+changes what the session carries into a request and which commands apply,
+not how the conversation is drawn.  Two surfaces meant two of everything
+underneath, and the two copies drifted -- a code session never read the
+project's own instructions, a plain one reformatted code blocks
+incorrectly mid-stream -- so each fix only ever landed on one side."
+  (chat--open-chat-session session))
 
 (defun chat-prepare-session-buffer (session)
   "Apply the session-level setup every chat surface needs to SESSION.
@@ -379,17 +414,42 @@ how it is drawn, which is why it does not belong in either display."
 
 (defvar chat-mode-map
   (let ((map (make-sparse-keymap)))
+    ;; Composing and sending.
     (define-key map (kbd "RET") 'chat-ui-send-message)
+    (define-key map (kbd "<S-return>") 'chat-ui-insert-newline)
+    (define-key map (kbd "C-g") 'chat-ui-cancel-response)
+    ;; Sessions.
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
+    (define-key map (kbd "C-c C-m") 'chat-set-model)
     (define-key map (kbd "C-c C-h") 'chat-show-help)
-    (define-key map (kbd "C-g") 'chat-ui-cancel-response)
-    (define-key map (kbd "C-c C-a") 'chat-toggle-auto-approve-session)
+    ;; Revising the conversation.
+    (define-key map (kbd "C-c C-e") 'chat-ui-edit-last-user-message)
+    (define-key map (kbd "C-c C-g") 'chat-ui-regenerate-last-response)
+    ;; Watching a run.
     (define-key map (kbd "C-c C-s") 'chat-show-current-request-status)
     (define-key map (kbd "C-c C-p") 'chat-ui-toggle-request-panel)
-    (define-key map (kbd "C-c C-m") 'chat-set-model)
+    ;; Approval.  Auto-approve moves off C-c C-a, which the code surface
+    ;; used for accepting an edit; on one keymap only one of them could
+    ;; keep it, and accepting an edit is the riskier thing to fire by
+    ;; muscle memory from the other surface.
+    (define-key map (kbd "C-c C-t") 'chat-toggle-auto-approve-session)
+    ;; Proposed edits.  Inert in a session without code capability.
+    (define-key map (kbd "C-c C-a") 'chat-code-accept-last-edit)
+    (define-key map (kbd "C-c C-k") 'chat-code-reject-last-edit)
+    (define-key map (kbd "C-c C-v") 'chat-code-view-preview)
+    ;; Project context.
+    (define-key map (kbd "C-c C-f") 'chat-code-focus-file)
+    (define-key map (kbd "C-c C-r") 'chat-code-refresh-context)
+    ;; Quoting the buffer you came from.
+    (define-key map (kbd "C-c C-q") 'chat-quote-region)
+    (define-key map (kbd "C-c C-SPC") 'chat-ask-region)
     map)
-  "Keymap for chat mode buffers.")
+  "Keymap for chat mode buffers.
+
+One table for every chat buffer.  Commands that need code capability are
+bound unconditionally and refuse politely without it, so a key does not
+appear and disappear depending on which session is in front of you.")
 
 (defun chat--reading-session-name (&optional file)
   "Return a default session name for reading workflow commands."
@@ -475,9 +535,19 @@ how it is drawn, which is why it does not belong in either display."
   (chat--ask-capture (chat-reading-capture-current-file) question))
 
 (define-derived-mode chat-mode fundamental-mode "Chat"
-  "Major mode for chat sessions."
+  "Major mode for chat sessions.
+
+The only chat surface.  Whether a session carries project context,
+coding rules and edit proposals is a property of the session, visible in
+the header and in which commands do anything."
   :group 'chat
   (setq buffer-read-only nil)
+  (setq truncate-lines nil)
+  (setq-local completion-at-point-functions
+              '(chat-ui--path-completion-at-point))
+  (add-hook 'post-self-insert-hook
+            #'chat-ui--maybe-complete-path-after-insert
+            nil t)
   (erase-buffer))
 
 (defun chat--refresh-buffer ()

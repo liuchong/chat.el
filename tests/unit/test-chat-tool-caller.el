@@ -323,7 +323,7 @@
        (insert "project read ok"))
      (chat-files-register-built-in-tools)
      (with-temp-buffer
-       (setq-local chat-code--current-session
+       (setq-local chat--current-session
                    (chat-code-session-create "Code Project" project-root nil))
        (let ((result (chat-tool-caller-execute
                       `(:name "files_read"
@@ -342,7 +342,7 @@
        (insert "line1\nline2\nline3\n"))
      (chat-files-register-built-in-tools)
      (with-temp-buffer
-       (setq-local chat-code--current-session
+       (setq-local chat--current-session
                    (chat-code-session-create "Code Project" project-root nil))
        (cl-letf (((symbol-function 'pop-to-buffer)
                   (lambda (buffer &rest _args)
@@ -372,7 +372,7 @@
        (insert "secret"))
      (chat-files-register-built-in-tools)
      (with-temp-buffer
-       (setq-local chat-code--current-session
+       (setq-local chat--current-session
                    (chat-code-session-create "Code Project" project-root nil))
        (let ((result
               (chat-tool-caller-execute
@@ -388,12 +388,40 @@
           (chat-tool-shell-enabled t))
      (make-directory project-root t)
      (with-temp-buffer
-       (setq-local chat-code--current-session
+       (setq-local chat--current-session
                    (chat-code-session-create "Code Project" project-root nil))
        (let ((result (chat-tool-caller-execute
                       '(:name "shell_execute"
                         :arguments (("command" . "pwd"))))))
          (should (string= (string-trim result) (file-truename project-root))))))))
+
+(ert-deftest chat-tool-caller-plain-session-grants-no-project-root ()
+  "A session without code capability widens nothing.
+
+The project root used to be read from a variable only a code buffer
+bound, so the check was \"is this a code buffer\".  Now every session is
+in the same variable and the check has to be the capability itself."
+  (chat-test-with-temp-dir
+   (let* ((project-root (expand-file-name "project" temp-dir))
+          (chat-files-allowed-directories (list "/tmp/"))
+          (chat-session-auto-save nil))
+     (make-directory project-root t)
+     (with-temp-buffer
+       ;; Code capability off, but the session does carry a root, so a
+       ;; check that ignored the capability would still find it.
+       (setq-local chat--current-session
+                   (chat-session-create "Plain" 'kimi))
+       (chat-session-metadata-set chat--current-session
+                                  'project-root project-root)
+       (should-not (chat-tool-caller--code-project-root))
+       (should-not (member project-root
+                           (chat-tool-caller--allowed-directories))))
+     (with-temp-buffer
+       (setq-local chat--current-session
+                   (chat-code-session-create "Code" project-root nil))
+       (should (equal (chat-tool-caller--code-project-root) project-root))
+       (should (member project-root
+                       (chat-tool-caller--allowed-directories)))))))
 
 (ert-deftest chat-tool-caller-uses-session-working-directory-for-shell ()
   "Test shell tools follow the working directory chosen for the session."
@@ -424,7 +452,7 @@
      (make-directory session-dir t)
      (chat-session-set-working-directory session session-dir)
      (with-temp-buffer
-       (setq-local chat-code--current-session
+       (setq-local chat--current-session
                    (chat-code-session-create "Code Project" project-root nil))
        (let ((result (chat-tool-caller-execute
                       '(:name "shell_execute"

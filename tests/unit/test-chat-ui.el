@@ -573,6 +573,239 @@ one that was asked."
        (should (string-match-p "Recent file target for follow-up requests" captured-prompt))
        (should (string-match-p (regexp-quote target-file) captured-prompt))))))
 
+(ert-deftest chat-ui-send-message-persists-history-and-keeps-input-open ()
+  "Sending records the message and leaves the prompt editable."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "History Session" 'kimi))
+          sent)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "Fix this function")
+       (cl-letf (((symbol-function 'chat-ui--get-response)
+                  (lambda () (setq sent t))))
+         (chat-ui-send-message))
+       (should sent)
+       (should (= (length (chat-session-messages session)) 1))
+       (let ((saved (car (chat-session-messages session))))
+         (should (eq (chat-message-role saved) :user))
+         (should (string= (chat-message-content saved) "Fix this function")))
+       (should (= (marker-position chat-ui--input-overlay) (point-max)))
+       (goto-char (point-min))
+       (should (search-forward "You:" nil t))
+       (should (search-forward "Fix this function" nil t))))))
+
+(ert-deftest chat-ui-insert-newline-keeps-input-open ()
+  "S-RET adds a line instead of sending."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Newline Session" 'kimi))
+          sent)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "first line")
+       (cl-letf (((symbol-function 'chat-ui--get-response)
+                  (lambda () (setq sent t))))
+         (chat-ui-insert-newline))
+       (insert "second line")
+       (should-not sent)
+       (should (string= (buffer-substring-no-properties
+                         (marker-position chat-ui--input-overlay)
+                         (point-max))
+                        "first line\nsecond line"))))))
+
+(ert-deftest chat-ui-path-completion-at-point-detects-relative-path-token ()
+  "Input completion offers files for a relative path fragment.
+
+The candidates come from the project the session was pointed at, not
+from wherever the buffer happens to sit."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (doc-dir (expand-file-name "docs" temp-dir))
+          (session (chat-session-create "Path Session" 'kimi)))
+     (make-directory doc-dir t)
+     (with-temp-file (expand-file-name "guide.md" doc-dir) (insert "hello"))
+     (chat-session-metadata-set session 'code-enabled t)
+     (chat-session-metadata-set session 'project-root temp-dir)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (setq-local default-directory "/")
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "See docs/gu")
+       (let* ((capf (chat-ui--path-completion-at-point))
+              (start (nth 0 capf))
+              (end (nth 1 capf))
+              (table (nth 2 capf))
+              (candidates (all-completions "docs/gu" table)))
+         (should capf)
+         (should (string= (buffer-substring-no-properties start end) "docs/gu"))
+         (should (member "docs/guide.md" candidates)))))))
+
+(ert-deftest chat-ui-auto-path-completion-only-triggers-for-path-like-input ()
+  "Typing an ordinary word does not open a file completion popup."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Auto Path Session" 'kimi))
+          path-triggered
+          plain-triggered)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (insert "docs/gu")
+       (let ((last-command-event ?u))
+         (cl-letf (((symbol-function 'completion-at-point)
+                    (lambda () (setq path-triggered t))))
+           (chat-ui--maybe-complete-path-after-insert)))
+       (delete-region (marker-position chat-ui--input-overlay) (point-max))
+       (goto-char (point-max))
+       (insert "plainword")
+       (let ((last-command-event ?d))
+         (cl-letf (((symbol-function 'completion-at-point)
+                    (lambda () (setq plain-triggered t))))
+           (chat-ui--maybe-complete-path-after-insert))))
+     (should path-triggered)
+     (should-not plain-triggered))))
+
+(ert-deftest chat-ui-fence-safe-prefix-length-tracks-open-fences ()
+  "A streaming cut never lands inside an unfinished code block."
+  ;; Nothing fenced, and nothing fenced left open: all of it can be kept.
+  (should (= (chat-ui--fence-safe-prefix-length "no fences here")
+             (length "no fences here")))
+  (let ((closed "text ```el\n(one)\n```\ntail"))
+    (should (= (chat-ui--fence-safe-prefix-length closed) (length closed))))
+  ;; An open fence means everything from it onward may still be
+  ;; reformatted, so the safe prefix stops before it.
+  (should (= (chat-ui--fence-safe-prefix-length "intro ```el\n(part") 0))
+  (should (= (chat-ui--fence-safe-prefix-length "a ```x\n1\n``` b ```y\n2")
+             (length "a ```x\n1\n```"))))
+
+(ert-deftest chat-ui-finalize-hides-tool-json-at-loop-limit ()
+  "A stalled tool loop shows why it stopped, not the raw call JSON."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Loop Limit" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (let ((content-start (copy-marker chat-ui--messages-end)))
+         (chat-ui--finalize-response
+          session "msg-1" (current-buffer) content-start
+          '(:content "{\"function_call\":{\"name\":\"shell_execute\",\"arguments\":{\"command\":\"pwd\"}}}"
+            :tool-calls ((:name "shell_execute"
+                          :arguments (("command" . "pwd"))))
+            :tool-results ("/tmp/project")
+            :tool-loop-limit-reached t)))
+       (goto-char (point-min))
+       (should-not (search-forward "{\"function_call\"" nil t))
+       (goto-char (point-min))
+       (should (search-forward "Tool loop stopped after reaching the safety limit."
+                               nil t))))))
+
+(ert-deftest chat-ui-tool-summary-keeps-short-directory-lists-readable ()
+  "A short directory listing keeps every file name visible."
+  (let* ((result (mapcar (lambda (name)
+                           (list :name name :path (concat "/tmp/" name)
+                                 :type 'file))
+                         '("a.md" "b.md" "c.md" "d.md" "e.md")))
+         (summary (chat-ui--tool-result-summary (format "%S" result))))
+    (should (string-match-p "a.md" summary))
+    (should (string-match-p "e.md" summary))))
+
+(ert-deftest chat-ui-tool-summary-shows-files-find-matches ()
+  "A search summary names what it matched."
+  (let* ((result '(:directory "/tmp/specs"
+                   :pattern "voice|image"
+                   :matches ("/tmp/specs/a.md" "/tmp/specs/b.md" "/tmp/specs/c.md")
+                   :match-count 3))
+         (summary (chat-ui--tool-result-summary (format "%S" result))))
+    (should (string-match-p "3 matches" summary))
+    (should (string-match-p "a.md" summary))
+    (should (string-match-p "c.md" summary))))
+
+(ert-deftest chat-ui-tool-summary-shows-read-lines-content ()
+  "A line-range read summary shows the lines, not just the path."
+  (let* ((result '(:path "/tmp/cmd/msg.go"
+                   :lines ("package cmd" "func main() {}")
+                   :start 1
+                   :end 2))
+         (summary (chat-ui--tool-result-summary (format "%S" result))))
+    (should (string-match-p "msg.go" summary))
+    (should (string-match-p "package cmd" summary))))
+
+(ert-deftest chat-ui-tool-followup-summarizes-structured-results ()
+  "Tool follow-up messages carry the real result content.
+
+Structured results go back to the model up to
+`chat-tool-caller-result-max-chars', so it sees file contents rather
+than a one-line description of them."
+  (let* ((tool-calls '((:name "files_read"
+                        :arguments (("path" . "/tmp/demo.el")))))
+         (tool-results
+          '("(:path \"/tmp/demo.el\" :content \"(message \\\"hello\\\")\\n(second-line)\" :size 24)"))
+         (message (chat-ui--tool-followup-message tool-calls tool-results)))
+    (should (string-match-p (regexp-quote "(message \\\"hello\\\")") message))
+    (should (string-match-p (regexp-quote "(second-line)") message))))
+
+(ert-deftest chat-ui-prepare-messages-carries-the-coding-prompt-for-a-code-session ()
+  "A code-capable session gets its coding rules from the single pipeline.
+
+Code capability used to imply a second request path, which is how code
+sessions ended up never reading the project's own instructions.  Here
+both arrive from the same place."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-project-instructions-max-chars 4000)
+          (session (chat-session-create "Code Session" 'kimi))
+          captured-prompt)
+     (write-region "Always run the linter.\n" nil
+                   (expand-file-name "AGENTS.md" temp-dir))
+     (chat-session-metadata-set session 'code-enabled t)
+     (with-temp-buffer
+       (setq-local default-directory temp-dir)
+       (setq-local chat--current-session session)
+       (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
+                  (lambda (prompt &optional _step-limit _session)
+                    (setq captured-prompt prompt)
+                    prompt))
+                 ((symbol-function 'chat-context-code-build)
+                  (lambda (_session) 'context))
+                 ((symbol-function 'chat-context-code-to-string)
+                  (lambda (_context) "Project files: main.el"))
+                 ((symbol-function 'chat-code-lsp-available-p) #'ignore))
+         (chat-ui--prepare-messages-with-tools nil))
+       ;; The coding rules replace the generic assistant preamble.
+       (should (string-match-p "Editing protocol" captured-prompt))
+       (should-not (string-match-p "You are a helpful AI assistant"
+                                   captured-prompt))
+       ;; The project context the session was pointed at.
+       (should (string-match-p "Project files: main.el" captured-prompt))
+       ;; And the project's own instructions, which the separate code
+       ;; path never read.
+       (should (string-match-p "Always run the linter" captured-prompt))))))
+
+(ert-deftest chat-ui-prepare-messages-leaves-a-plain-session-alone ()
+  "A session without code capability keeps the generic preamble."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Plain Session" 'kimi))
+          captured-prompt)
+     (with-temp-buffer
+       (setq-local default-directory temp-dir)
+       (setq-local chat--current-session session)
+       (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
+                  (lambda (prompt &optional _step-limit _session)
+                    (setq captured-prompt prompt)
+                    prompt)))
+         (chat-ui--prepare-messages-with-tools nil))
+       (should (string-match-p "You are a helpful AI assistant" captured-prompt))
+       (should-not (string-match-p "Editing protocol" captured-prompt))))))
+
 (ert-deftest chat-ui-handle-shell-command-cd-special-case ()
   "Test that a plain cd takes the directory-change path, not the shell."
   (chat-test-with-temp-dir

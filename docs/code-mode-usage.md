@@ -121,44 +121,49 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 | `chat-code-start` | - | 从当前项目启动 Code Mode |
 | `chat-code-for-file` | - | 针对特定文件启动 |
 | `chat-code-for-selection` | - | 使用当前选区作为上下文 |
-| `chat-code-from-chat` | - | 从普通聊天会话切换 |
-| `chat-code-quote-region` | - | 把当前选区引用到 code-mode 输入区 |
-| `chat-code-quote-defun` | - | 把当前 defun 引用到 code-mode 输入区 |
-| `chat-code-quote-near-point` | - | 把光标附近上下文引用到 code-mode 输入区 |
-| `chat-code-quote-current-file` | - | 把当前文件引用到 code-mode 输入区 |
-| `chat-code-ask-region` | - | 直接对当前选区提问 |
-| `chat-code-ask-defun` | - | 直接对当前 defun 提问 |
-| `chat-code-ask-near-point` | - | 直接对光标附近上下文提问 |
-| `chat-code-ask-current-file` | - | 直接对当前文件提问 |
+| `chat-code-from-chat` | - | 给当前会话加上代码能力，不重开对话 |
 
-### Code Mode Buffer 命令
+引用和提问命令不属于代码能力，任何会话都能用：`chat-quote-region`、
+`chat-quote-defun`、`chat-quote-near-point`、`chat-quote-current-file`
+把内容填进输入区，对应的 `chat-ask-*` 直接发送。
 
-在 `*chat:code:<session>*` buffer 中：
+### Chat Buffer 命令
+
+代码能力是会话属性，没有独立的 code buffer，也没有第二张键位表。
+下面这些键在任何 chat buffer 里都是同一套；标注“需代码能力”的几个在
+普通会话里按下去会明确告诉你该会话没有代码能力。
 
 | 快捷键 | 命令 | 描述 |
 |--------|------|------|
-| `RET` | `chat-code-send-message` | 发送消息 |
-| `C-c C-a` | `chat-code-accept-last-edit` | 接受最后一个修改 |
-| `C-c C-k` | `chat-code-reject-last-edit` | 拒绝最后一个修改 |
-| `C-c C-v` | `chat-code-view-preview` | 查看预览（切换到 *chat-preview*） |
-| `C-c C-f` | `chat-code-focus-file` | 更改焦点文件 |
-| `C-c C-r` | `chat-code-refresh-context` | 刷新上下文 |
-| `C-c C-q` | `chat-code-quote-region` | 把当前选区引用到输入区 |
-| `C-c C-SPC` | `chat-code-ask-region` | 直接提问当前选区 |
-| `C-c C-s` | `chat-code-show-current-request-status` | 查看当前请求的详细诊断 |
-| `C-c C-p` | `chat-code-toggle-request-panel` | 切换请求过程面板 |
-| `C-c C-e` | `chat-code-edit-last-user-message` | 编辑并重发最后一条用户消息 |
-| `C-c C-g` | `chat-code-regenerate-last-response` | 重新生成最后一条 AI 回复 |
-| `C-c C-h` | `chat-code-show-help` | 打开 code-mode 原生帮助缓冲区 |
-| `S-RET` | `chat-code-insert-newline` | 在输入区插入换行而不直接发送 |
-| `C-g` | `chat-code-cancel` | 取消当前操作 |
+| `RET` | `chat-ui-send-message` | 发送消息 |
+| `S-RET` | `chat-ui-insert-newline` | 在输入区插入换行而不直接发送 |
+| `C-g` | `chat-cancel-request` | 取消当前请求 |
+| `C-c C-n` | `chat-new-session` | 新建会话 |
+| `C-c C-l` | `chat-list-sessions` | 列出会话 |
+| `C-c C-m` | `chat-set-model` | 切换本会话的模型 |
+| `C-c C-e` | `chat-edit-last-user-message` | 编辑并重发最后一条用户消息 |
+| `C-c C-g` | `chat-regenerate-last-response` | 重新生成最后一条 AI 回复 |
+| `C-c C-s` | `chat-show-current-request-status` | 查看当前请求的详细诊断 |
+| `C-c C-p` | `chat-toggle-request-panel` | 切换请求过程面板 |
+| `C-c C-t` | `chat-toggle-auto-approve-session` | 切换本会话的自动批准 |
+| `C-c C-q` | `chat-quote-region` | 把当前选区引用到输入区 |
+| `C-c C-SPC` | `chat-ask-region` | 直接提问当前选区 |
+| `C-c C-h` | `chat-show-help` | 打开帮助 |
+| `C-c C-a` | `chat-code-accept-last-edit` | 接受最后一个修改（需代码能力） |
+| `C-c C-k` | `chat-code-reject-last-edit` | 拒绝最后一个修改（需代码能力） |
+| `C-c C-v` | `chat-code-view-preview` | 查看预览（需代码能力） |
+| `C-c C-f` | `chat-code-focus-file` | 更改焦点文件（需代码能力） |
+| `C-c C-r` | `chat-code-refresh-context` | 重建项目上下文（需代码能力） |
+
+`C-c C-a` 曾在两张键位表里各有含义：一边接受修改，一边自动批准。
+合表时自动批准让到 `C-c C-t`。
 
 当文件写工具触发审批时，原生审批提示除了单次、session、tool 级放行外，还会在可判定目录范围时提供 directory 级放行。
 这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。
 request panel 现在也会把 directory 级审批范围直接显示出来，方便确认放行边界。
 对于 streaming 响应，request panel 现在还会显示 live state、last chunk 和 recent activity，方便判断模型是否还在持续工作。
 主对话区里的当前 assistant 槽位也会显示一条临时的 `[Live] ...` 叙事行，用真实的 waiting、streaming、tool-loop 和 approval 状态解释后台正在发生什么。
-当 AI 用单文件工具读过或改过某个文件后，code-mode 现在会把它自动当成后续 vague follow-up 的默认 focus，这样像“再优化一轮”这类短指令不会轻易丢目标。
+当 AI 用单文件工具读过或改过某个文件后，具备代码能力的会话会把它自动当成后续 vague follow-up 的默认 focus，这样像“再优化一轮”这类短指令不会轻易丢目标；普通会话不会因此获得 focus。
 
 ### 阅读代码时直接提问
 
@@ -166,11 +171,11 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 
 ```text
 1. 在源码 buffer 中选择最贴近当前阅读状态的入口
-2. 选中代码时执行 `chat-code-quote-region` 或 `chat-code-ask-region`
-3. 光标在函数内时执行 `chat-code-quote-defun` 或 `chat-code-ask-defun`
-4. 正在看某行附近逻辑时执行 `chat-code-quote-near-point` 或 `chat-code-ask-near-point`
-5. 当前文件整体不大时执行 `chat-code-quote-current-file` 或 `chat-code-ask-current-file`
-6. 在 code-mode buffer 中继续补充问题，或直接让命令立即发送
+2. 选中代码时执行 `chat-quote-region` 或 `chat-ask-region`
+3. 光标在函数内时执行 `chat-quote-defun` 或 `chat-ask-defun`
+4. 正在看某行附近逻辑时执行 `chat-quote-near-point` 或 `chat-ask-near-point`
+5. 当前文件整体不大时执行 `chat-quote-current-file` 或 `chat-ask-current-file`
+6. 在 chat buffer 中继续补充问题，或直接让 ask 命令立即发送
 7. AI 如需切换到其他文件，可调用 `open_file` 在 Emacs 中直接打开相关文件
 ```
 
@@ -184,7 +189,7 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 3. 新文件用 files_write，已有文档的小改动优先 apply_patch 或 files_replace
 4. 如果 quote-current-file 因文件太大而拒绝，就退回到 region 或 near-point
 5. 始终把 preview 和 git diff 当最终审查面
-6. 如果上一轮已经 review 或修改过某个单文件，下一轮可以直接说“继续改”或“优化一轮”，code-mode 会优先沿用那个 focus
+6. 如果上一轮已经 review 或修改过某个单文件，下一轮可以直接说“继续改”或“优化一轮”，代码会话会优先沿用那个 focus
 ```
 
 如果你正在持续编辑同一个文档目录，审批提示里的 directory 级放行通常比 tool 级放行更稳妥。
@@ -192,7 +197,7 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 
 ### 输入区路径补全
 
-在 `*chat:code:<session>*` 底部输入区里：
+在 chat buffer 底部输入区里：
 
 ```text
 1. 输入绝对路径，例如 /tmp/demo.md

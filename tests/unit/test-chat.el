@@ -104,6 +104,93 @@
   (should (commandp 'chat-set-model))
   (should (eq (lookup-key chat-mode-map (kbd "C-c C-m")) 'chat-set-model)))
 
+(defconst chat-test--help-key-regexp
+  "\\bC-c \\(?:C-SPC\\|C-[a-zA-Z]\\|[a-zA-Z]\\)\\(?:\\s-\\|$\\)"
+  "Matches a whole key sequence in the help, not a prefix of one.
+
+`C-c C-SPC' has to be tried before `C-c C-[a-zA-Z]', or the alternation
+settles for `C-c C' and reports a key nobody wrote.")
+
+(defun chat-test--help-keys ()
+  "Return the key sequences `chat-commands-help' names, normalized."
+  (let (keys)
+    (with-temp-buffer
+      (insert chat-commands-help)
+      (goto-char (point-min))
+      (while (re-search-forward chat-test--help-key-regexp nil t)
+        (push (key-description (kbd (string-trim (match-string 0)))) keys)
+        ;; The trailing whitespace may open the next key on a line of
+        ;; two, as in "C-c C-n / C-c C-l".
+        (goto-char (match-end 0))
+        (skip-chars-backward " \t")))
+    keys))
+
+(defun chat-test--bound-keys ()
+  "Return the key sequences bound in `chat-mode-map', normalized."
+  (let (keys)
+    (map-keymap
+     (lambda (event definition)
+       (cond
+        ((keymapp definition)
+         (map-keymap
+          (lambda (inner _def)
+            (push (key-description (vector event inner)) keys))
+          definition))
+        (definition
+         (push (key-description (vector event)) keys))))
+     chat-mode-map)
+    keys))
+
+(ert-deftest chat-every-key-the-help-advertises-is-bound ()
+  "A key named in the help has to do something when pressed.
+
+Two surfaces each documented `C-c C-a' for a different command; when they
+became one keymap, one of the two would have lost silently."
+  (let ((documented (chat-test--help-keys))
+        (missing nil))
+    ;; A regexp that matched nothing would satisfy the loop below without
+    ;; checking anything, so pin the extraction to keys known to be
+    ;; documented, one of them the awkward shape that reads as a prefix.
+    (should (member (key-description (kbd "C-c C-h")) documented))
+    (should (member (key-description (kbd "C-c C-SPC")) documented))
+    (should (member (key-description (kbd "C-c C-a")) documented))
+    (should (> (length documented) 10))
+    (dolist (key documented)
+      (unless (commandp (lookup-key chat-mode-map (kbd key)))
+        (push key missing)))
+    (should-not missing)))
+
+(ert-deftest chat-every-bound-key-appears-in-the-help ()
+  "A key that only the keymap knows about is a key nobody finds."
+  (let ((documented (chat-test--help-keys))
+        (undocumented nil))
+    (dolist (key (chat-test--bound-keys))
+      ;; Sending, newline and cancel are part of using the buffer rather
+      ;; than commands to look up, and the help covers them in prose.
+      (unless (or (member key '("RET" "<return>" "S-RET" "S-<return>"
+                                "C-j" "TAB" "C-g"))
+                  (string-match-p "mouse\\|remap\\|menu" key)
+                  (member key documented))
+        (push key undocumented)))
+    (should-not undocumented)))
+
+(ert-deftest chat-accepting-an-edit-and-approving-tools-are-different-keys ()
+  "The one collision the merge had to resolve, held in place."
+  (let ((accept (lookup-key chat-mode-map (kbd "C-c C-a")))
+        (approve (lookup-key chat-mode-map (kbd "C-c C-t"))))
+    (should (commandp accept))
+    (should (commandp approve))
+    (should-not (eq accept approve))))
+
+(ert-deftest chat-code-capabilities-are-reachable-from-the-chat-keymap ()
+  "Code capability has no keymap of its own to fall back on."
+  (dolist (command '(chat-code-accept-last-edit
+                     chat-code-reject-last-edit
+                     chat-code-focus-file
+                     chat-code-refresh-context))
+    (should (commandp command))
+    (should (where-is-internal command chat-mode-map))))
+
 (ert-deftest chat-reading-commands-are-bound ()
   (should (commandp 'chat-quote-region))
   (should (commandp 'chat-ask-region))

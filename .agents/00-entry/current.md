@@ -8,7 +8,21 @@
 
 ## Current Phase
 
-Budget work is complete (2026-08-25), covering both meanings of the word.
+There is one chat surface (2026-08-26). Code capability is a property of
+a session rather than a second display: `chat-code-mode` is gone, and a
+coding session is a `chat-mode` buffer whose metadata carries a project
+root, a focus file and a context strategy. 1712 lines left
+`lisp/code/chat-code.el` and 475 arrived in `lisp/ui/chat-ui.el`, the
+difference being the duplicated pipeline itself. Decision 0009 records
+why the two surfaces could not be told apart by any principle, and why
+the merge had to precede transcript rendering rather than follow it.
+
+Two invariants are asserted rather than reviewed: the keymap and
+`chat-commands-help` agree key by key in both directions, and every `M-x`
+name in the docs is a real command.
+
+Budget work completed the day before (2026-08-25), covering both meanings
+of the word.
 
 The step budget lives in `lisp/agent/chat-agent-budget.el`:
 `chat-agent-max-steps` is 300 and accepts `unlimited`, disclosure is
@@ -29,8 +43,9 @@ HTML-comment markers that Markdown hides and other tools ignore.
 
 The typed transcript model in `lisp/core/chat-transcript.el` stamps turn,
 step, category and work on every message and projects the record down to
-what a request may carry. **The displays do not render from it yet**, so
-intermediate steps are still invisible on screen; that is the next stage.
+what a request may carry. **The display does not render from it yet**, so
+intermediate steps are still invisible on screen; that is the next stage,
+and there is now one renderer to change rather than two.
 
 Storage and self-knowledge landed on the same day. A run is told where its
 own transcript is and can filter it back through `session_log`
@@ -44,7 +59,7 @@ space. The assembled block measures itself against the system prompt share
 and shortens to paths alone when it does not fit, which is what an 8K
 window requires.
 
-Canonical suite: 777 tests passing.
+Canonical suite: 758 tests passing.
 
 The input command layer completed earlier the same day. Chat input parses
 into commands through `lisp/core/chat-command.el`, covering shell
@@ -77,6 +92,9 @@ surface advertises only relevant scoped tools.
 
 ## Active Modules
 
+- `chat.el` (sessions, the one keymap, help)
+- `lisp/ui/chat-ui.el` (the one renderer and request pipeline)
+- `lisp/code/chat-code.el` (code capability as session properties)
 - `lisp/core/chat-command.el`
 - `lisp/core/chat-transcript.el`
 - `lisp/core/chat-context-budget.el`
@@ -107,6 +125,7 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0009-one-chat-surface.md`
 - `../20-reference/decisions/0008-self-knowledge-and-shared-storage.md`
 - `../20-reference/decisions/0007-context-budget-and-resident-context.md`
 - `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`

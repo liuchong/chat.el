@@ -43,6 +43,9 @@ model knows content is missing."
 (defvar chat-tool-caller-current-session nil
   "Session whose tool overlay is used for provider tool exposure.")
 
+;; Bound buffer-locally by the chat surface, which loads after this.
+(defvar chat--current-session)
+
 (defun chat-tool-caller-truncate-result (result &optional max-chars)
   "Keep RESULT within MAX-CHARS, appending an omission marker when cut."
   (let* ((text (or result ""))
@@ -597,11 +600,16 @@ enumerated values."
              (chat-tool-shell-whitelist-match-p command))))))
 
 (defun chat-tool-caller--code-project-root ()
-  "Return the current code mode project root, when available."
-  (when (and (boundp 'chat-code--current-session)
-             chat-code--current-session
+  "Return the project root of the current session, when it has one.
+
+Code capability is a property of a session, so the root is read from the
+session in this buffer rather than from a variable that only a code
+buffer used to bind."
+  (when (and (bound-and-true-p chat--current-session)
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p chat--current-session)
              (fboundp 'chat-code-session-project-root))
-    (chat-code-session-project-root chat-code--current-session)))
+    (chat-code-session-project-root chat--current-session)))
 
 (defun chat-tool-caller--allowed-directories ()
   "Return effective file roots for the current tool execution."

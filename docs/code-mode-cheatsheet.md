@@ -1,26 +1,24 @@
-# Code Mode 快速参考卡
+# 代码能力快速参考卡
 
-当前可靠能力以 `chat-code.el` 的主对话链路为准。
-重构、git、索引性能相关命令目前仍应按实验能力理解。
+代码能力是会话的一个属性，不是另一个界面。开启后，同一个 chat buffer
+多出项目上下文、编程提示词和编辑提案；不开启时，编辑与上下文相关的键位
+按下去只会告诉你这个会话没有代码能力。
 
-## 🚀 启动 Code Mode
+可靠能力以主对话链路为准。重构、git、索引性能相关命令仍应按实验能力理解。
+
+## 🚀 开启代码能力
 
 ```
-M-x chat-code-start              从当前项目启动
+M-x chat-code-start              从当前项目启动一个带代码能力的会话
 M-x chat-code-for-file           针对特定文件
 M-x chat-code-for-selection      使用当前选区
-M-x chat-code-from-chat          从普通聊天切换
-M-x chat-code-quote-region       把当前选区引用到输入框
-M-x chat-code-quote-defun        把当前 defun 引用到输入框
-M-x chat-code-quote-near-point   把光标附近上下文引用到输入框
-M-x chat-code-quote-current-file 把当前文件引用到输入框
-M-x chat-code-ask-region         直接提问当前选区
-M-x chat-code-ask-defun          直接提问当前 defun
-M-x chat-code-ask-near-point     直接提问光标附近上下文
-M-x chat-code-ask-current-file   直接提问当前文件
+M-x chat-code-from-chat          给当前会话加上代码能力（不重开对话）
 ```
 
-## ✏️ 内联编辑（在代码缓冲区）
+代码能力写在会话元数据里，所以它跟着会话一起存盘。`M-x chat-list-sessions`
+里重新打开一个代码会话，项目根目录、焦点文件和上下文策略都还在。
+
+## ✏️ 内联编辑（在源码缓冲区）
 
 ```
 快捷键          命令                      功能
@@ -33,38 +31,52 @@ C-c e t    chat-edit-tests          生成测试
 C-c e c    chat-edit-complete       代码补全
 ```
 
-## 💬 Code Mode Buffer（*chat:code:<session>*）
+## 💬 Chat Buffer 键位
+
+一张键位表，代码键位和普通键位在同一个 buffer 里。
 
 ```
-快捷键          功能
+快捷键        功能
 ─────────────────────────────────────────────────────────
-RET           发送消息
-C-c C-a       接受修改
-C-c C-k       拒绝修改
-C-c C-v       查看预览（切换到 *chat-preview*）
-C-c C-f       更改焦点文件
-C-c C-r       刷新上下文
-C-c C-q       把当前选区引用到输入区
-C-c C-SPC     直接提问当前选区
-C-c C-s       查看当前请求诊断
-C-c C-p       切换请求过程面板
-C-c C-e       编辑并重发最后一条用户消息
-C-c C-g       重新生成最后一条 AI 回复
-C-c C-h       打开 code-mode 原生帮助
-C-g           取消操作
+RET         发送消息
+S-RET       换行不发送
+C-g         取消当前请求
+C-c C-n     新建会话
+C-c C-l     列出会话
+C-c C-m     切换本会话的模型
+C-c C-e     编辑并重发最后一条用户消息
+C-c C-g     重新生成最后一条 AI 回复
+C-c C-s     查看当前请求诊断
+C-c C-p     切换请求过程面板
+C-c C-t     切换本会话的自动批准
+C-c C-q     把当前选区引用到输入区
+C-c C-SPC   直接提问当前选区
+C-c C-h     打开帮助
+─── 以下需要会话具备代码能力 ───
+C-c C-a     接受修改
+C-c C-k     拒绝修改
+C-c C-v     查看预览（切换到 *chat-preview*）
+C-c C-f     更改焦点文件
+C-c C-r     重建项目上下文
 ```
+
+`C-c C-a` 曾经在两张键位表里各有含义：一边是接受修改，一边是自动批准。
+合表时自动批准让到 `C-c C-t`。`tests/unit/test-chat.el` 现在断言键位表与
+`chat-commands-help` 逐条对应，这类冲突不会再无声无息地发生。
 
 ## 📖 阅读代码工作流
 
 ```text
 1. 在源码 buffer 里选择最合适的入口
-2. 选区用 M-x chat-code-quote-region 或 C-c C-q
-3. 当前 defun 用 M-x chat-code-quote-defun
-4. 当前点附近逻辑用 M-x chat-code-quote-near-point
-5. 当前文件整体较小时可用 M-x chat-code-quote-current-file
-6. 在 code-mode buffer 中补充问题，或直接用对应的 M-x chat-code-ask-* 命令立即发送
+2. 选区用 M-x chat-quote-region 或在 chat buffer 里 C-c C-q
+3. 当前 defun 用 M-x chat-quote-defun
+4. 当前点附近逻辑用 M-x chat-quote-near-point
+5. 当前文件整体较小时可用 M-x chat-quote-current-file
+6. 在 chat buffer 里补充问题，或直接用对应的 M-x chat-ask-* 命令立即发送
 7. AI 如有需要可调用 open_file 直接打开相关文件
 ```
+
+quote 系列把内容填进输入区，留给你继续改写问题；ask 系列直接发出去。
 
 ## 🔀 多文件重构（实验性）
 
@@ -127,8 +139,10 @@ p         上一个修改
 ;; 自动应用（少于N行）
 (setq chat-code-auto-apply-threshold 10)
 
-;; 流式响应
-(setq chat-code-use-streaming t)
+;; 流式响应、输出上限和超时都归统一界面，不再分代码/非代码
+(setq chat-ui-use-streaming t)
+(setq chat-ui-max-output-tokens 4096)
+(setq chat-ui-request-timeout 180)
 
 ;; 快捷键
 (global-set-key (kbd "C-c c c") 'chat-code-start)
@@ -139,6 +153,9 @@ p         上一个修改
     (local-set-key (kbd "C-c e f") 'chat-edit-fix)
     (local-set-key (kbd "C-c e t") 'chat-edit-tests)))
 ```
+
+`chat-code-use-streaming`、`chat-code-max-output-tokens`、
+`chat-code-request-timeout` 等仍可设置，但已是 `chat-ui-` 变量的过时别名。
 
 ## 🎯 提示词示例
 
@@ -172,7 +189,9 @@ p         上一个修改
 
 | 文件 | 功能 |
 |------|------|
-| chat-code.el | 主入口 |
+| chat.el | 会话入口、单一键位表、帮助 |
+| chat-ui.el | 单一渲染与请求管线 |
+| chat-code.el | 代码能力（会话属性、编辑提案、编程提示词） |
 | chat-context-code.el | 智能上下文 |
 | chat-edit.el | 编辑操作 |
 | chat-code-preview.el | 预览 buffer |
@@ -187,6 +206,7 @@ p         上一个修改
 
 | 问题 | 解决 |
 |------|------|
+| 编辑/上下文键位说没有代码能力 | `M-x chat-code-from-chat` 给当前会话开启 |
 | 响应慢 | `(setq chat-code-default-strategy 'focused)` |
 | 不准确 | 使用 comprehensive 策略，提供更多上下文 |
 | 索引慢 | `M-x chat-code-incremental-index` |

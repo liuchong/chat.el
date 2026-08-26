@@ -31,6 +31,25 @@
 (require 'chat-agent)
 (require 'chat-agent-transcript)
 
+;; Code capability lives in a module that loads after this one, because
+;; it is an optional property of a session rather than a second surface.
+;; Declared rather than required so the dependency stays one-way.
+(declare-function chat-code-session-p "chat-code" (session))
+(declare-function chat-code--compose-system-prompt "chat-code" ())
+(declare-function chat-code-session-project-root "chat-code" (session))
+(declare-function chat-code-session-focus-file "chat-code" (session))
+(declare-function chat-code-session-context-strategy "chat-code" (session))
+(declare-function chat-code-session-context-files "chat-code" (session))
+(declare-function chat-code--parse-code-edit "chat-code" (content))
+(declare-function chat-code--propose-edit "chat-code" (edit))
+(declare-function chat-code-session-set-focus-file "chat-code" (session value))
+(declare-function chat-code-session-set-context-files "chat-code" (session value))
+(declare-function chat-code-lsp-available-p "chat-code-lsp" ())
+(declare-function chat-code-lsp-get-context "chat-code-lsp" ())
+(declare-function chat-code-lsp-format-context "chat-code-lsp" (context))
+(declare-function chat-context-code-build "chat-context-code" (session))
+(declare-function chat-context-code-to-string "chat-context-code" (context))
+
 ;; ------------------------------------------------------------------
 ;; Chat Buffer Management
 ;; ------------------------------------------------------------------
@@ -152,17 +171,38 @@
     (when chat-session-auto-save
       (chat-session-save chat--current-session))))
 
+(defun chat-ui--promote-code-focus (session paths latest-single-target)
+  "Record PATHS and LATEST-SINGLE-TARGET as SESSION's code context.
+
+A code session's focus follows what the run actually touched, so the next
+request carries the file the conversation moved to rather than the one it
+started on.  A session without code capability has no focus to move."
+  (when (and session
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p session))
+    (when paths
+      (chat-code-session-set-context-files
+       session
+       (delete-dups
+        (append (mapcar #'chat-files--resolved-path paths)
+                (chat-code-session-context-files session)))))
+    (when latest-single-target
+      (chat-code-session-set-focus-file
+       session (chat-files--resolved-path latest-single-target)))))
+
 (defun chat-ui--track-tool-targets (tool-events)
   "Update recent file target state from TOOL-EVENTS."
   (when-let ((target-data (chat-request-surface-tool-targets tool-events)))
-    (let ((all-paths (plist-get target-data :paths))
+    (let ((all-paths (delete-dups (plist-get target-data :paths)))
           (latest-single-target (plist-get target-data :latest-single-target)))
       (setq chat-ui--last-tracked-tool-paths all-paths)
       (chat-ui--session-metadata-set :chat-ui-recent-target-paths all-paths)
       (when latest-single-target
         (chat-ui--session-metadata-set
          :chat-ui-preferred-target-path
-         (chat-files--resolved-path latest-single-target))))))
+         (chat-files--resolved-path latest-single-target)))
+      (chat-ui--promote-code-focus
+       chat--current-session all-paths latest-single-target))))
 
 (defun chat-ui--request-live-detail (&optional snapshot)
   "Return a compact live request label from SNAPSHOT."
@@ -324,6 +364,135 @@
    chat-ui--current-request-id
    chat-ui--request-tool-events))
 
+(defcustom chat-ui-auto-path-completion t
+  "Whether typing a path-like token in the input offers completion."
+  :type 'boolean
+  :group 'chat-ui)
+
+(defvar chat-ui--auto-path-completion-active nil
+  "Non-nil while auto path completion is running, to avoid recursion.")
+
+(defun chat-ui--point-in-input-p (&optional position)
+  "Return non-nil when POSITION is inside the editable input area."
+  (let ((pos (or position (point))))
+    (and (markerp chat-ui--input-overlay)
+         (>= pos (marker-position chat-ui--input-overlay)))))
+
+(defun chat-ui--input-token-bounds ()
+  "Return bounds of the current token in the input area, or nil."
+  (when (chat-ui--point-in-input-p)
+    (save-excursion
+      (let ((end (point)))
+        (skip-chars-backward "^ \t\n\"'`()[]{}<>")
+        (let ((start (point)))
+          (when (<= (marker-position chat-ui--input-overlay) start)
+            (cons start end)))))))
+
+(defun chat-ui--path-token-p (token)
+  "Return non-nil when TOKEN looks like a file path fragment."
+  (and (stringp token)
+       (not (string-empty-p token))
+       (or (string-prefix-p "/" token)
+           (string-prefix-p "~/" token)
+           (string-prefix-p "./" token)
+           (string-prefix-p "../" token)
+           (string-match-p "/" token))))
+
+(defun chat-ui--path-completion-root ()
+  "Return the base directory for relative input path completion.
+
+A code session completes against the project it was rooted in, which is
+not always the directory the buffer sits in."
+  (file-name-as-directory
+   (or (and chat--current-session
+            (fboundp 'chat-code-session-p)
+            (chat-code-session-p chat--current-session)
+            (chat-code-session-project-root chat--current-session))
+       default-directory)))
+
+(defun chat-ui--path-completion-candidates (token base-directory)
+  "Return completion candidates for TOKEN relative to BASE-DIRECTORY."
+  (let* ((directory-prefix (or (file-name-directory token) ""))
+         (file-prefix (file-name-nondirectory token))
+         (completion-root (if (or (string-prefix-p "/" token)
+                                  (string-prefix-p "~/" token))
+                              (expand-file-name directory-prefix)
+                            (expand-file-name directory-prefix base-directory)))
+         (default-directory (file-name-as-directory completion-root)))
+    (mapcar (lambda (candidate)
+              (concat directory-prefix candidate))
+            (file-name-all-completions file-prefix default-directory))))
+
+(defun chat-ui--path-completion-at-point ()
+  "Return a completion data form for path-like input tokens."
+  (when-let* ((bounds (chat-ui--input-token-bounds))
+              (token (buffer-substring-no-properties (car bounds) (cdr bounds)))
+              ((chat-ui--path-token-p token)))
+    (let ((base-directory (chat-ui--path-completion-root)))
+      (list
+       (car bounds)
+       (cdr bounds)
+       (lambda (string predicate action)
+         (if (eq action 'metadata)
+             '(metadata (category . file))
+           (complete-with-action
+            action
+            (chat-ui--path-completion-candidates string base-directory)
+            string
+            predicate)))
+       :exclusive 'no
+       :company-kind (lambda (_candidate) 'file)))))
+
+(defun chat-ui--maybe-complete-path-after-insert ()
+  "Auto-trigger file completion for path-like tokens in the input area."
+  (when (and chat-ui-auto-path-completion
+             (not chat-ui--auto-path-completion-active)
+             (chat-ui--point-in-input-p)
+             (not (minibufferp))
+             (let ((char last-command-event))
+               (or (memq char '(?/ ?. ?~))
+                   (and (characterp char)
+                        (or (and (>= char ?0) (<= char ?9))
+                            (and (>= char ?A) (<= char ?Z))
+                            (and (>= char ?a) (<= char ?z))
+                            (memq char '(?_ ?-)))))))
+    (when (chat-ui--path-completion-at-point)
+      (let ((chat-ui--auto-path-completion-active t))
+        (completion-at-point)))))
+
+(defun chat-ui-insert-newline ()
+  "Insert a newline in the input area without sending the message."
+  (interactive)
+  (unless (chat-ui--point-in-input-p)
+    (goto-char (point-max)))
+  (insert "\n"))
+
+(defun chat-ui--capability-lines (session)
+  "Return the header lines describing what SESSION carries, or nil.
+
+A plain conversation has nothing to say here and gets nothing.  What a
+code session shows -- the project it is rooted in, the file in focus, the
+files in context -- is exactly what changes its requests, so the header
+doubles as the answer to why a reply mentioned a file nobody named."
+  (when (and session
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p session))
+    (let ((project (chat-code-session-project-root session))
+          (focus (chat-code-session-focus-file session))
+          (strategy (chat-code-session-context-strategy session))
+          (files (chat-code-session-context-files session)))
+      (concat
+       (format "Code: %s"
+               (if project (abbreviate-file-name project) "no project root"))
+       (when strategy (format " | context %s" strategy))
+       "\n"
+       (when focus
+         (format "Focus: %s\n" (abbreviate-file-name focus)))
+       (when files
+         (format "Context: %d file(s): %s\n"
+                 (length files)
+                 (mapconcat #'file-name-nondirectory files ", ")))))))
+
 (defun chat-ui-setup-buffer (session)
   "Setup chat buffer for SESSION."
   (chat-ui--clear-request-hint-timer)
@@ -341,8 +510,11 @@
     (erase-buffer)
     (insert (propertize (format "═══ %s ═══\n" (chat-session-name session))
                        'face 'header-line))
-    (insert (propertize (format "%s\n\n" (chat-ui--status-line session))
+    (insert (propertize (format "%s\n" (chat-ui--status-line session))
                        'face 'shadow))
+    (when-let ((capability (chat-ui--capability-lines session)))
+      (insert (propertize capability 'face 'shadow)))
+    (insert "\n")
     (dolist (msg (chat-session-messages session))
       (chat-ui--insert-message msg))
     (setq chat-ui--messages-end (point-marker))
@@ -525,13 +697,42 @@ is absent here is left as ordinary message text.")
      "Recent file target for follow-up requests: %s\nUse it only when the user refers implicitly to the same file or asks to continue the last file task."
      target)))
 
+(defun chat-ui--code-capability-prompt (session)
+  "Return the coding prompt and context for SESSION, or nil.
+
+Code capability is a property of the session, so this is the whole of
+what a coding session adds to a request: its rules, the project context
+it was pointed at, and whatever the language server can say about the
+file in focus.  Nothing else about the request differs, which is why
+there is no second request path to hold it."
+  (when (and session
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p session))
+    (let* ((prompt (and (fboundp 'chat-code--compose-system-prompt)
+                        (chat-code--compose-system-prompt)))
+           (context (and (fboundp 'chat-context-code-build)
+                         (ignore-errors
+                           (chat-context-code-to-string
+                            (chat-context-code-build session)))))
+           (lsp (and (fboundp 'chat-code-lsp-available-p)
+                     (chat-code-lsp-available-p)
+                     (when-let ((ctx (chat-code-lsp-get-context)))
+                       (chat-code-lsp-format-context ctx)))))
+      (string-join (delq nil (list prompt
+                                   (and context
+                                        (not (string-empty-p context))
+                                        context)
+                                   lsp))
+                   "\n\n"))))
+
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."
   (if (not chat-tool-caller-enabled)
       (progn
         (chat-log "[TOOLS] Tool calling disabled, using original messages")
         messages)
-    (let* ((base-prompt "You are a helpful AI assistant.")
+    (let* ((code-prompt (chat-ui--code-capability-prompt chat--current-session))
+           (base-prompt (or code-prompt "You are a helpful AI assistant."))
            (target-note (chat-ui--followup-target-note))
            (instructions (and (fboundp 'chat-project-instructions)
                               (chat-project-instructions default-directory)))
@@ -621,9 +822,187 @@ manual scrolling is never overridden."
                            (max (point-min) (- (point-max) 80))))
               (set-window-point window edge))))))))
 
+(defface chat-code-block-face
+  '((t :inherit font-lock-constant-face :extend t))
+  "Face for fenced code blocks in chat buffers.
+
+Named for the surface that introduced it, and kept under that name so
+existing customization keeps applying now that every chat buffer
+formats code blocks this way."
+  :group 'chat-ui)
+
+(defcustom chat-ui-tool-summary-max-chars 240
+  "Longest tool argument or result summary shown inline."
+  :type 'integer
+  :group 'chat-ui)
+
+(defun chat-ui--compact-text (text &optional max-chars)
+  "Normalize TEXT to one line and keep at most MAX-CHARS characters."
+  (let* ((limit (or max-chars chat-ui-tool-summary-max-chars))
+         (normalized (replace-regexp-in-string
+                      "[ \t\n\r]+" " " (string-trim (or text "")))))
+    (if (> (length normalized) limit)
+        (concat (substring normalized 0 limit) "...")
+      normalized)))
+
+(defun chat-ui--tool-arguments-summary (arguments)
+  "Return a compact one-line summary for tool ARGUMENTS."
+  (chat-ui--compact-text (format "%S" arguments) 120))
+
+(defun chat-ui--read-tool-result-data (result)
+  "Best effort parse RESULT into Lisp data."
+  (when (and (stringp result) (not (string-empty-p result)))
+    (condition-case nil
+        (car (read-from-string result))
+      (error nil))))
+
+(defun chat-ui--plist-like-p (data)
+  "Return non-nil when DATA looks like a plist."
+  (and (listp data) (keywordp (car data))))
+
+(defun chat-ui--tool-result-data-summary (data)
+  "Build a concise summary for parsed tool result DATA.
+
+Tool results are structured, so a summary can say which file and what
+happened instead of showing the first line of a serialized plist."
+  (cond
+   ((and (chat-ui--plist-like-p data) (plist-member data :content))
+    (let ((path (plist-get data :path))
+          (content (plist-get data :content)))
+      (chat-ui--compact-text
+       (format "%s%s"
+               (if path (format "%s: " (file-name-nondirectory path)) "")
+               (or content "")))))
+   ((and (chat-ui--plist-like-p data) (plist-member data :lines))
+    (let ((path (plist-get data :path))
+          (lines (plist-get data :lines)))
+      (chat-ui--compact-text
+       (format "%s: %s"
+               (if path (file-name-nondirectory path) "lines")
+               (mapconcat #'identity (seq-take lines 8) " ")))))
+   ((and (chat-ui--plist-like-p data) (plist-member data :path))
+    (chat-ui--compact-text
+     (format "%s %s"
+             (file-name-nondirectory (or (plist-get data :path) "file"))
+             (or (plist-get data :status) (plist-get data :result) "ok"))))
+   ((and (chat-ui--plist-like-p data)
+         (plist-member data :matches)
+         (listp (plist-get data :matches)))
+    (let* ((matches (plist-get data :matches))
+           (names (mapcar #'file-name-nondirectory (seq-take matches 8))))
+      (chat-ui--compact-text
+       (format "%d matches: %s"
+               (or (plist-get data :match-count) (length matches))
+               (mapconcat #'identity names ", ")))))
+   ((and (listp data)
+         data
+         (chat-ui--plist-like-p (car data))
+         (plist-member (car data) :path))
+    (let ((names nil)
+          (used 0))
+      (dolist (entry data)
+        (let ((name (file-name-nondirectory
+                     (or (plist-get entry :path)
+                         (plist-get entry :name)
+                         ""))))
+          (when (and (not (string-empty-p name))
+                     (< used chat-ui-tool-summary-max-chars))
+            (push name names)
+            (setq used (+ used (length name) 2)))))
+      (chat-ui--compact-text
+       (format "%d entries: %s"
+               (length data)
+               (mapconcat #'identity (nreverse names) ", ")))))
+   (t nil)))
+
+(defun chat-ui--tool-result-summary (result)
+  "Return a compact summary for RESULT."
+  (or (chat-ui--tool-result-data-summary
+       (chat-ui--read-tool-result-data result))
+      (chat-ui--compact-text
+       (or (car (split-string (string-trim (or result "")) "\n" t)) "ok"))))
+
+(defun chat-ui--tool-display-summary (tool-calls tool-results)
+  "Build a concise user-facing summary for TOOL-CALLS and TOOL-RESULTS."
+  (let (parts)
+    (while (and tool-calls tool-results)
+      (let* ((call (car tool-calls))
+             (name (plist-get call :name))
+             (summary (chat-ui--tool-result-summary (car tool-results))))
+        (push (format "%s: %s" name summary) parts))
+      (setq tool-calls (cdr tool-calls))
+      (setq tool-results (cdr tool-results)))
+    (when parts
+      (mapconcat #'identity (nreverse parts) " | "))))
+
+(defun chat-ui--append-to-messages (fn)
+  "Run FN at the end of the conversation area."
+  (save-excursion
+    (goto-char chat-ui--messages-end)
+    (funcall fn)
+    (set-marker chat-ui--messages-end (point))))
+
+(defun chat-ui--replace-response-slot (content-start fn)
+  "Replace the pending assistant slot at CONTENT-START with FN output."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char content-start)
+      (delete-region content-start chat-ui--messages-end)
+      (set-marker chat-ui--messages-end (point))
+      (funcall fn)
+      (set-marker chat-ui--messages-end (point)))))
+
+(defun chat-ui--fence-safe-prefix-length (content)
+  "Return the length of the CONTENT prefix after the last closed fence.
+
+The streaming fast path may only keep text it will not have to reformat.
+Cutting at the previous length leaves a half-arrived code block rendered
+as prose, and the fence that closes it later never re-runs the
+formatting, so the block stays broken for the rest of the conversation."
+  (let ((pos 0)
+        (last-close 0)
+        (count 0))
+    (while (string-match "```" content pos)
+      (setq count (1+ count)
+            pos (match-end 0))
+      (when (zerop (mod count 2))
+        (setq last-close pos)))
+    (if (zerop (mod count 2))
+        (length content)
+      last-close)))
+
+(defun chat-ui--insert-formatted-response (content)
+  "Insert CONTENT, giving fenced code blocks their own face."
+  (let ((pos 0)
+        (len (length content)))
+    (while (< pos len)
+      (if (string-match "^\\(```\\([^\n]*\\)\n\\(\\(?:.\\|\n\\)*?\\)\n```\\)"
+                        (substring content pos))
+          (let* ((tail (substring content pos))
+                 (lang (match-string 2 tail))
+                 (code (match-string 3 tail))
+                 (face (if (string-empty-p lang) 'default 'chat-code-block-face)))
+            (insert (substring content pos (+ pos (match-beginning 0))))
+            (insert (propertize (format "```%s\n%s\n```" lang code)
+                                'face face))
+            (setq pos (+ pos (match-end 0))))
+        (insert (substring content pos))
+        (setq pos len)))))
+
 (defun chat-ui--render-response-state (ui-buffer content-start content tool-events
-                                                 &optional live-detail)
-  "Render CONTENT, TOOL-EVENTS, and optional LIVE-DETAIL at CONTENT-START."
+                                                 &optional live-detail
+                                                 tool-summary
+                                                 tool-loop-limit-reached)
+  "Render CONTENT, TOOL-EVENTS, and optional LIVE-DETAIL at CONTENT-START.
+
+TOOL-SUMMARY and TOOL-LOOP-LIMIT-REACHED add trailing lines below the
+response when present.
+
+This is the only response renderer.  It used to have a second copy on the
+code surface, and the two grew different strengths -- one learned to
+guard against a dead buffer, the other learned to cut streaming updates
+at a fence boundary and to format code blocks -- so a fix to either was
+half a fix."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (setq chat-ui--request-tool-events tool-events)
@@ -646,22 +1025,28 @@ manual scrolling is never overridden."
                             (eq (plist-get last :content-start) content-start)
                             (= (plist-get last :event-count)
                                (length tool-events))
-                            (string-prefix-p old-content content))))
+                            (string-prefix-p old-content content)))
+                 (cut (and fast (chat-ui--fence-safe-prefix-length
+                                 old-content))))
             (if fast
-                ;; Streaming fast path: only the tail changed.
                 (progn
-                  (goto-char (+ (marker-position content-start)
-                                (length old-content)))
+                  (goto-char (+ (marker-position content-start) cut))
                   (delete-region (point) chat-ui--messages-end)
-                  (insert (substring content (length old-content))))
+                  (chat-ui--insert-formatted-response (substring content cut)))
               (delete-region content-start chat-ui--messages-end)
               (goto-char content-start)
               (unless (string-empty-p content)
-                (insert content)))
+                (chat-ui--insert-formatted-response content)))
             (when-let ((line (chat-ui--live-narrative-line live-detail)))
               (unless (string-empty-p content)
                 (insert "\n"))
               (insert line))
+            (when tool-summary
+              (insert "\n")
+              (insert (format "Tools used: %s" tool-summary)))
+            (when tool-loop-limit-reached
+              (insert "\n")
+              (insert "Tool loop stopped after reaching the safety limit."))
             (insert "\n\n")
             (set-marker chat-ui--messages-end (point))
             (setq chat-ui--last-render
@@ -678,7 +1063,11 @@ manual scrolling is never overridden."
              (arguments (plist-get call :arguments))
              (result (chat-tool-caller-truncate-result
                       (string-trim-right (or (car tool-results) "")))))
-        (push (format "- %s %S => %s" name arguments result) lines))
+        (push (format "- %s %s => %s"
+                      name
+                      (chat-ui--tool-arguments-summary arguments)
+                      result)
+              lines))
       (setq tool-calls (cdr tool-calls))
       (setq tool-results (cdr tool-results)))
     (nreverse lines)))
@@ -708,6 +1097,37 @@ Set this only to hold this display to a tighter limit than
 (defun chat-ui--step-limit ()
   "Return the step ceiling in force for this display."
   (chat-agent-budget-effective-limit chat-ui-tool-loop-max-steps))
+
+(defcustom chat-ui-max-output-tokens 4096
+  "Output tokens to ask for, capped by what the provider allows."
+  :type 'integer
+  :group 'chat-ui)
+
+(defcustom chat-ui-request-timeout 180
+  "Seconds to wait for a reply before giving up."
+  :type 'integer
+  :group 'chat-ui)
+
+(defcustom chat-ui-tool-followup-timeout 300
+  "Seconds to wait for a reply that follows a tool call.
+
+Longer than `chat-ui-request-timeout' because a follow-up arrives after
+the model has already read a tool result, which is the slow part."
+  :type 'integer
+  :group 'chat-ui)
+
+(defun chat-ui--request-output-budget (model)
+  "Return the output token budget to request from MODEL.
+
+Asking for more than the provider allows is refused outright by some and
+silently clamped by others, so the ceiling comes from the provider when
+it declares one."
+  (let ((provider-limit (condition-case nil
+                            (chat-llm-provider-option model :max-output-tokens)
+                          (error nil))))
+    (if (and (integerp provider-limit) (> provider-limit 0))
+        (min chat-ui-max-output-tokens provider-limit)
+      chat-ui-max-output-tokens)))
 
 (defun chat-ui--make-agent-event-handler (session msg-id ui-buffer content-start request-id)
   "Return an agent event handler rendering into UI-BUFFER.
@@ -853,9 +1273,13 @@ assistant response being filled in."
                       session))
                    :request-options
                    (append
-                    (list :temperature 0.7)
+                    (list :temperature 0.7
+                          :max-tokens (chat-ui--request-output-budget model)
+                          :timeout chat-ui-request-timeout)
                     (when request-id
                       (list :request-id request-id)))
+                   :followup-request-options
+                   (list :timeout chat-ui-tool-followup-timeout)
                    :on-event
                    (chat-ui--make-agent-event-handler
                     session msg-id ui-buffer assistant-start request-id)))))))
@@ -898,18 +1322,48 @@ spans use the bold face."
                              (match-end 1)
                              '(face bold))))))
 
+(defun chat-ui--proposed-edit (session content)
+  "Return the edit CONTENT proposes for SESSION, or nil.
+
+Only a session with code capability can be offered an edit to apply;
+without it the same fenced block is just text in a reply."
+  (when (and session
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p session)
+             (fboundp 'chat-code--parse-code-edit))
+    (chat-code--parse-code-edit content)))
+
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
   "Render PROCESSED response for SESSION.
 MSG-ID, RAW-REQUEST, and RAW-RESPONSE are accepted for compatibility;
 agent messages are persisted incrementally from `message-appended'."
-  (let* ((content (or (plist-get processed :content) ""))
-         (tool-events (plist-get processed :tool-events)))
-    (ignore session msg-id raw-request raw-response)
-    (chat-ui--render-response-state ui-buffer content-start content tool-events)
-    (when (buffer-live-p ui-buffer)
-      (with-current-buffer ui-buffer
-        (chat-ui--fontify-markdown-lite content-start chat-ui--messages-end)))
+  (let* ((content (string-trim-right
+                   ;; Stripped here as well as while streaming.  A reply
+                   ;; that arrives in one piece takes this path only, and
+                   ;; a tool call rendered raw reads as the model having
+                   ;; answered with JSON.
+                   (chat-tool-caller-extract-content
+                    (or (plist-get processed :content) ""))))
+         (tool-events (plist-get processed :tool-events))
+         (tool-calls (plist-get processed :tool-calls))
+         (tool-results (plist-get processed :tool-results))
+         (tool-summary (chat-ui--tool-display-summary tool-calls tool-results))
+         (limit-reached (plist-get processed :tool-loop-limit-reached)))
+    (ignore msg-id raw-request raw-response)
+    (if-let ((edit (chat-ui--proposed-edit session content)))
+        (when (buffer-live-p ui-buffer)
+          (with-current-buffer ui-buffer
+            (chat-ui--replace-response-slot
+             content-start
+             (lambda () (chat-code--propose-edit edit)))))
+      (chat-ui--render-response-state
+       ui-buffer content-start
+       (if (and (string-blank-p content) tool-summary) "" content)
+       tool-events nil tool-summary limit-reached)
+      (when (buffer-live-p ui-buffer)
+        (with-current-buffer ui-buffer
+          (chat-ui--fontify-markdown-lite content-start chat-ui--messages-end))))
     (chat-log "[UI] Response rendered")))
 
 (defun chat-ui--render-error (ui-buffer error-message)

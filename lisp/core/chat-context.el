@@ -263,12 +263,12 @@ ERROR-CALLBACK receives transport errors."
 
 ;;;###autoload
 (defun chat-context-compact-current-session ()
-  "Run durable LLM compaction for the active chat or code session."
+  "Run durable LLM compaction for the active session.
+
+There is one place to look: a coding session is an ordinary chat session
+carrying code capability, so it is in the same variable as any other."
   (interactive)
-  (let ((session
-         (or (and (boundp 'chat--current-session) chat--current-session)
-             (and (fboundp 'chat-code--base-session)
-                  (chat-code--base-session)))))
+  (let ((session (bound-and-true-p chat--current-session)))
     (unless session
       (user-error "No active session"))
     (chat-context-compact-session-with-llm

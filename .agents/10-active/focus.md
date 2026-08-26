@@ -8,6 +8,24 @@
 
 ## Doing Now
 
+There is one chat surface. Code capability is a property of a session,
+not a second display: `chat-code-mode` is gone, and a coding session is a
+`chat-mode` buffer whose metadata carries a project root, a focus file
+and a context strategy. Decision 0009 records why and how it was staged.
+
+The duplication is gone with it. 1712 lines left `lisp/code/chat-code.el`
+and 475 arrived in `lisp/ui/chat-ui.el`, the difference being the copies
+themselves. Both sides' better behaviour survived: fence-safe streaming
+and tool summaries by kind from the code side, buffer-liveness guards,
+project instructions and both budgets from the chat side.
+
+Two invariants are now asserted rather than reviewed. The keymap and
+`chat-commands-help` agree key by key in both directions, which is what
+would have caught the `C-c C-a` collision — accept-edit against
+auto-approval — before the maps were merged. And `test-docs.el` requires
+every `M-x` name in the docs to be a command, which found nine dead
+names.
+
 Both budgets are in place: steps in `lisp/agent/chat-agent-budget.el`,
 context in `lisp/core/chat-context-budget.el` with per-category
 allowances and a declared-residency parser beside it. The typed
@@ -17,20 +35,25 @@ Storage and self-knowledge landed on top: `chat-session-log.el` tells a
 run where its own transcript is and filters it back by turn, category,
 work and time; `chat-scratch.el` gives each session pruned scratch space;
 `chat-knowledge.el` keeps a global note store whose index — not its
-bodies — rides in the prompt. Canonical suite: 777 tests passing.
+bodies — rides in the prompt.
 
 The input command layer landed earlier: chat input parses through
 `lisp/core/chat-command.el` and dispatches through a name table in
 `chat-ui.el`, with shell execution, history repeat, the session working
 directory, ephemeral queries and a literal escape.
 
+Canonical suite: 758 tests passing.
+
 ## Next Stage
 
 Render from `chat-transcript-plan`. The model is complete and the data is
-stored, but both displays still draw an assistant turn into one mutable
+stored, but the display still draws an assistant turn into one mutable
 region, so intermediate steps remain invisible on screen. That is the
 whole reason the transcript work was started, and it is not finished
-until a display reads it.
+until the display reads it.
+
+There is now one renderer to change, which is why the merge came first:
+this work would otherwise have been written twice.
 
 After that: fold interaction, the `auto` mechanism (declarative
 `:repeatable` on commands plus session default-command continuation),

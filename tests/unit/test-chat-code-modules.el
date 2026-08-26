@@ -25,8 +25,7 @@
      (with-temp-file source-file
        (insert "print('old')\n"))
      (with-temp-buffer
-       (chat-code-mode)
-       (setq-local chat-code--current-session session)
+       (setq-local chat--current-session session)
        (setq edit
              (chat-code--parse-explicit-edit
               (concat "```code-edit\n"
@@ -67,9 +66,8 @@
      (with-temp-file source-file
        (insert "print('old')\n"))
      (with-temp-buffer
-       (chat-code-mode)
-       (setq-local chat-code--current-session session)
-       (chat-code--setup-buffer session)
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
        (setq-local chat-code--pending-edit
                    (chat-edit-create-rewrite
                     source-file

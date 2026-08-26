@@ -13,6 +13,15 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+;; Declared rather than required: this module is loaded for its commands
+;; and reaches the session only to add context to it, so requiring the
+;; surface back would invert the dependency.
+(defvar chat--current-session)
+(declare-function chat-code-session-p "chat-code" (session))
+(declare-function chat-code-session-context-files "chat-code" (session))
+(declare-function chat-code-session-set-context-files "chat-code"
+                  (session value))
+
 (defun chat-code-git--argv (args)
   "Normalize git ARGS into an argv list."
   (cond
@@ -268,15 +277,22 @@ MAX-LINES limits the diff output."
 ;; ------------------------------------------------------------------
 
 (defun chat-code-git-add-to-context ()
-  "Add git context to current code mode session."
-  (when (and (boundp 'chat-code--current-session)
-             chat-code--current-session)
+  "Add the files git reports as modified to this session's context.
+
+Does nothing in a session without code capability, which has no context
+file list to add to."
+  (when (and (bound-and-true-p chat--current-session)
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p chat--current-session))
     (let ((git-ctx (chat-code-git-get-context)))
       (when git-ctx
-        (let ((formatted (chat-code-git-format-context git-ctx 50)))
-          (setf (chat-code-session-context-files chat-code--current-session)
-                (append (chat-code-session-context-files chat-code--current-session)
-                        (plist-get git-ctx :modified-files))))))))
+        ;; Called repeatedly across a session, so union rather than
+        ;; append: the same modified file would otherwise accumulate.
+        (let ((files (chat-code-session-context-files chat--current-session)))
+          (dolist (file (plist-get git-ctx :modified-files))
+            (unless (member file files)
+              (setq files (append files (list file)))))
+          (chat-code-session-set-context-files chat--current-session files))))))
 
 ;; ------------------------------------------------------------------
 ;; Commands

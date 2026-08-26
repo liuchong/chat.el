@@ -1110,4 +1110,66 @@ monotonically while the window does not.
 index costs about a line per entry and stays useful at a hundred of them.
 Cap the index too, since it also appears in every request.
 
-Last updated: 2026-08-25
+### Merging Two Keymaps Resolves A Collision Silently
+
+**Problem**: after two modes become one, a documented key runs the wrong
+command, and nothing reported a conflict.
+
+**Cause**: `define-key` on the same key overwrites. Two maps that each
+bound `C-c C-a` to a different command merge into one that binds it to
+whichever was defined last. The other command becomes unreachable, and
+the map cannot show what it lost.
+
+**Solution**: assert the keymap and the help text agree in both
+directions — every key the help names is bound, and every key that is
+bound is documented. The conflict exists in the documentation before it
+exists in the code, so the check catches it before the merge.
+
+### A Reachability Pass Keyed On A Prefix Reports Live Code As Dead
+
+**Problem**: a function still called from its own file is deleted as
+unreachable.
+
+**Cause**: walking the call graph from definitions matching one prefix.
+A file usually also holds entry points that do not match — commands named
+for what they do rather than for the module — and their callees look
+unreachable.
+
+**Solution**: treat everything in the file that is not a matched
+definition as a root as well. Blank out the matched definitions and take
+any remaining mention as a call. Never delete on a report alone when the
+report can only prove absence of a reference it knows how to look for.
+
+### A Test That Binds The Same Stale Variable Its Target Reads
+
+**Problem**: a feature is broken in the running program while its test
+passes. Removing a buffer-local variable left `chat-tool-caller.el`
+reading it to find the project root, so tools lost the root for every
+coding session — and the test still passed, because the test set that
+same variable.
+
+**Cause**: the test reached past the public way of establishing state and
+bound the internal variable directly. A test written that way is
+consistent with the code under test by construction: both refer to the
+same name, and both are wrong together.
+
+**Solution**: set up state the way the program does — here, the session
+variable the surface binds — so a rename breaks the test. When a
+capability is being checked rather than a buffer kind, test the negative
+too: a session without the capability must not get the widened root.
+
+### Docs Name Commands That No Longer Exist
+
+**Problem**: a user runs an `M-x` command from the documentation and gets
+`No match`.
+
+**Cause**: renaming a command updates the callers, because they fail to
+compile otherwise. Documentation does not fail to compile.
+
+**Solution**: read the docs in a test and require every `M-x` name to be
+a command. Allow an explicit list of names belonging to Emacs or to
+packages the suite does not load; require everything shipped here to
+exist. Count what was checked, so a regexp that stops matching fails
+rather than passes.
+
+Last updated: 2026-08-26
