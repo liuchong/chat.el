@@ -20,6 +20,7 @@
 (require 'subr-x)
 (require 'chat-agent-types)
 (require 'chat-session)
+(require 'chat-transcript)
 (require 'chat-context-budget)
 (require 'chat-tool-caller)
 (require 'chat-llm)
@@ -296,29 +297,63 @@ last because that is where a short instruction is actually noticed."
         (append (chat-agent-run-state-messages run) (list message)))
   (chat-agent--emit run 'message-appended :message message))
 
-(defun chat-agent--make-assistant-message (run content calls raw-request raw-response)
-  "Build the assistant transcript message for RUN."
-  (make-chat-message
-   :id (chat-session-new-message-id
-        (format "assistant-step-%d" (chat-agent-run-state-step run)))
-   :role :assistant
-   :content content
-   :tool-calls calls
-   :raw-request raw-request
-   :raw-response raw-response
-   :timestamp (current-time)))
+(defun chat-agent--turn-number (run)
+  "Return which turn of the session RUN belongs to.
 
-(defun chat-agent--make-tool-message (_run call result-text)
+Counted from the user messages on the session, so it is the session's
+numbering rather than a counter of the loop's own that would restart with
+every run.  Settled on first use and kept: steering adds a user message
+while the run is going, and counting again afterwards would file the rest
+of this turn under the next one."
+  (or (chat-agent-run-state-turn run)
+      (setf (chat-agent-run-state-turn run)
+            (let ((session (chat-agent-run-state-session run)))
+              (if session
+                  (max 1 (seq-count (lambda (message)
+                                      (eq (chat-message-role message) :user))
+                                    (chat-session-messages session)))
+                1)))))
+
+(defun chat-agent--make-assistant-message (run content calls raw-request raw-response)
+  "Build the assistant transcript message for RUN.
+
+Stamped where it is made.  Nothing stamped these before -- the stamping
+API existed and only tests called it -- so a multi-round run reached disk
+as a flat list of messages and the display had to infer turns and steps
+from roles, which cannot tell an intermediate step from a final answer."
+  (chat-transcript-stamp
+   (make-chat-message
+    :id (chat-session-new-message-id
+         (format "assistant-step-%d" (chat-agent-run-state-step run)))
+    :role :assistant
+    :content content
+    :tool-calls calls
+    :raw-request raw-request
+    :raw-response raw-response
+    :timestamp (current-time))
+   :turn (chat-agent--turn-number run)
+   :step (chat-agent-run-state-step run)
+   ;; Tool calls mean the run continues, so this is a step and not the
+   ;; answer.
+   :category (if calls 'ai-progress 'ai-final)
+   :work (and calls 'message)))
+
+(defun chat-agent--make-tool-message (run call result-text)
   "Build a :tool transcript message for CALL and RESULT-TEXT."
   (let ((id (chat-agent-tool-call-id call))
         (name (plist-get call :name)))
-    (make-chat-message
-     :id (chat-session-new-message-id (format "tool-%s" id))
-     :role :tool
-     :content (chat-tool-caller-truncate-result
-               (string-trim-right (or result-text "")))
-     :timestamp (current-time)
-     :metadata (list :tool-call-id id :name name))))
+    (chat-transcript-stamp
+     (make-chat-message
+      :id (chat-session-new-message-id (format "tool-%s" id))
+      :role :tool
+      :content (chat-tool-caller-truncate-result
+                (string-trim-right (or result-text "")))
+      :timestamp (current-time)
+      :metadata (list :tool-call-id id :name name))
+     :turn (chat-agent--turn-number run)
+     :step (chat-agent-run-state-step run)
+     :category 'ai-progress
+     :work 'tool-result)))
 
 (defun chat-agent--resource-conflict-p (left right)
   "Return non-nil when resource accesses LEFT and RIGHT conflict."
@@ -480,12 +515,17 @@ TRUNCATED is non-nil when tool calls were refused for length."
                                        chat-agent-truncated-tool-result-text)))))
   (chat-agent--append-message
    run
-   (chat-agent--make-assistant-message
-    run
-    (plist-get processed :content)
-    (plist-get processed :tool-calls)
-    (plist-get result :raw-request)
-    (plist-get result :raw-response)))
+   ;; Reasoning rides on the step that produced it, so it is on the record
+   ;; and foldable without ever becoming a message the next request would
+   ;; send back.  The transport had it all along and it was discarded here.
+   (chat-transcript-set-reasoning
+    (chat-agent--make-assistant-message
+     run
+     (plist-get processed :content)
+     (plist-get processed :tool-calls)
+     (plist-get result :raw-request)
+     (plist-get result :raw-response))
+    (plist-get result :reasoning)))
   (let ((calls (plist-get processed :tool-calls))
         (results (plist-get processed :tool-results)))
     (while (and calls results)

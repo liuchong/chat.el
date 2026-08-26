@@ -1414,16 +1414,28 @@ mode the reader cannot see."
       (message "%s" (chat-i18n 'empty-message "Cannot send empty message"))
     (if (chat-tool-forge-ai--tool-request-p content)
         (chat-ui--handle-tool-creation content)
-      (let ((user-msg (make-chat-message
-                       :id (chat-session-new-message-id)
-                       :role :user
-                       :content content
-                       :timestamp (current-time))))
+      (let ((user-msg (chat-ui--stamp-user-message
+                       (make-chat-message
+                        :id (chat-session-new-message-id)
+                        :role :user
+                        :content content
+                        :timestamp (current-time)))))
         (chat-session-add-message chat--current-session user-msg)
         ;; Drawn from the record rather than inserted directly, so the
         ;; live boundary lands after this message instead of before it.
         (chat-ui--redraw-conversation)
         (chat-ui--get-response)))))
+
+(defun chat-ui--stamp-user-message (message)
+  "Number MESSAGE with the turn it opens.
+
+The question and every step it goes on to produce share this number, which
+is what lets the display group them instead of guessing from position."
+  (chat-transcript-stamp
+   message
+   :turn (1+ (seq-count (lambda (m) (eq (chat-message-role m) :user))
+                        (chat-session-messages chat--current-session)))
+   :category 'user))
 
 (defun chat-ui--steer-active-agent (content)
   "Queue CONTENT for the response that is already running."

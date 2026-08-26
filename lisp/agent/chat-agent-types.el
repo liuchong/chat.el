@@ -42,6 +42,10 @@
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options
   (step 0)
+  ;; Which turn of the session this run answers.  Settled once, because
+  ;; steering adds a user message mid-run and counting them again would
+  ;; report the later steps of one turn as belonging to the next.
+  turn
   content tool-events tool-calls tool-results
   raw-request raw-response
   handle cancelled done status reason

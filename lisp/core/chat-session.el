@@ -233,6 +233,16 @@ PREFIX defaults to \"msg\"."
   (expand-file-name (format "%s.json" session-id)
                     chat-session-directory))
 
+(defun chat-session-history-file (session)
+  "Return the absolute path of the file holding SESSION's history.
+
+Derived rather than stored.  A path written into the record would keep
+pointing at the old location after the session directory is moved or
+renamed, and a stale absolute path is worse than none.  Public because
+asking a session where its own history lives should not require a caller
+to know the naming scheme."
+  (and session (chat-session--file-name (chat-session-id session))))
+
 (defun chat-session--header-entry (session)
   "Return the JSONL header entry for SESSION."
   (list (cons 'type "header")

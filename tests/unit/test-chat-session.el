@@ -753,5 +753,28 @@ a plain symbol."
     (chat-session-metadata-set session 'working-directory "/nonexistent-chat-el-dir/")
     (should-not (chat-session-working-directory session))))
 
+(ert-deftest chat-session-can-name-its-own-history-file ()
+  "A session had no way to say where its history lives.
+
+Callers had to know the naming scheme and rebuild the path themselves,
+which is knowledge that belongs here."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "history" 'kimi))
+          (path (chat-session-history-file session)))
+     (should (file-name-absolute-p path))
+     (should (string-suffix-p ".jsonl" path))
+     (should (string-match-p (regexp-quote (chat-session-id session)) path))
+     (chat-session-save session)
+     (should (file-exists-p path)))))
+
+(ert-deftest chat-session-history-file-follows-a-moved-directory ()
+  "Derived, not stored: a stale absolute path is worse than none."
+  (let ((session (make-chat-session :id "abc" :name "abc")))
+    (let ((chat-session-directory "/one/"))
+      (should (equal (chat-session-history-file session) "/one/abc.jsonl")))
+    (let ((chat-session-directory "/two/"))
+      (should (equal (chat-session-history-file session) "/two/abc.jsonl")))))
+
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here

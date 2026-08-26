@@ -803,5 +803,118 @@ budget chatter in the saved history."
       (let ((end (car (last events))))
         (should (eq (plist-get end :status) 'completed))))))
 
+;; ------------------------------------------------------------------
+;; Stamping the record
+;; ------------------------------------------------------------------
+;;
+;; The stamping API existed and only tests called it.  The loop built its
+;; messages plain, so a multi-round run reached disk as a flat list and the
+;; display had to infer turn, step and kind from roles -- which cannot tell
+;; an intermediate step from a final answer.
+
+(defun chat-agent-test--appended (events)
+  "Return the messages EVENTS appended, in order."
+  (delq nil (mapcar (lambda (event)
+                      (and (eq (plist-get event :type) 'message-appended)
+                           (plist-get event :message)))
+                    events)))
+
+(ert-deftest chat-agent-stamps-a-final-answer-as-final ()
+  "A reply with no tool calls ends the run, so it is the answer."
+  (let ((calls (list nil))
+        (events nil))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "最终回答" :raw-request "r" :raw-response "s"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :on-event (lambda (event) (setq events (append events (list event))))))
+      (let ((message (car (chat-agent-test--appended events))))
+        (should message)
+        (should (eq (chat-transcript-category message) 'ai-final))
+        (should (= (chat-transcript-step message) 1))
+        (should (chat-message-timestamp message))))))
+
+(ert-deftest chat-agent-stamps-a-step-that-calls-tools-as-progress ()
+  "A reply carrying tool calls is a step of the turn, not its answer."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (exec-counter (list 0))
+        (calls (list nil))
+        (events nil))
+    (chat-agent-test--register-demo-tool exec-counter)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list (list :content chat-agent-test--tool-call-json
+                            :raw-request "r" :raw-response "s")
+                      (list :content "最终回答"
+                            :raw-request "r2" :raw-response "s2"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :on-event (lambda (event) (setq events (append events (list event))))))
+      (let* ((messages (chat-agent-test--appended events))
+             (first-step (car messages))
+             (tool-message (seq-find (lambda (m)
+                                       (eq (chat-message-role m) :tool))
+                                     messages))
+             (answer (car (last messages))))
+        (should (eq (chat-transcript-category first-step) 'ai-progress))
+        (should (eq (chat-transcript-work first-step) 'message))
+        (should tool-message)
+        (should (eq (chat-transcript-category tool-message) 'ai-progress))
+        (should (eq (chat-transcript-work tool-message) 'tool-result))
+        (should (eq (chat-transcript-category answer) 'ai-final))
+        ;; Two requests, so two steps, and they are numbered apart.
+        (should (= (chat-transcript-step first-step) 1))
+        (should (= (chat-transcript-step answer) 2))))))
+
+(ert-deftest chat-agent-keeps-one-turn-number-for-the-whole-run ()
+  "Steering adds a user message mid-run; the turn must not advance.
+
+The number is counted from the session's user messages, so recounting
+after a steer would file the rest of this turn under the next one."
+  (let* ((session (chat-session-create "stamp" 'kimi))
+         (run (chat-agent--run-create :session session)))
+    (chat-session-add-message
+     session (make-chat-message :id "u1" :role :user :content "one"
+                                :timestamp (current-time)))
+    (should (= (chat-agent--turn-number run) 1))
+    (chat-session-add-message
+     session (make-chat-message :id "u2" :role :user :content "steered"
+                                :timestamp (current-time)))
+    (should (= (chat-agent--turn-number run) 1))))
+
+(ert-deftest chat-agent-numbers-the-second-turn-second ()
+  "A fresh run over a session with one exchange answers turn two."
+  (let ((session (chat-session-create "stamp" 'kimi)))
+    (dolist (id '("u1" "u2"))
+      (chat-session-add-message
+       session (make-chat-message :id id :role :user :content id
+                                  :timestamp (current-time))))
+    (should (= (chat-agent--turn-number
+                (chat-agent--run-create :session session))
+               2))))
+
+(ert-deftest chat-agent-puts-reasoning-on-the-step-that-produced-it ()
+  "Reasoning belongs to its step, so no request path can send it back."
+  (let ((calls (list nil))
+        (events nil))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "答案" :reasoning "先想一想"
+                            :raw-request "r" :raw-response "s"))
+                calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :on-event (lambda (event) (setq events (append events (list event))))))
+      (let ((message (car (chat-agent-test--appended events))))
+        (should (equal (chat-transcript-reasoning message) "先想一想"))
+        ;; On the metadata, not in the content the next request would carry.
+        (should (equal (chat-message-content message) "答案"))))))
+
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here
