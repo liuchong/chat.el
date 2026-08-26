@@ -1259,7 +1259,7 @@ from."
   (apply #'propertize text
          (append properties chat-ui--input-prompt-properties)))
 
-(defun chat-ui--prompt-mark (glyph face)
+(defun chat-ui--prompt-mark (glyph face &optional image)
   "Return GLYPH and a space as a prompt segment in FACE, or \"\" if unusable.
 
 An undisplayable glyph is dropped rather than drawn: a hollow box carries
@@ -1267,11 +1267,31 @@ nothing, takes a column anyway, and reads as a broken program.
 
 FACE may be nil, and then none is set rather than `default' being set:
 the two are not the same, and the second would stop a provider without a
-known brand colour from inheriting the text around it."
+known brand colour from inheriting the text around it.
+
+IMAGE, when given, is shown over GLYPH rather than instead of it: the
+glyph stays the text in the buffer and only its pixels change.  That is
+what keeps this safe to put in the prompt.  The prompt's width is
+measured, its start and end are computed, and the input area begins after
+it; an image inserted as its own character would change all three, while
+an image displayed over one changes none of them.  It also means a
+terminal frame, a build without librsvg, and a yank of the prompt line
+each get the glyph, without a second code path written to give it to
+them.
+
+The image covers the glyph and the trailing space is a segment of its
+own, because one `display' property spanning a run draws one image for
+the whole run -- put on both, it would replace the space as well and set
+the badge directly against the model name."
   (if (chat-mark-displayable-p glyph)
-      (apply #'chat-ui--prompt-segment
-             (concat glyph " ")
-             (when face (list 'face face)))
+      (concat
+       (apply #'chat-ui--prompt-segment
+              glyph
+              (append (when face (list 'face face))
+                      (when image (list 'display image))))
+       (apply #'chat-ui--prompt-segment
+              " "
+              (when face (list 'face face))))
     ""))
 
 (defun chat-ui--prompt-model-segment ()
@@ -1299,7 +1319,9 @@ Clickable only when there is more than one provider to choose from.  A
                               "%s -- mouse-1 to switch model" model)
                  model)))
     (concat
-     (chat-ui--prompt-mark (car mark) (cdr mark))
+     (chat-ui--prompt-mark
+      (car mark) (cdr mark)
+      (chat-mark-provider-image provider (car mark) (cdr mark)))
      (apply #'chat-ui--prompt-segment
             shown
             'face 'chat-ui-prompt-model

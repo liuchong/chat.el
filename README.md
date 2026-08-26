@@ -663,6 +663,25 @@ than shown as a hollow box, so the prompt degrades to `cmd>` and
 `moonshot-v1-8k>` on a terminal without them. `chat-ui-prompt-model-width`
 truncates a long model name, and hovering shows it in full.
 
+On a graphical frame an initial is drawn as a rounded badge in the
+provider's brand colour instead of being left as a letter, sized to the
+line and recoloured from the same face, so it follows a light or dark
+theme. The four glyphs above are left alone: each was chosen because it
+resembles the mark it stands for, and a letter in a box is not an
+improvement on a resemblance.
+
+No vendor logo ships with chat.el -- a trademark belongs to its owner, and
+a redrawn approximation is a worse answer than an honest badge. Put the
+real file in `chat-mark-logo-directory` named after the provider
+(`deepseek.svg`, `kimi.png`) and it is used in place of anything drawn
+here, for any provider. `chat-mark-logo-enabled` turns drawing off.
+
+The badge is displayed over the glyph rather than inserted beside it, so
+the prompt is the same text either way. That is what keeps it safe in a
+line whose width is measured and whose end marks the start of the input
+area, and it is also why a terminal frame, a build without librsvg, and a
+yank of the prompt line all give you the character.
+
 Clicking the model name opens a menu and switches this session to the
 model picked, which is the same thing `M-x chat-set-model` does -- the
 model was visible in one place and changeable in another. It is refused

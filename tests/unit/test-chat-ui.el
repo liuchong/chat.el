@@ -1453,6 +1453,32 @@ symbol and not its display name."
     (should (string-prefix-p "\u2261 " (chat-ui--input-prompt)))
     (should (string-suffix-p "queue> " (chat-ui--input-prompt)))))
 
+(ert-deftest chat-ui-a-drawn-mark-changes-pixels-and-nothing-else ()
+  "The invariant that makes an image safe in the prompt.
+
+The prompt's width is measured, its bounds are computed and the input area
+starts after it.  An image inserted as a character of its own would move
+all three; an image displayed over a character that stays where it was
+moves none.  So the test is on the text, not on the picture: whatever is
+drawn, the prompt still reads as the glyph, and a terminal frame, a build
+without librsvg and a yank of the line get that text with no second path
+written to hand it to them."
+  (let* ((image '(image :type svg :data "<svg/>"))
+         (plain (chat-ui--prompt-mark "D" 'chat-mark-brand-deepseek))
+         (drawn (chat-ui--prompt-mark "D" 'chat-mark-brand-deepseek image)))
+    (should (equal "D " (substring-no-properties drawn)))
+    (should (equal (substring-no-properties plain)
+                   (substring-no-properties drawn)))
+    (should (equal image (get-text-property 0 'display drawn)))
+    ;; One `display' property spanning a run draws one image for the whole
+    ;; run, so covering the space too would replace it and set the badge
+    ;; against the model name.
+    (should-not (get-text-property 1 'display drawn))
+    ;; The properties the prompt is protected and found by are still on
+    ;; every character of it, including the one carrying the image.
+    (should (get-text-property 0 'read-only drawn))
+    (should (get-text-property 1 'read-only drawn))))
+
 (ert-deftest chat-ui-a-mode-with-no-mark-still-gets-a-prompt ()
   "An unmarked command is a supported state, not an error."
   (chat-ui-auto-test--with-session

@@ -122,4 +122,131 @@ no runtime test would visit it."
             (push (file-name-nondirectory file) offenders)))))
     (should-not offenders)))
 
+;; ------------------------------------------------------------------
+;; Drawn marks
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-mark-a-badge-is-sized-as-asked-and-scales-its-shape ()
+  "The pixel size is on the element and the geometry is in the viewBox.
+
+Authoring the shape in fixed units and scaling it once is what keeps a
+badge the same badge at every font height.  Recomputing the corner radius
+and the font size against the height instead would make each frame's
+badge a slightly different drawing."
+  (let ((svg (chat-mark-badge-svg "D" "#4D6BFE" 19)))
+    (should (string-match-p "width=\"19\"" svg))
+    (should (string-match-p "height=\"19\"" svg))
+    (should (string-match-p "viewBox=\"0 0 32 32\"" svg))
+    (should (string-match-p "fill=\"#4D6BFE\"" svg))
+    (should (string-match-p ">D</text>" svg))))
+
+(ert-deftest chat-mark-badge-text-is-legible-on-what-it-sits-on ()
+  "White on a pale fill is an invisible letter, which is worse than a letter."
+  (should (string-match-p "fill=\"#FFFFFF\""
+                          (chat-mark-badge-svg "D" "#4D6BFE" 19)))
+  (should (string-match-p "fill=\"#1A1A1A\""
+                          (chat-mark-badge-svg "D" "#F5E663" 19))))
+
+(ert-deftest chat-mark-a-badge-cannot-be-broken-by-its-glyph ()
+  "The glyph reaches the badge from a provider's display name.
+
+Nothing in that path is guaranteed to be XML, so a name beginning with an
+ampersand would otherwise produce a document librsvg refuses, and the
+mark would vanish rather than fall back."
+  (let ((svg (chat-mark-badge-svg "&" "#4D6BFE" 19)))
+    (should (string-match-p ">&amp;</text>" svg))
+    (should-not (string-match-p ">&</text>" svg))))
+
+(ert-deftest chat-mark-nothing-is-drawn-where-it-cannot-be ()
+  "Every refusal is nil, because nil is the glyph and the glyph is fine.
+
+Batch has no graphical frame, so this is the state the test suite runs
+in, and also the state a terminal Emacs runs in permanently."
+  (should-not (chat-mark-provider-image 'deepseek "D" 'chat-mark-brand-deepseek))
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
+    (let ((chat-mark-logo-enabled nil))
+      (should-not
+       (chat-mark-provider-image 'deepseek "D" 'chat-mark-brand-deepseek)))
+    ;; No provider at all, and a provider with no brand colour: the second
+    ;; is the case `chat-mark-provider-faces' deliberately leaves open, and
+    ;; a badge filled with a guessed colour would close it wrongly.
+    (should-not (chat-mark-provider-image nil "?" nil))
+    (should-not (chat-mark-provider-image 'nonesuch "N" nil))))
+
+(ert-deftest chat-mark-an-unmeasurable-frame-costs-a-badge-not-the-prompt ()
+  "`default-font-height' signals when there is no frame font to ask about.
+
+This runs on every send, from inside the prompt builder.  An exception
+escaping here would take out the whole prompt to save one badge, and
+there is nothing to save: no height means no image, and no image means
+the glyph, which is a working prompt."
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'default-font-height)
+             (lambda (&rest _) (error "No font in this frame"))))
+    (clrhash chat-mark--image-cache)
+    (should-not (chat-mark--line-height))
+    (should-not
+     (chat-mark-provider-image 'deepseek "D" 'chat-mark-brand-deepseek))))
+
+(ert-deftest chat-mark-a-glyph-that-already-resembles-the-logo-is-left-alone ()
+  "A letter in a coloured box is an improvement on a letter, not on a mark.
+
+The four listed glyphs were chosen because each looks like the logo it
+stands for.  Boxing them for the sake of every provider having a picture
+would replace a resemblance with a decoration."
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
+    (dolist (provider (mapcar #'car chat-mark-provider-marks))
+      (should-not
+       (chat-mark-provider-image provider "\u2733" 'chat-mark-brand-claude)))))
+
+(ert-deftest chat-mark-a-real-logo-file-wins-over-anything-generated ()
+  "Including over a listed glyph: the file is the reader saying which mark."
+  (skip-unless (image-type-available-p 'svg))
+  (chat-test-with-temp-dir
+   (let ((chat-mark-logo-directory (expand-file-name "logos/" temp-dir)))
+     (make-directory chat-mark-logo-directory t)
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+               ((symbol-function 'default-font-height) (lambda (&rest _) 19)))
+       (clrhash chat-mark--image-cache)
+       (with-temp-file (expand-file-name "claude.svg" chat-mark-logo-directory)
+         (insert "<svg xmlns=\"http://www.w3.org/2000/svg\""
+                 " width=\"32\" height=\"32\"><rect width=\"32\""
+                 " height=\"32\" fill=\"#000\"/></svg>"))
+       (let ((image (chat-mark-provider-image
+                     'claude "\u2733" 'chat-mark-brand-claude)))
+         (should image)
+         ;; A file, not the generated data: the reader's own asset.
+         (should (plist-get (cdr image) :file))
+         (should-not (plist-get (cdr image) :data)))))))
+
+(ert-deftest chat-mark-an-image-is-built-once-per-appearance ()
+  "The prompt is rebuilt on every send, and rasterising is not free.
+
+The resolved colour is in the key rather than being read past it, so a
+theme change lands on a new entry instead of needing anyone to remember
+to clear the cache."
+  (skip-unless (image-type-available-p 'svg))
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'default-font-height) (lambda (&rest _) 19)))
+    (clrhash chat-mark--image-cache)
+    (let ((first (chat-mark-provider-image
+                  'deepseek "D" 'chat-mark-brand-deepseek))
+          (again (chat-mark-provider-image
+                  'deepseek "D" 'chat-mark-brand-deepseek)))
+      (should first)
+      (should (eq first again))
+      (should (= 1 (hash-table-count chat-mark--image-cache))))))
+
+(ert-deftest chat-mark-the-cache-has-a-ceiling ()
+  "A cache with no bound is a leak that happens slowly."
+  (skip-unless (image-type-available-p 'svg))
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'default-font-height) (lambda (&rest _) 19)))
+    (clrhash chat-mark--image-cache)
+    (dotimes (index (* 3 chat-mark--image-cache-limit))
+      (chat-mark-provider-image
+       (intern (format "vendor-%d" index)) "V" 'chat-mark-brand-deepseek))
+    (should (<= (hash-table-count chat-mark--image-cache)
+                (1+ chat-mark--image-cache-limit)))))
+
 ;;; test-chat-mark.el ends here
