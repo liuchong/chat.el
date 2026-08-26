@@ -134,9 +134,51 @@ hand-wrote the frontmatter that the real path failed to write. A helper
 that constructs valid input by hand tests the reader and not the writer.
 Decision 0015 records it.
 
-Canonical suite: 984 tests passing.
+The command prompt behaves like a shell where it did not, and the boundary
+deciding what may is named: a builtin is interpreted in Lisp if and only
+if its effect must outlive the command that issued it, because a
+subprocess cannot move its parent's directory or set its parent's
+environment. `lisp/ui/chat-shell-builtins.el` holds those six and nothing
+else. `cd -` reached `expand-file-name`, which read the dash as a relative
+path named `-`, and nothing was tracking a previous directory for it to
+mean; `export` reached one subshell and was gone by the next line, so the
+variable looked set and then was not.
+
+Auto path completion is off. A completion UI that is open takes RET, so
+the key that sends became the key that picks a candidate — and
+coordinating with it is not possible, because Corfu and Company bind RET
+in maps that override the major mode's, so `chat-ui-send-message` is never
+called and has nothing to notice. Not opening it uninvited is the fix.
+TAB still completes as a shell does.
+
+Output format is stated instead of assumed. Nothing in the system prompt
+had ever mentioned format; Markdown was working on the model's habit
+alone. It is now asked for and narrowed to what a buffer displays well,
+with a reason on every restriction, since a prompt rule without one reads
+as optional.
+
+Specs 005 and 006 are written and not implemented. 005 is the built-in
+Markdown display engine: an Org-like result from Markdown syntax using
+Emacs means only — `invisible` for markers so copying still yields the
+source, real major modes for code with an explicit language table so model
+output cannot decide which packages load, `string-width` for table columns
+because CJK is double-width. Its governing rule is one renderer as a pure
+function of the source, which is the structural answer to the two paths
+that style differently today. 006 judges MDP: adopted for the text
+tool-call protocol, where its comment rule retires the empirical repairs
+in `chat-tool-caller--fix-broken-json`, and for structured tool results,
+where one text serving a program, a person and the next turn is exactly
+its design; declined for multi-line payloads, where its single-line values
+need the same escaping JSON does and the existing patch envelope is
+better.
+
+Canonical suite: 1009 tests passing.
 
 ## Next Stage
+
+Implement spec 005, then 006. Neither `lisp/ui/chat-markdown.el` nor
+`lisp/core/chat-mdp.el` exists yet; 005 comes first because 006 depends on
+it for display and gets it for free.
 
 Auto's second sense: an agent running rounds until its goal is met rather
 than until it stops calling tools. The step budget already bounds the

@@ -275,6 +275,52 @@ turn one repeated call into two executions."
       (should (string-match-p "Read files before editing" prompt))
       (should (string-match-p "\"path\"" prompt)))))
 
+(ert-deftest chat-tool-caller-asks-for-markdown-in-the-system-prompt ()
+  "The answer format is stated, not left to the model's habit.
+
+Every model writes Markdown by habit, and the renderer was built around
+that habit, so leaving it unsaid makes the display depend on something
+nobody asked for."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-tool-shell-enabled nil)
+        (chat-language 'en))
+    (let ((prompt (chat-tool-caller-build-system-prompt "Base")))
+      (should (string-match-p "Markdown" prompt)))))
+
+(ert-deftest chat-tool-caller-narrows-markdown-to-what-renders-well ()
+  "Each restriction in the subset is present, and each carries its reason.
+
+A prompt rule without a reason reads as optional."
+  (let ((chat-language 'en))
+    (let ((note (chat-tool-caller--output-format-note)))
+      ;; The restrictions.
+      (should (string-match-p "ATX" note))
+      (should (string-match-p "level two" note))
+      (should (string-match-p "hard-wrap" note))
+      (should (string-match-p "names its language" note))
+      (should (string-match-p "two levels" note))
+      (should (string-match-p "four\n?[ ]*columns" note))
+      (should (string-match-p "Inline code" note))
+      (should (string-match-p "No HTML" note))
+      (should (string-match-p "LaTeX" note))
+      ;; The reasons, which are what stop a rule reading as optional.
+      (should (string-match-p "wrapped to the window" note))
+      (should (string-match-p "selects syntax highlighting" note))
+      (should (string-match-p "does not fit a window" note))
+      (should (string-match-p "not rendered\\|none of these" note)))))
+
+(ert-deftest chat-tool-caller-states-the-format-whether-or-not-tools-exist ()
+  "Format is about how to answer, so it does not depend on having tools."
+  (let ((chat-language 'en))
+    (let ((without (let ((chat-tool-caller-enabled nil))
+                     (chat-tool-caller-build-system-prompt "Base")))
+          (with (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+                      (chat-tool-shell-enabled nil))
+                  (chat-files-register-built-in-tools)
+                  (chat-tool-caller-build-system-prompt "Base"))))
+      (should (string-match-p "Markdown" without))
+      (should (string-match-p "Markdown" with)))))
+
 (ert-deftest chat-tool-caller-denies-unapproved-dangerous-tool ()
   "Test that dangerous tools are blocked when approval is denied."
   (chat-test-with-temp-dir

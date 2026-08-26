@@ -234,6 +234,42 @@ message or a line of code on the way out makes it unsearchable."
               " writes in another language, follow the user."))
      language)))
 
+(defun chat-tool-caller--output-format-note ()
+  "Return the instruction naming the answer format.
+
+Markdown, stated rather than assumed.  Every model writes it by habit,
+and the habit is what the renderer was built around, so leaving it unsaid
+means the display depends on something nobody asked for.
+
+The subset is narrower than Markdown, and each restriction is there
+because of how a buffer displays rather than because of taste.  The
+reasons are stated: a prompt rule without a reason reads as optional, and
+a model that does not know why a rule exists drops it as soon as the
+content makes it inconvenient.
+
+Not a precondition of rendering.  The renderer has to have defined
+behaviour for anything the model writes, in or out of this subset -- see
+specs/005."
+  (chat-i18n-prompt
+   'output-format
+   (concat
+    "Write answers in Markdown. They are rendered in the editor, so keep"
+    " to the subset it displays well:\n"
+    "- Headings use the ATX form (`## Title`), start at level two, and go"
+    " no deeper than four. Never underline a heading: that form cannot be"
+    " recognised until the line after it, by which point it is drawn.\n"
+    "- Do not hard-wrap paragraphs. Text is wrapped to the window, so a"
+    " paragraph wrapped by hand is ragged at every other width.\n"
+    "- Every fenced code block names its language. The language is what"
+    " selects syntax highlighting; without it the code has none.\n"
+    "- Lists nest at most two levels.\n"
+    "- Tables only for data that is genuinely tabular, at most four"
+    " columns, with short cells. A wide table does not fit a window.\n"
+    "- Inline code for identifiers, paths and commands.\n"
+    "- Bold sparingly, and never in place of a heading.\n"
+    "- No HTML, no LaTeX math, no images, no footnotes: none of these"
+    " are rendered.")))
+
 (defun chat-tool-caller-build-system-prompt
     (base-prompt &optional step-limit session)
   "Extend BASE-PROMPT with long term memory and tool calling instructions.
@@ -255,6 +291,10 @@ will ask again for something it was already told."
       (setq base (concat base "\n\n" storage)))
     (when-let ((language (chat-tool-caller--reply-language-note)))
       (setq base (concat base "\n\n" language)))
+    ;; Beside the language note and on the same footing: both say how to
+    ;; answer rather than what to answer, and both apply whether or not
+    ;; there are tools.
+    (setq base (concat base "\n\n" (chat-tool-caller--output-format-note)))
     (if (not chat-tool-caller-enabled)
         base
       (let ((tools (chat-tool-caller--available-tools)))

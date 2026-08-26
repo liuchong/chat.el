@@ -88,7 +88,37 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 984 tests passing.
+Canonical suite: 1009 tests passing.
+
+The command prompt behaves like a shell in the two places it did not. A
+subprocess cannot move its parent's working directory or set its parent's
+environment, which is the whole reason any of this has to be interpreted
+in Lisp, and that boundary now has a file: `lisp/ui/chat-shell-builtins.el`
+owns `cd`, `pushd`, `popd`, `dirs`, `export` and `unset`, and nothing
+else, because the shell is better at everything else than we would be.
+`cd -` used to reach `expand-file-name`, which read the dash as a relative
+path named `-` and reported it missing; the previous directory is now
+recorded before each move. An `export` reaches the next command instead of
+only the subshell that ran it.
+
+Auto path completion is off. A completion UI that is open takes RET for
+itself, so the key that sends a message became the key that picks a
+candidate and the message needed a second RET, and the popup moved the
+buffer under someone still typing. TAB still completes, filling the common
+prefix on the first press and listing on the second, as a shell does.
+
+Output format is now stated rather than assumed. Every model writes
+Markdown by habit and the renderer was built around that habit, so the
+system prompt asks for it and narrows it to the subset a buffer displays
+well -- ATX headings from level two, no hand-wrapped paragraphs, a
+language on every fence, shallow lists, narrow tables, no HTML or math.
+Each restriction carries its reason, because a prompt rule without one
+reads as optional. Specs 005 and 006 record where this goes next: a
+built-in Markdown display engine that gets an Org-like result out of
+Markdown syntax without an external renderer, and a judgement on MDP,
+which is adopted for tool calls and tool results and declined for
+multi-line payloads, where its single-line values need the same escaping
+JSON does and the existing patch envelope is better.
 
 A run is now something you can watch happen. It used to be that a
 reasoning model thought for a minute with the screen perfectly still and
