@@ -616,11 +616,12 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Cause**: `call-process-shell-command` hands the full string back to the shell for expansion.
 
-**Solution**: reject shell metacharacters and execute argv directly with `process-file`.
+**Solution**: reject shell metacharacters and execute argv directly rather than through a shell.
 
 ```elisp
-(and (not (string-match-p chat-tool-shell--unsafe-pattern command))
-     (member (car argv) chat-tool-shell-allowed-commands))
+(chat-command-gate-check command
+                         :commands chat-tool-shell-allowed-commands
+                         :separators nil)
 ```
 
 ### AI Tool Source Can Execute During Compilation
@@ -2248,5 +2249,121 @@ until the block finishes.
 whose appearance is settled. Cutting past it trades a correct display for
 an append, and the display never recovers, because the append path has no
 reason to look back.
+
+### Emacs Gives A Subprocess A Pty, So Git Starts A Pager And Waits Forever
+
+**Problem**: `git log` and `git tag -l` run their whole timeout and then
+report a timeout, having done their work immediately. The captured output
+is two lines from `less`: `WARNING: terminal is not fully functional` and
+`Press RETURN to continue`.
+
+**Cause**: `process-connection-type` defaults to `t`, so `make-process`
+allocates a pty unless told otherwise. Git checks whether stdout is a
+terminal to decide about paging, a pty answers yes, and the pager it
+starts waits for a keystroke that nothing on the other end of a pipe can
+send. This is not specific to git or to background tasks — it affects any
+pager-using program on any tool path, and it also puts ANSI colour codes
+into text a model is about to read.
+
+**Solution**: both halves, because neither covers the other. Use a pipe,
+which removes the terminal that programs were checking for; and set the
+variables, which cover the programs that page without asking a terminal
+first, such as a forced `core.pager`.
+
+```elisp
+(let ((process-environment (chat-command-gate-environment)))
+  (make-process ... :connection-type 'pipe))
+```
+
+**General rule**: a subprocess started on behalf of a tool call has
+nobody who can answer a prompt. Anything that can block waiting for a
+person has to be told not to, and the failure mode is a timeout reported
+against a command that already finished — which reads as the command
+being slow rather than as the harness being wrong.
+
+### A Refusal That Does Not Say Why Is Answered By Giving Up
+
+**Problem**: an agent asked to summarise a commit range spent six minutes
+reading `.git` internals — `packed-refs`, `logs/HEAD`, loose objects —
+which cannot produce commit subjects at all, since reflog holds only SHAs
+and commit objects are zlib-compressed.
+
+**Cause**: the tool refused `cd … && git rev-parse … && git log -1 … |
+head -10` with `Error: Command not allowed:` and a copy of the command.
+That command had four independent causes of refusal: `git` was not on the
+allowlist, `&&` and `|` were rejected metacharacters, and quoting was a
+candidate too. One sentence covered all four equally well, which means it
+distinguished none of them. Unable to tell which rule had closed, the
+agent did not try `git log` on its own — it abandoned git entirely.
+
+**Solution**: make a refusal carry data rather than a sentence — a code,
+the token that failed, and a form that works — and let the caller phrase
+it. The token is what stops the reader comparing a whole command against a
+list; the hint is what makes retrying possible.
+
+```elisp
+(cl-defstruct chat-command-gate-refusal code token hint)
+```
+
+**General rule**: an error message is an instruction to the reader about
+what to do next, and a reader who cannot tell which of several rules
+stopped them has exactly one move available: stop. Every refusal needs to
+name the specific thing and a way forward, or it will be read as "this
+whole approach is closed".
+
+### A Strict Gate Beside An Open Window Is Not A Boundary
+
+**Problem**: `shell_execute` enforced a 19-command allowlist and rejected
+all shell metacharacters, while `work_task_start` handed the model's
+string to `sh -c` unexamined. The same `git` command that was refused on
+the first path ran on the second, with `&&` and `||` in it.
+
+**Cause**: two places were deciding what may run, so they decided
+differently. The gap widened further because subagent sessions are created
+with `autoApprove: true`, and session-level auto-approve short-circuits
+the per-tool auto-approve list, so on that path there was neither an
+allowlist nor a prompt.
+
+**Solution**: one decision function, and a policy passed in as an
+argument. What differs legitimately between callers is the program list
+and whether separators are meaningful — a tool that runs one program
+through `make-process` cannot honour a pipeline, a background task runner
+exists to run shell lines — but the decision itself belongs in one place.
+
+**General rule**: the cost of a restriction is paid by whoever obeys it,
+and the benefit only exists if there is no other route. When a second
+route exists, the restriction stops being a boundary and becomes a tax on
+the honest path — so either close the other route or drop the
+restriction, but do not keep both.
+
+### A Running Tool Reported As A Stalled Stream
+
+**Problem**: a subagent worked for two and a half minutes and the
+interface said `Stream has stalled without a new chunk`. Nothing was
+wrong; the message was read as a failure.
+
+**Cause**: the stall check was given a request id and a threshold, and it
+concluded from "no chunk for fifteen seconds" that the stream had
+stalled. The stream had in fact finished normally, and what was in
+progress was something the stream had asked for — but tool activity was
+kept in the UI's own list and never reached the request's record, so the
+check could not see it. The phase stayed on `streaming` for the whole tool
+call as well, so even the wording named the wrong component.
+
+**Solution**: record tool start and finish on the request trace, count
+them rather than flagging them (one step can call several tools, and a
+flag cleared by the first result reports the rest as silence), and treat
+silence with a known cause as not a stall. Then explain the wait instead:
+`Running <tool> (42s)`, with a number that moves.
+
+Also make the hint timer repeat rather than fire once. A single shot
+landing during a long tool call is now spent on nothing, and a real stall
+afterwards would go unreported — trading a false alarm for a silence is
+not an improvement.
+
+**General rule**: "no output" is not a diagnosis. Before reporting a
+component as stuck, check whether something else is legitimately busy —
+and if it is, say what it is and how long it has been going, because the
+reader's real question is whether anything is still happening.
 
 Last updated: 2026-08-27

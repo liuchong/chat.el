@@ -6,6 +6,7 @@
 
 ;;; Code:
 
+(require 'chat-command-gate)
 (require 'chat-files)
 (require 'chat-tool-forge)
 (require 'seq)
@@ -18,9 +19,17 @@ WARNING: Only enable in trusted environments."
   :group 'chat)
 
 (defcustom chat-tool-shell-allowed-commands
-  '("ls" "cat" "pwd" "echo" "head" "tail" "grep" "find" "wc" "which" "type"
-    "du" "stat" "sort" "uniq" "cut" "sed" "awk" "tr")
-  "List of allowed shell commands for safety."
+  '("ls" "cat" "pwd" "echo" "printf" "head" "tail" "grep" "find" "wc" "which"
+    "type" "du" "stat" "sort" "uniq" "cut" "sed" "awk" "tr" "git")
+  "List of allowed shell commands for safety.
+
+`git' is admitted per subcommand, not as a word: only the read-only ones
+in `chat-command-gate-git-read-only-subcommands' pass, so `git log' runs
+and `git push' does not.  It was absent for a long time with no reason
+recorded, which cost more than it protected -- reading a repository's
+history is what `cat' and `find' were already allowed to do the slow way,
+and the work that needs it (release notes, changelogs, review) cannot be
+done at all without it."
   :type '(repeat string)
   :group 'chat)
 
@@ -54,65 +63,38 @@ Examples:
     "cut "
     "sed "
     "awk "
-    "tr ")
+    "tr "
+    ;; Read-only git, one subcommand at a time.  Not the pattern "git ",
+    ;; which would also skip approval for `git push' -- the gate would
+    ;; still refuse it, so nothing would happen, but a prompt that was
+    ;; skipped for a command that then failed reads as a bug rather than
+    ;; as a rule.
+    "git log "
+    "git show "
+    "git diff "
+    "git status "
+    "git rev-parse "
+    "git rev-list "
+    "git describe "
+    "git shortlog "
+    "git blame "
+    "git ls-files "
+    "git for-each-ref "
+    "git merge-base "
+    "git tag ")
   "Built in readonly command patterns that bypass approval.
 User configured patterns in `chat-tool-shell-whitelist' are checked in addition
 to these defaults."
   :type '(repeat string)
   :group 'chat)
 
-(defconst chat-tool-shell--unsafe-pattern
-  "[;&|><`$\n\r]"
-  "Pattern for shell metacharacters that are not allowed.")
+(defalias 'chat-tool-shell--split-command #'chat-command-gate-split
+  "Parse a command into an argv list.
 
-(defun chat-tool-shell--split-command (command)
-  "Parse COMMAND into an argv list.
-Unlike `split-string-and-unquote', single quotes group anywhere in a
-word, so commands like awk 'BEGIN{...}' file survive intact."
-  (let ((len (length command))
-        (idx 0)
-        (args nil)
-        (current nil)
-        (in-token nil))
-    (while (< idx len)
-      (let ((ch (aref command idx)))
-        (cond
-         ((memq ch '(?\s ?\t ?\n))
-          (when in-token
-            (push (apply #'string (nreverse current)) args)
-            (setq current nil
-                  in-token nil)))
-         ((eq ch ?\\)
-          (setq in-token t)
-          (when (< (1+ idx) len)
-            (setq idx (1+ idx))
-            (push (aref command idx) current)))
-         ((eq ch ?')
-          (setq in-token t)
-          (setq idx (1+ idx))
-          (while (and (< idx len) (not (eq (aref command idx) ?')))
-            (push (aref command idx) current)
-            (setq idx (1+ idx))))
-         ((eq ch ?\")
-          (setq in-token t)
-          (setq idx (1+ idx))
-          (while (and (< idx len) (not (eq (aref command idx) ?\")))
-            (let ((inner (aref command idx)))
-              (if (and (eq inner ?\\)
-                       (< (1+ idx) len)
-                       (memq (aref command (1+ idx)) '(?\" ?\\)))
-                  (progn
-                    (setq idx (1+ idx))
-                    (push (aref command idx) current))
-                (push inner current)))
-            (setq idx (1+ idx))))
-         (t
-          (setq in-token t)
-          (push ch current))))
-      (setq idx (1+ idx)))
-    (when in-token
-      (push (apply #'string (nreverse current)) args))
-    (nreverse args)))
+One splitter, in `chat-command-gate', because the gate has to agree with
+the runner about where the words are: a second implementation that
+tokenised `awk \\='a b\\=' differently would approve one command and run
+another.")
 
 (defun chat-tool-shell--whitelist-patterns ()
   "Return all whitelist patterns."
@@ -238,6 +220,7 @@ truncated and spills into a temporary file."
                        chat-tool-shell-max-timeout))
          (buffer (generate-new-buffer " *chat-shell*"))
          (stderr-buffer (generate-new-buffer " *chat-shell-stderr*"))
+         (process-environment (chat-command-gate-environment))
          (proc nil)
          (timed-out nil))
     (unwind-protect
@@ -248,6 +231,13 @@ truncated and spills into a temporary file."
                       :command argv
                       :stderr stderr-buffer
                       :noquery t
+                      ;; A pipe, not the pty Emacs hands out by default.
+                      ;; A pty looks like a terminal, and a pager started
+                      ;; because of it waits for a keystroke that cannot
+                      ;; arrive -- so the command runs out its timeout and
+                      ;; reports a timeout for a command that finished
+                      ;; its work immediately.
+                      :connection-type 'pipe
                       :sentinel #'ignore))
           (let ((deadline (+ (float-time) timeout)))
             (while (and (process-live-p proc)
@@ -310,20 +300,50 @@ Matching rules:
   (setq chat-tool-shell-whitelist (delete pattern chat-tool-shell-whitelist))
   (message "Removed '%s' from shell whitelist" pattern))
 
-(defun chat-tool-shell-validate (command)
-  "Check if COMMAND is in the allowed list."
+(defun chat-tool-shell-refusal (command)
+  "Return why COMMAND may not run here, or nil when it may.
+
+The reason is a `chat-command-gate-refusal', not a flag, because the
+reader has to be told which rule closed on them.  A single \"not allowed\"
+covers an unlisted program, a rejected metacharacter and a writing git
+subcommand equally well, which means it distinguishes none of them, and a
+reader who cannot tell them apart cannot fix the command -- they can only
+abandon the approach, which is what happened."
   (let ((cd-prefix (chat-tool-shell--parse-cd-prefix command)))
     (if cd-prefix
         (condition-case nil
             (let ((rest (plist-get cd-prefix :rest)))
               (chat-tool-shell--safe-directory (plist-get cd-prefix :directory))
-              (or (null rest)
-                  (chat-tool-shell-validate rest)))
-          (error nil))
-      (let ((argv (chat-tool-shell--split-command command)))
-        (and argv
-             (not (string-match-p chat-tool-shell--unsafe-pattern command))
-             (member (car argv) chat-tool-shell-allowed-commands))))))
+              (and rest (chat-tool-shell-refusal rest)))
+          ;; The directory itself was refused, which the gate cannot say
+          ;; because it is not the gate's question.
+          (error (chat-command-gate-refusal-create
+                  :code 'directory
+                  :token (plist-get cd-prefix :directory)
+                  :hint "Use a path inside the session's allowed directories")))
+      (chat-command-gate-check command
+                               :commands chat-tool-shell-allowed-commands
+                               :separators nil))))
+
+(defun chat-tool-shell-validate (command)
+  "Return non-nil when COMMAND is allowed to run.
+
+Kept as the boolean question because callers and tests ask it; the reason
+lives in `chat-tool-shell-refusal'."
+  (not (chat-tool-shell-refusal command)))
+
+(defun chat-tool-shell--refusal-message (refusal command)
+  "Return REFUSAL as the result text for COMMAND.
+
+Adds the one thing this tool can do that the gate does not know about: a
+`cd DIR && COMMAND' prefix is accepted, so a reader told that `&&' is
+unavailable is not also told, wrongly, that there is no way to choose a
+directory."
+  (concat
+   (chat-command-gate-explain refusal command)
+   (when (and (eq (chat-command-gate-refusal-code refusal) 'metacharacter)
+              (member (chat-command-gate-refusal-token refusal) '("&&" ";")))
+     ". A single `cd DIR && COMMAND' prefix is the one exception and does work")))
 
 (defun chat-tool-shell-execute (command &optional timeout)
   "Execute shell COMMAND and return output.
@@ -331,8 +351,8 @@ Optional TIMEOUT (seconds) overrides `chat-tool-shell-timeout' and is
 capped by `chat-tool-shell-max-timeout'."
   (if (not chat-tool-shell-enabled)
       "Error: Shell tool is disabled"
-    (if (not (chat-tool-shell-validate command))
-        (format "Error: Command not allowed: %s" command)
+    (if-let* ((refusal (chat-tool-shell-refusal command)))
+        (chat-tool-shell--refusal-message refusal command)
       (condition-case err
           (let ((cd-prefix (chat-tool-shell--parse-cd-prefix command)))
             (if cd-prefix
@@ -351,7 +371,17 @@ capped by `chat-tool-shell-max-timeout'."
  (make-chat-forged-tool
   :id 'shell_execute
   :name "Shell Execute"
-  :description "Execute a shell command and return the output. Available commands: ls, cat, pwd, echo, head, tail, grep, find, wc, which, type, du, stat, sort, uniq, cut, sed, awk, tr"
+  ;; Generated from the variable, because the description is what the
+  ;; model reads.  It used to be a literal string naming the same
+  ;; programs, so adding one to the list left the description still
+  ;; saying it was unavailable, and the model's picture of the tool drifts
+  ;; away from the tool.
+  :description
+  (concat "Execute one shell command and return the output. "
+          "Pipes, redirection and chaining are not available; send each "
+          "command as its own call, except that a single "
+          "`cd DIR && COMMAND' prefix is accepted. "
+          (chat-command-gate-describe chat-tool-shell-allowed-commands))
   :language 'elisp
   :parameters '((:name "command" :type "string" :required t)
                 (:name "timeout" :type "number" :required nil))

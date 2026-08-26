@@ -139,4 +139,96 @@ before this said only that the stream had started."
                "Reasoning has stalled"
                (chat-request-diagnostics-stall-message id))))))
 
+;; ------------------------------------------------------------------
+;; A running tool is not a stalled stream
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-request-diagnostics-a-running-tool-is-not-a-stall ()
+  "Silence with a known cause is not reported as a failure.
+
+This was the worst message in the interface.  A subagent worked for two
+and a half minutes; the main request, waiting on it, was reported as
+\"Stream has stalled without a new chunk\".  The stream had finished
+normally -- what was in progress was something the stream had asked for --
+so the notice named the wrong component and implied a failure that had
+not happened, and was read as one."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-diagnostics-stall-threshold 0))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record id 'stream-chunk)
+      ;; Before the tool starts, silence has no known cause and is a stall.
+      (should (chat-request-diagnostics-stall-message id))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-call :tool "work_task_start"))
+      (should-not (chat-request-diagnostics-stall-message id))
+      ;; And once the tool is done, silence is unexplained again.
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-result :tool "work_task_start"))
+      (should (chat-request-diagnostics-stall-message id)))))
+
+(ert-deftest chat-request-diagnostics-tools-in-flight-are-counted ()
+  "Counted, not flagged, because one step can call several tools.
+
+A flag cleared by the first result would report the tools still running
+as silence, which is the bug this replaces in a smaller form."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-diagnostics-stall-threshold 0))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-call :tool "files_read"))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-call :tool "files_grep"))
+      (should (= 2 (plist-get (chat-request-diagnostics-snapshot id)
+                              :tools-in-flight)))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-result :tool "files_read"))
+      (should-not (chat-request-diagnostics-stall-message id))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-result :tool "files_grep"))
+      (should (zerop (plist-get (chat-request-diagnostics-snapshot id)
+                                :tools-in-flight)))
+      (should (chat-request-diagnostics-stall-message id)))))
+
+(ert-deftest chat-request-diagnostics-a-failed-tool-also-ends-its-silence ()
+  "A tool that errors has stopped running, whatever its result was."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-diagnostics-stall-threshold 0))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-call :tool "shell_execute"))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-error :tool "shell_execute"))
+      (should (zerop (plist-get (chat-request-diagnostics-snapshot id)
+                                :tools-in-flight)))
+      (should (chat-request-diagnostics-stall-message id)))))
+
+(ert-deftest chat-request-diagnostics-a-running-tool-is-reported-with-seconds ()
+  "Not flagging a stall is not enough; the wait has to be explained.
+
+The reader's question during a long tool call is whether anything is
+still happening, and only a number that moves answers it."
+  (let ((detail (chat-request-diagnostics-live-detail
+                 (list :phase 'tool-loop
+                       :running-tool "work_task_start"
+                       :tool-started-at (time-subtract (current-time) 42)))))
+    (should (string-match-p "Running work_task_start (42s)" detail))))
+
+(ert-deftest chat-request-diagnostics-a-tool-call-puts-the-request-in-its-loop ()
+  "The phase follows what the request is doing.
+
+It stayed on `streaming' through the whole tool call, which is what let
+the stall notice describe a finished stream as a stalled one."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal)))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record id 'stream-chunk)
+      (should (eq 'streaming
+                  (plist-get (chat-request-diagnostics-snapshot id) :phase)))
+      (chat-request-diagnostics-record-tool-event
+       id '(:type tool-call :tool "files_read"))
+      (should (eq 'tool-loop
+                  (plist-get (chat-request-diagnostics-snapshot id) :phase)))
+      (should (equal "files_read"
+                     (plist-get (chat-request-diagnostics-snapshot id)
+                                :running-tool))))))
+
 (provide 'test-chat-request-diagnostics)

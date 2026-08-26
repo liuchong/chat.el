@@ -127,6 +127,7 @@ Returns the list of files that were loaded."
 (require 'chat-llm-ark)
 
 ;; Load tool modules.
+(require 'chat-command-gate)
 (require 'chat-tool-forge)
 (require 'chat-tool-forge-ai)
 (require 'chat-tool-caller)

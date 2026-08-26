@@ -1015,11 +1015,16 @@ becomes the key that picks a candidate.  TAB is still bound to
     (should (string-match-p
              "\\`2"
              (string-trim (chat-ui--execute-shell-safe "printf 'a\\nb\\n' | wc -l")))))
-  ;; Held to the tool restrictions, the same command is refused.
+  ;; Held to the tool restrictions, the same command is refused -- and the
+  ;; refusal names the pipe, which is the part that cannot work here.  The
+  ;; old assertion was on the words "not allowed", which was all the
+  ;; message said and all the reader got.
   (let ((chat-ui-shell-unrestricted nil)
         (chat-tool-shell-enabled t))
-    (should (string-match-p "not allowed"
-                            (chat-ui--execute-shell-safe "printf x | wc -l")))))
+    (let ((result (chat-ui--execute-shell-safe "printf x | wc -l")))
+      (should (string-prefix-p "Error:" result))
+      (should (string-match-p "|" result))
+      (should (string-match-p "own call" result)))))
 
 (ert-deftest chat-ui-slash-commands-cover-the-documented-names ()
   "Every command named in the help text has a handler."

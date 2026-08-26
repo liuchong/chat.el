@@ -31,6 +31,9 @@
   last-chunk-at
   reasoning-count
   reasoning-chars
+  tools-in-flight
+  tool-started-at
+  running-tool
   last-error
   last-event
   metadata
@@ -81,6 +84,8 @@
     ('response-received 'processing)
     ('stream-started 'streaming)
     ('stream-chunk 'streaming)
+    ('tool-started 'tool-loop)
+    ('tool-finished 'tool-loop)
     ('tool-loop-step 'tool-loop)
     ('completed 'completed)
     ('cancelled 'cancelled)
@@ -178,6 +183,22 @@ dropped once the limit is exceeded."
                 (+ (or (chat-request-trace-reasoning-chars trace) 0)
                    (or (plist-get props :chars) 0)))
           (setf (chat-request-trace-last-chunk-at trace) now))
+        ;; A tool that has started and not finished is why the request has
+        ;; gone quiet.  Counted rather than flagged, because a step can
+        ;; call several tools and a flag cleared by the first result would
+        ;; report the rest as silence.
+        (when (eq event-type 'tool-started)
+          (setf (chat-request-trace-tools-in-flight trace)
+                (1+ (or (chat-request-trace-tools-in-flight trace) 0)))
+          (setf (chat-request-trace-tool-started-at trace) now)
+          (setf (chat-request-trace-running-tool trace)
+                (plist-get props :tool)))
+        (when (eq event-type 'tool-finished)
+          (setf (chat-request-trace-tools-in-flight trace)
+                (max 0 (1- (or (chat-request-trace-tools-in-flight trace) 0))))
+          (when (zerop (chat-request-trace-tools-in-flight trace))
+            (setf (chat-request-trace-tool-started-at trace) nil)
+            (setf (chat-request-trace-running-tool trace) nil)))
         (let ((events (cons event (chat-request-trace-events trace))))
           (setf (chat-request-trace-events trace)
                 (if (> (length events) chat-request-diagnostics-max-events)
@@ -186,6 +207,29 @@ dropped once the limit is exceeded."
         (dolist (observer (gethash id chat-request-diagnostics--observers))
           (funcall observer id trace event))
         trace))))
+
+(defun chat-request-diagnostics-record-tool-event (id event)
+  "Record tool EVENT against request ID as tool activity.
+
+Takes the tool event the caller already has rather than asking it to
+count.  Which tool events mean \"work started\" and which mean \"work
+finished\" is this module's question, and a caller that answered it
+separately would be a second place for the two to disagree."
+  (when-let* ((type (plist-get event :type))
+              (tool (or (plist-get event :tool) "tool")))
+    (pcase type
+      ('tool-call
+       (chat-request-diagnostics-record
+        id 'tool-started
+        :tool tool
+        :summary (format "Running %s" tool)))
+      ((or 'tool-result 'tool-error)
+       (chat-request-diagnostics-record
+        id 'tool-finished
+        :tool tool
+        :summary (format "%s from %s"
+                         (if (eq type 'tool-error) "Error" "Result")
+                         tool))))))
 
 (defun chat-request-diagnostics-snapshot (id)
   "Return a plist snapshot for request ID."
@@ -205,6 +249,9 @@ dropped once the limit is exceeded."
        :last-chunk-at (chat-request-trace-last-chunk-at trace)
        :reasoning-count (or (chat-request-trace-reasoning-count trace) 0)
        :reasoning-chars (or (chat-request-trace-reasoning-chars trace) 0)
+       :tools-in-flight (or (chat-request-trace-tools-in-flight trace) 0)
+       :tool-started-at (chat-request-trace-tool-started-at trace)
+       :running-tool (chat-request-trace-running-tool trace)
        :last-error (chat-request-trace-last-error trace)
        :last-event (chat-request-trace-last-event trace)
        :handle-live-p (chat-request-diagnostics--handle-live-p
@@ -231,7 +278,14 @@ dropped once the limit is exceeded."
     (float-time (time-subtract (current-time) time))))
 
 (defun chat-request-diagnostics-stall-message (id)
-  "Return a user facing stall message for request ID."
+  "Return a user facing stall message for request ID, or nil.
+
+Silence with a known cause is not a stall.  A tool that is still running
+is the commonest of those causes and used to produce the worst message in
+the interface: a subagent working for two and a half minutes was reported
+as \"Stream has stalled without a new chunk\", which named the wrong
+component, implied a failure, and was read as one.  The stream had
+finished normally; something the stream asked for was in progress."
   (let* ((snapshot (chat-request-diagnostics-snapshot id))
          (phase (plist-get snapshot :phase))
          (age (chat-request-diagnostics--seconds-since
@@ -239,7 +293,8 @@ dropped once the limit is exceeded."
          (chunk-count (plist-get snapshot :stream-chunk-count))
          (reasoning-count (or (plist-get snapshot :reasoning-count) 0)))
     (when (and age
-               (> age chat-request-diagnostics-stall-threshold))
+               (> age chat-request-diagnostics-stall-threshold)
+               (zerop (or (plist-get snapshot :tools-in-flight) 0)))
       (pcase phase
         ('waiting
          "Still waiting for provider response.")
@@ -298,8 +353,20 @@ FALLBACK is used when SNAPSHOT does not provide a better detail."
          ;; prompt.
          (t (format "Waiting for the first token (%ss)" waited)))))
      ((eq phase 'tool-loop)
-      (or last-summary
-          (pcase (plist-get latest-tool-event :type)
+      (or
+       ;; A running tool, with a number that moves.  This is the case the
+       ;; stall notice used to cover, and covering it with a static
+       ;; summary instead would trade a wrong explanation for none: the
+       ;; reader's question during a long tool call is whether anything is
+       ;; still happening, and only the seconds answer it.
+       (when-let* ((running (plist-get snapshot :running-tool))
+                   (since (plist-get snapshot :tool-started-at)))
+         (format "Running %s (%ss)"
+                 running
+                 (truncate (or (chat-request-diagnostics--seconds-since since)
+                               0))))
+       last-summary
+       (pcase (plist-get latest-tool-event :type)
             ('tool-call
              (format "Running %s"
                      (plist-get latest-tool-event :tool)))

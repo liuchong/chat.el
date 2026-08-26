@@ -12,12 +12,28 @@
 ;; Background tasks, session-local work records, and resumable declarative
 ;; workflows.  Workflow steps call registered tools or pause at explicit
 ;; approval checkpoints; they never evaluate arbitrary Lisp.
+;;
+;; Background commands go through `chat-command-gate', the same decision
+;; `shell_execute' uses.  They did not until recently, and the gap was not
+;; a small one: this is the only tool that hands a model-supplied string
+;; to `sh -c', so while `shell_execute' refused `git log' for not being on
+;; a list, the identical command ran here unexamined.  A subagent session
+;; is created with auto-approve on, so on that path there was no list and
+;; no prompt either.  A strict gate beside an open window is not a
+;; boundary, and the strict half only cost us the time spent going around
+;; it.
+;;
+;; The policy here is not the same list as `shell_execute' -- this tool
+;; exists to run shell lines, so `&&' and `|' are accepted and each
+;; segment is checked -- but the decision is the same function, so there
+;; is one place to read and one place to change.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
+(require 'chat-command-gate)
 (require 'chat-session)
 (require 'chat-tool-caller)
 (require 'chat-tool-forge)
@@ -45,6 +61,25 @@
 (defcustom chat-work-workflow-max-steps 100
   "Maximum number of steps accepted in one workflow."
   :type 'integer
+  :group 'chat-work)
+
+(defcustom chat-work-task-allowed-commands
+  '("ls" "cat" "pwd" "echo" "printf" "head" "tail" "grep" "find" "wc" "which"
+    "type" "du" "stat" "sort" "uniq" "cut" "sed" "awk" "tr" "git" "sleep"
+    "true" "false" "test" "mkdir" "cd")
+  "Programs a background task may run.
+
+Deliberately close to `chat-tool-shell-allowed-commands' and deliberately
+not open-ended.  A background task used to be `sh -c ANYTHING', which on
+an auto-approved subagent session meant a model could run anything at all
+with nothing between it and the shell.
+
+Build and test runners are not here, because guessing which ones a
+project uses would produce a list that is wrong for every project and
+reassuring in all of them.  Add the ones this machine needs -- \"make\",
+\"cargo\", \"npm\", \"pytest\" -- and the refusal names this variable when
+something is missing, so the gap says how to close itself."
+  :type '(repeat string)
   :group 'chat-work)
 
 (defvar chat-work-task-finished-hook nil
@@ -153,13 +188,40 @@
             (puthash (chat-work-task-id task) task chat-work--tasks))))))
   (hash-table-count chat-work--tasks))
 
+(defun chat-work-task-refusal (command)
+  "Return why COMMAND may not run as a background task, or nil when it may.
+
+Separators are allowed and each segment is checked, because a background
+task is a shell line by construction -- `cd build && make' is the shape
+this tool is for, and refusing it would be refusing the tool."
+  (chat-command-gate-check command
+                           :commands chat-work-task-allowed-commands
+                           :separators t))
+
+(defun chat-work--task-refusal-message (refusal command)
+  "Return REFUSAL as the result text for background COMMAND."
+  (concat
+   (chat-command-gate-explain refusal command)
+   (when (eq (chat-command-gate-refusal-code refusal) 'unknown-command)
+     ". Add it to `chat-work-task-allowed-commands' if this machine needs it")))
+
 (defun chat-work-task-start (command &optional directory)
-  "Start COMMAND as a cancellable background task in DIRECTORY."
+  "Start COMMAND as a cancellable background task in DIRECTORY.
+
+Refuses before starting anything when the command does not pass
+`chat-work-task-refusal', and says why.  A task that cannot run should
+not appear in the task list as one that failed: the two look the same
+afterwards and mean entirely different things."
+  (when-let* ((refusal (chat-work-task-refusal command)))
+    (error "%s" (chat-work--task-refusal-message refusal command)))
   (chat-work--ensure-directory)
   (let* ((id (chat-work--task-id))
          (default-directory (file-name-as-directory
                              (or directory default-directory)))
          (log-file (expand-file-name (concat id ".log") chat-work-directory))
+         ;; Read when the process is created, so binding it here is what
+         ;; the child inherits.  `make-process' has no keyword for this.
+         (process-environment (chat-command-gate-environment))
          (task (make-chat-work-task
                 :id id
                 :command command
@@ -175,6 +237,13 @@
            :buffer nil
            :command (list shell-file-name shell-command-switch command)
            :noquery t
+           ;; A pipe rather than the pty Emacs hands out by default.  A
+           ;; pty looks like a terminal, and a `git log' here started
+           ;; `less' because of it, which wrote "Press RETURN to continue"
+           ;; into the task log and sat there until the task was cancelled
+           ;; twenty seconds later.  The environment bound below covers
+           ;; the programs that page without asking a terminal first.
+           :connection-type 'pipe
            :filter (lambda (_proc chunk)
                      (write-region chunk nil log-file 'append 'silent))
            :sentinel (lambda (proc _event)
@@ -684,7 +753,14 @@ DECISION is `approve' or `reject' when the workflow awaits approval."
   "Register work orchestration tools."
   (chat-work--register-tool
    'work_task_start "Work Task Start"
-   "Start a cancellable background shell task."
+   ;; Generated, so that adding a program to the variable changes what the
+   ;; model is told.  Written out, the two drift and the description wins,
+   ;; because the description is the only one the model reads.
+   (concat "Start a cancellable background shell task. "
+           "Chaining with && || ; and | is accepted and every command in "
+           "the chain is checked. Redirection, background jobs and command "
+           "substitution are not accepted. "
+           (chat-command-gate-describe chat-work-task-allowed-commands))
    '((:name "command" :type "string" :required t)
      (:name "directory" :type "string" :required nil))
    #'chat-work-task-start

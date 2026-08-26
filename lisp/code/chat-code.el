@@ -142,7 +142,8 @@ When making changes:
 - Prefer file tools for inspection before shell commands
 - Use shell commands only for lightweight readonly inspection when file tools are not enough
 - Stay inside the active project unless the user explicitly asks to leave it
-- Do not repeat the same blocked tool pattern after access denied, approval denied, or command not allowed
+- Read a refused command's error before retrying: it names the token that failed and the form that works, so reformulate as told rather than repeating the same shape or abandoning the approach
+- Shell commands run one program at a time; send a chain as separate calls instead of joining them with && or a pipe
 - Stop using tools once you have enough evidence to answer
 - Keep tool usage efficient, directed, and production quality rather than exploratory for its own sake"
   "System prompt for a session with code capability."
@@ -391,7 +392,9 @@ When SILENT is non-nil, do not show minibuffer feedback."
             "- Use apply_patch for targeted existing-file edits with context."
             "- Avoid broad recursive scans unless the current question truly requires them."
             "- Prefer focused paths over climbing parent directories."
-            "- If a tool returns access denied, approval denied, command not allowed, or repeated failure, do not retry the same pattern."
+            "- If a tool returns access denied or approval denied, do not retry the same pattern."
+            "- If a command is refused, the error names the token that failed and the form that works; reformulate as it says instead of repeating the same shape or giving up on the command."
+            "- shell_execute runs one program at a time: send a chain as separate calls rather than joining them with && or a pipe."
             "- If the answer is already supportable from gathered evidence, stop using tools and answer directly."
             "- If the user asked to create or change files, use write tools directly instead of printing file contents in chat."
             "- If the user asked only for analysis, review, or explanation, stay readonly."))

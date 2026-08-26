@@ -222,12 +222,50 @@ session at a directory does not by itself grant the model access to it.
 
 ### Shell Commands And Trust
 
-A command the model proposes goes through the restricted tool path, which
-accepts only `chat-tool-shell-allowed-commands` and rejects shell
-metacharacters. A command a person typed is treated as a different trust
-level: by default it runs through the system shell, so pipes, redirection
-and variables work. Set `chat-ui-shell-unrestricted` to nil to hold typed
-commands to the same restrictions as the model.
+A command the model proposes goes through one gate, `chat-command-gate`,
+whichever tool it arrives at. `shell_execute` runs a single program from
+`chat-tool-shell-allowed-commands` and rejects shell metacharacters, with
+one `cd DIR && COMMAND` prefix as the exception; `work_task_start` runs a
+shell line, so `&&`, `||`, `;` and `|` are accepted there and every
+command in the chain is checked against
+`chat-work-task-allowed-commands`. Redirection, background jobs and
+command substitution are refused on both. A command a person typed is
+treated as a different trust level: by default it runs through the system
+shell, so pipes, redirection and variables work. Set
+`chat-ui-shell-unrestricted` to nil to hold typed commands to the same
+restrictions as the model.
+
+Read-only `git` is available, per subcommand rather than as a word:
+`log`, `show`, `diff`, `status`, `rev-parse`, `rev-list`, `describe`,
+`blame` and friends run, while `push`, `commit`, `reset` and `checkout` do
+not. `git tag` and `git branch` are admitted only in the form that lists,
+since `git tag NAME` creates one. `git -c` stays refused because
+`git -c alias.log='!sh' log` is spelled as a read-only subcommand and is
+not one.
+
+A refusal names the token that failed and a form that works, rather than
+saying only that something was not allowed. That matters more than it
+sounds: a command joining four `git` calls with `&&` and a pipe has four
+possible causes of refusal, and a message that distinguishes none of them
+can only be answered by abandoning the approach.
+
+Background tasks are deliberately not open-ended, and the default list
+has no build runners in it, because guessing which ones a project uses
+produces a list that is wrong for every project and reassuring in all of
+them. Add what this machine needs:
+
+```elisp
+(add-to-list 'chat-work-task-allowed-commands "cargo")
+(add-to-list 'chat-work-task-allowed-commands "make")
+```
+
+Tool subprocesses run on a pipe rather than the pty Emacs hands out by
+default, with `GIT_PAGER=cat`, `PAGER=cat`, `TERM=dumb` and
+`GIT_TERMINAL_PROMPT=0` set. Each of those is a way for a command to hang
+instead of failing: a pty looks like a terminal, git seeing a terminal
+starts a pager, and the pager waits for a keystroke that cannot arrive
+through a pipe. Left alone, `git tag -l` runs its full timeout and then
+reports a timeout for work it finished immediately.
 
 ### Fullwidth Input
 

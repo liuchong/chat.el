@@ -404,6 +404,7 @@ started on.  A session without code capability has no focus to move."
                        (chat-request-diagnostics-stall-message
                         chat-ui--current-request-id))))
         (setq chat-ui--request-hint-shown t)
+        (chat-ui--clear-request-hint-timer)
         (chat-request-surface-update-panel-if-visible
          buffer
          chat-ui--current-request-id
@@ -412,13 +413,20 @@ started on.  A session without code capability has no focus to move."
                  message-text)))))
 
 (defun chat-ui--start-request-hint-timer (buffer)
-  "Start the stalled request hint timer for BUFFER."
+  "Start the stalled request hint timer for BUFFER.
+
+Repeats, and stops itself once it has something to say or once the
+request ends.  It used to fire once: with the stall check now declining
+to call a running tool a stall, a single shot landing during a long tool
+call would be spent on nothing and a real stall afterwards would go
+unreported -- trading a false alarm for a silence, which is not an
+improvement."
   (chat-ui--clear-request-hint-timer)
   (setq chat-ui--request-hint-shown nil)
   (setq chat-ui--request-hint-timer
         (run-at-time
          chat-request-diagnostics-stall-threshold
-         nil
+         chat-request-diagnostics-stall-threshold
          #'chat-ui--maybe-show-request-hint
          buffer)))
 
@@ -2607,6 +2615,14 @@ assistant response being filled in."
          ((eq type 'tool-event)
           (setq tool-events (append tool-events
                                     (list (plist-get event :event))))
+          ;; Tool activity belongs on the request's own record, not only in
+          ;; this buffer's list.  The stall check is given a request id and
+          ;; nothing else, so a tool that started and has not finished was
+          ;; invisible to it -- which is how a working subagent came to be
+          ;; reported as a stalled stream.
+          (when request-id
+            (chat-request-diagnostics-record-tool-event
+             request-id (plist-get event :event)))
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
               (setq chat-ui--request-tool-events tool-events)
