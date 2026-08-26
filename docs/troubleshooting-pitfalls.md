@@ -1218,4 +1218,73 @@ any session whose model is a real provider fails on lookup.
 **Solution**: `(require 'chat)` in scratch scripts. Cheap, and it makes
 the script exercise the same load order a user gets.
 
+### A Documented Key Bound To A Different Event Of The Same Name
+
+**Problem**: the help said `S-RET` inserts a newline, `<S-return>` was
+bound, and terminal users had no way to type a second line.
+
+**Cause**: they are not the same key. `(kbd "S-RET")` is `[33554445]`,
+a shift-modified `C-m` — what a terminal sends. `(kbd "<S-return>")` is
+`[S-return]`, the GUI function key. The consistency test that would have
+caught it extracted only `C-c ...` sequences from the help, so every
+unprefixed key went unchecked in both directions.
+
+**Solution**: bind both, and extract unprefixed keys from the help too.
+Broadening that regexp immediately found `TAB` documented and bound to
+nothing at all. When a consistency test has a blind spot, the bugs
+collect inside it.
+
+### Tab-Padded Output Rendered At The Wrong Tab Width
+
+**Problem**: `ls` columns were ragged in the chat buffer while `ls -l`
+looked fine.
+
+**Cause**: BSD `ls -C` pads columns with tab characters and counts on
+stops every eight columns. The buffer's `tab-width` was 4, a common
+default. `ls -l` pads with spaces, so it was immune.
+
+**Solution**: expand the tabs where the text is displayed, against the
+width that produced them, rather than changing the buffer's `tab-width`
+to suit one kind of output. Count columns with `string-width` so CJK
+output lands correctly, and copy text in runs rather than character by
+character — `char-to-string` drops the text properties that carry colour.
+
+### Colour Applied As `font-lock-face` In A Buffer Without Font Lock
+
+**Problem**: ANSI colour was converted correctly and none of it appeared.
+
+**Cause**: `ansi-color-apply` marks colour with `font-lock-face`, which
+the display honours only where Font Lock is enabled. A chat buffer is not
+font-locked, so the property was present and inert.
+
+**Solution**: promote `font-lock-face` to `face` after applying. And when
+adding a base face over coloured text, append it rather than setting it,
+or it replaces the colour it was meant to sit behind.
+
+### A Path Rule That Owns The Character A Command Needs
+
+**Problem**: typing `/` to see the command list listed the root directory.
+
+**Cause**: the path predicate accepted any token starting with `/`, which
+is the right reading of that character everywhere except the one position
+where it opens a command.
+
+**Solution**: decide by position, not just by the character. A token that
+starts at the input marker and has no second slash is a command; anything
+else is a path. Have both completion functions ask the same question so
+they cannot both claim the same token.
+
+### The Help Was Unreachable From The Place You Would Ask For It
+
+**Problem**: `/help` fell through to the model as ordinary text and came
+back as a tool error.
+
+**Cause**: help had a key binding and no command name. Someone who cannot
+tell what the surface does has not found the key binding yet — that is
+what being stuck means.
+
+**Solution**: make the obvious name work, and let it run while a response
+is in flight, since being stuck is not less true while the model is
+talking. Then test that every name the help promises reaches a handler.
+
 Last updated: 2026-08-26

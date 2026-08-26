@@ -970,6 +970,180 @@ both arrive from the same place."
                      (nreverse calls))))))
 
 ;; ------------------------------------------------------------------
+;; Getting around the input area
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-ui-beginning-of-input-stops-after-the-prompt ()
+  "The prompt is buffer text, so the line begins before it.
+
+Landing there is not harmless: typing inserts outside the input area and
+`C-k' takes the prompt with it."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "some text")
+    (chat-ui-beginning-of-input)
+    (should (= (point) (marker-position chat-ui--input-overlay)))
+    (should-not (= (point) (line-beginning-position)))))
+
+(ert-deftest chat-ui-beginning-of-input-still-works-on-a-second-line ()
+  "Inside a multi-line message the line start is what is wanted."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "first line\nsecond line")
+    (chat-ui-beginning-of-input)
+    (should (= (point) (line-beginning-position)))
+    (should (looking-at "second line"))))
+
+(ert-deftest chat-ui-beginning-of-input-outside-the-input-area ()
+  "Above the prompt it is an ordinary movement command."
+  (with-temp-buffer
+    (insert "transcript line\n")
+    (chat-ui--setup-input-area)
+    (goto-char (point-min))
+    (end-of-line)
+    (chat-ui-beginning-of-input)
+    (should (= (point) (point-min)))))
+
+;; ------------------------------------------------------------------
+;; Completing what you are typing
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-ui-a-leading-slash-offers-commands-not-directories ()
+  "`/' at the prompt is a command, and answering with the root directory
+is answering a different question."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "/")
+    (let ((completion (chat-ui--command-completion-at-point)))
+      (should completion)
+      (should (member "help" (nth 2 completion)))
+      (should (member "cmd" (nth 2 completion))))
+    ;; And the path completion declines it, so the two cannot both fire.
+    (should-not (chat-ui--path-completion-at-point))))
+
+(ert-deftest chat-ui-a-partial-command-narrows-to-it ()
+  "Completion starts after the slash, so the names match directly."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "/he")
+    (let ((completion (chat-ui--command-completion-at-point)))
+      (should completion)
+      (should (equal (buffer-substring-no-properties (nth 0 completion)
+                                                     (nth 1 completion))
+                     "he")))))
+
+(ert-deftest chat-ui-a-second-slash-makes-it-a-path-again ()
+  "`/Users/liu' is a path.  The ambiguity resolves as soon as it can."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "/tmp/")
+    (should-not (chat-ui--command-completion-at-point))
+    (should (chat-ui--path-completion-at-point))))
+
+(ert-deftest chat-ui-a-slash-mid-message-is-a-path ()
+  "Only the slash that opens the input is a command."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "look at /")
+    (should-not (chat-ui--command-completion-at-point))
+    (should (chat-ui--path-completion-at-point))))
+
+;; ------------------------------------------------------------------
+;; Shell output
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-ui-expands-tabs-against-shell-tab-stops ()
+  "`ls -C' pads columns with tabs and counts on stops every eight.
+
+A buffer set to any other `tab-width' -- four is a common default --
+renders that output ragged, so the tabs are expanded here instead."
+  (should (equal (chat-ui--expand-tabs "ab\tc") "ab      c"))
+  (should (equal (chat-ui--expand-tabs "abcdefgh\tc")
+                 (concat "abcdefgh" (make-string 8 ?\s) "c")))
+  ;; Two columns that started aligned stay aligned.
+  (let* ((expanded (chat-ui--expand-tabs "a\t\tx\nlonger-name\tx"))
+         (lines (split-string expanded "\n")))
+    (should (= (string-match "x" (nth 0 lines))
+               (string-match "x" (nth 1 lines))))))
+
+(ert-deftest chat-ui-expands-tabs-by-display-width ()
+  "A line of CJK output lands where the shell meant it to."
+  (let* ((expanded (chat-ui--expand-tabs "中文\tx"))
+         (column (string-width (substring expanded
+                                          0 (string-match "x" expanded)))))
+    (should (= column 8))))
+
+(ert-deftest chat-ui-leaves-text-without-tabs-alone ()
+  "The common case pays nothing."
+  (should (equal (chat-ui--expand-tabs "plain output\n") "plain output\n")))
+
+(ert-deftest chat-ui-shell-colour-becomes-a-face-not-noise ()
+  "Tools emit SGR escapes when they think they have a terminal."
+  (let ((decorated (chat-ui--decorate-shell-text "\e[31mred\e[0m tail")))
+    (should-not (string-match-p "\e\\[" decorated))
+    (should (string-match-p "red" decorated))
+    (should (string-match-p "tail" decorated))))
+
+(ert-deftest chat-ui-a-shell-line-is-marked-as-one ()
+  "The command is what you search a transcript for, so it stands out."
+  (with-temp-buffer
+    (setq-local chat-ui--messages-end (point-max-marker))
+    (chat-ui--insert-shell-echo "ls -l")
+    (goto-char (point-min))
+    (should (search-forward "ls -l" nil t))
+    (let ((face (get-text-property (- (point) 1) 'face)))
+      (should (eq face 'chat-ui-shell-command-face)))))
+
+(ert-deftest chat-ui-shell-output-keeps-the-colour-it-asked-for ()
+  "The base face is appended, so it sits under the output's own colour."
+  (with-temp-buffer
+    (setq-local chat-ui--messages-end (point-max-marker))
+    (chat-ui--insert-shell-output "\e[31mred\e[0m plain")
+    (goto-char (point-min))
+    (should (search-forward "red" nil t))
+    (let ((faces (get-text-property (- (point) 1) 'face)))
+      ;; The output's colour is still there, with the base face behind it.
+      (should (memq 'chat-ui-shell-output-face (ensure-list faces)))
+      (should (> (length (ensure-list faces)) 1)))
+    (should (search-forward "plain" nil t))
+    (should (memq 'chat-ui-shell-output-face
+                  (ensure-list (get-text-property (- (point) 1) 'face))))))
+
+;; ------------------------------------------------------------------
+;; Help
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-ui-help-is-a-command-you-can-type ()
+  "`/help' is the first thing someone types when they are stuck.
+
+It used to fall through to the model as ordinary text, which answered a
+request for the command list with a tool error."
+  (should (chat-ui--command-handler "help"))
+  (should (eq (chat-ui--command-handler "help") 'chat-ui--command-help)))
+
+(ert-deftest chat-ui-help-works-while-a-response-is-running ()
+  "Being stuck is not less true while the model is talking."
+  (should (chat-ui--control-command (chat-command-parse "/help"))))
+
+(ert-deftest chat-ui-help-on-a-topic-shows-the-lines-that-mention-it ()
+  "The whole help is long; a topic is the way in."
+  (with-temp-buffer
+    (setq-local chat-ui--messages-end (point-max-marker))
+    (chat-ui--command-help "auto")
+    (let ((shown (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p "auto" shown))
+      (should-not (string-match-p "Quote active region" shown)))))
+
+(ert-deftest chat-ui-help-on-an-unknown-topic-says-so ()
+  "Silence would read as a broken command."
+  (with-temp-buffer
+    (setq-local chat-ui--messages-end (point-max-marker))
+    (chat-ui--command-help "nonsense-topic")
+    (should (string-match-p
+             "Nothing in the help"
+             (buffer-substring-no-properties (point-min) (point-max))))))
+
+;; ------------------------------------------------------------------
 ;; The default command
 ;; ------------------------------------------------------------------
 

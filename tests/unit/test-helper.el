@@ -19,6 +19,12 @@
 ;; Share the same module lookup rules across all tests.
 (load (expand-file-name "../test-paths.el" (file-name-directory load-file-name)) nil t)
 
+;; The suite's assertions are written in English, so the language is
+;; pinned rather than taken from whatever locale the machine has.  A test
+;; that cares about translation sets `chat-language' itself.
+(require 'chat-i18n)
+(setq chat-language 'en)
+
 ;; Create temporary test directory
 (defmacro chat-test-with-temp-dir (&rest body)
   "Execute BODY with a temporary directory that is cleaned up afterwards."

@@ -62,7 +62,21 @@ Slash commands now have the consistency guarantee the keymap got: a test
 reads the names out of `chat-commands-help` and requires each to reach a
 handler, with the nine that answer nothing named explicitly in the test.
 
-Canonical suite: 794 tests passing.
+Six problems reported from real use are fixed, and five of them were on
+the path a person takes in their first minute: `C-a` landing before the
+prompt, a leading `/` completing directories instead of commands, TAB
+bound to nothing, `ls` columns ragged because `ls -C` pads with tabs
+against stops of 8, and `/help` not being a command at all. Broadening the
+help-key extraction to unprefixed keys found two more the old consistency
+test had been passing over: `S-RET` documented while `<S-return>` was
+bound, and TAB unbound. Decision 0012 records it.
+
+Language is in: `chat-i18n` resolves from `chat-language`, the Emacs
+language environment, then the locale. English lives at the call sites as
+the fallback, so an untranslated key reads as English. Simplified Chinese
+ships complete, the help text being the point.
+
+Canonical suite: 828 tests passing.
 
 ## Next Stage
 

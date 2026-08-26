@@ -14,7 +14,12 @@
 
 ;;; Code:
 
+(require 'chat-i18n)
 (require 'chat-command)
+;; Owned by `chat.el', which loads after this file.
+(defvar chat-commands-help)
+(declare-function chat-help-text "chat" ())
+(declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
 (require 'chat-transcript)
 (require 'chat-llm)
@@ -416,10 +421,105 @@ started on.  A session without code capability has no focus to move."
           (when (<= (marker-position chat-ui--input-overlay) start)
             (cons start end)))))))
 
+(defconst chat-ui--command-table
+  '((:name "cancel"   :handler chat-ui--command-cancel :while-busy t)
+    (:name "model"    :handler chat-ui--command-model  :while-busy t)
+    (:name "cmd"      :handler chat-ui--command-shell  :repeatable t)
+    (:name "!"        :handler chat-ui--command-shell  :repeatable t)
+    (:name "cd"       :handler chat-ui--command-cd)
+    (:name "pwd"      :handler chat-ui--command-pwd)
+    (:name "question" :handler chat-ui--command-question)
+    (:name "ask"      :handler chat-ui--command-question)
+    (:name "?"        :handler chat-ui--command-question)
+    (:name "auto"     :handler chat-ui--command-auto)
+    (:name "help"     :handler chat-ui--command-help :while-busy t))
+  "What each slash command is, declared rather than listed per property.
+
+`:handler' takes the argument text, which may be empty.  A name absent
+from this table is left as ordinary message text.
+
+`:while-busy' means the command still runs while a response is in flight.
+
+`:repeatable' means the command is worth running several times in a row,
+so it may become the session's default command: plain input then goes to
+it instead of to the model, until `/auto off'.  Shell work is the case
+that wants this -- you rarely run one command.
+
+Asking the model is deliberately not repeatable, because it is already
+what plain input does.  Neither is `/ask', which asks without recording:
+as a sticky default it would quietly stop the conversation being written
+down, and a footgun that only shows up later is worse than typing four
+characters.")
+
+(defun chat-ui--command-entry (name)
+  "Return the table entry for slash command NAME, or nil."
+  (seq-find (lambda (entry) (equal (plist-get entry :name) name))
+            chat-ui--command-table))
+
+(defun chat-ui--command-handler (name)
+  "Return the handler for slash command NAME, or nil."
+  (plist-get (chat-ui--command-entry name) :handler))
+
+(defun chat-ui--command-repeatable-p (name)
+  "Return non-nil when slash command NAME may become the default."
+  (and (plist-get (chat-ui--command-entry name) :repeatable) t))
+
+(defun chat-ui--repeatable-command-names ()
+  "Return the names of every command that may become the default."
+  (delete-dups
+   (delq nil
+         (mapcar (lambda (entry)
+                   (and (plist-get entry :repeatable)
+                        (plist-get entry :name)))
+                 chat-ui--command-table))))
+
+(defun chat-ui--command-token-bounds ()
+  "Return the bounds of a slash command being typed, or nil.
+
+A `/' opening the input area is a command; the same character anywhere
+else is part of a path.  `/Users/liu' has a second slash and is a path
+again, so the ambiguity resolves as soon as there is enough to resolve
+it."
+  (when-let* ((bounds (chat-ui--input-token-bounds))
+              (input-start (marker-position chat-ui--input-overlay)))
+    (and (= (car bounds) input-start)
+         (let ((token (buffer-substring-no-properties (car bounds) (cdr bounds))))
+           (and (string-prefix-p "/" token)
+                (not (string-match-p "/" (substring token 1)))
+                bounds)))))
+
+(defun chat-ui--command-completion-at-point ()
+  "Complete a slash command at the start of the input area.
+
+Without this, `/' reaches the path completion below and answers a request
+for the command list with the contents of the root directory."
+  (when-let ((bounds (chat-ui--command-token-bounds)))
+    (list (1+ (car bounds))
+          (cdr bounds)
+          (chat-ui--command-completion-table)
+          :exclusive 'no
+          :annotation-function #'chat-ui--command-annotation
+          :company-kind (lambda (_candidate) 'keyword))))
+
+(defun chat-ui--command-completion-table ()
+  "Return the slash command names offered for completion."
+  (mapcar (lambda (entry) (plist-get entry :name)) chat-ui--command-table))
+
+(defun chat-ui--command-annotation (name)
+  "Return a short annotation for slash command NAME."
+  (let ((entry (chat-ui--command-entry name)))
+    (cond
+     ((plist-get entry :repeatable) "  can hold plain input")
+     ((plist-get entry :while-busy) "  works while busy")
+     (t ""))))
+
 (defun chat-ui--path-token-p (token)
   "Return non-nil when TOKEN looks like a file path fragment."
   (and (stringp token)
        (not (string-empty-p token))
+       ;; A slash command is not a path; see
+       ;; `chat-ui--command-token-bounds'.
+       (not (chat-ui--command-token-bounds))
        (or (string-prefix-p "/" token)
            (string-prefix-p "~/" token)
            (string-prefix-p "./" token)
@@ -472,7 +572,7 @@ not always the directory the buffer sits in."
        :company-kind (lambda (_candidate) 'file)))))
 
 (defun chat-ui--maybe-complete-path-after-insert ()
-  "Auto-trigger file completion for path-like tokens in the input area."
+  "Auto-trigger completion for path-like or command-like input."
   (when (and chat-ui-auto-path-completion
              (not chat-ui--auto-path-completion-active)
              (chat-ui--point-in-input-p)
@@ -484,7 +584,8 @@ not always the directory the buffer sits in."
                             (and (>= char ?A) (<= char ?Z))
                             (and (>= char ?a) (<= char ?z))
                             (memq char '(?_ ?-)))))))
-    (when (chat-ui--path-completion-at-point)
+    (when (or (chat-ui--command-completion-at-point)
+              (chat-ui--path-completion-at-point))
       (let ((chat-ui--auto-path-completion-active t))
         (completion-at-point)))))
 
@@ -494,6 +595,22 @@ not always the directory the buffer sits in."
   (unless (chat-ui--point-in-input-p)
     (goto-char (point-max)))
   (insert "\n"))
+
+(defun chat-ui-beginning-of-input ()
+  "Move to the start of what you typed, not to the start of the line.
+
+The prompt is buffer text, so plain `move-beginning-of-line' lands before
+the `> ' -- a position where typing inserts outside the input area and
+`C-k' takes the prompt with it.  On a continuation line inside the input,
+the line start is what is wanted."
+  (interactive)
+  (let ((input-start (and chat-ui--input-overlay
+                          (marker-position chat-ui--input-overlay))))
+    (if (and input-start
+             (>= (point) input-start)
+             (<= (line-beginning-position) input-start))
+        (goto-char input-start)
+      (move-beginning-of-line 1))))
 
 (defun chat-ui--capability-lines (session)
   "Return the header lines describing what SESSION carries, or nil.
@@ -849,57 +966,6 @@ all produce the same screen."
 ;; Message Sending
 ;; ------------------------------------------------------------------
 
-(defconst chat-ui--command-table
-  '((:name "cancel"   :handler chat-ui--command-cancel :while-busy t)
-    (:name "model"    :handler chat-ui--command-model  :while-busy t)
-    (:name "cmd"      :handler chat-ui--command-shell  :repeatable t)
-    (:name "!"        :handler chat-ui--command-shell  :repeatable t)
-    (:name "cd"       :handler chat-ui--command-cd)
-    (:name "pwd"      :handler chat-ui--command-pwd)
-    (:name "question" :handler chat-ui--command-question)
-    (:name "ask"      :handler chat-ui--command-question)
-    (:name "?"        :handler chat-ui--command-question)
-    (:name "auto"     :handler chat-ui--command-auto))
-  "What each slash command is, declared rather than listed per property.
-
-`:handler' takes the argument text, which may be empty.  A name absent
-from this table is left as ordinary message text.
-
-`:while-busy' means the command still runs while a response is in flight.
-
-`:repeatable' means the command is worth running several times in a row,
-so it may become the session's default command: plain input then goes to
-it instead of to the model, until `/auto off'.  Shell work is the case
-that wants this -- you rarely run one command.
-
-Asking the model is deliberately not repeatable, because it is already
-what plain input does.  Neither is `/ask', which asks without recording:
-as a sticky default it would quietly stop the conversation being written
-down, and a footgun that only shows up later is worse than typing four
-characters.")
-
-(defun chat-ui--command-entry (name)
-  "Return the table entry for slash command NAME, or nil."
-  (seq-find (lambda (entry) (equal (plist-get entry :name) name))
-            chat-ui--command-table))
-
-(defun chat-ui--command-handler (name)
-  "Return the handler for slash command NAME, or nil."
-  (plist-get (chat-ui--command-entry name) :handler))
-
-(defun chat-ui--command-repeatable-p (name)
-  "Return non-nil when slash command NAME may become the default."
-  (and (plist-get (chat-ui--command-entry name) :repeatable) t))
-
-(defun chat-ui--repeatable-command-names ()
-  "Return the names of every command that may become the default."
-  (delete-dups
-   (delq nil
-         (mapcar (lambda (entry)
-                   (and (plist-get entry :repeatable)
-                        (plist-get entry :name)))
-                 chat-ui--command-table))))
-
 (defun chat-ui-send-message ()
   "Act on the input area, either as a command or as a message."
   (interactive)
@@ -911,7 +977,7 @@ characters.")
            (control (chat-ui--control-command command)))
       (cond
        ((eq (plist-get command :kind) 'empty)
-        (message "Cannot send empty message"))
+        (message "%s" (chat-i18n 'empty-message "Cannot send empty message")))
        (control
         (chat-ui--clear-input input-start input-end)
         (funcall control (plist-get command :arg)))
@@ -919,7 +985,8 @@ characters.")
         (chat-ui--clear-input input-start input-end)
         (chat-ui--steer-active-agent (chat-ui--command-message-text command)))
        ((chat-ui--response-active-p)
-        (message "A response is already in progress. Cancel it before sending another message."))
+        (message "%s" (chat-i18n 'request-in-progress
+                          "A response is already in progress. Cancel it before sending another message.")))
        (t
         (chat-ui--clear-input input-start input-end)
         (chat-ui--dispatch-command command))))))
@@ -989,7 +1056,9 @@ prefix engages auto exactly as the slash name does."
     (unless (equal (chat-ui-default-command) name)
       (chat-ui--set-default-command name)
       (chat-ui--render-status-line)
-      (message "Plain input now runs through /%s. /auto off to stop." name))))
+      (message "%s" (chat-i18n 'auto-claimed
+                               "Plain input now runs through /%s. /auto off to stop."
+                               name)))))
 
 (defun chat-ui--command-auto (arg)
   "Report, set or clear the default command according to ARG."
@@ -998,27 +1067,36 @@ prefix engages auto exactly as the slash name does."
      ((string-empty-p request)
       (chat-ui--insert-system-message
        (if-let ((name (chat-ui-default-command)))
-           (format "Auto: plain input runs through /%s. /auto off to stop."
-                   name)
-         (format "Auto: off -- plain input goes to the model. Repeatable: %s"
-                 (mapconcat (lambda (name) (concat "/" name))
-                            (chat-ui--repeatable-command-names) " ")))))
+           (chat-i18n 'auto-state-on
+                      "Auto: plain input runs through /%s. /auto off to stop."
+                      name)
+         (chat-i18n 'auto-state-off
+                    "Auto: off -- plain input goes to the model. Repeatable: %s"
+                    (chat-ui--repeatable-command-list)))))
      ((member request '("off" "none" "stop"))
       (chat-ui--set-default-command nil)
       (chat-ui--render-status-line)
-      (chat-ui--insert-system-message "Auto: off -- plain input goes to the model."))
+      (chat-ui--insert-system-message
+       (chat-i18n 'auto-turned-off
+                  "Auto: off -- plain input goes to the model.")))
      ((chat-ui--command-repeatable-p request)
       (chat-ui--set-default-command request)
       (chat-ui--render-status-line)
       (chat-ui--insert-system-message
-       (format "Auto: plain input runs through /%s. /auto off to stop."
-               request)))
+       (chat-i18n 'auto-state-on
+                  "Auto: plain input runs through /%s. /auto off to stop."
+                  request)))
      (t
       (chat-ui--insert-system-message
-       (format "/%s cannot be a default command. Repeatable: %s"
-               request
-               (mapconcat (lambda (name) (concat "/" name))
-                          (chat-ui--repeatable-command-names) " ")))))))
+       (chat-i18n 'auto-not-repeatable
+                  "/%s cannot be a default command. Repeatable: %s"
+                  request
+                  (chat-ui--repeatable-command-list)))))))
+
+(defun chat-ui--repeatable-command-list ()
+  "Return the repeatable command names as slash-prefixed display text."
+  (mapconcat (lambda (name) (concat "/" name))
+             (chat-ui--repeatable-command-names) " "))
 
 (defun chat-ui--dispatch-command (command)
   "Run COMMAND, which was parsed from the input area."
@@ -1054,7 +1132,7 @@ prefix engages auto exactly as the slash name does."
 (defun chat-ui--send-user-message (content)
   "Record CONTENT as a user message and ask the model to respond."
   (if (string-empty-p content)
-      (message "Cannot send empty message")
+      (message "%s" (chat-i18n 'empty-message "Cannot send empty message"))
     (if (chat-tool-forge-ai--tool-request-p content)
         (chat-ui--handle-tool-creation content)
       (let ((user-msg (make-chat-message
@@ -1078,12 +1156,13 @@ prefix engages auto exactly as the slash name does."
     (chat-session-add-message chat--current-session user-msg)
     (chat-ui--redraw-conversation)
     (chat-agent-steer chat-ui--active-agent-run user-msg)
-    (message "Message queued for the active response.")))
+    (message "%s" (chat-i18n 'message-queued
+                          "Message queued for the active response."))))
 
 (defun chat-ui--command-cancel (_arg)
   "Cancel the response that is in flight."
   (chat-ui-cancel-response)
-  (message "Request cancelled."))
+  (message "%s" (chat-i18n 'request-cancelled "Request cancelled.")))
 
 (defun chat-ui--command-model (arg)
   "Point this session at the provider named ARG, prompting when empty."
@@ -1094,7 +1173,7 @@ prefix engages auto exactly as the slash name does."
 (defun chat-ui--command-shell (arg)
   "Run ARG as a shell command."
   (if (string-empty-p arg)
-      (message "Usage: !<command>")
+      (message "%s" (chat-i18n 'shell-usage "Usage: !<command>"))
     (chat-ui--handle-shell-command arg)))
 
 (defun chat-ui--command-question (arg)
@@ -1111,6 +1190,45 @@ prefix engages auto exactly as the slash name does."
 (defun chat-ui--command-pwd (_arg)
   "Report the working directory of this session."
   (chat-ui--insert-system-message (format "📁 %s" default-directory)))
+
+(defun chat-ui--command-help (arg)
+  "Show help, filtered to lines matching ARG when it is given.
+
+`/help' is the first thing someone types when they cannot see what to do
+next, so it has to work from the input area rather than only from a key
+binding nobody has found yet."
+  (let ((topic (string-trim (or arg ""))))
+    (if (string-empty-p topic)
+        (chat-ui--show-help)
+      (chat-ui--show-help-matching topic))))
+
+(defun chat-ui--help-text ()
+  "Return the help text to show, localized when a catalog has it."
+  (if (fboundp 'chat-help-text)
+      (chat-help-text)
+    chat-commands-help))
+
+(defun chat-ui--show-help ()
+  "Display the full help text."
+  (if (fboundp 'chat-show-help)
+      (chat-show-help)
+    (chat-ui--insert-system-message (chat-ui--help-text))))
+
+(defun chat-ui--show-help-matching (topic)
+  "Show the help lines that mention TOPIC, or say that none do."
+  (let ((matches
+         (seq-filter (lambda (line)
+                       (string-match-p (regexp-quote (downcase topic))
+                                       (downcase line)))
+                     (split-string (chat-ui--help-text) "\n"))))
+    (chat-ui--insert-system-message
+     (if matches
+         (concat (chat-i18n 'help-topic-heading "Help for %s:" topic)
+                 "\n"
+                 (string-join matches "\n"))
+       (chat-i18n 'help-topic-missing
+                  "Nothing in the help mentions %s. /help for all of it."
+                  topic)))))
 
 (defun chat-ui--followup-target-note ()
   "Return a system note about the most recent file target."
@@ -1243,6 +1361,28 @@ manual scrolling is never overridden."
                        (>= (window-end window t)
                            (max (point-min) (- (point-max) 80))))
               (set-window-point window edge))))))))
+
+(defface chat-ui-shell-prompt-face
+  '((t :inherit font-lock-comment-face :weight bold))
+  "Face for the `$' marking an echoed shell command."
+  :group 'chat-ui)
+
+(defface chat-ui-shell-command-face
+  '((t :inherit font-lock-function-name-face :weight bold))
+  "Face for the shell command itself.
+
+The command is what you would search the transcript for, so it is the
+part that should stand out from its own output."
+  :group 'chat-ui)
+
+(defface chat-ui-shell-output-face
+  '((t :inherit fixed-pitch))
+  "Face for shell output.
+
+Fixed pitch because column alignment is meaningless without it: a
+proportional font makes `ls' ragged however carefully the tabs were
+expanded."
+  :group 'chat-ui)
 
 (defface chat-code-block-face
   '((t :inherit font-lock-constant-face :extend t))
@@ -1934,12 +2074,102 @@ cannot change the directory this session works in."
     (if directory
         (chat-ui--change-directory directory)
       (setq chat-ui--last-shell-command trimmed)
-      (chat-ui--insert-system-message (format "$ %s" trimmed))
+      (chat-ui--insert-shell-echo trimmed)
       (let ((output (chat-ui--execute-shell-safe trimmed)))
-        (chat-ui--insert-system-message
+        (chat-ui--insert-shell-output
          (if (and output (not (string-empty-p (string-trim output))))
              output
-           "(no output)"))))))
+           (chat-i18n 'no-output "(no output)")))))))
+
+(defconst chat-ui--shell-tab-width 8
+  "Tab stop width shell tools assume when they align columns.
+
+`ls -C' pads with tabs rather than spaces, and it counts on stops every
+eight columns.  A buffer set to any other `tab-width' -- four is a common
+default -- renders that output ragged.  Rather than fight the buffer's
+setting, the tabs are expanded here against the width that produced
+them.")
+
+(defun chat-ui--expand-tabs (text)
+  "Return TEXT with tabs expanded against shell tab stops.
+
+Column counting uses `string-width', so a line of CJK output lands where
+the shell meant it to.  Text is copied in runs rather than character by
+character, because the colour applied just before this is a text property
+and rebuilding the string from characters would throw it away."
+  (if (not (string-match-p "\t" text))
+      text
+    (let ((parts nil)
+          (line-start 0)
+          (length (length text)))
+      (while (<= line-start length)
+        (let* ((newline (string-search "\n" text line-start))
+               (line-end (or newline length))
+               (position line-start)
+               ;; Counted on the output, not the input: a tab is one
+               ;; character in but several columns out, so a second tab on
+               ;; the same line has to be measured against what came out.
+               (column 0))
+          (while (< position line-end)
+            (let ((tab (string-search "\t" text position)))
+              (if (or (not tab) (>= tab line-end))
+                  (progn
+                    (push (substring text position line-end) parts)
+                    (setq position line-end))
+                (let ((run (substring text position tab)))
+                  (push run parts)
+                  (setq column (+ column (string-width run))))
+                (let ((stop (* chat-ui--shell-tab-width
+                               (1+ (/ column chat-ui--shell-tab-width)))))
+                  (push (make-string (- stop column) ?\s) parts)
+                  (setq column stop))
+                (setq position (1+ tab)))))
+          (when newline (push "\n" parts))
+          (setq line-start (if newline (1+ newline) (1+ length)))))
+      (apply #'concat (nreverse parts)))))
+
+(defun chat-ui--as-display-faces (text)
+  "Return TEXT with any `font-lock-face' promoted to `face'.
+
+`ansi-color-apply' marks colour with `font-lock-face', which the display
+honours only where Font Lock is on.  A chat buffer is not a
+font-locked buffer, so the colour would simply not appear."
+  (let ((position 0)
+        (length (length text)))
+    (while (< position length)
+      (let ((next (or (next-single-property-change position 'font-lock-face text)
+                      length))
+            (value (get-text-property position 'font-lock-face text)))
+        (when value
+          (put-text-property position next 'face value text))
+        (setq position next))))
+  text)
+
+(defun chat-ui--decorate-shell-text (text)
+  "Return TEXT ready to display: colours applied, tabs expanded.
+
+Shell tools emit SGR escapes when they think they are talking to a
+terminal.  Left alone they show up as literal `ESC[0m' noise, so they are
+turned into faces -- which is also the colour the output is supposed to
+have."
+  (chat-ui--expand-tabs
+   (if (require 'ansi-color nil t)
+       (chat-ui--as-display-faces (copy-sequence (ansi-color-apply text)))
+     text)))
+
+(defun chat-ui--insert-shell-echo (command)
+  "Echo COMMAND in the transcript as the shell line it is."
+  (chat-ui--insert-system-message
+   (concat (propertize "$ " 'face 'chat-ui-shell-prompt-face)
+           (propertize command 'face 'chat-ui-shell-command-face))))
+
+(defun chat-ui--insert-shell-output (output)
+  "Insert shell OUTPUT, aligned and coloured."
+  (let ((text (copy-sequence (chat-ui--decorate-shell-text output))))
+    ;; Appended, so it sits under any colour the output asked for rather
+    ;; than replacing it.
+    (add-face-text-property 0 (length text) 'chat-ui-shell-output-face t text)
+    (chat-ui--insert-system-message text)))
 
 (defun chat-ui--directory-command-target (command)
   "Return the directory a lone `cd' COMMAND asks for, or nil.

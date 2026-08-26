@@ -460,6 +460,25 @@ You can override this with `chat-files-allowed-directories`.
       (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
+## Language
+
+Text you read is localized; text you type is not. Key sequences, command
+names and slash names stay in ASCII, because translating them would make
+the help describe a program that does not exist.
+
+```elisp
+(setq chat-language 'zh-CN)   ; or 'en, or 'auto (the default)
+```
+
+`auto` follows the Emacs language environment, then `LC_ALL`,
+`LC_MESSAGES` and `LANG`. A key with no entry in the chosen catalog reads
+as English rather than as nothing, so a partial translation degrades to
+readable. `M-x chat-i18n-report` says how complete each catalog is.
+
+Simplified Chinese ships complete. Adding a language means one call to
+`chat-i18n-register`; the tests require any shipped translation of the
+help to name exactly the keys and slash commands the English one does.
+
 ## Auto: The Default Command
 
 Shell work comes in runs. Prefixing every line with `!` is the friction

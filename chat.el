@@ -88,6 +88,8 @@ Returns the list of files that were loaded."
 ;; ------------------------------------------------------------------
 
 ;; Load core modules.
+(require 'chat-i18n)
+(require 'chat-i18n-zh-cn)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-command)
@@ -191,6 +193,7 @@ Returns the list of files that were loaded."
 
 (defcustom chat-commands-help
   "Chat Commands:
+  /help [topic]         - This help, or only the lines mentioning topic
   /cancel               - Cancel current AI request
   /new                  - Create new session
   /list                 - List all sessions
@@ -228,6 +231,8 @@ Keys:
   C-c C-t               - Toggle auto-approval for this session
   C-c C-q / C-c C-SPC   - Quote active region / ask about it
   C-c C-d               - Show or fold all detail
+  C-a                   - Go to the start of what you typed
+  TAB                   - Complete: slash commands after /, paths otherwise
   C-c C-h               - This help
 
 Auto (Default Command):
@@ -291,9 +296,21 @@ Wiki Commands:
   /wiki-log             - Open wiki log
 
 Type your message and press RET to send."
-  "Help text displayed for chat commands."
+  "Help text displayed for chat commands.
+
+This is the English text and the reference every translation is checked
+against.  `chat-help-text' is what the surface actually shows; it returns
+the catalog entry for the current language and falls back to this."
   :type 'string
   :group 'chat)
+
+(defun chat-help-text ()
+  "Return the help text in the language the user reads.
+
+Someone who cannot tell what the surface does will not go reading the
+source to find out, so this is the one string worth translating before
+any other."
+  (chat-i18n 'help-text chat-commands-help))
 
 ;; ------------------------------------------------------------------
 ;; Main Entry Points
@@ -427,7 +444,7 @@ how it is drawn, which is why it does not belong in either display."
   (with-current-buffer (get-buffer-create "*Chat Help*")
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (insert chat-commands-help)
+      (insert (chat-help-text))
       (goto-char (point-min))
       (view-mode 1))
     (pop-to-buffer (current-buffer))))
@@ -436,8 +453,17 @@ how it is drawn, which is why it does not belong in either display."
   (let ((map (make-sparse-keymap)))
     ;; Composing and sending.
     (define-key map (kbd "RET") 'chat-ui-send-message)
+    ;; `<S-return>' is the GUI key; `S-RET' is what a terminal sends, and
+    ;; they are genuinely different events.  Binding only the first left
+    ;; terminal users with no way to type a second line.  `C-j' is there
+    ;; because many terminals cannot send either one.
     (define-key map (kbd "<S-return>") 'chat-ui-insert-newline)
+    (define-key map (kbd "S-RET") 'chat-ui-insert-newline)
+    (define-key map (kbd "C-j") 'chat-ui-insert-newline)
     (define-key map (kbd "C-g") 'chat-ui-cancel-response)
+    ;; Completion is the point of the command and path tables; without a
+    ;; key it was reachable only through `M-x'.
+    (define-key map (kbd "TAB") 'completion-at-point)
     ;; Sessions.
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
@@ -467,6 +493,10 @@ how it is drawn, which is why it does not belong in either display."
     ;; Detail.  A fold row carries its own RET and TAB, so these are for
     ;; reaching the detail without first finding a row to stand on.
     (define-key map (kbd "C-c C-d") 'chat-ui-toggle-all-folds)
+    ;; The prompt is buffer text, so the line begins before it.  Land on
+    ;; what you typed instead.
+    (define-key map (kbd "C-a") 'chat-ui-beginning-of-input)
+    (define-key map (kbd "<home>") 'chat-ui-beginning-of-input)
     map)
   "Keymap for chat mode buffers.
 
@@ -567,7 +597,8 @@ the header and in which commands do anything."
   (setq buffer-read-only nil)
   (setq truncate-lines nil)
   (setq-local completion-at-point-functions
-              '(chat-ui--path-completion-at-point))
+              '(chat-ui--command-completion-at-point
+                chat-ui--path-completion-at-point))
   (add-hook 'post-self-insert-hook
             #'chat-ui--maybe-complete-path-after-insert
             nil t)

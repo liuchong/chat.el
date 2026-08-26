@@ -106,10 +106,21 @@
 
 (defconst chat-test--help-key-regexp
   "\\bC-c \\(?:C-SPC\\|C-[a-zA-Z]\\|[a-zA-Z]\\)\\(?:\\s-\\|$\\)"
-  "Matches a whole key sequence in the help, not a prefix of one.
+  "Matches a whole prefixed key sequence, not a prefix of one.
 
 `C-c C-SPC' has to be tried before `C-c C-[a-zA-Z]', or the alternation
 settles for `C-c C' and reports a key nobody wrote.")
+
+(defconst chat-test--help-standalone-key-regexp
+  (concat "^ +\\("
+          "\\(?:[CMSsH]-\\)*"
+          "\\(?:RET\\|TAB\\|SPC\\|DEL\\|ESC\\|<[a-z-]+>\\|[a-zA-Z]\\)"
+          "\\)\\s-+- ")
+  "Matches an unprefixed key at the head of a help line.
+
+The help documents `RET', `C-g' and `C-a' this way, and a regexp that
+only understood `C-c ...' left every one of them unchecked -- which is
+how `C-a' came to be bound without a line naming it.")
 
 (defun chat-test--help-keys ()
   "Return the key sequences `chat-commands-help' names, normalized."
@@ -122,8 +133,11 @@ settles for `C-c C' and reports a key nobody wrote.")
         ;; The trailing whitespace may open the next key on a line of
         ;; two, as in "C-c C-n / C-c C-l".
         (goto-char (match-end 0))
-        (skip-chars-backward " \t")))
-    keys))
+        (skip-chars-backward " \t"))
+      (goto-char (point-min))
+      (while (re-search-forward chat-test--help-standalone-key-regexp nil t)
+        (push (key-description (kbd (match-string 1))) keys)))
+    (delete-dups keys)))
 
 (defun chat-test--bound-keys ()
   "Return the key sequences bound in `chat-mode-map', normalized."
@@ -160,17 +174,26 @@ became one keymap, one of the two would have lost silently."
         (push key missing)))
     (should-not missing)))
 
+(defun chat-test--documented-commands (documented)
+  "Return the commands reachable from the DOCUMENTED key sequences."
+  (delq nil (mapcar (lambda (key) (lookup-key chat-mode-map (kbd key)))
+                    documented)))
+
 (ert-deftest chat-every-bound-key-appears-in-the-help ()
   "A key that only the keymap knows about is a key nobody finds."
-  (let ((documented (chat-test--help-keys))
-        (undocumented nil))
+  (let* ((documented (chat-test--help-keys))
+         (documented-commands (chat-test--documented-commands documented))
+         (undocumented nil))
     (dolist (key (chat-test--bound-keys))
       ;; Sending, newline and cancel are part of using the buffer rather
       ;; than commands to look up, and the help covers them in prose.
-      (unless (or (member key '("RET" "<return>" "S-RET" "S-<return>"
-                                "C-j" "TAB" "C-g"))
+      (unless (or (member key '("RET" "<return>"))
                   (string-match-p "mouse\\|remap\\|menu" key)
-                  (member key documented))
+                  (member key documented)
+                  ;; A second key for a documented command is findable:
+                  ;; `<home>' beside `C-a' needs no line of its own.
+                  (memq (lookup-key chat-mode-map (kbd key))
+                        documented-commands))
         (push key undocumented)))
     (should-not undocumented)))
 
