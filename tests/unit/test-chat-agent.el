@@ -916,5 +916,67 @@ after a steer would file the rest of this turn under the next one."
         ;; On the metadata, not in the content the next request would carry.
         (should (equal (chat-message-content message) "答案"))))))
 
+;;; Stream accumulation
+
+(defun chat-agent-test--publish-all (pieces)
+  "Feed PIECES through an accumulator, returning (DELTAS . ALL)."
+  (let ((text (chat-agent--stream-text-create))
+        (deltas nil))
+    (dolist (piece pieces)
+      (when (chat-agent--stream-add text piece)
+        (push (car (chat-agent--stream-publish text)) deltas)))
+    ;; The tail that never reached the threshold, which the end of a run
+    ;; flushes and which the deltas would otherwise be missing.
+    (let ((tail (car (chat-agent--stream-publish text))))
+      (unless (string-empty-p tail)
+        (push tail deltas)))
+    (cons (nreverse deltas) (chat-agent-stream-text-published text))))
+
+(ert-deftest chat-agent-a-held-back-piece-still-arrives ()
+  "Holding pieces back is only allowed if none of them are lost.
+
+The accumulator publishes less often as a reply grows, so the reply that
+stops arriving before the next publication is the one that would silently
+lose its tail."
+  (let ((chat-agent-stream-publish-fraction 8)
+        (text (chat-agent--stream-text-create)))
+    ;; Long enough that the last pieces cannot reach the threshold.
+    (dotimes (_ 400)
+      (when (chat-agent--stream-add text "0123456789")
+        (chat-agent--stream-publish text)))
+    (should (equal (chat-agent--stream-all text)
+                   (mapconcat #'identity (make-list 400 "0123456789") "")))))
+
+(ert-deftest chat-agent-a-short-reply-publishes-every-piece ()
+  "Backing off must not cost a normal-length reply its smooth arrival."
+  (let* ((chat-agent-stream-publish-fraction 8)
+         (pieces (make-list 4 "word "))
+         (published (chat-agent-test--publish-all pieces)))
+    (should (equal (car published) pieces))
+    (should (equal (cdr published) "word word word word "))))
+
+(ert-deftest chat-agent-a-long-reply-is-not-copied-once-per-piece ()
+  "The reply that cost 165 times its own size to accumulate.
+
+Measured on the longest reply in a real log -- 340 pieces, 321KB -- the
+`(concat all piece)' accumulator allocated 52MB, half a collection
+threshold spent on one reply.  Publishing has to fall well short of once
+per piece for that to stop being true."
+  (let* ((chat-agent-stream-publish-fraction 8)
+         (pieces (make-list 340 (make-string 967 ?x)))
+         (published (chat-agent-test--publish-all pieces)))
+    (should (< (length (car published)) 60))
+    ;; Fewer, larger steps, carrying exactly what arrived.
+    (should (equal (mapconcat #'identity (car published) "")
+                   (cdr published)))
+    (should (= (length (cdr published)) (* 340 967)))))
+
+(ert-deftest chat-agent-publishing-every-piece-remains-available ()
+  "The back-off is a default, not a decision taken away from the reader."
+  (let* ((chat-agent-stream-publish-fraction 0)
+         (pieces (make-list 50 "0123456789"))
+         (published (chat-agent-test--publish-all pieces)))
+    (should (= (length (car published)) 50))))
+
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here

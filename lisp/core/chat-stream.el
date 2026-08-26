@@ -223,9 +223,13 @@ Handles format: data: {...} or data:{...} (with or without space)"
             (process-put proc 'chat-stream-finish-reason
                          (chat-stream--normalize-finish-reason reason)))
           (when (and (stringp reasoning) (not (string-empty-p reasoning)))
-            (process-put proc 'chat-stream-reasoning
-                         (concat (or (process-get proc 'chat-stream-reasoning) "")
-                                 reasoning)))
+            ;; Pushed rather than concatenated: this is read once, when the
+            ;; stream ends, and rebuilding all of it per delta made a long
+            ;; reasoning trace quadratic to collect.
+            (process-put proc 'chat-stream-reasoning-parts
+                         (cons reasoning
+                               (process-get proc
+                                            'chat-stream-reasoning-parts))))
           (when (equal event-type "error")
             (let ((error-data (chat-stream--alist-get data 'error)))
               (process-put proc 'chat-stream-http-error
@@ -253,11 +257,17 @@ Handles format: data: {...} or data:{...} (with or without space)"
    ((listp raw) raw)
    (t nil)))
 
+(defun chat-stream--reasoning-text (proc)
+  "Return the reasoning PROC accumulated, in arrival order."
+  (when-let ((parts (and proc (process-get proc
+                                           'chat-stream-reasoning-parts))))
+    (apply #'concat (reverse parts))))
+
 (defun chat-stream-native-result (proc)
   "Return accumulated native tool-calls and finish-reason from PROC."
   (let* ((acc (and proc (process-get proc 'chat-stream-tool-calls-acc)))
          (reason (and proc (process-get proc 'chat-stream-finish-reason)))
-         (reasoning (and proc (process-get proc 'chat-stream-reasoning)))
+         (reasoning (chat-stream--reasoning-text proc))
          (calls nil))
     (when acc
       (dotimes (index (length acc))

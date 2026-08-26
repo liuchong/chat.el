@@ -1988,4 +1988,70 @@ with a face rather than the font, and check `char-displayable-p` before
 drawing -- dropping the mark entirely when the answer is no. A box
 carries nothing, takes a column anyway, and reads as a broken program.
 
-Last updated: 2026-08-26
+### Scanning A Copy Of What Is Left Instead Of Scanning From An Offset
+
+**Problem**: drawing a long reply took 592ms and allocated 986MB -- ten
+times the collection threshold -- to put 320KB on screen once.
+
+**Cause**: the loop over fenced code blocks searched `(substring content
+pos)` and then took the same copy again to read the match groups. Two
+copies of everything remaining, per block, so the cost was the reply's
+length times its number of blocks. It looks linear because there is one
+loop and one pass; the quadratic is inside `substring`.
+
+**Solution**: `string-match` takes a start offset, and the match data it
+leaves is in the original string's coordinates.
+
+```elisp
+(while (< pos len)
+  (if (string-match regexp content pos)      ; not (substring content pos)
+      (let ((block (match-string 1 content)) ; groups read from content
+            (start (match-beginning 0))
+            (end (match-end 0)))
+        ...
+        (setq pos end))
+    ...))
+```
+
+Flat at 0.5MB per 100k afterwards, against 7 -> 20 -> 77 -> 308 before,
+measured at four sizes an octave apart. Two sizes cannot tell linear from
+quadratic; the ratio between them can.
+
+The offset is also more correct than the copy. `^` matches at the start of
+the string it is given, so scanning a copy let it match wherever the copy
+happened to begin -- mid-line, in the middle of a paragraph. With an
+offset it matches only where a line actually starts.
+
+### Handing The Whole Of It Over Every Time Something Arrives
+
+**Problem**: a 321KB reply arriving in 340 pieces allocated 53.6MB, 171
+times the text, before anything was drawn with it.
+
+**Cause**: `(setq all (concat all piece))` per piece. Emacs strings are
+flat and immutable, so this copies everything received so far, every time
+-- and no Lisp fixes that by being a Lisp. Clojure's structure sharing is
+for vectors and maps; its strings are flat too.
+
+**Solution**: hold the pieces in a list, fold them into one string only
+when a consumer is given it, and give consumers it less often as it grows.
+
+```elisp
+(push piece pending)
+(when (>= (* 8 pending-length) (length published))   ; back off as it grows
+  (publish))
+```
+
+A short reply publishes on every piece and is unaffected; a long one
+publishes 36 times instead of 340. Two things this needs to be safe: the
+end of the run must flush whatever never reached the threshold, or a reply
+loses its tail; and every consumer must accept a larger step, which is
+where the quadratic above was found -- backing off made the drawing worse
+before it made it better.
+
+**What it does not fix**: the first send after a restart. Real sessions
+hold small messages, so neither cost was ever on the keystroke path. They
+filled the threshold *during* a reply, and the collection then landed on
+whoever allocated next. Fixing an allocator and fixing a stall are
+different claims, and the measurement has to say which one it supports.
+
+Last updated: 2026-08-27

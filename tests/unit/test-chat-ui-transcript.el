@@ -360,5 +360,96 @@ cannot reach back over it."
            (should (string-match-p "step one text" visible))
            (should (string-match-p "step two text" visible))))))))
 
+;; ------------------------------------------------------------------
+;; Drawing a reply
+;; ------------------------------------------------------------------
+
+(defun chat-ui-transcript-test--fenced (blocks)
+  "Return BLOCKS paragraphs, each followed by a fenced code block."
+  (mapconcat (lambda (index)
+               (format "Paragraph %d.\n\n```elisp\n(marker %d)\n```\n\n"
+                       index index))
+             (number-sequence 1 blocks) ""))
+
+(defun chat-ui-transcript-test--draw-cost (blocks)
+  "Return bytes allocated drawing a reply of BLOCKS blocks."
+  (cl-flet ((allocated ()
+              (let ((counts (memory-use-counts)))
+                (+ (* 16 (nth 0 counts)) (* 8 (nth 2 counts)) (nth 4 counts)))))
+    (let ((content (chat-ui-transcript-test--fenced blocks)))
+      (with-temp-buffer
+        (let ((before (allocated)))
+          (chat-ui--insert-formatted-response content)
+          (- (allocated) before))))))
+
+(ert-deftest chat-ui-transcript-drawing-a-reply-is-linear-in-its-length ()
+  "Drawing searched a fresh copy of the text that remained, per block.
+
+Two copies per block, so a reply cost its length times its number of
+blocks: 320KB of prose and code allocated 986MB and took 592ms, ten times
+a collection threshold to draw one reply once.  Nothing about that is
+visible at the size of a test, so what is asserted is the shape: four
+times the text may not cost sixteen times as much."
+  (let ((small (chat-ui-transcript-test--draw-cost 200))
+        (large (chat-ui-transcript-test--draw-cost 800)))
+    (should (> small 0))
+    (should (< large (* 8 small)))))
+
+(ert-deftest chat-ui-transcript-a-drawn-reply-keeps-its-blocks-and-prose ()
+  "Faces on the blocks, and everything between them still there."
+  (with-temp-buffer
+    (chat-ui--insert-formatted-response
+     "Before.\n\n```elisp\n(one)\n```\n\nBetween.\n\n```\n(two)\n```\n\nAfter.")
+    (let ((text (buffer-string)))
+      (dolist (part '("Before." "(one)" "Between." "(two)" "After."))
+        (should (string-match-p (regexp-quote part) text))))
+    (goto-char (point-min))
+    (should (search-forward "(one)" nil t))
+    ;; A language names the block, so it is drawn as code.
+    (should (eq (get-text-property (match-beginning 0) 'face)
+                'chat-code-block-face))))
+
+(ert-deftest chat-ui-transcript-an-unclosed-block-is-drawn-as-it-arrived ()
+  "The half-arrived block of a reply still streaming."
+  (with-temp-buffer
+    (chat-ui--insert-formatted-response "Text.\n\n```elisp\n(unfinished")
+    (should (equal (buffer-string) "Text.\n\n```elisp\n(unfinished"))))
+
+(ert-deftest chat-ui-transcript-a-batched-update-can-carry-whole-code-blocks ()
+  "The stream now publishes in fewer, larger steps as a reply grows.
+
+Accumulating a reply cost 165 times its own size when every piece was
+handed over, so the agent hands over less often once the reply is long --
+which means one update now carries what a dozen used to.  With small
+pieces a fence spanned several updates and only the last one closed it;
+with a large one a single update opens and closes many.  The append
+resumes from a fence-safe point in the *old* text, so all of the new text
+has to be drawn however much of it arrives at once."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Batched Session" 'kimi))
+          (reply (mapconcat
+                  (lambda (index)
+                    (format "Paragraph %d.\n\n```elisp\n(marker %d)\n```\n\n"
+                            index index))
+                  (number-sequence 1 40) "")))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       ;; Handed over the way the accumulator hands it over: every update
+       ;; is the whole reply so far, and the steps grow with it.
+       (let ((published 0))
+         (while (< published (length reply))
+           (setq published (min (length reply)
+                                (+ published (max 200 (/ published 8)))))
+           (chat-ui--render-response-state (current-buffer)
+                                           chat-ui--live-start
+                                           (substring reply 0 published)
+                                           nil)))
+       (let ((visible (chat-ui-transcript-test--visible)))
+         (dolist (index '(1 2 20 39 40))
+           (should (string-match-p (format "Paragraph %d\\." index) visible))
+           (should (string-match-p (format "(marker %d)" index) visible))))))))
+
 (provide 'test-chat-ui-transcript)
 ;;; test-chat-ui-transcript.el ends here

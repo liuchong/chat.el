@@ -228,6 +228,29 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-reasoning-deltas-keep-their-order ()
+  "Reasoning is collected per delta and read once, at the end.
+
+Rebuilding the whole trace on every delta made a long one quadratic to
+collect, so the deltas are pushed onto a list instead -- which puts them
+in the wrong order unless the read reverses them."
+  (let ((buffer (generate-new-buffer " *chat-stream-reasoning-order*"))
+        proc)
+    (unwind-protect
+        (progn
+          (setq proc (start-process "chat-stream-order" buffer "true"))
+          (dolist (thought '("first" " then" " last"))
+            (chat-stream-accumulate-payload
+             proc
+             (format "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"%s\"}}"
+                     thought)))
+          (should (equal (plist-get (chat-stream-native-result proc) :reasoning)
+                         "first then last")))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest chat-stream-a-request-marks-its-own-phases ()
   "Timing the send only from the UI left a phase nothing could explain.
 

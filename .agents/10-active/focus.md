@@ -320,19 +320,37 @@ count tracks the wire.
 The other 5.19MB was the cold project-instructions read, which the cache
 already reduces to once per Emacs. Per-send allocation is now ~1.6MB.
 
-Which leaves the streaming accumulator as the dominant allocator, and it
-is a design question rather than a fix. `chat-agent-loop.el` rebuilds the
-whole response per chunk; replaying the log's worst response — 340
-chunks, 321KB — through the real handler allocates 59MB, 52MB of it the
-accumulator. Two responses fill the threshold alone. Clojure would not
-help here: its structure sharing is for vectors and maps, and its strings
-are flat and immutable like Emacs's. A buffer would fix the accumulation
-but not the handover, because both consumers want the whole string every
-chunk — tool-call detection across chunk boundaries, and a live render
-that is deliberately a pure function of the whole content. Making the
-live tail append is the real fix and is not started.
+The streaming accumulator was the dominant allocator and no longer is.
+`chat-agent-loop.el` rebuilt the whole reply per piece, so the log's
+worst reply — 340 pieces, 321KB — cost 53.6MB to accumulate, 171 times
+the text. Clojure would not have helped: its structure sharing is for
+vectors and maps, and its strings are flat and immutable like Emacs's.
+Pieces are now held in a list and folded into one string only when the
+reply is published, and publishing backs off as the reply grows — every
+piece while it is short, and past that once the unpublished tail reaches
+an eighth of what is out. 340 handovers became 36, and 53.6MB became
+3.3MB. Nothing is lost: the end of a run flushes whatever never reached
+the threshold. The transport's reasoning accumulator had the same shape
+and is read once, at the end, so it just pushes.
 
-Canonical suite: 1091 tests passing.
+Backing off made the *drawing* worse, which is how the larger one was
+found. `chat-ui--insert-formatted-response` searched a fresh copy of the
+remaining text for each fenced block, and copied it twice, so drawing
+cost length times block count: 320KB of prose and code allocated 986MB
+and took 592ms — ten collection thresholds to draw one reply once.
+`string-match` takes a start offset, which is both linear and more
+correct, since `^` had been matching wherever the copy happened to begin.
+1.74MB and 5ms, and flat at 0.5MB per 100k across four sizes.
+
+Together, the log's worst reply went from 73.5MB and 689ms with five
+collections to 5.9MB and 34ms with none. This is not the first send's
+924ms, though: real sessions hold small messages — 41 of them, 19KB in
+total, longest 8KB — so neither cost was ever on the keystroke path. What
+they were doing was filling the threshold during a long reply, so the
+collection landed on whatever allocated next. The first send after a
+restart still pays for startup garbage that is not this program's.
+
+Canonical suite: 1100 tests passing.
 
 ## Next Stage
 

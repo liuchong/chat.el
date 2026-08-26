@@ -227,10 +227,81 @@ last because that is where a short instruction is actually noticed."
              (chat-agent--finish run 'error err-message)))
          (chat-agent--options-for-turn run))))
 
+;; ------------------------------------------------------------------
+;; Stream Accumulation
+;; ------------------------------------------------------------------
+
+;; A reply arrives in many small pieces and its consumers want all of it
+;; that has arrived, so the obvious accumulator -- `(concat all piece)' --
+;; copies everything received so far on every piece.  Replayed against the
+;; longest reply in a real log, 340 pieces totalling 321KB, that allocated
+;; 52MB: 165 times the text it was carrying, and half of a 100MB collection
+;; threshold spent on one reply.  The collection then lands on whoever
+;; allocates next, which is how a keystroke comes to pay for a reply that
+;; finished a minute earlier.
+;;
+;; So pieces are held in a list and folded into one string only when the
+;; reply is published, and publishing backs off as the reply grows: a short
+;; reply publishes on every piece, and past that a piece publishes once the
+;; unpublished tail reaches a fraction of what is already out.  Total
+;; copying becomes a small multiple of the reply's own length rather than a
+;; multiple of the number of pieces.  What it costs is that the tail of a
+;; very long reply arrives in fewer, larger steps, which is text arriving
+;; faster than anyone reads it.
+
+(defcustom chat-agent-stream-publish-fraction 8
+  "How far a reply may run unpublished, as a divisor of its length.
+
+A piece publishes once the unpublished tail reaches the published length
+divided by this, so short replies publish on every piece and long ones
+back off.  Smaller values publish more often and copy more; a value below
+one publishes every piece, at the cost this divisor exists to avoid."
+  :type 'integer
+  :group 'chat)
+
+(cl-defstruct (chat-agent-stream-text
+               (:constructor chat-agent--stream-text-create)
+               (:copier nil))
+  "Text arriving in pieces.
+PUBLISHED is what consumers have been given; PENDING holds the pieces
+since, in reverse arrival order, and PENDING-LENGTH their total."
+  (published "")
+  (pending nil)
+  (pending-length 0))
+
+(defun chat-agent--stream-add (text piece)
+  "Add PIECE to TEXT.  Return non-nil when TEXT is due to be published."
+  (push piece (chat-agent-stream-text-pending text))
+  (cl-incf (chat-agent-stream-text-pending-length text) (length piece))
+  (or (not (integerp chat-agent-stream-publish-fraction))
+      (< chat-agent-stream-publish-fraction 1)
+      (>= (* chat-agent-stream-publish-fraction
+             (chat-agent-stream-text-pending-length text))
+          (length (chat-agent-stream-text-published text)))))
+
+(defun chat-agent--stream-publish (text)
+  "Fold what is pending in TEXT in, and return (DELTA . ALL).
+DELTA is what this publication adds, ALL everything arrived so far.  A
+single pending piece becomes the delta without being copied."
+  (let* ((pending (chat-agent-stream-text-pending text))
+         (delta (cond ((null pending) "")
+                      ((null (cdr pending)) (car pending))
+                      (t (apply #'concat (nreverse pending))))))
+    (setf (chat-agent-stream-text-pending text) nil
+          (chat-agent-stream-text-pending-length text) 0)
+    (unless (string-empty-p delta)
+      (setf (chat-agent-stream-text-published text)
+            (concat (chat-agent-stream-text-published text) delta)))
+    (cons delta (chat-agent-stream-text-published text))))
+
+(defun chat-agent--stream-all (text)
+  "Return everything TEXT holds, publishing anything still pending."
+  (cdr (chat-agent--stream-publish text)))
+
 (defun chat-agent--dispatch-stream (run)
   "Dispatch RUN through the streaming transport."
-  (let ((content-acc "")
-        (reasoning-acc ""))
+  (let ((content (chat-agent--stream-text-create))
+        (reasoning (chat-agent--stream-text-create)))
     (let* ((request-messages
             (prog1 (chat-agent--request-messages run)
               (chat-log-timing-mark "budget")))
@@ -238,22 +309,24 @@ last because that is where a short instruction is actually noticed."
            (chat-stream-request
             (chat-agent-run-state-model run)
             request-messages
-            (lambda (chunk)
-              (when (and chunk (> (length chunk) 0))
-                (setq content-acc (concat content-acc chunk))
-                (chat-agent--emit run 'stream-chunk
-                                  :text chunk
-                                  :content content-acc)))
+            (lambda (piece)
+              (when (and piece (> (length piece) 0))
+                (when (chat-agent--stream-add content piece)
+                  (let ((published (chat-agent--stream-publish content)))
+                    (chat-agent--emit run 'stream-chunk
+                                      :text (car published)
+                                      :content (cdr published))))))
             (append (list :stream t
                           :on-reasoning
-                          (lambda (chunk)
-                            (when (and chunk (> (length chunk) 0))
-                              (setq reasoning-acc
-                                    (concat reasoning-acc chunk))
-                              (chat-agent--emit
-                               run 'stream-reasoning
-                               :text chunk
-                               :reasoning reasoning-acc))))
+                          (lambda (piece)
+                            (when (and piece (> (length piece) 0))
+                              (when (chat-agent--stream-add reasoning piece)
+                                (let ((published
+                                       (chat-agent--stream-publish reasoning)))
+                                  (chat-agent--emit
+                                   run 'stream-reasoning
+                                   :text (car published)
+                                   :reasoning (cdr published)))))))
                     (chat-agent--options-for-turn run)))))
       (setf (chat-agent-run-state-handle run) proc)
       (let ((inner (process-sentinel proc)))
@@ -279,12 +352,17 @@ last because that is where a short instruction is actually noticed."
                      (chat-agent--finish run 'error stream-error))
                  (chat-agent--handle-result
                   run
-                  (let ((native (chat-stream-native-result p)))
+                  ;; Whatever was still unpublished lands here, so a reply
+                  ;; whose tail never reached the publishing threshold is
+                  ;; still complete by the time it is recorded.
+                  (let ((native (chat-stream-native-result p))
+                        (all (chat-agent--stream-all content)))
                     (chat-agent--emit run 'stream-result
-                                      :content content-acc
-                                      :reasoning reasoning-acc
+                                      :content all
+                                      :reasoning (chat-agent--stream-all
+                                                  reasoning)
                                       :native native)
-                    (append (list :content content-acc
+                    (append (list :content all
                                   :raw-request nil
                                   :raw-response nil)
                             native)))))))))))))
