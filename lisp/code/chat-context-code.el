@@ -1,4 +1,4 @@
-;;; chat-context-code.el --- Context management for code mode -*- lexical-binding: t -*-
+;;; chat-context-code.el --- Project context for code capability -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 chat.el contributors
 ;; License: 1PL (One Public License) - https://license.pub/1pl/
@@ -10,7 +10,7 @@
 
 ;;; Commentary:
 
-;; This module provides intelligent context management for code mode.
+;; This module builds the project context a code-capable session sends.
 ;; It builds context from various sources based on the selected strategy.
 
 ;;; Code:
@@ -22,7 +22,7 @@
 ;; ------------------------------------------------------------------
 
 (defgroup chat-context-code nil
-  "Context management for code mode."
+  "Project context for a session with code capability."
   :group 'chat-code
   :prefix "chat-context-code-")
 
@@ -57,7 +57,7 @@
 ;; ------------------------------------------------------------------
 
 (cl-defstruct chat-code-context
-  "Context object for code mode."
+  "Project context assembled for a code-capable session."
   strategy              ; Context strategy symbol
   budget                ; Token budget
   sources               ; List of context-source structs

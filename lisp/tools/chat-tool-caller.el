@@ -603,12 +603,12 @@ enumerated values."
                   files_write files_replace files_patch apply_patch)))
 
 (defun chat-tool-caller--access-denied-hint (tool-id error-message)
-  "Return ERROR-MESSAGE with a code-mode hint when useful."
+  "Return ERROR-MESSAGE with a hint about code capability when useful."
   (if (and (chat-tool-caller--file-tool-p tool-id)
            (string-match-p "path outside allowed directories" error-message)
            (null (chat-tool-caller--code-project-root)))
       (concat error-message
-              ". Start code mode from the project root or switch this conversation to code mode before searching the repository")
+              ". Start a session from the project root with `chat-code-start', or give this one code capability with `chat-code-from-chat', before searching the repository")
     error-message))
 
 (defun chat-tool-caller--shell-whitelist-approve-p (call)
@@ -644,7 +644,7 @@ buffer used to bind."
 (defun chat-tool-caller--execution-directory (&optional session)
   "Return the working directory for the current tool execution.
 
-A directory SESSION was pointed at wins over the detected code mode
+A directory SESSION was pointed at wins over the detected project
 project root, so tools follow an explicit change of directory.  The
 ambient value is the last resort, because tools can run from a process
 sentinel where the current buffer is not the chat buffer.

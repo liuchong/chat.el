@@ -159,7 +159,7 @@ Returns the list of files that were loaded."
 (require 'chat-request-panel)
 (require 'chat-ui)
 
-;; Load code mode (optional)
+;; Load code capability (optional)
 (when (locate-library "chat-code")
   (require 'chat-context-code)
   (require 'chat-edit)

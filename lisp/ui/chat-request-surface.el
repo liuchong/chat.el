@@ -8,7 +8,7 @@
 
 ;;; Commentary:
 
-;; Shared helpers for live request surfaces used by chat-ui and code-mode.
+;; Shared helpers for the live request surface.
 
 ;;; Code:
 

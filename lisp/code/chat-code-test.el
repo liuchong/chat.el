@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 
-;; This module integrates testing with code mode.
+;; This module integrates test running with code capability.
 ;; Supports running tests, auto-fix, and coverage analysis.
 
 ;;; Code:
@@ -185,7 +185,7 @@ Returns list of failures."
     ;; Create prompt for AI
     (let ((prompt (format "Fix this failing test:\n\nTest: %s\nFile: %s\nError: %s\n\nTest code:\n```\n%s\n```\n\nSource code:\n```\n%s\n```\n\nProvide the fixed test code."
                          test-name file error-info test-code source-code)))
-      ;; Send to code mode
+      ;; Send to the chat surface
       (chat-code--inline-request file test-code prompt "Auto-fix test"))))
 
 (defun chat-code-test--extract-test (file test-name)

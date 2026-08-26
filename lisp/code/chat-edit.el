@@ -1,4 +1,4 @@
-;;; chat-edit.el --- Edit operations for code mode -*- lexical-binding: t -*-
+;;; chat-edit.el --- Edit operations for code capability -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 chat.el contributors
 ;; License: 1PL (One Public License) - https://license.pub/1pl/
@@ -10,7 +10,7 @@
 
 ;;; Commentary:
 
-;; This module provides edit operations for code mode.
+;; This module provides the edit operations code capability adds.
 ;; Implements atomic, reversible code edits with backup support.
 
 ;;; Code:
@@ -23,7 +23,7 @@
 ;; ------------------------------------------------------------------
 
 (defgroup chat-edit nil
-  "Edit operations for code mode."
+  "Edit operations a code-capable session offers."
   :group 'chat-code
   :prefix "chat-edit-")
 

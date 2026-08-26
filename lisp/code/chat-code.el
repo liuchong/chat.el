@@ -73,12 +73,12 @@
   :prefix "chat-code-")
 
 (defcustom chat-code-enabled t
-  "Enable code mode features."
+  "Whether a session may be given code capability."
   :type 'boolean
   :group 'chat-code)
 
 (defcustom chat-code-default-strategy 'balanced
-  "Default context strategy for code mode.
+  "Default context strategy for a session with code capability.
 \='minimal      - Current file only (~2k tokens)
 \='focused      - Current file + related files (~4k tokens)
 \='balanced     - + Symbols + Imports (~8k tokens)
@@ -145,7 +145,7 @@ When making changes:
 - Do not repeat the same blocked tool pattern after access denied, approval denied, or command not allowed
 - Stop using tools once you have enough evidence to answer
 - Keep tool usage efficient, directed, and production quality rather than exploratory for its own sake"
-  "System prompt for code mode."
+  "System prompt for a session with code capability."
   :type 'string
   :group 'chat-code)
 
@@ -160,7 +160,7 @@ When making changes:
     "If a tool request was blocked or denied, do not retry the same pattern without new evidence."
     "If the user gives a short follow-up without restating the path, prefer the current focus file or the most recently inspected file before broad scanning."
     "Once enough evidence exists to answer, stop exploring and answer directly.")
-  "Non-negotiable rules always sent in code mode.")
+  "Non-negotiable rules always sent for a session with code capability.")
 
 (defconst chat-code--coding-best-practices
   '("Prefer concrete code paths, data flow, and call sites over comments or file names."
@@ -170,7 +170,7 @@ When making changes:
     "For debugging, distinguish observed facts from hypotheses."
     "For fixes, prefer root-cause changes over cosmetic patches."
     "When practical, add or update tests that lock in the behavior being changed.")
-  "Reusable programming best practices for code mode.")
+  "Reusable programming best practices sent with code capability.")
 
 (defconst chat-code--editing-protocol-rules
   '("When the user asks for real file changes, use tools instead of printing large code blocks in chat."
@@ -182,7 +182,7 @@ When making changes:
     "If an edit tool fails because the match is ambiguous or stale, read the file again and choose a narrower edit strategy."
     "Do not repeat the same failed edit command without new evidence from the files."
     "When enough evidence exists, stop editing and summarize the actual changes made.")
-  "Editing protocol rules for code mode.")
+  "Editing protocol rules sent with code capability.")
 
 (defcustom chat-code-filetype-map
   '(("\\.py$" . python)
@@ -417,7 +417,7 @@ the default and the reference a translation is checked against."
     chat-code-system-prompt))
 
 (defun chat-code--compose-system-prompt ()
-  "Compose the full code mode system prompt.
+  "Compose the full system prompt a code-capable session sends.
 
 The rule sections stay in the language they were written in.  They are
 dense with things a parser matches literally -- tool names, `AGENTS.md',
@@ -575,11 +575,20 @@ recorded."
 
 ;;;###autoload
 (defun chat-code-start (&optional project-root)
-  "Start a code mode session for the current project.
+  "Start a new chat session with code capability, rooted at this project.
+
+Capability is a property of a session rather than a surface to switch
+into, so this is a constructor: it makes a session, turns the capability
+on and points it at the detected project root.  It stays a separate
+command from `chat-new-session' because rooting a conversation at a
+project is a decision worth making when the conversation begins, and from
+`chat-code-from-chat' because that one adds the capability to a
+conversation already under way.
+
 Optional PROJECT-ROOT overrides the detected project root."
   (interactive)
   (unless chat-code-enabled
-    (error "Code mode is not enabled. Set chat-code-enabled to t"))
+    (error "Code capability is not enabled. Set chat-code-enabled to t"))
   (let* ((project-root (or project-root (chat-code--detect-project-root)))
          (session-name (format "Code: %s"
                                (file-name-nondirectory
@@ -589,11 +598,11 @@ Optional PROJECT-ROOT overrides the detected project root."
 
 ;;;###autoload
 (defun chat-code-for-file (file-path)
-  "Start code mode focused on FILE-PATH."
+  "Start a session with code capability, focused on FILE-PATH."
   (interactive
    (list (read-file-name "Focus file: " nil nil t (buffer-file-name))))
   (unless chat-code-enabled
-    (error "Code mode is not enabled. Set chat-code-enabled to t"))
+    (error "Code capability is not enabled. Set chat-code-enabled to t"))
   (let* ((project-root (chat-code--detect-project-root file-path))
          (session-name (format "Code: %s"
                                (file-name-nondirectory file-path)))
@@ -604,10 +613,10 @@ Optional PROJECT-ROOT overrides the detected project root."
 
 ;;;###autoload
 (defun chat-code-for-selection ()
-  "Start code mode with current selection as context."
+  "Start a session with code capability, focused on the active region."
   (interactive)
   (unless chat-code-enabled
-    (error "Code mode is not enabled. Set chat-code-enabled to t"))
+    (error "Code capability is not enabled. Set chat-code-enabled to t"))
   (let* ((file-path (buffer-file-name))
          (_ (unless file-path
               (error "Buffer is not visiting a file")))
@@ -626,10 +635,13 @@ Optional PROJECT-ROOT overrides the detected project root."
 
 ;;;###autoload
 (defun chat-code-from-chat ()
-  "Switch current chat session to code mode."
+  "Give the current session code capability.
+
+The conversation is kept: capability is a property of a session, so there
+is nothing to switch to and nothing to carry across."
   (interactive)
   (unless chat-code-enabled
-    (error "Code mode is not enabled. Set chat-code-enabled to t"))
+    (error "Code capability is not enabled. Set chat-code-enabled to t"))
   (unless (and (boundp 'chat--current-session) chat--current-session)
     (error "Not in a chat buffer"))
   ;; Enabling capability on the session in hand, rather than creating one

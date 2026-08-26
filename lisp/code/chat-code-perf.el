@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 
-;; This module provides performance optimizations for code mode.
+;; This module provides performance optimizations for code capability.
 ;; Features: incremental indexing, background indexing, cache management.
 
 ;;; Code:

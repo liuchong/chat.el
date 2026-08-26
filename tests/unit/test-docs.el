@@ -9,6 +9,13 @@
 ;; before, and nothing noticed.  These tests read the docs the way a
 ;; user would -- take every `M-x' invocation at face value -- and fail
 ;; when one of them is not a command.
+;;
+;; Docstrings are documentation too, and were left out of that the first
+;; time.  When the two surfaces merged, the Markdown was cleaned of `code
+;; mode' and the docstrings were not, so `M-x chat-code-start' went on
+;; offering to "start a code mode session" for months -- and `M-x' is the
+;; one place a docstring is read.  Checking one and not the other is the
+;; same blind spot as a one-way consistency test.
 
 ;;; Code:
 
@@ -84,6 +91,55 @@ chat buffer."
               (push (format "%s:%d: %s" file (line-number-at-pos)
                             (match-string 0))
                     stale))))))
+    (should-not stale)))
+
+(defconst test-docs-dead-terms
+  "code mode\\|\\*chat:code:\\|chat-code-mode"
+  "Names for things the merge removed.
+
+`code mode' was a major mode, a buffer and a second copy of the request
+pipeline.  None of it exists: a coding session is an ordinary chat buffer
+whose session carries project context.  The term has to go with it, or
+it stays in circulation and gets written into the next thing.")
+
+(defun test-docs-chat-symbols (predicate)
+  "Return every `chat-' symbol satisfying PREDICATE."
+  (let (found)
+    (mapatoms
+     (lambda (symbol)
+       (when (and (string-prefix-p "chat-" (symbol-name symbol))
+                  (funcall predicate symbol))
+         (push symbol found))))
+    found))
+
+(ert-deftest test-docs-no-command-offers-a-mode-that-was-removed ()
+  "A docstring is what `M-x' shows, and it has to describe this program.
+
+This is the direction the doc tests were missing.  The Markdown was
+checked and the docstrings were not, so every `chat-code-*' entry point
+went on describing itself as starting a mode that had been deleted --
+visible in the completion list, which is exactly where someone looking
+for the command reads it."
+  (let ((commands (test-docs-chat-symbols #'commandp))
+        stale)
+    ;; A predicate that stopped matching would pass this vacuously.
+    (should (> (length commands) 40))
+    (dolist (command commands)
+      (when-let ((doc (documentation command)))
+        (when (string-match-p test-docs-dead-terms doc)
+          (push (symbol-name command) stale))))
+    (should-not stale)))
+
+(ert-deftest test-docs-no-setting-offers-a-mode-that-was-removed ()
+  "Customize shows these, and a stale one describes a program that is not
+this one."
+  (let ((settings (test-docs-chat-symbols #'custom-variable-p))
+        stale)
+    (should (> (length settings) 40))
+    (dolist (setting settings)
+      (when-let ((doc (documentation-property setting 'variable-documentation)))
+        (when (string-match-p test-docs-dead-terms doc)
+          (push (symbol-name setting) stale))))
     (should-not stale)))
 
 (provide 'test-docs)

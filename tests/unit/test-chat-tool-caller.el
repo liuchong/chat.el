@@ -527,8 +527,10 @@ in the same variable and the check has to be the capability itself."
           (should (eq (plist-get approval :decision) 'whitelisted-command))
           (should (equal (plist-get approval :command) "pwd")))))))
 
-(ert-deftest chat-tool-caller-file-access-denied-suggests-code-mode ()
-  "Test file access denial explains how to switch to code mode."
+(ert-deftest chat-tool-caller-file-access-denied-names-a-way-forward ()
+  "A refusal has to say what to do about it, by naming a command that
+exists.  This hint used to advise switching to `code mode', which stopped
+being a thing the reader could do when the two surfaces merged."
   (let ((chat-files-allowed-directories '("/tmp/"))
         (chat-tool-forge--registry (make-hash-table :test 'eq)))
     (chat-files-register-built-in-tools)
@@ -537,7 +539,10 @@ in the same variable and the check has to be the capability itself."
                      :arguments (("directory" . "/Users/liu/projects/demo")
                                  ("pattern" . "StickerManager"))))))
       (should (string-match-p "Access denied" result))
-      (should (string-match-p "code mode" result)))))
+      (should (string-match-p "chat-code-start" result))
+      (should (string-match-p "chat-code-from-chat" result))
+      (should (commandp 'chat-code-start))
+      (should (commandp 'chat-code-from-chat)))))
 
 (ert-deftest chat-tool-caller-unclosed-fence-does-not-hang ()
   "Test that an unclosed ```json fence terminates instead of looping forever."
