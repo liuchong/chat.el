@@ -141,9 +141,21 @@ The screen is drawn from the record, so a reload cannot show less than
 the live run did -- which it did when the live run kept its steps in a
 buffer region and the record was never read back."
   (chat-ui-transcript-test--with-run ()
-    (let ((live (chat-ui-transcript-test--visible)))
-      (chat-ui-setup-buffer chat--current-session)
-      (should (equal (chat-ui-transcript-test--visible) live)))))
+    (let ((live (chat-ui-transcript-test--visible))
+          (id (chat-session-id chat--current-session)))
+      ;; Equality is only worth asserting if the live screen held the
+      ;; steps in the first place.
+      (should (string-match-p "Looking that up now" live))
+      (should (string-match-p "The answer is 42" live))
+      (chat-session-save chat--current-session)
+      ;; A reopen is a fresh buffer over a session read back from disk,
+      ;; not a redraw of the buffer that still holds the run's state.
+      (with-temp-buffer
+        (let ((reloaded (chat-session-load id)))
+          (should reloaded)
+          (setq-local chat--current-session reloaded)
+          (chat-ui-setup-buffer reloaded)
+          (should (equal (chat-ui-transcript-test--visible) live)))))))
 
 ;; ------------------------------------------------------------------
 ;; What folds and what does not
