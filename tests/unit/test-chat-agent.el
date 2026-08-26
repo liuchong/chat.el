@@ -213,7 +213,71 @@ car collects the messages of every request."
                                      :timestamp (current-time)))))))
       (let ((sent (caar calls)))
         (should (= (length sent) 2))
-        (should (string= (chat-message-content (cadr sent)) "补充指令"))))))
+        ;; Introduced by a marker saying when it arrived: on the wire only
+        ;; role and content travel, so an injected message that says
+        ;; nothing about itself is indistinguishable from one the user sent
+        ;; before the run began.
+        (should (string-match-p "^\\[arrived while you were working · "
+                                (chat-message-content (cadr sent))))
+        (should (string-match-p "^补充指令$"
+                                (chat-message-content (cadr sent))))))))
+
+(ert-deftest chat-agent-steering-marks-which-input-is-which ()
+  "Several messages injected at once say how many there were and in
+what order.  Three adjacent user turns with nothing to tell them apart
+left the model unable to say which was the correction."
+  (let ((calls (list nil))
+        (steered nil))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport '((:content "回答")) calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :steering-fn
+             (lambda (_run)
+               (unless steered
+                 (setq steered t)
+                 (list (make-chat-message :id "s1" :role :user
+                                          :content "first"
+                                          :timestamp (current-time))
+                       (make-chat-message :id "s2" :role :user
+                                          :content "second"
+                                          :timestamp (current-time))))))))
+    (let ((sent (caar calls)))
+      (should (= 3 (length sent)))
+      (should (string-match-p "^\\[input 1 of 2 · "
+                              (chat-message-content (nth 1 sent))))
+      (should (string-match-p "^\\[input 2 of 2 · "
+                              (chat-message-content (nth 2 sent)))))))
+
+(ert-deftest chat-agent-steering-leaves-the-session-copy-unmarked ()
+  "The marker is on the wire, not on the message the user can see.
+The same struct is in the session and on screen, where an explanation of
+when it arrived is noise."
+  (let ((calls (list nil))
+        (steered nil)
+        (original (make-chat-message :id "s1" :role :user
+                                    :content "补充"
+                                    :timestamp (current-time))))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport '((:content "回答")) calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :steering-fn (lambda (_run)
+                            (unless steered
+                              (setq steered t)
+                              (list original))))))
+    (should (string= "补充" (chat-message-content original)))))
+
+(ert-deftest chat-agent-steering-gives-the-budget-back ()
+  "A message arriving mid-run gets as many steps as the first one did.
+Steering used to spend the budget rather than bring any: six of eight
+steps spent on the question left the correction two."
+  (let ((run (chat-agent--run-create :max-steps 8 :step-budget 8 :step 5)))
+    (chat-agent-steer run (make-chat-message :id "s1" :role :user
+                                             :content "改一下"))
+    (should (= 13 (chat-agent-run-state-max-steps run)))))
 
 (ert-deftest chat-agent-custom-should-stop-overrides-default ()
   "Test a custom should-stop predicate ends the loop early."
@@ -343,10 +407,17 @@ car collects the messages of every request."
        (make-chat-message :id "steer-b" :role :user :content "second"))
       (funcall saved-success '(:content "initial"))
       (let ((second-request (cadr (car calls))))
-        (should (string= (chat-message-content (nth 2 second-request))
-                         "second"))
-        (should (string= (chat-message-content (nth 3 second-request))
-                         "first"))))))
+        ;; Matched rather than compared: each injected message now carries
+        ;; a marker saying when it arrived and where it sat in the batch.
+        (should (string-match-p "^second$"
+                                (chat-message-content (nth 2 second-request))))
+        (should (string-match-p "^first$"
+                                (chat-message-content (nth 3 second-request))))
+        (should (string-match-p "input 1 of 2"
+                                (chat-message-content (nth 2 second-request))))
+        (should (string-match-p "input 2 of 2"
+                                (chat-message-content
+                                 (nth 3 second-request))))))))
 
 (ert-deftest chat-agent-cancel-runs-registered-cancel-functions ()
   "Test cancellation propagates through registered callbacks."
@@ -514,8 +585,9 @@ car collects the messages of every request."
                :timestamp (current-time))))))))
       (should (chat-agent-run-state-done run))
       (should (= (length (car calls)) 2))
-      (should (string= (chat-message-content (car (last (cadr (car calls)))))
-                       "new constraint")))))
+      (should (string-match-p
+               "^new constraint$"
+               (chat-message-content (car (last (cadr (car calls))))))))))
 
 (ert-deftest chat-agent-plugin-can-block-tool-calls ()
   "Test before-tool-call hooks can block execution."

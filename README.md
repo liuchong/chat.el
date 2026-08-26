@@ -198,6 +198,7 @@ command prefix.
 | `/cd [dir]` | Change the working directory; with no argument, prompt for one |
 | `/pwd` | Show the working directory |
 | `/send <message>` | Send and record it, as plain input does |
+| `/send insert\|queue\|interrupt <message>` | Send it, saying what to do about a reply already running |
 | `/quick <q>`, `?<q>` | Ask the model without recording the exchange |
 | `/queue <note>`, `/flush`, `/drop` | Collect notes and send them as one |
 | `/model [name]` | Retarget this session; with no name, prompt for one |
@@ -552,6 +553,53 @@ its neighbour is not carrying its weight.
 recorded and no tools are used, which is what makes it cheap and what
 makes it forgettable. Its answer is labeled `Assistant (quick)` so a
 reply that will not be there next turn does not look like one that will.
+
+## Sending While Something Is Running
+
+Pressing return during a reply used to mean one thing, and it was never
+chosen: the input joined the run in progress. That is right when you are
+adding to what you asked, wrong when you want the current job finished
+first, and worst when you have changed your mind -- the model carries on
+with a task you withdrew. So it is three things, and you pick:
+
+```
+/send insert <message>     ; join the run in progress (the default)
+/send queue <message>      ; wait for it to finish, then send this on its own
+/send interrupt <message>  ; stop it, keep what it wrote, send this instead
+/send queue                ; make that the default from now on
+```
+
+- **insert** adds your message to the run, for its next step to see. Each
+  message injected this way is introduced to the model by a line saying
+  when it arrived and where it sat in the batch -- otherwise three
+  messages sent in a row reach the model as three adjacent turns with
+  nothing to tell a correction from an addition. Every message also gives
+  the run its step budget back, counted from where it has got to, so the
+  last thing you said gets as many steps as the first thing did.
+- **queue** holds your message until the run ends -- completed, failed or
+  cancelled, because waiting means waiting for an outcome and all three
+  are one. It then goes out as a run of its own, carrying the finished
+  conversation as context. Several queued messages stay separate and go
+  out in order; merging them would be `insert`.
+- **interrupt** stops the run, writes the half-finished reply into the
+  session marked as interrupted, and sends your message. The partial
+  answer is therefore in the context of what follows, the same as a reply
+  that finished.
+
+With nothing running the three are the same thing, because there is
+nothing to join, wait for, or interrupt.
+
+A mode word is only read from an explicit `/send`. Typing `queue the
+build for tomorrow` sends those five words; otherwise the first one would
+be eaten. To send a message that starts with a mode name, name a mode:
+`/send insert queue the build for tomorrow`.
+
+The prompt shows the mode when it is not the default, and shows how many
+messages are waiting when any are.
+
+`/send queue` is not `/queue`. `/queue` collects notes *before* sending
+and `/flush` sends them as one message; `queue` mode waits for a reply
+that is already running. Same word, different moment.
 
 ## Deferred Send
 

@@ -96,6 +96,40 @@ indistinguishable from a hung one."
 (defvar-local chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
 
+(defvar chat-ui--input-was-typed nil
+  "Non-nil while a handler runs on text entered without a command name.
+
+Mode words are read only from an explicit `/send'.  Plain input reaches
+the same handler, so reading them from both would mean that typing
+\"queue the build for tomorrow\" sent \"the build for tomorrow\" and
+queued it.  Asking for `/send queue ...' is a choice; typing is not.
+
+Declared here rather than beside its use: bound with `let', so it has to
+be known as a dynamic variable before the first binding is compiled, or
+the binding is lexical and does nothing at all.")
+
+(defconst chat-ui-send-modes '(insert queue interrupt)
+  "How input is handled when a run is already in progress.
+
+insert     add it to the run in progress, for the next step to see
+queue      hold it until the run finishes, then send it as a new run
+interrupt  stop the run, keep what it produced, and send this instead")
+
+(defcustom chat-send-default-mode 'insert
+  "What pressing return during a run does when no mode is named.
+
+`insert' because that is what it has always done; changing the default
+would change the behaviour of every existing user without their asking."
+  :type '(choice (const insert) (const queue) (const interrupt))
+  :group 'chat)
+
+(defvar-local chat-ui--send-mode nil
+  "Mode chosen for this buffer, or nil to use `chat-send-default-mode'.
+See `chat-ui-send-modes'.")
+
+(defvar-local chat-ui--queued-sends nil
+  "Messages waiting for the current run to finish, in arrival order.")
+
 (defvar-local chat-ui--active-agent-run nil
   "Currently active agent run state, or nil.")
 
@@ -1282,14 +1316,37 @@ never been announced by name."
   (let ((claimed (chat-ui-default-command-claimed-p)))
     (if (not claimed)
         (concat (chat-ui--prompt-model-segment)
+                (chat-ui--prompt-send-mode-segment)
                 (chat-ui--prompt-segment "> "))
       (let ((mark (chat-mark-for-mode (chat-ui-default-command))))
         (concat
          (chat-ui--prompt-mark (car mark) (cdr mark))
          (chat-ui--prompt-segment
-          (format "%s> " (chat-ui--display-command-name
-                          (chat-ui-default-command)))
+          (format "%s%s> "
+                  (chat-ui--display-command-name (chat-ui-default-command))
+                  (chat-ui--prompt-send-mode-text))
           'face 'chat-ui-claimed-prompt))))))
+
+(defun chat-ui--prompt-send-mode-text ()
+  "Return how the chosen send mode reads in the prompt, or \"\".
+
+Shown only when it is not the default, and only when something is
+waiting.  A mode that is in force silently is a mode that cannot explain
+why the same keystroke inserted this time and queued last time; a mode
+shown always is clutter on a line most people never change."
+  (let ((mode (chat-ui-send-mode))
+        (waiting (length chat-ui--queued-sends)))
+    (cond
+     ((> waiting 0) (format " %s:%d" (chat-ui--send-mode-name mode) waiting))
+     ((eq mode chat-send-default-mode) "")
+     (t (format " %s" (chat-ui--send-mode-name mode))))))
+
+(defun chat-ui--prompt-send-mode-segment ()
+  "Return the send mode as a prompt segment, or \"\" when there is none."
+  (let ((text (chat-ui--prompt-send-mode-text)))
+    (if (string-empty-p text)
+        ""
+      (chat-ui--prompt-segment text 'face 'chat-ui-prompt-model))))
 
 (defun chat-ui--input-prompt-bounds ()
   "Return the extent of the drawn prompt as a cons, or nil when none is drawn."
@@ -1421,9 +1478,16 @@ where some of it is."
        (control
         (chat-ui--clear-input input-start input-end)
         (funcall control (plist-get command :arg)))
+       ;; Through the send path rather than straight to steering: an
+       ;; explicit `/send queue ...' during a run has to be read as a
+       ;; command, and this branch used to swallow it as prose.
        ((chat-agent-active-p chat-ui--active-agent-run)
         (chat-ui--clear-input input-start input-end)
-        (chat-ui--steer-active-agent (chat-ui--command-message-text command)))
+        (if (eq (plist-get command :kind) 'slash)
+            (chat-ui--dispatch-command command)
+          (let ((chat-ui--input-was-typed t))
+            (chat-ui--send-in-mode (chat-ui--command-message-text command)
+                                   (chat-ui-send-mode)))))
        ((chat-ui--response-active-p)
         (message "%s" (chat-i18n 'request-in-progress
                           "A response is already in progress. Cancel it before sending another message.")))
@@ -1631,7 +1695,10 @@ mode the reader cannot see."
 
 (defun chat-ui--dispatch-plain-input (text)
   "Run TEXT through the command that currently holds plain input."
-  (let ((handler (chat-ui--command-handler (chat-ui-default-command))))
+  (let ((handler (chat-ui--command-handler (chat-ui-default-command)))
+        ;; Marked so that the handler knows the user did not name it, and
+        ;; therefore does not read the first word as an argument to it.
+        (chat-ui--input-was-typed t))
     (if handler
         (funcall handler text)
       (chat-ui--send-user-message text))))
@@ -1807,6 +1874,37 @@ provider and reads identically to the one that is."
       (message "%s" (chat-i18n 'shell-usage "Usage: !<command>"))
     (chat-ui--handle-shell-command arg)))
 
+;; ------------------------------------------------------------------
+;; Sending while something is already running
+;; ------------------------------------------------------------------
+
+;; Pressing return during a run had one meaning, and it was never chosen:
+;; the input was injected into the run in progress.  That is right when the
+;; user is adding to what they asked, wrong when they want the current job
+;; finished first, and worst when they have changed their mind -- the model
+;; carries on with a task that has been withdrawn.  So three meanings, and
+;; the user picks.  Spec 010.
+
+(defun chat-ui-send-mode ()
+  "Return the mode in force for this buffer."
+  (or chat-ui--send-mode chat-send-default-mode))
+
+(defun chat-ui--send-mode-name (mode)
+  "Return MODE as it is written in a command."
+  (symbol-name mode))
+
+(defun chat-ui--split-send-mode (arg)
+  "Return (MODE . REST) for ARG, or nil when it names no mode.
+
+Only the first word, and only when it is exactly a mode name."
+  (let* ((trimmed (string-trim arg))
+         (space (string-match-p "[ \t\n]" trimmed))
+         (head (if space (substring trimmed 0 space) trimmed))
+         (rest (if space (string-trim (substring trimmed space)) "")))
+    (when-let ((mode (car (member (intern-soft (downcase head))
+                                  chat-ui-send-modes))))
+      (cons mode rest))))
+
 (defun chat-ui--command-send (arg)
   "Send ARG to the model as a recorded turn, or flush the queue when empty.
 
@@ -1814,13 +1912,96 @@ This is the name of what plain input has always done: recorded in the
 session, answered by a run that may reason and use tools over several
 steps.  It needed a name so that auto has somewhere to return to, and so
 that the main way of using the surface is not the only thing on it with
-no name."
-  (if (string-empty-p arg)
+no name.
+
+ARG may begin with a mode name, which applies to this message, or consist
+of one, which changes the mode for later ones."
+  (let ((split (and (not chat-ui--input-was-typed)
+                    (chat-ui--split-send-mode arg))))
+    (cond
+     ((and split (string-empty-p (cdr split)))
+      (chat-ui--set-send-mode (car split)))
+     (split
+      (chat-ui--send-in-mode (cdr split) (car split)))
+     ((string-empty-p arg)
       (if (chat-ui--queue-entries)
           (chat-ui--command-flush "")
         (message "%s" (chat-i18n 'send-usage
-                                 "Usage: /send <message>, or /send alone to send the queue.")))
-    (chat-ui--send-user-message arg)))
+                                 "Usage: /send <message>, or /send alone to send the queue."))))
+     (t (chat-ui--send-in-mode arg (chat-ui-send-mode))))))
+
+(defun chat-ui--set-send-mode (mode)
+  "Make MODE what pressing return during a run does in this buffer."
+  (setq chat-ui--send-mode mode)
+  (force-mode-line-update)
+  (message (chat-i18n 'send-mode-set "Sending during a run now: %s")
+           (chat-ui--send-mode-name mode)))
+
+(defun chat-ui--send-in-mode (content mode)
+  "Send CONTENT, handling a run already in progress according to MODE.
+
+With nothing running the three modes are the same thing, because there is
+nothing to insert into, wait for, or interrupt."
+  (cond
+   ((not (chat-agent-active-p chat-ui--active-agent-run))
+    (chat-ui--send-user-message content))
+   ((eq mode 'queue) (chat-ui--queue-send content))
+   ((eq mode 'interrupt) (chat-ui--interrupt-with content))
+   (t (chat-ui--steer-active-agent content))))
+
+(defun chat-ui--queue-send (content)
+  "Hold CONTENT until the current run finishes, then send it on its own."
+  (setq chat-ui--queued-sends (append chat-ui--queued-sends (list content)))
+  (message (chat-i18n 'send-queued-count
+                      "Queued until this response finishes (%d waiting).")
+           (length chat-ui--queued-sends)))
+
+(defun chat-ui--drain-queued-sends ()
+  "Send the first message waiting for a run that has just finished.
+
+One at a time, each as a run of its own.  Combining them would be
+`insert', and someone who chose `queue' chose not to combine them.  The
+rest stay queued and follow as each run ends.
+
+Sent whatever the finished run's status was, cancelled and failed
+included: waiting meant waiting for an outcome, and a failure is one.
+Swallowing the input would be worse than carrying a failure forward."
+  (when-let ((next (pop chat-ui--queued-sends)))
+    ;; Through a timer so that the send does not run inside the event
+    ;; handler of the run it was waiting for, which is still finishing.
+    (let ((buffer (current-buffer)))
+      (run-at-time
+       0 nil
+       (lambda ()
+         (when (buffer-live-p buffer)
+           (with-current-buffer buffer
+             (chat-ui--send-user-message next))))))))
+
+(defconst chat-ui--interrupted-marker "[interrupted after %s characters]"
+  "How a reply cut short introduces itself to later turns.")
+
+(defun chat-ui--interrupt-with (content)
+  "Stop the current run, keep what it produced, and send CONTENT instead.
+
+Keeping it is the part that did not exist.  A cancelled run's in-flight
+text was dropped -- the stream sentinel skips the result handler once
+cancelled, and the UI's `cancelled' branch only cleans up -- so \"the
+partial result is used as context\" had nothing to refer to.  Steps that
+had already completed were always kept; this is about the one in flight."
+  (let ((partial (string-trim (or chat-ui--live-response-content ""))))
+    (unless (string-empty-p partial)
+      (chat-session-add-message
+       chat--current-session
+       (make-chat-message
+        :id (chat-session-new-message-id)
+        :role :assistant
+        :content (concat (format chat-ui--interrupted-marker
+                                 (length partial))
+                         "\n" partial)
+        :timestamp (current-time))))
+    (chat-ui-cancel-response)
+    (chat-ui--redraw-conversation)
+    (chat-ui--send-user-message content)))
 
 (defun chat-ui--command-quick (arg)
   "Ask the model ARG once, without recording it in the session."
@@ -2512,7 +2693,12 @@ assistant response being filled in."
              (chat-ui--render-error
               ui-buffer
               (or (plist-get event :reason) "Unknown error"))
-             (message "Error: %s" (plist-get event :reason)))))
+             (message "Error: %s" (plist-get event :reason))))
+          ;; After the status branches, and outside them, because waiting
+          ;; meant waiting for an outcome and every one of these is one.
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (chat-ui--drain-queued-sends))))
          ;; Nothing falls off the end.  The agent emits more kinds of event
          ;; than this handler names, and a `cond' with no final clause drops
          ;; the rest without a word -- which is how a minute of reasoning

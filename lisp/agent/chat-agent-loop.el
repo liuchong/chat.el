@@ -100,6 +100,43 @@ watching a run must not be able to change what the run does.")
         (chat-agent--emit run 'context-transformed
                           :message-count (length messages))))))
 
+(defun chat-agent--steering-marker (index total timestamp)
+  "Return the line that introduces one injected message.
+
+INDEX of TOTAL, sent at TIMESTAMP.  Three messages arriving mid-run used
+to reach the model as three adjacent user turns with nothing to tell them
+apart: the struct's timestamp and id are not on the wire, only role and
+content are.  So the model could not tell a correction from an addition,
+nor which of the three was the latest.
+
+English regardless of interface language.  This is a protocol marker read
+by the model, not a string read by the user; localising it would make the
+same situation look different to different models for no gain."
+  (format "[%sarrived while you were working · %s]"
+          (if (> total 1) (format "input %d of %d · " index total) "")
+          (format-time-string "%H:%M:%S" timestamp)))
+
+(defun chat-agent--annotate-steering (messages)
+  "Return MESSAGES with each one introduced by its position in the batch.
+
+Copies rather than edits: the same structs are already in the session and
+on screen, where the marker would be noise.  It belongs on the wire only."
+  (let ((total (length messages))
+        (index 0))
+    (mapcar
+     (lambda (message)
+       (setq index (1+ index))
+       (if (not (chat-message-p message))
+           message
+         (let ((copy (copy-chat-message message)))
+           (setf (chat-message-content copy)
+                 (concat (chat-agent--steering-marker
+                          index total (chat-message-timestamp message))
+                         "\n"
+                         (or (chat-message-content message) "")))
+           copy)))
+     messages)))
+
 (defun chat-agent--apply-steering (run)
   "Inject queued steering messages, then the optional steering callback."
   (let ((queued (chat-agent--queue-order
@@ -112,8 +149,11 @@ watching a run must not be able to change what the run does.")
     (let ((messages (append queued extra)))
       (when messages
         (setf (chat-agent-run-state-messages run)
-              (append (chat-agent-run-state-messages run) messages))
-        (chat-agent--emit run 'steering :messages messages)))))
+              (append (chat-agent-run-state-messages run)
+                      (chat-agent--annotate-steering messages)))
+        (chat-agent--emit run 'steering
+                          :messages messages
+                          :max-steps (chat-agent-run-state-max-steps run))))))
 
 (defun chat-agent--forced-stop-p (run processed)
   "Return non-nil when RUN explicitly asks to stop after PROCESSED."

@@ -41,6 +41,12 @@
   model messages session transport on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options
+  ;; What a single input is worth, kept apart from `max-steps' so that a
+  ;; later input can be given the same again.  Steering used to spend the
+  ;; budget rather than bring any: a question that took six of eight steps
+  ;; left the correction two, and the correction is usually the part the
+  ;; user actually wanted.
+  step-budget
   (step 0)
   ;; Which turn of the session this run answers.  Settled once, because
   ;; steering adds a user message mid-run and counting them again would

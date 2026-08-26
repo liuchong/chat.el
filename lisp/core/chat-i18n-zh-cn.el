@@ -244,7 +244,11 @@ Wiki（/wiki <子命令>）：
    (empty-message . "不能发送空消息")
    (input-history-empty . "还没有输入历史")
    (input-history-oldest . "已经是最早的输入")
-   (send-usage . "用法：/send <消息>；单独写 /send 则把攒下的内容发出。")
+   (send-usage . "用法：/send <消息>；单独写 /send 则把攒下的内容发出。\n\
+运行中再发送：/send insert|queue|interrupt <消息>；只写模式名则改默认。")
+   (send-mode-set . "运行中再发送，现在是：%s")
+   (send-queued-count . "已排队，等这次回复跑完再发（%d 条在等）。")
+   (send-interrupted . "已打断，保留了已经生成的部分。")
    (request-in-progress . "已有回复正在生成。先取消它再发送新消息。")
    (request-cancelled . "请求已取消。")
    (message-queued . "消息已排入正在进行的回复。")

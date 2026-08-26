@@ -71,6 +71,8 @@ Events are delivered synchronously through :on-event.  The final
               :prepare-next-turn-fn (plist-get config :prepare-next-turn-fn)
               :max-steps (or (plist-get config :max-steps)
                              chat-agent-max-steps)
+              :step-budget (or (plist-get config :max-steps)
+                               chat-agent-max-steps)
               :request-options (plist-get config :request-options)
               :followup-request-options
               (plist-get config :followup-request-options)
@@ -138,10 +140,20 @@ Events are delivered synchronously through :on-event.  The final
 
 (defun chat-agent-steer (run message)
   "Queue MESSAGE to be injected before the next LLM call of RUN.
-The message takes effect after the current tool batch."
+The message takes effect after the current tool batch.
+
+Also gives the run its budget back, counted from where it has got to, so
+that the newest input has as many steps as the first one did.  Without
+this, input arriving mid-run spends the budget instead of bringing any.
+
+Unbounded on purpose: each refresh takes a human pressing return, and a
+human is the exit from that loop.  A model cannot steer itself, so the
+original limit still bounds a model going in circles."
   (when (and (chat-agent-run-state-p run) message)
-    (chat-agent--queue-message
-     run 'steering message)
+    (chat-agent--queue-message run 'steering message)
+    (when-let ((budget (chat-agent-run-state-step-budget run)))
+      (setf (chat-agent-run-state-max-steps run)
+            (+ (chat-agent-run-state-step run) budget)))
     message))
 
 (defun chat-agent-follow-up (run message)
