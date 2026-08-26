@@ -58,25 +58,88 @@ paths root-most first, without duplicates."
                        parent))))
     files))
 
+(defun chat-project--instruction-files (start-directory)
+  "Return the instruction files that apply to START-DIRECTORY."
+  (delete-dups
+   (append
+    (when (file-exists-p chat-project-global-agents-file)
+      (list chat-project-global-agents-file))
+    (chat-project-collect-agents-files start-directory))))
+
+(defun chat-project--merge-files (files)
+  "Return FILES read and joined with a source annotation each, or nil."
+  (when files
+    (string-join
+     (mapcar
+      (lambda (file)
+        (format ";; Project instructions from %s:\n%s"
+                file
+                (string-trim-right
+                 (with-temp-buffer
+                   (insert-file-contents file)
+                   (buffer-string)))))
+      files)
+     "\n\n")))
+
 (defun chat-project--merged-text (start-directory)
   "Return the merged instruction files for START-DIRECTORY, or nil."
-  (let ((files (delete-dups
-                (append
-                 (when (file-exists-p chat-project-global-agents-file)
-                   (list chat-project-global-agents-file))
-                 (chat-project-collect-agents-files start-directory)))))
-    (when files
-      (string-join
-       (mapcar
-        (lambda (file)
-          (format ";; Project instructions from %s:\n%s"
-                  file
-                  (string-trim-right
-                   (with-temp-buffer
-                     (insert-file-contents file)
-                     (buffer-string)))))
-        files)
-       "\n\n"))))
+  (chat-project--merge-files
+   (chat-project--instruction-files start-directory)))
+
+;; ------------------------------------------------------------------
+;; Caching
+;; ------------------------------------------------------------------
+;;
+;; Instructions are asked for once per request, and every request used to
+;; read every applicable AGENTS.md off disk and run the resident-span
+;; partition over the result.  On this machine that is two files totalling
+;; some 20KB to 30KB, which measured at a handful of milliseconds -- small
+;; on its own, but repeated work either way, and the garbage it produces is
+;; the kind that buys a collection pause somewhere in the send path.
+;;
+;; The walk that finds the files is not cached, only their contents: it is
+;; under a millisecond, and skipping it would miss an AGENTS.md newly added
+;; in an intermediate directory.  So a hit still notices a new file, a
+;; removed one, and a changed one, and only saves the reading and the
+;; parsing.
+
+(defvar chat-project--cache (make-hash-table :test 'equal)
+  "Cache of parsed instructions, keyed by start directory.
+
+Each value is a list of (STAMPS . RESULT), where STAMPS identifies the
+files that were read and their modification times.")
+
+(defun chat-project--stamps (files)
+  "Return an identity for FILES that changes when any of them does."
+  (mapcar (lambda (file)
+            (cons file
+                  (file-attribute-modification-time
+                   (file-attributes file))))
+          files))
+
+(defun chat-project-cache-clear ()
+  "Forget cached project instructions.
+
+Rarely needed: a changed, added or removed file is noticed on its own.
+This exists for a file whose modification time does not move, which a
+coarse filesystem clock can produce for two writes in the same second."
+  (interactive)
+  (clrhash chat-project--cache))
+
+(defun chat-project--cached (start-directory compute)
+  "Return instructions for START-DIRECTORY, calling COMPUTE on a miss."
+  (let* ((files (chat-project--instruction-files start-directory))
+         (stamps (chat-project--stamps files))
+         ;; The cap is part of the answer, and unlike the file set it
+         ;; leaves no trace in the stamps, so a changed cap would
+         ;; otherwise be served the old truncation.
+         (key (cons start-directory chat-project-instructions-max-chars))
+         (entry (gethash key chat-project--cache)))
+    (if (and entry (equal (car entry) stamps))
+        (cdr entry)
+      (let ((result (funcall compute files)))
+        (puthash key (cons stamps result) chat-project--cache)
+        result))))
 
 (defun chat-project-instructions-partitioned (start-directory)
   "Return instructions for START-DIRECTORY split by declared residency.
@@ -89,19 +152,22 @@ The size cap applies to the compactable part alone.  Truncating the
 merged text by character count, as this once did, cuts whatever happens
 to sit at the end -- so a long instructions file lost its last rules
 without saying so, which is a worse outcome than summarizing them."
-  (when-let ((text (chat-project--merged-text start-directory)))
-    (let* ((parts (chat-context-resident-partition text))
-           (resident (plist-get parts :resident))
-           (compactable (plist-get parts :compactable)))
-      (list :resident resident
-            :compactable
-            (if (and compactable
-                     (> (length compactable)
-                        chat-project-instructions-max-chars))
-                (concat (substring compactable
-                                   0 chat-project-instructions-max-chars)
-                        "\n... [project instructions truncated]")
-              compactable)))))
+  (chat-project--cached
+   start-directory
+   (lambda (files)
+     (when-let ((text (chat-project--merge-files files)))
+       (let* ((parts (chat-context-resident-partition text))
+              (resident (plist-get parts :resident))
+              (compactable (plist-get parts :compactable)))
+         (list :resident resident
+               :compactable
+               (if (and compactable
+                        (> (length compactable)
+                           chat-project-instructions-max-chars))
+                   (concat (substring compactable
+                                      0 chat-project-instructions-max-chars)
+                           "\n... [project instructions truncated]")
+                 compactable)))))))
 
 (defun chat-project-instructions (start-directory)
   "Return merged project instructions for START-DIRECTORY, or nil.

@@ -205,6 +205,30 @@ arrives."
                 (push (list file name call) offenders)))))))
     (should-not offenders)))
 
+(ert-deftest chat-ui-the-paint-before-the-request-cannot-be-skipped ()
+  "`redisplay' with no argument does nothing while input is pending.
+
+It returns nil to say so, and a send is exactly when something is likely
+to be queued -- a held key, an autorepeat, a second RET.  So the one
+paint standing between the keystroke and the request was the one most
+liable to be skipped, which puts the reader back to seeing nothing until
+the command returns.  Asserted in the source because batch mode never
+paints and reports no window worth painting into."
+  (let* ((source (test-chat-ui--function-source
+                  "lisp/ui/chat-ui.el" 'chat-ui--start-agent-run))
+         (calls (test-chat-ui--calls-in source)))
+    (should source)
+    ;; Present at all: without it there is no paint before the transport.
+    (should (memq 'redisplay calls))
+    ;; And forced.  Read as text, since the argument is what distinguishes
+    ;; the two and a flattened symbol list cannot show it.
+    (with-temp-buffer
+      (insert (format "%S" source))
+      (goto-char (point-min))
+      (should (search-forward "(redisplay t)" nil t))
+      (goto-char (point-min))
+      (should-not (search-forward "(redisplay)" nil t)))))
+
 ;; The rule is tested rather than the scrolling, because a batch window
 ;; reports its end as the end of the buffer whatever the buffer holds, so
 ;; every window looks like it is at the bottom and no arrangement of one

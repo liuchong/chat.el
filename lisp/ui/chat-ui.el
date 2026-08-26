@@ -2467,12 +2467,19 @@ assistant response being filled in."
     ;; request was already on the wire, which reads as the send having
     ;; waited for it.
     ;;
-    ;; A paint rather than a deferral because the preparation was measured
-    ;; at about 17ms on a thirty-message session -- moving that off the
-    ;; command loop would buy nothing and cost the synchronous contract the
-    ;; rest of the send path is written against.
+    ;; A paint rather than a deferral because the preparation is a few
+    ;; milliseconds -- moving that off the command loop would buy nothing
+    ;; and cost the synchronous contract the rest of the send path is
+    ;; written against.
+    ;;
+    ;; Forced, because the plain `redisplay' does nothing at all when any
+    ;; input is pending and returns nil to say so.  A send is exactly the
+    ;; moment something is likely to be queued -- a held key, an autorepeat,
+    ;; a second RET -- so the one paint standing between the keystroke and
+    ;; the request was the one most liable to be skipped, and skipping it
+    ;; puts the reader back to seeing nothing until the command returns.
     (chat-ui--render-live-region)
-    (redisplay)
+    (redisplay t)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
            (messages-final
             (chat-context-prepare-messages

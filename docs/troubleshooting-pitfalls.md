@@ -1786,11 +1786,65 @@ indicator at all.
 
 **Solution**: draw the waiting state at the point the request is created,
 not on the next tick, and `redisplay` once before the work. Measure
-before reaching for anything heavier -- the preparation here was about
-17ms on a thirty-message session, so moving it off the command loop would
-have bought nothing and cost the synchronous contract the send path is
-written against. The complaint was never about the 17ms; it was about
-the frame that was never drawn.
+before reaching for anything heavier -- the preparation here was a few
+milliseconds, so moving it off the command loop would have bought nothing
+and cost the synchronous contract the send path is written against. The
+complaint was never about the milliseconds; it was about the frame that
+was never drawn.
+
+### `redisplay` Is The Version That Might Not
+
+**Problem**: after adding the paint above, sending still hitched. Not
+every time, and not for long, but the frame plainly did not arrive with
+the keystroke.
+
+**Cause**: `(redisplay)` does nothing at all when input is pending. It
+returns nil to say so, and nobody was reading the return value. A send is
+exactly the moment something is likely to be queued -- a held key, an
+autorepeat, a second RET behind the first -- so of all the paints in the
+program, the one placed to rescue the send was the one most liable to be
+skipped. `(redisplay t)` is the forced version.
+
+**Solution**: `(redisplay t)` on any paint whose whole purpose is to
+happen before slow work. Reserve the preemptible form for paints that are
+merely nice to have, where losing one to pending input is the right
+outcome. Asserted in the source rather than at runtime, because batch
+mode never paints and reports no window worth painting into, so a test
+that called it could not tell the two apart.
+
+### The Pause You Feel Is The Collection Your Allocation Bought
+
+**Problem**: the send path timed at 3ms on one keystroke and 400ms on the
+next, with nothing different about the two. Instrumenting the callees
+blamed a different function each time -- project instructions on one run,
+the system prompt on another -- which is the signature of measuring
+something that is not there.
+
+**Cause**: garbage collection, landing wherever it landed and billing
+whichever function was running. `gcs-done` and `gc-elapsed` around the
+path showed one collection every second or third send, and the allocation
+that paid for it was mostly repeated work: every send re-read every
+applicable `AGENTS.md` off disk -- 20KB to 30KB here -- and re-ran the
+resident-span partition over the result, throwing all of it away
+afterwards.
+
+**Solution**: measure `gcs-done`, `gc-elapsed` and `memory-use-counts`
+around the path before believing any per-function number, since a
+sampling profiler and wall-clock advice will both blame the innocent.
+Then allocate less rather than collecting later: caching the instructions
+halved the allocation per send, and the collections disappeared from the
+sample entirely. Raising `gc-cons-threshold` around the send was
+considered and rejected -- a deferred pause is still a pause, and it
+lands somewhere less predictable, which trades a measurable problem for
+an unmeasurable one. Note that the effect is worse, not better, in a
+long-lived Emacs with a raised threshold: rarer collections over a larger
+heap are exactly the several-hundred-millisecond kind.
+
+**Related hazard**: the prompt asks whether more than one model is
+configured every time it is drawn, which asks every provider for its key.
+That sweep is 0.4ms with no `auth-source` files present. With
+`~/.authinfo.gpg` in place it becomes a GPG decryption per draw, and the
+prompt is drawn on every send.
 
 ### Setting `face` To `default` Is Not The Same As Not Setting It
 

@@ -126,6 +126,109 @@ outrank the cap or the declaration means nothing."
          (chat-project-agents-file-names '("NO_SUCH_FILE.md")))
      (should-not (chat-project-instructions b)))))
 
+;; ------------------------------------------------------------------
+;; Caching
+;; ------------------------------------------------------------------
+;;
+;; Instructions are read once per request.  Before caching that meant
+;; reading every applicable AGENTS.md off disk and re-running the resident
+;; partition over 20-30KB on every single send.
+
+(defmacro chat-project-test--counting-reads (counter &rest body)
+  "Run BODY with COUNTER incremented for each instructions file read."
+  (declare (indent 1))
+  `(let ((,counter 0))
+     (cl-letf* ((real (symbol-function 'insert-file-contents))
+                ((symbol-function 'insert-file-contents)
+                 (lambda (file &rest args)
+                   (when (string-match-p "AGENTS\\|global" file)
+                     (setq ,counter (1+ ,counter)))
+                   (apply real file args))))
+       ,@body)))
+
+(ert-deftest chat-project-a-second-ask-does-not-read-the-files-again ()
+  "The files and the parse are the expensive part; the walk is not."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "root rules"))
+     (chat-project-cache-clear)
+     (chat-project-test--counting-reads reads
+       (should (chat-project-instructions b))
+       (should (= 1 reads))
+       (dotimes (_ 5) (chat-project-instructions b))
+       (should (= 1 reads))))))
+
+(ert-deftest chat-project-a-changed-file-is-noticed ()
+  "A cache that serves stale rules is worse than no cache."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (path (expand-file-name "AGENTS.md" root)))
+     (with-temp-file path (insert "first rules"))
+     (chat-project-cache-clear)
+     (should (string-match-p "first rules" (chat-project-instructions b)))
+     ;; A modification time the filesystem clock can distinguish, since
+     ;; two writes inside one second are what this cannot see.
+     (with-temp-file path (insert "second rules"))
+     (set-file-times path (time-add (current-time) 2))
+     (should (string-match-p "second rules"
+                             (chat-project-instructions b))))))
+
+(ert-deftest chat-project-a-file-added-further-up-is-noticed ()
+  "Which is why the walk that finds the files is not itself cached."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "root rules"))
+     (chat-project-cache-clear)
+     (should-not (string-match-p "a rules" (chat-project-instructions b)))
+     (with-temp-file (expand-file-name "AGENTS.md" a)
+       (insert "a rules"))
+     (should (string-match-p "a rules" (chat-project-instructions b))))))
+
+(ert-deftest chat-project-a-removed-file-is-noticed ()
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (path (expand-file-name "AGENTS.md" a)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "root rules"))
+     (with-temp-file path (insert "a rules"))
+     (chat-project-cache-clear)
+     (should (string-match-p "a rules" (chat-project-instructions b)))
+     (delete-file path)
+     (should-not (string-match-p "a rules" (chat-project-instructions b))))))
+
+(ert-deftest chat-project-a-changed-cap-is-not-served-the-old-answer ()
+  "The cap shapes the answer and leaves no trace in the file stamps."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert (make-string 500 ?r)))
+     (chat-project-cache-clear)
+     (let ((chat-project-instructions-max-chars 100))
+       (should (string-match-p "truncated" (chat-project-instructions b))))
+     (let ((chat-project-instructions-max-chars 100000))
+       (should-not (string-match-p "truncated"
+                                   (chat-project-instructions b)))))))
+
+(ert-deftest chat-project-two-directories-do-not-share-an-answer ()
+  "Different projects, different rules."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "root rules"))
+     (with-temp-file (expand-file-name "AGENTS.md" a)
+       (insert "a rules"))
+     (chat-project-cache-clear)
+     (should-not (string-match-p "a rules" (chat-project-instructions root)))
+     (should (string-match-p "a rules" (chat-project-instructions b))))))
+
 (ert-deftest chat-ui-prepare-messages-includes-project-instructions ()
   "Test plain chat injects project instructions into the system prompt."
   (chat-project-test--with-tree

@@ -235,7 +235,26 @@ it cannot be synchronous while a menu is being drawn, so the written list
 is the fallback and `chat-llm-provider-models` is the one place that has
 to change.
 
-Canonical suite: 1075 tests passing.
+Sending still hitched after all that, and the cause was two things
+neither of which was the milliseconds. `(redisplay)` does nothing when
+input is pending and returns nil to say so, so of every paint in the
+program the one placed to rescue the send was the one most liable to be
+skipped; it is now `(redisplay t)`. And the same send measured 3ms once
+and 400ms the next, with the blame landing on a different callee each
+time — the signature of garbage collection, confirmed with `gcs-done` and
+`gc-elapsed`. The allocation paying for it was repeated work: every send
+re-read every applicable `AGENTS.md` and re-ran the resident partition
+over 20–30KB. Caching the contents (not the search, which must still
+notice a file added further up) halved allocation per send and took the
+collections out of the sample: keystroke to paint 4.5ms → 1.5ms, one warm
+send 5–13ms → 3.2–3.7ms, three collections over eight sends → none.
+
+The conversation redraw was left alone deliberately. It is the largest
+pre-paint term at 400 messages (17.9ms) but its contract — the record is
+the only source, so append, fold and reopen all produce the same screen —
+is what an append path beside it would break.
+
+Canonical suite: 1082 tests passing.
 
 ## Next Stage
 
