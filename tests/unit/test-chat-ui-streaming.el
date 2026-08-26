@@ -205,6 +205,56 @@ arrives."
                 (push (list file name call) offenders)))))))
     (should-not offenders)))
 
+(ert-deftest chat-ui-a-send-records-where-its-time-went ()
+  "A hitch nobody measured is a hitch nobody can find.
+
+The costs that decide whether RET feels instant live in the display and
+in whatever hooks the reader's configuration installs, and neither exists
+in batch mode or in an `emacs -Q'.  So the path has to measure itself
+where the complaint happens, and the mark before the paint is the one
+that matters: everything ahead of it stands between the keystroke and the
+reader seeing their own question."
+  (let ((log-file (make-temp-file "chat-timing")))
+    (unwind-protect
+        (chat-test-with-temp-dir
+         (let* ((chat-log-file log-file)
+                (chat-log-enabled t)
+                (chat-ui-log-send-timings t)
+                (chat-session-directory temp-dir)
+                (chat-input-history-file
+                 (expand-file-name "history.eld" temp-dir))
+                (session (chat-session-create "Timing" 'kimi)))
+           (with-temp-buffer
+             (setq-local chat--current-session session)
+             (chat-ui-setup-buffer session)
+             (cl-letf (((symbol-function 'chat-agent-start)
+                        (lambda (&rest _) nil)))
+               (goto-char (point-max))
+               (insert "a question")
+               (chat-ui-send-message)))
+           (let ((logged (with-temp-buffer
+                           (insert-file-contents log-file)
+                           (buffer-string))))
+             (should (string-match-p "\\[TIMING\\]" logged))
+             ;; The phases, in the order the path runs them.
+             (should (string-match
+                      (concat "prompt [0-9]+ -> history [0-9]+ -> record [0-9]+"
+                              " -> redraw [0-9]+ -> live [0-9]+ -> PAINT [0-9]+"
+                              " -> start [0-9]+")
+                      logged))
+             ;; And the facts about the buffer that explain an outlier.
+             (should (string-match-p "total [0-9]+ms" logged))
+             (should (string-match-p "post-command hooks" logged)))))
+      (delete-file log-file))))
+
+(ert-deftest chat-ui-timings-can-be-turned-off ()
+  "Measuring is cheap, but nothing that logs every send is unconditional."
+  (let ((chat-ui-log-send-timings nil))
+    (chat-ui--clock-start)
+    (chat-ui--clock "prompt")
+    (should-not chat-ui--send-clock)
+    (should-not chat-ui--send-marks)))
+
 (ert-deftest chat-ui-the-paint-before-the-request-cannot-be-skipped ()
   "`redisplay' with no argument does nothing while input is pending.
 

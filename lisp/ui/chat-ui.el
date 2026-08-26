@@ -1337,15 +1337,80 @@ where some of it is."
 ;; Message Sending
 ;; ------------------------------------------------------------------
 
+;; ------------------------------------------------------------------
+;; Where a send spends its time
+;; ------------------------------------------------------------------
+;;
+;; Nothing on the send path logged anything before the request was
+;; prepared, so a report of "RET hitches" had no evidence in it and had to
+;; be chased by reproducing the path elsewhere.  That does not work: the
+;; costs that matter here live in the display and in whatever hooks the
+;; reader's configuration has installed, and neither exists in batch mode
+;; or in an `emacs -Q'.  So the path measures itself, in the session where
+;; the complaint happens, and says so in one line.
+
+(defvar chat-ui--send-clock nil
+  "Start time of the send in progress, or nil.")
+
+(defvar chat-ui--send-marks nil
+  "Reversed list of (LABEL . MILLISECONDS) for the send in progress.")
+
+(defcustom chat-ui-log-send-timings t
+  "Whether each send records where its time went.
+
+One log line per send, which is what makes a hitch diagnosable after the
+fact rather than only while someone is watching for it."
+  :type 'boolean
+  :group 'chat)
+
+(defun chat-ui--clock-start ()
+  "Begin timing a send."
+  (setq chat-ui--send-clock (and chat-ui-log-send-timings (float-time))
+        chat-ui--send-marks nil))
+
+(defun chat-ui--clock (label)
+  "Record LABEL as reached, with the time since the send began."
+  (when chat-ui--send-clock
+    (push (cons label (* 1000 (- (float-time) chat-ui--send-clock)))
+          chat-ui--send-marks)))
+
+(defun chat-ui--clock-report (what)
+  "Log the marks collected for this send, described as WHAT."
+  (when (and chat-ui--send-clock chat-ui--send-marks)
+    (let ((marks (nreverse chat-ui--send-marks))
+          (previous 0))
+      (chat-log
+       "[TIMING] %s: %s | total %.0fms | buffer %dk, %d messages, undo %s, %d post-command hooks, %d change hooks"
+       what
+       (mapconcat
+        (lambda (mark)
+          (prog1 (format "%s %.0f" (car mark) (- (cdr mark) previous))
+            (setq previous (cdr mark))))
+        marks " -> ")
+       previous
+       (/ (buffer-size) 1024)
+       (if chat--current-session
+           (length (chat-session-messages chat--current-session))
+         0)
+       (cond ((eq buffer-undo-list t) "off")
+             ((listp buffer-undo-list) (format "%d" (length buffer-undo-list)))
+             (t "?"))
+       (length (default-value 'post-command-hook))
+       (length (if (listp after-change-functions) after-change-functions nil))))
+    (setq chat-ui--send-marks nil
+          chat-ui--send-clock nil)))
+
 (defun chat-ui-send-message ()
   "Act on the input area, either as a command or as a message."
   (interactive)
   (when chat--current-session
+    (chat-ui--clock-start)
     ;; Before reading the input rather than after clearing it, so a prompt
     ;; that went missing is back on screen at the moment the reader looks
     ;; for it.  Reading the input afterwards is safe: repairing the prompt
     ;; moves the marker with the typed text, not through it.
     (chat-ui--render-input-prompt)
+    (chat-ui--clock "prompt")
     (let* ((input-start (marker-position chat-ui--input-overlay))
            (input-end (point-max))
            (content (string-trim (buffer-substring-no-properties input-start input-end)))
@@ -1358,6 +1423,7 @@ where some of it is."
       (unless (eq (plist-get command :kind) 'empty)
         (chat-input-history-add content)
         (chat-input-history-reset-position))
+      (chat-ui--clock "history")
       (cond
        ((eq (plist-get command :kind) 'empty)
         (message "%s" (chat-i18n 'empty-message "Cannot send empty message")))
@@ -1592,9 +1658,11 @@ mode the reader cannot see."
                         :content content
                         :timestamp (current-time)))))
         (chat-session-add-message chat--current-session user-msg)
+        (chat-ui--clock "record")
         ;; Drawn from the record rather than inserted directly, so the
         ;; live boundary lands after this message instead of before it.
         (chat-ui--redraw-conversation)
+        (chat-ui--clock "redraw")
         (chat-ui--get-response)))))
 
 (defun chat-ui--stamp-user-message (message)
@@ -2479,7 +2547,12 @@ assistant response being filled in."
     ;; the request was the one most liable to be skipped, and skipping it
     ;; puts the reader back to seeing nothing until the command returns.
     (chat-ui--render-live-region)
+    (chat-ui--clock "live")
     (redisplay t)
+    ;; The one mark worth having: everything before it is what stands
+    ;; between the keystroke and the reader seeing their own question, and
+    ;; the paint's own cost is invisible anywhere but a real frame.
+    (chat-ui--clock "PAINT")
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
            (messages-final
             (chat-context-prepare-messages
@@ -2524,7 +2597,9 @@ assistant response being filled in."
                    (list :timeout chat-ui-tool-followup-timeout)
                    :on-event
                    (chat-ui--make-agent-event-handler
-                    session msg-id ui-buffer assistant-start request-id)))))))
+                    session msg-id ui-buffer assistant-start request-id))))
+      (chat-ui--clock "start")
+      (chat-ui--clock-report (format "%s send" transport)))))
 
 (defface chat-ui-code-block-face
   '((t :inherit font-lock-constant-face :extend t))
