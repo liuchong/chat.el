@@ -256,29 +256,57 @@ typed, where the person already decided what to run."* 人已经决定了要跑�
 
 ## 功能规格
 
-### 模块：chat-approval.el（扩展）
+### 模块：chat-approval.el（模式与判定）
 
 | 接口 | 用途 |
 |---|---|
 | `chat-approval-mode` | 全局默认模式 |
 | `chat-approval-effective-mode (&optional session)` | 会话覆盖后的实际模式 |
 | `chat-approval-set-mode (mode &optional session)` | 切换，`dangerous` 需确认 |
-| `chat-approval-authorize (tool call session observer)` | 唯一入口，返回 t/nil |
-| `chat-approval-grants (&optional session)` | 四个来源合并后的记录列表 |
-| `chat-approval-grant-match (tool call &optional session)` | 命中的记录或 nil |
-| `chat-approval-add-grant (grant)` | 写运行时或会话记录 |
-| `chat-approval-revoke-grant (grant)` | 删记录 |
+| `chat-approval-mode-report (&optional session)` | 当前模式与它来自哪里 |
+| `chat-approval-authorize (tool call session observer)` | 唯一入口 |
+| `chat-approval-rules` | `auto` 下按序求值的规则函数表 |
 | `chat-approval-command-consent-p ()` | 工具内闸门用：这次调用是否已有人看过 |
 
-`chat-approval-request-tool-call` 保留为 `chat-approval-authorize` 的别名，因为
-`chat-tool-caller.el` 两条执行路径都在调它，改名会把一次语义变更混进一次重命名里。
+`chat-approval-authorize` 的返回值不是 t/nil，而是 nil 或 `dangerous` / `grant` /
+`rule` / `human` 之一——即"这次是怎么被允许的"。工具内的闸门需要区分"人看过"和
+"命中授权"，而一个布尔值区分不了；调用方把它绑到 `chat-approval-consent` 上，
+工具据此判断。旧名 `chat-approval-request-tool-call` 保留为别名，只判真假的外部
+调用方不受影响。
+
+### 模块：chat-approval-grants.el（授权记录）
+
+单独一个模块，因为这四份存储、持久化和匹配语义与"谁来判定"是两件事，而且
+`chat-tool-shell` 需要用到匹配规则却不该因此依赖整个审批流程。
+
+| 接口 | 用途 |
+|---|---|
+| `chat-approval-grants (&optional session)` | 四个来源合并，narrowest first |
+| `chat-approval-grant-match (tool-id arguments &optional session)` | 命中的记录或 nil |
+| `chat-approval-grant-pattern-match-p (value pattern)` | 沿用的白名单匹配语义 |
+| `chat-approval-add-grant (grant &optional session)` | 写运行时或会话记录 |
+| `chat-approval-revoke-grant (grant &optional session)` | 删记录，拒绝删内建与用户的 |
+| `chat-approval-clear-runtime-grants ()` | 清空运行时记录并落盘 |
+| `chat-approval-list-grants ()` | 列出全部记录及其来源 |
+
+跨模块的两处依赖用函数变量交出去，而不是反向 require：
+`chat-approval-grant-target-paths-function` 由 `chat-files` 设置（目录记录要知道这次
+调用会碰哪些文件），`chat-approval-grant-command-tail-function` 由 `chat-tool-shell`
+设置（`cd DIR && git log` 要能命中 `git log ` 的记录，而授权存储不该懂 shell 语法）。
 
 ### 模块：chat-session.el（扩展）
 
 - 新增 `approval-mode` 槽，取值 `manual` / `auto` / `dangerous` / `inherit` / nil。
 - 新增 `approval-grants` 槽，存会话级记录，**不进持久化**。
-- `auto-approve` 槽保留并映射：t 视为 `auto`，nil 视为 `inherit`。理由是已有会话文件
-  里存着这个字段，直接丢弃会让老会话的授权状态在升级后变成默认值而没有任何提示。
+- `auto-approve` 槽保留并**只作为读取来源**：t 映射为 `auto`，nil 映射为 `inherit`。
+  理由是已有会话文件里存着这个字段，直接丢弃会让老会话的授权状态在升级后变成默认值
+  而没有任何提示。
+- 关键在于"只作为读取来源"：这个 flag 不得在判定里再有自己的分支。第一版实现里它
+  两边都在——既映射成 `auto`，又在 `chat-approval--auto-approve-p` 里直接放行——
+  于是这类会话报告的是 `auto` 而行为是"全部通过"，规则一条都没跑。同理，
+  `chat-approval-auto-approve-global` 与 `chat-approval-auto-approve-tools` 也一并
+  读成 user 来源的 grant，`chat-toggle-auto-approve-*` 两个命令改为切换模式。
+  一个含义只能有一条路径，否则两条路径会给出不同答案，而模式变成装饰。
 - 子会话构造时复制父会话的 `approval-mode`，不复制会话级记录（那是父会话里那个人对
   那些具体命令的判断，不是给子代理的授权）。
 
@@ -310,6 +338,9 @@ typed, where the person already decided what to run."* 人已经决定了要跑�
 13. 子会话继承父会话的 `approval-mode`；父为 `manual` 时子不为 `auto` 或 `dangerous`。
 14. 任何交互式选项都无法把模式改成 `dangerous`。
 15. 切到 `dangerous` 需要二次确认，且会话中留下一条系统消息。
+15a. 老会话的 `autoApprove: true` 读成 `auto` 之后**确实走规则**：闸门放行的执行，
+    闸门拒绝的被拒，两者都不询问。该 flag 在判定中没有自己的分支。
+15b. `chat-approval-set-mode` 拒绝未知模式，且拒绝时不改变原有取值。
 
 ### 授权记录
 
@@ -351,6 +382,15 @@ typed, where the person already decided what to run."* 人已经决定了要跑�
 36. `/approve` 无参数时报告当前模式与来源（全局还是会话覆盖）。
 37. 请求面板显示本次调用命中的规则名或授权记录来源。
 
+## 实现记录
+
+一处在实现中发现、值得写下来的事：**测试必须能隔离运行时授权。** 第一版实现跑测试时，
+`allow-command` 那条测试写下的运行时记录被后面几条测试命中，于是"应该弹窗"的测试
+拿不到弹窗事件而失败。这不是测试写错，而是这份存储确实是全局可变状态；同一个问题在
+真实使用里表现为"我不记得什么时候允许过这条命令"。所以 `test-helper` 把
+`chat-approval-grants-file` 指向临时目录并默认关掉持久化，另提供
+`chat-test-with-grants` 清空运行时记录——跑一次测试不该在开发者的 Emacs 里留下授权。
+
 ## 待确认问题
 
 **升级路径。** 现有会话文件里 `autoApprove: true` 的会话（实测至少两个）在新模型下
@@ -358,7 +398,7 @@ typed, where the person already decided what to run."* 人已经决定了要跑�
 （`auto` 会拒绝规则外的写操作，原状态不会）。三个选项：读成 `auto`（推荐，最接近原意
 且不静默放宽）、读成 `manual`（最安全，但会让原本无人值守的会话开始弹窗）、
 读成 `dangerous`（保持原行为，但等于把危险模式静默塞给一批老会话，与 §1 冲突）。
-本 spec 取第一个，需要确认。
+本 spec 取第一个，已按此实现，需要确认。
 
 **规则的配置语言。** 本版把 `chat-approval-rules` 定成函数列表，用户要自定义就写一个
 函数。这满足"后期也可以支持用户自定义"，但不是声明式配置。要不要一套声明式规则

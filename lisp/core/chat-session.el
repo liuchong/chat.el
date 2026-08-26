@@ -58,7 +58,9 @@
   leaf-message-id       ; Current leaf message ID for branch UIs
   summaries             ; Durable compaction or branch summary records
   recovery-state        ; Computed interrupted-run recovery metadata
-  auto-approve          ; nil, t, or 'inherit (inherit from global)
+  auto-approve          ; Superseded by approval-mode; still read from old files
+  approval-mode         ; manual, auto, dangerous, 'inherit, or nil
+  approval-grants       ; Session-scoped approval grants; never persisted
   metadata)             ; Additional metadata alist keyed by symbols
 
 (cl-defstruct chat-message
@@ -277,6 +279,7 @@ can change mid-session, and only a full rewrite refreshes the header.
                              (cond ((eq aa t) t)
                                    ((eq aa nil) :json-false)
                                    (t 'inherit))))
+        (cons 'approvalMode (chat-session--approval-mode-wire session))
         (cons 'toolConfig (chat-session--plist-to-alist
                            (chat-session-tool-config session)))
         (cons 'parentSessionId (chat-session-parent-session-id session))
@@ -411,6 +414,7 @@ skipped."
                (cons 'modelName (and state (cdr (assoc 'modelName state))))
                (cons 'messages (nreverse message-datas))
                (cons 'autoApprove (and state (cdr (assoc 'autoApprove state))))
+               (cons 'approvalMode (and state (cdr (assoc 'approvalMode state))))
                (cons 'toolConfig (and state
                                       (assoc 'toolConfig state)
                                       (cdr (assoc 'toolConfig state))))
@@ -634,6 +638,7 @@ branch starts with no messages. SESSION is never truncated."
              :summaries nil
              :recovery-state nil
              :auto-approve (chat-session-auto-approve session)
+             :approval-mode (chat-session-approval-mode session)
              :metadata (chat-session-metadata-merge session metadata))))
       (when index
         (let ((parent-message (nth index messages)))
@@ -694,6 +699,7 @@ branch starts with no messages. SESSION is never truncated."
                       (cond ((eq aa t) t)
                             ((eq aa nil) :json-false)
                             (t 'inherit))))
+    (approvalMode . ,(chat-session--approval-mode-wire session))
     (toolConfig . ,(chat-session--plist-to-alist
                     (chat-session-tool-config session)))
     (parentSessionId . ,(chat-session-parent-session-id session))
@@ -849,6 +855,29 @@ branch starts with no messages. SESSION is never truncated."
    ((null value) nil)
    (t (list value))))
 
+(defun chat-session--approval-mode-wire (session)
+  "Return SESSION's approval mode for the wire format."
+  (let ((mode (chat-session-approval-mode session)))
+    (if (memq mode '(manual auto dangerous))
+        (symbol-name mode)
+      "inherit")))
+
+(defun chat-session--approval-mode-from-wire (value auto-approve-value)
+  "Return an approval mode from wire VALUE, or from AUTO-APPROVE-VALUE.
+
+A session written before modes existed carries only `autoApprove'.  When
+that was true the session was running with approval switched off, so it
+reads back as `auto' rather than as the default: reading it as `manual'
+would start asking in a session someone left unattended, and reading it as
+`dangerous' would hand out the one mode that must be chosen deliberately."
+  (cond
+   ((and (stringp value)
+         (member value '("manual" "auto" "dangerous")))
+    (intern value))
+   ((memq value '(manual auto dangerous)) value)
+   ((eq auto-approve-value t) 'auto)
+   (t 'inherit)))
+
 (defun chat-session--deserialize (data)
   "Convert JSON-parsed DATA to chat-session struct."
   (let ((auto-approve-val (chat-session--alist-get data 'autoApprove)))
@@ -881,6 +910,9 @@ branch starts with no messages. SESSION is never truncated."
                                 ((eq auto-approve-val :json-false) nil)
                                 ((eq auto-approve-val 'inherit) 'inherit)
                                 (t nil))  ; default to nil (follow global)
+            :approval-mode (chat-session--approval-mode-from-wire
+                            (chat-session--alist-get data 'approvalMode)
+                            auto-approve-val)
             :metadata (chat-session--alist-get data 'metadata))))
       (unless (chat-session-leaf-message-id session)
         (setf (chat-session-leaf-message-id session)
@@ -1106,6 +1138,23 @@ VALUE should be t, nil, or `inherit'."
   (setf (chat-session-updated-at session) (current-time))
   (when chat-session-auto-save
     (chat-session-save session)))
+
+(defun chat-session-set-approval-mode (session mode)
+  "Set SESSION's approval MODE.
+MODE is `manual', `auto', `dangerous', `inherit' or nil."
+  (setf (chat-session-approval-mode session) mode)
+  (setf (chat-session-updated-at session) (current-time))
+  (when chat-session-auto-save
+    (chat-session-save session))
+  mode)
+
+(defun chat-session-set-approval-grants (session grants)
+  "Set SESSION's session-scoped approval GRANTS.
+
+These are deliberately not saved.  \"Allow for this session\" is a
+judgement about the session in front of the person who made it; carrying
+it into a reloaded session would outlive what they agreed to."
+  (setf (chat-session-approval-grants session) grants))
 
 (provide 'chat-session)
 ;;; chat-session.el ends here

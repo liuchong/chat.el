@@ -6,11 +6,14 @@
 
 ;;; Code:
 
+(require 'chat-approval-grants)
 (require 'chat-command-gate)
 (require 'chat-files)
 (require 'chat-tool-forge)
 (require 'seq)
 (require 'subr-x)
+
+(declare-function chat-approval-command-consent-p "chat-approval" ())
 
 (defcustom chat-tool-shell-enabled nil
   "Enable shell command execution tool.
@@ -96,21 +99,13 @@ the runner about where the words are: a second implementation that
 tokenised `awk \\='a b\\=' differently would approve one command and run
 another.")
 
-(defun chat-tool-shell--whitelist-patterns ()
-  "Return all whitelist patterns."
-  (append chat-tool-shell-whitelist
-          chat-tool-shell-default-whitelist))
+(defalias 'chat-tool-shell--pattern-match-p
+  #'chat-approval-grant-pattern-match-p
+  "Return non-nil when a command matches a whitelist pattern.
 
-(defun chat-tool-shell--pattern-match-p (command pattern)
-  "Return non-nil when COMMAND matches whitelist PATTERN."
-  (and (> (length pattern) 0)
-       (if (= (aref pattern (1- (length pattern))) ? )
-           (and (>= (length command) (1- (length pattern)))
-                (string-equal (substring command 0 (1- (length pattern)))
-                              (substring pattern 0 (1- (length pattern))))
-                (or (= (length command) (1- (length pattern)))
-                    (= (aref command (1- (length pattern))) ? )))
-         (string-equal command pattern))))
+The rule moved to `chat-approval-grants' when grants for other tools began
+needing it.  One implementation, because the list a user reads and the
+list a call is matched against have to be the same list.")
 
 (defun chat-tool-shell--parse-cd-prefix (command)
   "Parse COMMAND as an optional safe `cd` prefix form.
@@ -265,40 +260,69 @@ truncated and spills into a temporary file."
       (when (buffer-live-p stderr-buffer)
         (kill-buffer stderr-buffer)))))
 
+(defun chat-tool-shell-runnable-tail (command)
+  "Return the part of COMMAND that runs after a safe `cd DIR &&' prefix.
+
+Returns nil when COMMAND has no such prefix or the directory is out of
+bounds.  Registered with `chat-approval-grants' so a whitelisted `cd DIR
+&& git log' still matches the grant for `git log ' without the grant store
+having to know any shell syntax."
+  (when-let ((cd-prefix (chat-tool-shell--parse-cd-prefix command)))
+    (condition-case nil
+        (progn
+          (chat-tool-shell--safe-directory (plist-get cd-prefix :directory))
+          (or (plist-get cd-prefix :rest) ""))
+      (error nil))))
+
+(setq chat-approval-grant-command-tail-function #'chat-tool-shell-runnable-tail)
+
 (defun chat-tool-shell-whitelist-match-p (command)
-  "Return non-nil if COMMAND matches any pattern in whitelist.
-Matching rules:
-- If whitelist pattern ends with space, matches any command with that prefix
-- Otherwise, requires exact match
-- \"ls \" matches \"ls\", \"ls -l\", but not \"lsxxx\""
-  (let ((patterns (chat-tool-shell--whitelist-patterns))
-        (cd-prefix (chat-tool-shell--parse-cd-prefix command)))
-    (or (seq-some (lambda (pattern)
-                    (chat-tool-shell--pattern-match-p command pattern))
-                  patterns)
-        (when cd-prefix
-          (condition-case nil
-              (let ((rest (plist-get cd-prefix :rest)))
-                (chat-tool-shell--safe-directory (plist-get cd-prefix :directory))
-                (or (null rest)
-                    (seq-some (lambda (pattern)
-                                (chat-tool-shell--pattern-match-p rest pattern))
-                              patterns)))
-            (error nil))))))
+  "Return non-nil if COMMAND may run without approval.
+
+Asks `chat-approval-grants', so runtime and session grants count here too
+and not only the two configured lists.  A bare `cd DIR' is allowed on its
+own: it reports a directory and changes nothing."
+  (let ((tail (chat-tool-shell-runnable-tail command)))
+    (or (and tail (string-empty-p tail))
+        (and (chat-approval-grant-match 'shell_execute
+                                        (list (cons "command" command)))
+             t))))
 
 (defun chat-tool-shell-whitelist-add (pattern)
-  "Add PATTERN to the shell command whitelist."
+  "Record PATTERN as a runtime grant for `shell_execute'.
+
+Goes to the runtime store rather than `chat-tool-shell-whitelist', which
+belongs to the user.  Appending to their defcustom put entries they never
+wrote into `M-x customize', risked a `custom-file' save writing them back,
+and left no way to drop what the program had granted without dropping what
+they had configured."
   (interactive "sCommand pattern to whitelist (e.g., 'ls ' or 'git status'): ")
-  (unless (member pattern chat-tool-shell-whitelist)
-    (push pattern chat-tool-shell-whitelist)
-    (message "Added '%s' to shell whitelist" pattern)))
+  (chat-approval-add-grant
+   (make-chat-approval-grant :tool 'shell_execute
+                             :scope 'command
+                             :pattern pattern
+                             :source 'runtime))
+  (when (called-interactively-p 'interactive)
+    (message "Command pattern '%s' will run without approval" pattern)))
 
 (defun chat-tool-shell-whitelist-remove (pattern)
-  "Remove PATTERN from the shell command whitelist."
+  "Drop the runtime grant for PATTERN."
   (interactive
-   (list (completing-read "Remove pattern: " chat-tool-shell-whitelist nil t)))
-  (setq chat-tool-shell-whitelist (delete pattern chat-tool-shell-whitelist))
-  (message "Removed '%s' from shell whitelist" pattern))
+   (list (completing-read
+          "Remove pattern: "
+          (mapcar #'chat-approval-grant-pattern
+                  (seq-filter (lambda (grant)
+                                (eq (chat-approval-grant-scope grant) 'command))
+                              (chat-approval-runtime-grants)))
+          nil t)))
+  (if-let ((grant (seq-find
+                   (lambda (grant)
+                     (equal (chat-approval-grant-pattern grant) pattern))
+                   (chat-approval-runtime-grants))))
+      (progn (chat-approval-revoke-grant grant)
+             (when (called-interactively-p 'interactive)
+               (message "Removed '%s'" pattern)))
+    (setq chat-tool-shell-whitelist (delete pattern chat-tool-shell-whitelist))))
 
 (defun chat-tool-shell-refusal (command)
   "Return why COMMAND may not run here, or nil when it may.
@@ -348,23 +372,36 @@ directory."
 (defun chat-tool-shell-execute (command &optional timeout)
   "Execute shell COMMAND and return output.
 Optional TIMEOUT (seconds) overrides `chat-tool-shell-timeout' and is
-capped by `chat-tool-shell-max-timeout'."
+capped by `chat-tool-shell-max-timeout'.
+
+The command list applies unless somebody already took responsibility for
+this command: a person who read it and approved it, or dangerous mode.
+Checking the list afterwards would not make either case safer, it would
+only overrule the decision -- which is what happened when a user approved
+`make test' at the prompt and watched the gate refuse it anyway.
+
+The list still applies to grants.  A grant skips the question, not the
+rules; only a person looking at this particular command can do that."
   (if (not chat-tool-shell-enabled)
       "Error: Shell tool is disabled"
-    (if-let* ((refusal (chat-tool-shell-refusal command)))
-        (chat-tool-shell--refusal-message refusal command)
-      (condition-case err
-          (let ((cd-prefix (chat-tool-shell--parse-cd-prefix command)))
-            (if cd-prefix
-                (let ((safe-dir (chat-tool-shell--safe-directory
-                                 (plist-get cd-prefix :directory)))
-                      (rest (plist-get cd-prefix :rest)))
-                  (if rest
-                      (let ((default-directory (file-name-as-directory safe-dir)))
-                        (chat-tool-shell-execute rest timeout))
-                    (concat safe-dir "\n")))
-              (chat-tool-shell--execute-argv command timeout)))
-        (error (format "Error executing command: %s" (error-message-string err)))))))
+    (if (and (fboundp 'chat-approval-command-consent-p)
+             (chat-approval-command-consent-p))
+        (chat-tool-shell-execute-unrestricted command timeout)
+      (if-let* ((refusal (chat-tool-shell-refusal command)))
+          (chat-tool-shell--refusal-message refusal command)
+        (condition-case err
+            (let ((cd-prefix (chat-tool-shell--parse-cd-prefix command)))
+              (if cd-prefix
+                  (let ((safe-dir (chat-tool-shell--safe-directory
+                                   (plist-get cd-prefix :directory)))
+                        (rest (plist-get cd-prefix :rest)))
+                    (if rest
+                        (let ((default-directory (file-name-as-directory safe-dir)))
+                          (chat-tool-shell-execute rest timeout))
+                      (concat safe-dir "\n")))
+                (chat-tool-shell--execute-argv command timeout)))
+          (error (format "Error executing command: %s"
+                         (error-message-string err))))))))
 
 ;; Register the tool
 (chat-tool-forge-register

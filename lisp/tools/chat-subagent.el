@@ -84,7 +84,12 @@
       0))
 
 (defun chat-subagent--child-session (name messages parent depth)
-  "Create isolated child session NAME with MESSAGES."
+  "Create isolated child session NAME with MESSAGES.
+
+The child inherits the parent's approval mode and nothing else about
+permission.  Session-scoped grants stay behind: those are one person's
+decisions about the commands they were shown, not a licence handed to a
+sub-agent that will run commands nobody sees."
   (make-chat-session
    :id (chat-session-new-message-id "child-session")
    :name name
@@ -94,6 +99,8 @@
    :messages messages
    :tool-config (copy-tree (and parent
                                 (chat-session-tool-config parent)))
+   :approval-mode (or (and parent (chat-session-approval-mode parent))
+                      'inherit)
    :metadata `((subagentDepth . ,depth))
    :parent-session-id (and parent (chat-session-id parent))))
 

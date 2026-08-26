@@ -38,6 +38,8 @@
 (require 'chat-tool-caller)
 (require 'chat-tool-forge)
 
+(declare-function chat-approval-command-consent-p "chat-approval" ())
+
 (defgroup chat-work nil
   "Work orchestration for chat.el."
   :group 'chat)
@@ -211,9 +213,19 @@ this tool is for, and refusing it would be refusing the tool."
 Refuses before starting anything when the command does not pass
 `chat-work-task-refusal', and says why.  A task that cannot run should
 not appear in the task list as one that failed: the two look the same
-afterwards and mean entirely different things."
-  (when-let* ((refusal (chat-work-task-refusal command)))
-    (error "%s" (chat-work--task-refusal-message refusal command)))
+afterwards and mean entirely different things.
+
+The list is skipped when a person approved this command or dangerous mode
+is on.  Build and test runners are what this tool is for, and they cannot
+all be enumerated in advance -- `make', `cargo', `pytest', a project's own
+script.  A user who reads `make test' and approves it has answered the
+question the list exists to ask, and re-asking it in code only voids their
+answer.  Under `auto' the list still decides, because there nobody read
+anything."
+  (unless (and (fboundp 'chat-approval-command-consent-p)
+               (chat-approval-command-consent-p))
+    (when-let* ((refusal (chat-work-task-refusal command)))
+      (error "%s" (chat-work--task-refusal-message refusal command))))
   (chat-work--ensure-directory)
   (let* ((id (chat-work--task-id))
          (default-directory (file-name-as-directory

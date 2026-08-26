@@ -757,16 +757,6 @@ enumerated values."
               ". Start a session from the project root with `chat-code-start', or give this one code capability with `chat-code-from-chat', before searching the repository")
     error-message))
 
-(defun chat-tool-caller--shell-whitelist-approve-p (call)
-  "Check if shell command in CALL is whitelisted for auto-approval."
-  (let ((arguments (plist-get call :arguments))
-        (require (require 'chat-tool-shell nil t)))
-    (when require
-      (let ((command (cdr (assoc "command" arguments))))
-        (and command
-             (fboundp 'chat-tool-shell-whitelist-match-p)
-             (chat-tool-shell-whitelist-match-p command))))))
-
 (defun chat-tool-caller--code-project-root ()
   "Return the project root of the current session, when it has one.
 
@@ -882,9 +872,10 @@ ERROR-CALLBACK and return a cancellable handle."
                        (chat-tool-caller--permission-metadata tool)))
               (unless (chat-session-tool-enabled-p actual-session tool-id)
                 (error "Tool '%s' is disabled for this session" name))
-              (let ((argv (chat-tool-caller--arguments-to-argv tool arguments)))
-                (if (not (chat-approval-request-tool-call
-                          tool call actual-session observer))
+              (let ((argv (chat-tool-caller--arguments-to-argv tool arguments))
+                    (consent (chat-approval-authorize
+                              tool call actual-session observer)))
+                (if (not consent)
                     (let ((text (format "Approval denied for tool '%s'" name)))
                       (chat-tool-caller--notify
                        observer
@@ -893,28 +884,33 @@ ERROR-CALLBACK and return a cancellable handle."
                              :result-summary text))
                       (funcall error-callback text))
                   (cl-incf (chat-forged-tool-usage-count tool))
-                  (funcall
-                   (chat-forged-tool-async-function tool)
-                   argv
-                   (lambda (result)
-                     (let ((text (chat-tool-caller--stringify-result result)))
-                       (chat-tool-caller--notify
-                        observer
-                        (list :type 'tool-result
-                              :tool name
-                              :result-summary
-                              (chat-tool-caller--tool-result-summary text)))
-                       (funcall success text)))
-                   (lambda (message)
-                     (let ((text (format "Error executing tool '%s': %s"
-                                         name message)))
-                       (chat-tool-caller--notify
-                        observer
-                        (list :type 'tool-error
-                              :tool name
-                              :result-summary
-                              (chat-tool-caller--compact-text text)))
-                       (funcall error-callback text)))))))
+                  ;; The binding has to cover the call that starts the work,
+                  ;; not the callbacks: an async tool validates its command
+                  ;; and spawns the process before returning, and a dynamic
+                  ;; binding would be long gone by the time output arrives.
+                  (let ((chat-approval-consent consent))
+                    (funcall
+                     (chat-forged-tool-async-function tool)
+                     argv
+                     (lambda (result)
+                       (let ((text (chat-tool-caller--stringify-result result)))
+                         (chat-tool-caller--notify
+                          observer
+                          (list :type 'tool-result
+                                :tool name
+                                :result-summary
+                                (chat-tool-caller--tool-result-summary text)))
+                         (funcall success text)))
+                     (lambda (message)
+                       (let ((text (format "Error executing tool '%s': %s"
+                                           name message)))
+                         (chat-tool-caller--notify
+                          observer
+                          (list :type 'tool-error
+                                :tool name
+                                :result-summary
+                                (chat-tool-caller--compact-text text)))
+                         (funcall error-callback text))))))))
           (error
            (let ((text (format "Error executing tool '%s': %s"
                                name (error-message-string err))))
@@ -964,49 +960,34 @@ If SESSION is nil, uses `chat--current-session' if bound."
                      :result-summary result))
               result))
            (t
-              ;; Check shell whitelist first for shell_execute
-              (if (and (eq tool-id 'shell_execute)
-                       (chat-tool-caller--shell-whitelist-approve-p call))
-                  ;; Whitelisted shell command: execute without approval
+            ;; One gate for every tool.  The shell whitelist used to be
+            ;; consulted here and nowhere else, so a grant took effect or did
+            ;; not depending on whether the tool happened to be asynchronous.
+            ;; `chat-approval-authorize' now knows about grants, and reports
+            ;; how it decided so the tool can tell whether a person looked.
+            (let ((consent (chat-approval-authorize
+                            tool call actual-session observer)))
+              (if consent
                   (let ((result
                          (chat-tool-caller--stringify-result
-                          (chat-tool-forge-execute
-                           tool-id
-                           (chat-tool-caller--arguments-to-argv tool arguments)))))
-                    (chat-tool-caller--notify
-                     observer
-                     (append
-                      (list :type 'approval
-                            :tool name
-                            :decision 'whitelisted-command
-                            :approved t)
-                      (chat-tool-caller--event-command-context arguments)))
+                          (let ((chat-approval-consent consent))
+                            (chat-tool-forge-execute
+                             tool-id
+                             (chat-tool-caller--arguments-to-argv
+                              tool arguments))))))
                     (chat-tool-caller--notify
                      observer
                      (list :type 'tool-result
                            :tool name
                            :result-summary (chat-tool-caller--tool-result-summary result)))
                     result)
-                ;; Normal approval flow
-                (if (chat-approval-request-tool-call tool call actual-session observer)
-                    (let ((result
-                           (chat-tool-caller--stringify-result
-                            (chat-tool-forge-execute
-                             tool-id
-                             (chat-tool-caller--arguments-to-argv tool arguments)))))
-                      (chat-tool-caller--notify
-                       observer
-                       (list :type 'tool-result
-                             :tool name
-                             :result-summary (chat-tool-caller--tool-result-summary result)))
-                      result)
-                  (let ((result (format "Approval denied for tool '%s'" name)))
-                    (chat-tool-caller--notify
-                     observer
-                     (list :type 'tool-error
-                           :tool name
-                           :result-summary result))
-                    result))))))
+                (let ((result (format "Approval denied for tool '%s'" name)))
+                  (chat-tool-caller--notify
+                   observer
+                   (list :type 'tool-error
+                         :tool name
+                         :result-summary result))
+                  result))))))
       (error
        (let ((result
               (format "Error executing tool '%s': %s"

@@ -218,7 +218,25 @@ whole rather than to any one part of it.")
             (when auto (format " | %s" (chat-i18n 'status-auto "auto: /%s" auto)))
             (when (> queued 0)
               (format " | %s" (chat-i18n 'status-queued "queued: %d" queued)))
+            (when-let ((approval (chat-ui--status-approval session)))
+              (format " | %s" approval))
             (when label (format " | %s" label)))))
+
+(defun chat-ui--status-approval (session)
+  "Return the approval mode segment for SESSION, or nil when it is the default.
+
+`manual' is not announced, on the same grounds as the baseline command:
+naming the ordinary case every time teaches the reader to skip the field.
+The other two are announced always, and `dangerous' in a face of its own
+-- a user who has forgotten that every command now runs unasked is the
+worst way for this to fail."
+  (pcase (chat-approval-effective-mode session)
+    ('manual nil)
+    ('auto (chat-i18n 'status-approval-auto "approval: auto"))
+    ('dangerous
+     (propertize (chat-i18n 'status-approval-dangerous "approval: DANGEROUS")
+                 'face 'warning))
+    (_ nil)))
 
 (defun chat-ui--render-status-line ()
   "Rewrite the status line in place from the current session."
@@ -227,11 +245,14 @@ whole rather than to any one part of it.")
       (goto-char (point-min))
       (forward-line 1)
       (delete-region (line-beginning-position) (line-end-position))
-      (insert (propertize
-               (chat-ui--status-line
-                (and (boundp 'chat--current-session)
-                     chat--current-session))
-               'face 'shadow)))))
+      (let ((start (point)))
+        (insert (chat-ui--status-line
+                 (and (boundp 'chat--current-session)
+                      chat--current-session)))
+        ;; Appended, so a segment that carries its own face keeps it.  The
+        ;; dangerous-mode warning is the reason: propertizing the whole line
+        ;; would grey it out along with everything else.
+        (add-face-text-property start (point) 'shadow t)))))
 
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
@@ -537,6 +558,7 @@ design was.")
     (:name "save"     :handler chat-ui--command-save)
     (:name "clear"    :handler chat-ui--command-clear)
     (:name "wiki"     :handler chat-wiki-dispatch)
+    (:name "approve"  :handler chat-ui--command-approve)
     (:name "auto"     :handler chat-ui--command-auto))
   "What each slash command is, declared rather than listed per property.
 
@@ -1699,6 +1721,40 @@ mode the reader cannot see."
                   request
                   (chat-ui--repeatable-command-list)))))))
 
+(defun chat-ui--command-approve (arg)
+  "Report or change the approval mode according to ARG.
+
+Named `approve' rather than `auto' because `/auto' already says which
+command plain input runs through.  Two settings under one word would be
+two settings nobody can talk about."
+  (let* ((session (and (boundp 'chat--current-session) chat--current-session))
+         (request (downcase (string-trim (or arg "")))))
+    (cond
+     ((string-empty-p request)
+      (chat-ui--insert-system-message
+       (concat (chat-approval-mode-report session)
+               ". "
+               (chat-i18n 'approval-usage
+                          "/approve manual | auto | dangerous"))))
+     ((member request '("manual" "auto" "dangerous"))
+      (let ((mode (intern request)))
+        (condition-case err
+            (progn
+              (chat-approval-set-mode mode session)
+              (chat-ui--render-default-command)
+              (chat-ui--insert-system-message
+               (if (eq mode 'dangerous)
+                   (chat-i18n 'approval-dangerous-on
+                              "Approval: DANGEROUS -- every tool call runs unasked, and the command gate is off.")
+                 (chat-approval-mode-report session))))
+          (user-error
+           (chat-ui--insert-system-message (error-message-string err))))))
+     (t
+      (chat-ui--insert-system-message
+       (chat-i18n 'approval-unknown-mode
+                  "Unknown approval mode `%s'. One of: manual, auto, dangerous."
+                  request))))))
+
 (defun chat-ui--repeatable-command-list ()
   "Return the repeatable command names as slash-prefixed display text."
   (mapconcat (lambda (name)
@@ -2229,9 +2285,18 @@ there is no second request path to hold it."
                    (plist-get event :index)
                    (plist-get event :tool)))
           ('approval
-           (format "- Approval %s: %s"
-                   (plist-get event :index)
-                   (plist-get event :decision)))
+           ;; The source and the reason are the whole value of this line.
+           ;; "Approval 3: granted" leaves the reader unable to tell a
+           ;; builtin pattern from something they allowed last month, and a
+           ;; refusal with no reason is the failure spec 011 set out to fix.
+           (concat
+            (format "- Approval %s: %s"
+                    (plist-get event :index)
+                    (plist-get event :decision))
+            (when-let ((source (plist-get event :source)))
+              (format " (%s)" source))
+            (when-let ((reason (plist-get event :reason)))
+              (format " -- %s" reason))))
           ('tool-result
            (format "- Tool Result %s: %s"
                    (plist-get event :index)

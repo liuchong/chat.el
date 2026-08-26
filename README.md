@@ -249,10 +249,18 @@ sounds: a command joining four `git` calls with `&&` and a pipe has four
 possible causes of refusal, and a message that distinguishes none of them
 can only be answered by abandoning the approach.
 
-Background tasks are deliberately not open-ended, and the default list
-has no build runners in it, because guessing which ones a project uses
-produces a list that is wrong for every project and reassuring in all of
-them. Add what this machine needs:
+How much that list is worth depends on who is watching, so it is applied
+by mode rather than always (see Approval Modes below). Under `manual` a
+command you read and approved runs as typed: you have already made the
+decision the list exists to make, and checking it afterwards would only
+void your answer. Under `auto` the list decides, because there nobody
+read anything. Under `dangerous` it is not consulted.
+
+Background task commands are deliberately not open-ended for the
+unattended case, and the default list has no build runners in it, because
+guessing which ones a project uses produces a list that is wrong for every
+project and reassuring in all of them. If you run unattended, add what
+this machine needs:
 
 ```elisp
 (add-to-list 'chat-work-task-allowed-commands "cargo")
@@ -380,11 +388,72 @@ tool sensitivity, effects, and call-specific policy, so new write,
 outbound, personal, correspondence, credential, and network capabilities
 do not depend on a manually maintained tool-id list.
 Generated tools also require approval before registration.
-File writing tools can also be whitelisted by directory, so future writes under an approved directory can run without repeated prompts.
 Emacs live-buffer tools are scoped by default: buffer listing and reads stay within the current project or current non-file buffer, and credential-like buffers are hard-denied.
 
 Generated elisp tools must be a single top level `lambda` form.
 This prevents compile time side effects from arbitrary wrapper forms.
+
+## Approval Modes
+
+Who decides whether a tool call runs is one setting with three values,
+reported and changed with `/approve`:
+
+| Mode | Command gate | Asks | For |
+| --- | --- | --- | --- |
+| `manual` | advice: its reason goes in the question, your yes wins | when not already granted | the default |
+| `auto` | authoritative: a refusal is final | never | unattended work |
+| `dangerous` | skipped | never | throwaway environments |
+
+`manual` is the default rather than `auto` because a refusal under `auto`
+cannot be appealed: a reasonable command the rules happen not to cover is
+simply denied, and a user who does not know which mode they are in cannot
+tell that apart from a broken tool. `dangerous` has to be set on purpose
+and asks to confirm; no interactive choice reaches it, because approving
+one command must never be a way to turn asking off altogether. The status
+line names the mode whenever it is not `manual`, `dangerous` in a warning
+face.
+
+`dangerous` still honours `chat-files-allowed-directories` and the tools a
+session has switched off. Those are limits you configured, not questions
+about whether to ask.
+
+A session may override the global default, and a sub-agent inherits the
+mode it was started in rather than choosing its own.
+
+### Grants: What Skips The Question
+
+When `manual` asks, you can allow once, allow for this session, or allow
+from now on — by tool, by command, or by directory for file writes. The
+last two are recorded as grants, and grants come from four places that are
+kept apart:
+
+| Source | Where | Who writes it | Lasts |
+| --- | --- | --- | --- |
+| builtin | `chat-approval-builtin-grants` | nobody, it is code | always |
+| user | `chat-approval-user-grants`, `chat-tool-shell-whitelist` | only you | always |
+| runtime | `~/.chat/approvals.eld` | only chat.el | until revoked |
+| session | the session | only chat.el | until the session ends |
+
+Keeping them apart is the point. Runtime grants used to be pushed onto the
+customisation variables you had set by hand, which put entries you never
+wrote into `M-x customize`, risked a `custom-file` save writing them back,
+and left no way to drop what the program had granted without dropping your
+own configuration too. They also never survived a restart, so "always
+allow" expired when Emacs did.
+
+`M-x chat-approval-list-grants` shows every grant with its source.
+`M-x chat-approval-clear-runtime-grants` drops the ones chat.el recorded
+and leaves builtin and user grants alone; those two cannot be revoked from
+inside, since one is code and the other is yours.
+
+A grant skips the question, not the rules: the command gate still applies
+to it. Only a person looking at a particular command can decide that it
+should run in spite of the rules.
+
+"Allow for this session" grants exactly what was approved. It used to set
+the session's auto-approve flag, which meant one yes to one shell command
+stopped every later tool in that session from asking — the option said
+"this" and did "everything".
 
 ## Step Budget
 
@@ -1045,7 +1114,8 @@ same scoped tool and approval policy as other capabilities.
 | `lisp/llm/chat-llm.el` | Provider abstraction and async request handling |
 | `lisp/core/chat-stream.el` | SSE parsing and chunk handling |
 | `lisp/tools/chat-tool-caller.el` | Tool prompt contract, parsing, and execution |
-| `lisp/core/chat-approval.el` | Approval flow for risky tools and tool creation |
+| `lisp/core/chat-approval.el` | Approval modes, rules, and the one entry point every tool call goes through |
+| `lisp/core/chat-approval-grants.el` | What may skip the question, kept apart by source |
 | `lisp/core/chat-files.el` | Built in file tools and path safety checks |
 | `lisp/core/chat-context.el` | Context trimming and summary generation |
 | `lisp/tools/chat-tool-forge.el` | Tool registry, compilation, loading, and execution |

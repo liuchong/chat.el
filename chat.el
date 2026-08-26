@@ -113,6 +113,7 @@ Returns the list of files that were loaded."
 (require 'chat-knowledge)
 (require 'chat-files)
 (require 'chat-reading)
+(require 'chat-approval-grants)
 (require 'chat-approval)
 (require 'chat-wiki)
 
@@ -277,6 +278,17 @@ Auto (Default Command):
   the status line says `auto: /cmd'. An explicit /command always means
   itself, and while a response is running plain input steers that run
   rather than the default command.
+
+Approval (who decides whether a tool call runs):
+  /approve            - Say which mode is in force, and where it was set
+  /approve manual     - Granted calls run, everything else asks (default)
+  /approve auto       - The rules decide and nothing asks; a refusal is final
+  /approve dangerous  - Everything runs, command gate off; asks to confirm
+  When asked, you can allow once, allow for this session, or allow from now
+  on. The last two are remembered as grants: M-x chat-approval-list-grants
+  shows all of them with their source, and
+  M-x chat-approval-clear-runtime-grants drops the ones chat.el recorded
+  while leaving your own configuration alone.
 
 Language:
   Set `chat-language' for the interface, or leave it at `auto' to follow
@@ -690,24 +702,40 @@ the header and in which commands do anything."
 ;; Auto-Approval Commands
 ;; ------------------------------------------------------------------
 
+(defun chat-set-approval-mode (mode)
+  "Set the approval MODE for the current session."
+  (interactive
+   (list (intern (completing-read
+                  "Approval mode: "
+                  (mapcar #'symbol-name chat-approval-modes)
+                  nil t))))
+  (let ((session (and (boundp 'chat--current-session) chat--current-session)))
+    (chat-approval-set-mode mode session)
+    (message "%s" (chat-approval-mode-report session))))
+
 (defun chat-toggle-auto-approve-global ()
-  "Toggle global auto-approval setting."
+  "Switch the global approval mode between `auto' and `manual'.
+
+Sets the mode rather than a separate flag.  Two settings that both mean
+\"stop asking\" can disagree, and then neither the status line nor the
+user can say which one is in force."
   (interactive)
-  (setq chat-approval-auto-approve-global (not chat-approval-auto-approve-global))
-  (message "Global auto-approval: %s"
-           (if chat-approval-auto-approve-global "enabled" "disabled")))
+  (chat-approval-set-mode
+   (if (eq chat-approval-mode 'auto) 'manual 'auto))
+  (message "%s" (chat-approval-mode-report nil)))
 
 (defun chat-toggle-auto-approve-session ()
-  "Toggle auto-approval for current session."
+  "Switch this session's approval mode between `auto' and `manual'."
   (interactive)
   (if (and (boundp 'chat--current-session) chat--current-session)
       (let* ((session chat--current-session)
-             (current (chat-session-auto-approve session))
-             (new-value (not current)))
-        (chat-session-set-auto-approve session new-value)
-        (message "Session '%s' auto-approval: %s"
+             (mode (if (eq (chat-approval-effective-mode session) 'auto)
+                       'manual
+                     'auto)))
+        (chat-approval-set-mode mode session)
+        (message "Session '%s': %s"
                  (chat-session-name session)
-                 (if new-value "enabled" "disabled")))
+                 (chat-approval-mode-report session)))
     (message "No active session")))
 
 (defun chat-add-to-shell-whitelist (pattern)

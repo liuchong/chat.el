@@ -5,6 +5,10 @@
 (require 'test-helper)
 (require 'chat-code)
 (require 'chat-tool-caller)
+;; Several tests bind `chat-tool-shell-enabled'.  Loading the module here
+;; makes the variable special before that happens; otherwise the first such
+;; binding is lexical and loading the module later fails outright.
+(require 'chat-tool-shell)
 
 (ert-deftest chat-tool-caller-parses-raw-json ()
   "Test parsing a bare JSON tool call."
@@ -329,7 +333,7 @@ A prompt rule without a reason reads as optional."
           (chat-tool-forge--registry (make-hash-table :test 'eq))
           captured-tool)
      (chat-files-register-built-in-tools)
-     (cl-letf (((symbol-function 'chat-approval-request-tool-call)
+     (cl-letf (((symbol-function 'chat-approval-authorize)
                 (lambda (tool _call &optional _session _observer)
                   (setq captured-tool (chat-forged-tool-id tool))
                   nil)))
@@ -369,7 +373,8 @@ A prompt rule without a reason reads as optional."
        (let ((approval (seq-find (lambda (event)
                                    (eq (plist-get event :type) 'approval))
                                  events)))
-         (should (eq (plist-get approval :decision) 'whitelisted-directory))
+         (should (eq (plist-get approval :decision) 'granted))
+         (should (eq (plist-get approval :scope) 'directory))
          (should (equal (plist-get approval :directory) target-dir)))))))
 
 (ert-deftest chat-tool-caller-stringifies-built-in-file-results ()
@@ -556,10 +561,10 @@ in the same variable and the check has to be the capability itself."
           (session (chat-session-create "Approval Session"))
           captured-session)
      (chat-files-register-built-in-tools)
-     (cl-letf (((symbol-function 'chat-approval-request-tool-call)
+     (cl-letf (((symbol-function 'chat-approval-authorize)
                 (lambda (_tool _call &optional maybe-session _observer)
                   (setq captured-session maybe-session)
-                  t)))
+                  'human)))
        (let ((result (chat-tool-caller-process-response-data
                       (format "{\"function_call\":{\"name\":\"files_write\",\"arguments\":{\"path\":\"%s\",\"content\":\"ok\"}}}"
                               target-file)
@@ -586,23 +591,28 @@ in the same variable and the check has to be the capability itself."
 
 (ert-deftest chat-tool-caller-whitelisted-shell-event-keeps-command-context ()
   "Test whitelisted shell execution reports command context."
-  (let ((chat-tool-shell-enabled t)
-        (chat-tool-shell-whitelist '("pwd"))
-        (events nil))
-    (with-temp-buffer
-      (let ((result
-             (chat-tool-caller-execute
-              '(:name "shell_execute"
-                :arguments (("command" . "pwd")))
-              nil
-              (lambda (event)
-                (push event events)))))
-        (should (stringp result))
-        (let ((approval (seq-find (lambda (event)
-                                    (eq (plist-get event :type) 'approval))
-                                  events)))
-          (should (eq (plist-get approval :decision) 'whitelisted-command))
-          (should (equal (plist-get approval :command) "pwd")))))))
+  (chat-test-with-grants
+   (let ((chat-tool-shell-enabled t)
+         (chat-tool-shell-whitelist '("pwd"))
+         (events nil))
+     (with-temp-buffer
+       (let ((result
+              (chat-tool-caller-execute
+               '(:name "shell_execute"
+                 :arguments (("command" . "pwd")))
+               nil
+               (lambda (event)
+                 (push event events)))))
+         (should (stringp result))
+         (let ((approval (seq-find (lambda (event)
+                                     (eq (plist-get event :type) 'approval))
+                                   events)))
+           ;; One decision covers every tool now, so the event says
+           ;; `granted' and names the source rather than carrying a
+           ;; shell-specific label from the path that only shell took.
+           (should (eq (plist-get approval :decision) 'granted))
+           (should (eq (plist-get approval :source) 'user))
+           (should (equal (plist-get approval :command) "pwd"))))))))
 
 (ert-deftest chat-tool-caller-file-access-denied-names-a-way-forward ()
   "A refusal has to say what to do about it, by naming a command that

@@ -25,6 +25,23 @@
 (require 'chat-i18n)
 (setq chat-language 'en)
 
+;; Runtime approval grants are written to disk in normal use.  The suite runs
+;; on a developer's machine, so it is pointed away from their file and
+;; persistence is off unless a test asks for it: a run of the tests must not
+;; be able to grant anything in the Emacs they use afterwards.
+(require 'chat-approval-grants)
+(setq chat-approval-grants-file
+      (expand-file-name "chat-test-approvals.eld" temporary-file-directory))
+(setq chat-approval-grants-persist nil)
+
+(defmacro chat-test-with-grants (&rest body)
+  "Execute BODY with an empty, non-persistent runtime grant store."
+  `(let ((chat-approval--runtime-grants nil)
+         (chat-approval--runtime-grants-loaded t)
+         (chat-approval-grants-persist nil)
+         (chat-approval-user-grants nil))
+     ,@body))
+
 ;; Create temporary test directory
 (defmacro chat-test-with-temp-dir (&rest body)
   "Execute BODY with a temporary directory that is cleaned up afterwards."

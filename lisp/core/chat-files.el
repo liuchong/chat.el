@@ -128,6 +128,13 @@ Returns nil when TOOL-ID does not point at specific files."
                    paths)))
          (delete-dups (nreverse paths)))))))
 
+;; Directory grants need to know which files a call will touch, and this is
+;; where that is known.  Handing the function over keeps the grant store from
+;; having to depend on the file tools to answer a question about them.
+(with-eval-after-load 'chat-approval-grants
+  (setq chat-approval-grant-target-paths-function
+        #'chat-files--tool-target-paths))
+
 ;; ------------------------------------------------------------------
 ;; Basic File Operations
 ;; ------------------------------------------------------------------

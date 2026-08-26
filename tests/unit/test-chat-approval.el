@@ -98,16 +98,86 @@
                '(:id window-tool :language elisp)))
       (should (string-match-p "window-tool" captured-prompt)))))
 
-(ert-deftest chat-approval-allow-session-enables-session-auto-approve ()
-  "Test session approval choice persists to the session."
+(ert-deftest chat-approval-allow-session-grants-only-what-was-approved ()
+  "Allowing for the session must not switch the whole session to automatic."
   (chat-test-with-temp-dir
-   (let* ((chat-session-directory temp-dir)
-          (session (chat-session-create "Approval Session"))
-          (chat-approval-required-tools '(files_write))
-          (chat-approval-noninteractive-policy 'ask)
-          (chat-approval-decision-function
-           (lambda (&rest _args)
-             'allow-session)))
+   (chat-test-with-grants
+    (let* ((chat-session-directory temp-dir)
+           (session (chat-session-create "Approval Session"))
+           (chat-approval-required-tools '(files_write shell_execute))
+           (chat-approval-noninteractive-policy 'ask)
+           (asked 0)
+           (chat-approval-decision-function
+            (lambda (&rest _args)
+              (setq asked (1+ asked))
+              'allow-session)))
+      (should
+       (chat-approval-request-tool-call
+        (make-chat-forged-tool
+         :id 'shell_execute
+         :name "Shell Execute"
+         :language 'elisp
+         :is-active t)
+        '(:name "shell_execute"
+          :arguments (("command" . "rg -n Sticker .")))
+        session))
+      ;; The session is not now approving everything.  It used to be: the
+      ;; decision set the session's auto-approve flag, so one yes to one
+      ;; command stopped every later tool from asking.
+      (should-not (eq (chat-session-auto-approve session) t))
+      (should-not (eq (chat-approval-effective-mode session) 'auto))
+      ;; The same command needs no second question.
+      (should
+       (chat-approval-request-tool-call
+        (make-chat-forged-tool
+         :id 'shell_execute
+         :name "Shell Execute"
+         :language 'elisp
+         :is-active t)
+        '(:name "shell_execute"
+          :arguments (("command" . "rg -n Sticker .")))
+        session))
+      (should (= asked 1))
+      ;; A different tool in the same session still asks.
+      (should
+       (chat-approval-request-tool-call
+        (make-chat-forged-tool
+         :id 'files_write
+         :name "Write File"
+         :language 'elisp
+         :is-active t)
+        '(:name "files_write"
+          :arguments (("path" . "/tmp/demo.txt")
+                      ("content" . "hello world")))
+        session))
+      (should (= asked 2))))))
+
+(ert-deftest chat-approval-session-grants-do-not-outlive-the-session ()
+  "A session grant is not written to the runtime store."
+  (chat-test-with-temp-dir
+   (chat-test-with-grants
+    (let* ((chat-session-directory temp-dir)
+           (session (chat-session-create "Approval Session"))
+           (chat-approval-required-tools '(shell_execute))
+           (chat-approval-noninteractive-policy 'ask)
+           (chat-approval-decision-function (lambda (&rest _args) 'allow-session)))
+      (chat-approval-request-tool-call
+       (make-chat-forged-tool :id 'shell_execute :name "Shell Execute"
+                              :language 'elisp :is-active t)
+       '(:name "shell_execute" :arguments (("command" . "rg -n Sticker .")))
+       session)
+      (should (chat-session-approval-grants session))
+      (should-not chat-approval--runtime-grants)))))
+
+(ert-deftest chat-approval-allow-tool-records-a-runtime-grant ()
+  "Test tool approval choice becomes a runtime grant for that tool."
+  (chat-test-with-grants
+   (let ((chat-approval-required-tools '(files_write))
+         (chat-approval-noninteractive-policy 'ask)
+         (chat-approval-always-approve-tools nil)
+         (chat-approval-decision-function
+          (lambda (&rest _args)
+            'allow-tool)))
      (should
       (chat-approval-request-tool-call
        (make-chat-forged-tool
@@ -117,110 +187,108 @@
         :is-active t)
        '(:name "files_write"
          :arguments (("path" . "/tmp/demo.txt")
-                     ("content" . "hello world")))
-       session))
-     (should (chat-session-auto-approve-p session)))))
+                     ("content" . "hello world")))))
+     (let ((grant (car chat-approval--runtime-grants)))
+       (should (eq (chat-approval-grant-tool grant) 'files_write))
+       (should (eq (chat-approval-grant-scope grant) 'tool))
+       (should (eq (chat-approval-grant-source grant) 'runtime))
+       (should (chat-approval-grant-created-at grant)))
+     ;; The user's own list is untouched.
+     (should-not chat-approval-always-approve-tools))))
 
-(ert-deftest chat-approval-allow-tool-adds-global-tool-override ()
-  "Test tool approval choice persists to the tool override list."
-  (let ((chat-approval-required-tools '(files_write))
-        (chat-approval-noninteractive-policy 'ask)
-        (chat-approval-always-approve-tools nil)
-        (chat-approval-decision-function
-         (lambda (&rest _args)
-           'allow-tool)))
-    (should
-     (chat-approval-request-tool-call
-      (make-chat-forged-tool
-       :id 'files_write
-       :name "Write File"
-       :language 'elisp
-       :is-active t)
-      '(:name "files_write"
-        :arguments (("path" . "/tmp/demo.txt")
-                    ("content" . "hello world")))))
-    (should (memq 'files_write chat-approval-always-approve-tools))))
-
-(ert-deftest chat-approval-allow-command-adds-shell-whitelist ()
-  "Test shell approval choice can whitelist the current command."
-  (let ((chat-approval-required-tools '(shell_execute))
-        (chat-approval-noninteractive-policy 'ask)
-        (chat-tool-shell-whitelist nil)
-        (chat-approval-decision-function
-         (lambda (&rest _args)
-           'allow-command)))
-    (should
-     (chat-approval-request-tool-call
-      (make-chat-forged-tool
-       :id 'shell_execute
-       :name "Shell Execute"
-       :language 'elisp
-       :is-active t)
-      '(:name "shell_execute"
-        :arguments (("command" . "rg -n StickerManager .")))))
-    (should (member "rg -n StickerManager ." chat-tool-shell-whitelist))))
-
-(ert-deftest chat-approval-allow-directory-adds-file-write-directory-whitelist ()
-  "Test directory approval choice persists a file-write directory root."
-  (chat-test-with-temp-dir
-   (let* ((target-file (expand-file-name "docs/guide.md" temp-dir))
-          (target-dir (chat-approval--normalize-directory
-                       (file-name-directory target-file)))
-          (chat-approval-required-tools '(files_write))
-          (chat-approval-noninteractive-policy 'ask)
-          (chat-approval-always-approve-directories nil)
-          (chat-approval-decision-function
-           (lambda (&rest _args)
-             'allow-directory)))
+(ert-deftest chat-approval-allow-command-leaves-the-user-list-alone ()
+  "Test shell approval records a runtime grant, not a customisation change."
+  (chat-test-with-grants
+   (let ((chat-approval-required-tools '(shell_execute))
+         (chat-approval-noninteractive-policy 'ask)
+         (chat-tool-shell-whitelist nil)
+         (chat-approval-decision-function
+          (lambda (&rest _args)
+            'allow-command)))
      (should
       (chat-approval-request-tool-call
        (make-chat-forged-tool
-        :id 'files_write
-        :name "Write File"
+        :id 'shell_execute
+        :name "Shell Execute"
         :language 'elisp
         :is-active t)
-       `(:name "files_write"
-         :arguments (("path" . ,target-file)
-                     ("content" . "hello world")))))
-     (should (member target-dir chat-approval-always-approve-directories)))))
+       '(:name "shell_execute"
+         :arguments (("command" . "rg -n StickerManager .")))))
+     (let ((grant (car chat-approval--runtime-grants)))
+       (should (equal (chat-approval-grant-pattern grant)
+                      "rg -n StickerManager ."))
+       (should (eq (chat-approval-grant-scope grant) 'command)))
+     (should-not chat-tool-shell-whitelist))))
+
+(ert-deftest chat-approval-allow-directory-records-a-runtime-grant ()
+  "Test directory approval choice becomes a runtime grant for that root."
+  (chat-test-with-temp-dir
+   (chat-test-with-grants
+    (let* ((target-file (expand-file-name "docs/guide.md" temp-dir))
+           (target-dir (chat-approval--normalize-directory
+                        (file-name-directory target-file)))
+           (chat-approval-required-tools '(files_write))
+           (chat-approval-noninteractive-policy 'ask)
+           (chat-approval-always-approve-directories nil)
+           (chat-approval-decision-function
+            (lambda (&rest _args)
+              'allow-directory)))
+      (should
+       (chat-approval-request-tool-call
+        (make-chat-forged-tool
+         :id 'files_write
+         :name "Write File"
+         :language 'elisp
+         :is-active t)
+        `(:name "files_write"
+          :arguments (("path" . ,target-file)
+                      ("content" . "hello world")))))
+      (let ((grant (car chat-approval--runtime-grants)))
+        (should (equal (chat-approval-grant-pattern grant) target-dir))
+        (should (eq (chat-approval-grant-scope grant) 'directory)))
+      (should-not chat-approval-always-approve-directories)))))
 
 (ert-deftest chat-approval-directory-whitelist-auto-approves-future-file-writes ()
   "Test whitelisted directories auto-approve later file writes."
   (chat-test-with-temp-dir
-   (let* ((target-file (expand-file-name "docs/guide.md" temp-dir))
-          (target-dir (chat-approval--normalize-directory
-                       (file-name-directory target-file)))
-          (chat-approval-required-tools '(files_write))
-          (chat-approval-always-approve-directories (list target-dir))
-          events
-          prompted
-          (chat-approval-decision-function
-           (lambda (&rest _args)
-             (setq prompted t)
-             'deny)))
-     (should
-      (chat-approval-request-tool-call
-       (make-chat-forged-tool
-        :id 'files_write
-        :name "Write File"
-        :language 'elisp
-        :is-active t)
-       `(:name "files_write"
-         :arguments (("path" . ,target-file)
-                     ("content" . "hello world")))
-       nil
-       (lambda (event)
-         (push event events))))
-     (should-not prompted)
-     (let ((approval (seq-find (lambda (event)
-                                 (eq (plist-get event :type) 'approval))
-                               events)))
-       (should (eq (plist-get approval :decision) 'whitelisted-directory))
-       (should (equal (plist-get approval :directory) target-dir))))))
+   (chat-test-with-grants
+    (let* ((target-file (expand-file-name "docs/guide.md" temp-dir))
+           (target-dir (chat-approval--normalize-directory
+                        (file-name-directory target-file)))
+           (chat-approval-required-tools '(files_write))
+           (chat-approval-always-approve-directories (list target-dir))
+           events
+           prompted
+           (chat-approval-decision-function
+            (lambda (&rest _args)
+              (setq prompted t)
+              'deny)))
+      (should
+       (chat-approval-request-tool-call
+        (make-chat-forged-tool
+         :id 'files_write
+         :name "Write File"
+         :language 'elisp
+         :is-active t)
+        `(:name "files_write"
+          :arguments (("path" . ,target-file)
+                      ("content" . "hello world")))
+        nil
+        (lambda (event)
+          (push event events))))
+      (should-not prompted)
+      (let ((approval (seq-find (lambda (event)
+                                  (eq (plist-get event :type) 'approval))
+                                events)))
+        (should (eq (plist-get approval :decision) 'granted))
+        (should (eq (plist-get approval :scope) 'directory))
+        (should (eq (plist-get approval :source) 'user))
+        (should (equal (plist-get approval :directory) target-dir)))))))
 
 (ert-deftest chat-approval-observer-receives-pending-options-and-command-context ()
   "Test approval observers receive structured pending context."
-  (let ((chat-approval-required-tools '(shell_execute))
+  (chat-test-with-grants
+   (let ((chat-approval-required-tools '(shell_execute))
         (chat-approval-noninteractive-policy 'ask)
         (chat-approval-decision-function
          (lambda (&rest _args)
@@ -253,11 +321,12 @@
                        "always allow this command"
                        "deny")))
       (should (eq (plist-get approval :decision) 'allow-once))
-      (should (equal (plist-get approval :command) "rg -n StickerManager .")))))
+      (should (equal (plist-get approval :command) "rg -n StickerManager ."))))))
 
 (ert-deftest chat-approval-observer-includes-directory-scope-for-file-writes ()
   "Test approval observers receive directory context for file-write tools."
   (chat-test-with-temp-dir
+   (chat-test-with-grants
    (let* ((target-file (expand-file-name "docs/guide.md" temp-dir))
           (target-dir (chat-approval--normalize-directory
                        (file-name-directory target-file)))
@@ -290,11 +359,12 @@
                         "allow for session"
                         "always allow this tool"
                         ,(format "always allow this directory (%s)" target-dir)
-                        "deny")))))))
+                        "deny"))))))))
 
 (ert-deftest chat-approval-allow-command-notifies-whitelist-update ()
   "Test command approval emits a whitelist update event for observers."
-  (let ((chat-approval-required-tools '(shell_execute))
+  (chat-test-with-grants
+   (let ((chat-approval-required-tools '(shell_execute))
         (chat-approval-noninteractive-policy 'ask)
         (chat-tool-shell-whitelist nil)
         (chat-approval-decision-function
@@ -318,7 +388,7 @@
                                events)))
       (should (equal (plist-get whitelist :scope) 'command))
       (should (equal (plist-get whitelist :pattern) "rg -n StickerManager ."))
-      (should (equal (plist-get whitelist :tool) "shell_execute")))))
+      (should (equal (plist-get whitelist :tool) "shell_execute"))))))
 
 (ert-deftest chat-approval-allow-directory-notifies-whitelist-update ()
   "Test directory approval emits a whitelist update event for observers."

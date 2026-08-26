@@ -2366,4 +2366,73 @@ component as stuck, check whether something else is legitimately busy —
 and if it is, say what it is and how long it has been going, because the
 reader's real question is whether anything is still happening.
 
+### Approved, Then Refused Anyway
+
+**Problem**: the model proposed `make test` as a background task, the user
+read it and approved it, and the tool refused: `the program make is not on
+the allowed list`. The approval had no effect on the outcome.
+
+**Cause**: approval ran before the tool function and the command list ran
+inside it, with no way for either to know about the other. So the list was
+consulted a second time, after the only party who could actually judge the
+command had already judged it. A list cannot add safety over a person who
+read the command; all it can do is void their answer.
+
+**Solution**: make the answer say *how* the call was permitted rather than
+just that it was — `human`, `grant`, `rule` or `dangerous` — and let the
+tool see it. A person's yes skips the list; a grant does not, because a
+grant only means "stop asking me about this", not "the rules no longer
+apply".
+
+**General rule**: when two checks guard one action, decide which one is
+authoritative and let it be. Re-checking after a human decision is not
+defence in depth, it is a veto over the only judgement in the system that
+had full context.
+
+### One Yes That Turned Off Every Question
+
+**Problem**: approving a single shell command with "allow for session"
+stopped every later tool in that session from asking, including file
+writes and patches. A session found on disk had `autoApprove: true` with
+nobody remembering having enabled it.
+
+**Cause**: the option was implemented by setting the session's
+auto-approve flag, and that flag short-circuited the per-tool list
+entirely. There was nowhere to record "this command, this session", so the
+nearest available switch was used — and it was a much larger switch than
+the option's own label described.
+
+**Solution**: give session-scoped grants their own store, so the choice
+covers exactly what was approved and dies with the session. And keep the
+mode out of reach of every interactive choice: the one mode that runs
+anything has to be typed on purpose.
+
+**General rule**: an option must not do more than its label says. When the
+data structure cannot express the narrow thing offered, the answer is to
+add it, not to spend the nearest wider permission and hope the difference
+never comes up.
+
+### Runtime Grants Written Into The User's Own Settings
+
+**Problem**: "always allow this" put entries into `M-x customize` that the
+user had never written, and lost them all on restart anyway.
+
+**Cause**: the grant was pushed onto the same `defcustom` the user
+configures by hand. Three problems in one: their customisation buffer
+showed our entries, a `custom-file` save could write them back as if they
+had asked for them, and clearing what the program granted meant clearing
+their configuration with it. Nothing was persisted, so a promise the user
+read as permanent expired silently.
+
+**Solution**: separate stores by owner — a constant for what the project
+stands behind, a `defcustom` we only ever read, and a file we own and can
+clear as a group. Record when each runtime grant was added and which
+session added it, because a list grown over months is otherwise unreadable
+and the only safe move left is to delete all of it.
+
+**General rule**: never write to a variable a user is expected to set. If
+the program needs to remember something, it needs its own place to
+remember it — sharing storage with configuration makes both unmaintainable
+and makes intent impossible to reconstruct.
+
 Last updated: 2026-08-27

@@ -52,6 +52,7 @@
    ("保存" . "save")
    ("清理" . "clear")
    ("知识库" . "wiki")
+   ("审批" . "approve")
    ("自动" . "auto")))
 
 (chat-i18n-register
@@ -125,6 +126,15 @@ Auto（默认命令）：
   只要当前不是 /send，输入提示符上就会写着是哪个命令占着它，状态栏也会
   显示 `auto: /cmd'。显式写出的 /命令 永远是它自己；有回复正在跑时，
   直接输入是给那次运行补充信息，而不是走默认命令。
+
+审批（谁来决定工具调用能不能跑）：
+  /approve            - 说明当前是哪种模式，以及是全局设的还是本会话设的
+  /approve manual     - 白名单直接放行，其余逐次问你（默认）
+  /approve auto       - 按内建规则判断，不问你；规则不放行就直接拒绝
+  /approve dangerous  - 一切都跑，命令闸门也一并关掉；切换时需要确认
+  人工审批时可以选一次允许、本会话允许、以后都允许；后两种会记成授权，
+  用 M-x chat-approval-list-grants 查看，M-x chat-approval-clear-runtime-grants
+  清掉程序自己记下的那份。
 
 语言：
   用 `chat-language' 设置界面语言，保持 `auto' 则跟随 Emacs 的语言环境。
