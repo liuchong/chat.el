@@ -593,10 +593,35 @@ that had run one shell command stayed a shell, and a question got an
 answer without getting you out.
 
 It is a mode, so it is visible in two places. The status line reads
-`auto: /cmd`, and the input prompt itself becomes `cmd>` -- the status
+`auto: /cmd`, and the input prompt itself becomes `❯ cmd>` -- the status
 line is at the top of a buffer that scrolls, and the cursor is at the
 bottom. An explicit `/command` always means itself, and while a response
 is running plain input steers that run rather than the default command.
+
+The prompt says what RET will do, so an unclaimed line names the provider
+and the model it will reach instead:
+
+```text
+K moonshot-v1-8k>   ; the baseline: this line goes to Kimi
+✳ claude-sonnet-4-5>
+❯ cmd>              ; a shell line, which no model sees
+≡ queue>
+```
+
+The mark is the provider's own where a character resembles it, and the
+initial of its name otherwise; `✦` stands in when there is no provider
+configuration to read. A glyph the frame cannot draw is dropped rather
+than shown as a hollow box, so the prompt degrades to `cmd>` and
+`moonshot-v1-8k>` on a terminal without them. `chat-ui-prompt-model-width`
+truncates a long model name, and hovering shows it in full.
+
+Clicking the model name opens a menu of the configured providers and
+switches this session to the one picked, which is the same thing
+`M-x chat-set-model` does -- the model was visible in one place and
+changeable in another. The click is only offered when more than one
+provider is configured, and it is refused mid-response for the same
+reason `chat-set-model` refuses: the reply would come back from a
+provider that was never asked.
 
 `:default sticky` in `chat-ui--command-table` says a command may claim
 plain input; `:default reset` says using it hands the claim back. `/quick`
@@ -818,6 +843,7 @@ same scoped tool and approval policy as other capabilities.
 |------|----------------|
 | `chat.el` | Entry point and command wiring |
 | `lisp/ui/chat-ui.el` | Chat buffer rendering and response lifecycle |
+| `lisp/ui/chat-mark.el` | Glyphs and brand colours for modes and providers |
 | `lisp/core/chat-session.el` | Session and message persistence |
 | `lisp/llm/chat-llm.el` | Provider abstraction and async request handling |
 | `lisp/core/chat-stream.el` | SSE parsing and chunk handling |

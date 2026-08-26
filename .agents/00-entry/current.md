@@ -88,7 +88,22 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1009 tests passing.
+Canonical suite: 1044 tests passing.
+
+The prompt says which provider it will reach, not just which command
+holds the line (spec 007). An unclaimed line carries the provider's mark
+and the model the request will actually name; a shell line carries a
+shell mark and no model, because RET there reaches no model. The tables
+are pure functions in `lisp/ui/chat-mark.el`: single-column BMP
+characters rather than emoji or an icon font, since only a face can
+follow the background from light to dark and only one column keeps a
+monospaced buffer in step, and a glyph the frame cannot draw is dropped
+so the prompt degrades to exactly what it was before. Brand colours are
+used for brands only, asserted by a static test over the tree. Clicking
+the model opens a provider menu and switches through `chat-set-model`,
+which already refuses mid-response and already persists; the affordance
+appears only when more than one provider is configured, and a terminal
+without popup menus gets `completing-read`.
 
 The command prompt behaves like a shell in the two places it did not. A
 subprocess cannot move its parent's working directory or set its parent's

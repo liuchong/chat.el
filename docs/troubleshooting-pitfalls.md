@@ -812,6 +812,20 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 **Solution**: prefer `-l` with explicit file paths or a checked shell wrapper.
 
+### `chat-test-with-temp-dir` Does Not Move `default-directory`
+
+**Problem**: two empty directories named `one` and `two` kept appearing in the repository root, recreated by every test run.
+
+**Cause**: the macro binds `temp-dir` and a temporary state directory, but it does not rebind `default-directory`. A test that says `(expand-file-name "one")` therefore resolves against wherever the runner happens to be -- the repository root -- and writes there. The test still passed, so nothing pointed at it.
+
+**Solution**: pass `temp-dir` explicitly to `expand-file-name`. Anything a test creates on disk has to name the directory it is created in.
+
+```elisp
+(chat-test-with-temp-dir
+ (let ((first (expand-file-name "one" temp-dir)))   ; not (expand-file-name "one")
+   ...))
+```
+
 ### External Process Calls Must Not Trust Ambient `default-directory`
 
 **Problem**: tests or tooling that invoke `diff` or `process-file` can fail with `Setting current directory` even though the target files and commands are valid.
@@ -1777,5 +1791,36 @@ before reaching for anything heavier -- the preparation here was about
 have bought nothing and cost the synchronous contract the send path is
 written against. The complaint was never about the 17ms; it was about
 the frame that was never drawn.
+
+### Setting `face` To `default` Is Not The Same As Not Setting It
+
+**Problem**: provider marks with no brand colour of their own came out
+flat instead of taking the colour of the text around them.
+
+**Cause**: the segment builder took a face argument that could be nil and
+wrote `(or face 'default)` to avoid a nil property. `default` is a real
+face, not an absence: it pins the foreground instead of letting the mark
+inherit whatever it is drawn in.
+
+**Solution**: build the property list so the key is absent when there is
+no face, rather than present with a neutral-sounding value.
+
+```elisp
+(apply #'propertize text (when face (list 'face face)))
+```
+
+### A Glyph That The Frame Cannot Draw Is Worse Than No Glyph
+
+**Problem**: a decorative mark risks appearing as a hollow box on a
+terminal or in a font without it.
+
+**Cause**: emoji and icon-font glyphs assume a colour font or a patched
+font, and there is no reliable way to detect a font that has been
+installed but lacks the code point.
+
+**Solution**: keep marks to single-column BMP characters, colour them
+with a face rather than the font, and check `char-displayable-p` before
+drawing -- dropping the mark entirely when the answer is no. A box
+carries nothing, takes a column anyway, and reads as a broken program.
 
 Last updated: 2026-08-26

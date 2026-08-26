@@ -194,11 +194,34 @@ deferred at zero cost, since its own spec makes validation a separable
 layer above parsing; the parser keeps to four line types so that stays
 true.
 
-Canonical suite: 1009 tests passing.
+The prompt now answers both halves of "what will RET do" (spec 007). It
+already named the command holding the line; it did not name the provider
+an unclaimed line reaches, and that was stated only in the status line at
+the top of a buffer that scrolls while the cursor is at the bottom — the
+same distance that made `cmd> ` necessary. So an unclaimed line carries
+the provider's mark and the model the request will actually name, a shell
+line carries a shell mark and no model, and `lisp/ui/chat-mark.el` holds
+the tables as pure functions.
+
+Three constraints shaped it. Marks are single-column BMP characters, not
+emoji or icon-font glyphs, because only a face can follow the background
+from light to dark and only a single column keeps a monospaced buffer in
+step. A glyph the frame cannot draw is dropped rather than shown as a
+box, so the prompt degrades to exactly what it was. And brand colours are
+used for brands only — a static test fails if any file outside
+`chat-mark.el` names one.
+
+Clicking the model opens a provider menu and goes through
+`chat-set-model`, which already refuses mid-response and already
+persists; the affordance appears only when there is more than one
+provider, and a terminal without popup menus falls back to
+`completing-read` rather than losing the feature.
+
+Canonical suite: 1044 tests passing.
 
 ## Next Stage
 
-Implement spec 005, then 006. Neither `lisp/ui/chat-markdown.el` nor
+Implement spec 005, then 006. Neither `lisp/core/chat-markdown.el` nor
 `lisp/core/chat-mdp.el` exists yet; 005 comes first because 006 depends on
 it for display and gets it for free.
 

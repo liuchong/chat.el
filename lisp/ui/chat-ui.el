@@ -17,6 +17,7 @@
 (require 'chat-i18n)
 (require 'chat-command)
 (require 'chat-input-history)
+(require 'chat-mark)
 (require 'chat-shell-builtins)
 ;; Owned by `chat.el', which loads after this file.
 (defvar chat-commands-help)
@@ -1160,21 +1161,117 @@ Tagged with `chat-ui-prompt' so it can be found again by what it is.
 Measuring back from the input marker instead would fail in the one case
 that matters: a prompt that has already been partly eaten.")
 
+(defface chat-ui-prompt-model
+  '((t :inherit shadow))
+  "Face for the model name in the input prompt.
+
+Quiet, because it is context rather than a warning; the coloured glyph
+beside it is what the eye lands on."
+  :group 'chat-ui)
+
+(defcustom chat-ui-prompt-model-width 24
+  "Width the model name in the prompt is truncated to.
+
+A provider's model names run long enough to push the cursor across the
+window -- `grok-4-fast-non-reasoning' is twenty-five columns on its own.
+Measured in columns rather than characters, so a name with CJK in it is
+not counted at half its width."
+  :type 'integer
+  :group 'chat-ui)
+
+(defvar chat-ui-prompt-model-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'chat-ui-switch-model)
+    map)
+  "Keymap on the model segment of the prompt.
+
+Carries the mouse binding only.  Everything else falls through to the
+buffer, because point can be moved onto the prompt and a keymap there
+that swallowed ordinary keys would be a trap.")
+
+(defun chat-ui--prompt-segment (text &rest properties)
+  "Return TEXT as a prompt segment carrying PROPERTIES.
+
+Every segment carries the prompt's own properties as well, so the whole
+prompt is one protected, findable run however many pieces it is built
+from."
+  (apply #'propertize text
+         (append properties chat-ui--input-prompt-properties)))
+
+(defun chat-ui--prompt-mark (glyph face)
+  "Return GLYPH and a space as a prompt segment in FACE, or \"\" if unusable.
+
+An undisplayable glyph is dropped rather than drawn: a hollow box carries
+nothing, takes a column anyway, and reads as a broken program.
+
+FACE may be nil, and then none is set rather than `default' being set:
+the two are not the same, and the second would stop a provider without a
+known brand colour from inheriting the text around it."
+  (if (chat-mark-displayable-p glyph)
+      (apply #'chat-ui--prompt-segment
+             (concat glyph " ")
+             (when face (list 'face face)))
+    ""))
+
+(defun chat-ui--prompt-model-segment ()
+  "Return the segment naming the provider and model plain input reaches.
+
+The model named is the one the request will actually carry, not the
+provider symbol and not its display name: a prompt that names something
+other than what is about to be used stops preventing mistakes and starts
+causing them.
+
+Clickable only when there is more than one provider to choose from.  A
+`mouse-face' over a menu of one promises a choice that does not exist."
+  (let* ((provider (and chat--current-session
+                        (chat-session-model-id chat--current-session)))
+         (config (and provider (chat-llm-get-provider-config provider)))
+         (display-name (plist-get config :name))
+         (model (or (plist-get config :model)
+                    (and provider (symbol-name provider))
+                    ""))
+         (mark (chat-mark-for-provider provider display-name))
+         (switchable (> (length (chat-llm-enabled-providers)) 1))
+         (shown (truncate-string-to-width
+                 model chat-ui-prompt-model-width nil nil "\u2026"))
+         (help (if switchable
+                   (chat-i18n 'prompt-model-switch
+                              "%s -- mouse-1 to switch provider" model)
+                 model)))
+    (concat
+     (chat-ui--prompt-mark (car mark) (cdr mark))
+     (apply #'chat-ui--prompt-segment
+            shown
+            'face 'chat-ui-prompt-model
+            'help-echo help
+            (when switchable
+              (list 'keymap chat-ui-prompt-model-map
+                    'mouse-face 'highlight))))))
+
 (defun chat-ui--input-prompt ()
   "Return the text that opens the input area.
 
-Names the command plain input will run through when that is not the
-baseline.  The status line says so too, but it is at the top of a buffer
-that scrolls and the cursor is down here: a shell that looks like a chat
-box is how a question ends up being run as a command."
+Says what pressing RET will do.  The status line says it too, but it is
+at the top of a buffer that scrolls and the cursor is down here: a shell
+that looks like a chat box is how a question ends up being run as a
+command, and a window that looks like one provider is how a question ends
+up at another.
+
+A claimed line names the command; an unclaimed one names the provider and
+model, because that is what it will reach.  Neither shows the other: the
+model is not what a shell line is about, and the baseline command has
+never been announced by name."
   (let ((claimed (chat-ui-default-command-claimed-p)))
-    (apply #'propertize
-           (if claimed
-               (format "%s> " (chat-ui--display-command-name
-                               (chat-ui-default-command)))
-             "> ")
-           (append (when claimed '(face chat-ui-claimed-prompt))
-                   chat-ui--input-prompt-properties))))
+    (if (not claimed)
+        (concat (chat-ui--prompt-model-segment)
+                (chat-ui--prompt-segment "> "))
+      (let ((mark (chat-mark-for-mode (chat-ui-default-command))))
+        (concat
+         (chat-ui--prompt-mark (car mark) (cdr mark))
+         (chat-ui--prompt-segment
+          (format "%s> " (chat-ui--display-command-name
+                          (chat-ui-default-command)))
+          'face 'chat-ui-claimed-prompt))))))
 
 (defun chat-ui--input-prompt-bounds ()
   "Return the extent of the drawn prompt as a cons, or nil when none is drawn."
@@ -2591,7 +2688,53 @@ from a different provider than the one that was asked."
   (when chat-session-auto-save
     (chat-session-save chat--current-session))
   (chat-ui--render-status-line)
+  ;; The prompt names the model too, so leaving it alone here would leave
+  ;; one of the two places that state it saying the wrong thing.
+  (chat-ui--render-input-prompt)
   (message "Model switched to %s" model))
+
+(defun chat-ui--model-choices ()
+  "Return the providers to offer, as an alist of label and symbol."
+  (mapcar
+   (lambda (provider)
+     (let ((config (chat-llm-get-provider-config provider)))
+       (cons (format "%s  %s"
+                     (or (plist-get config :name) (symbol-name provider))
+                     (or (plist-get config :model) ""))
+             provider)))
+   (chat-llm-enabled-providers)))
+
+(defun chat-ui-switch-model (&optional event)
+  "Choose the provider this session talks to, from a menu.
+
+Bound to a click on the model named in the prompt, which is where the
+reader is already looking when they want to change it -- the model was
+visible in one place and changeable in another.
+
+Falls back to the minibuffer where a popup menu cannot be drawn, because
+Emacs in a terminal is not an edge case, and going through
+`chat-set-model' rather than setting the session field directly keeps its
+refusal while a response is in flight."
+  (interactive (list last-nonmenu-event))
+  (let ((choices (chat-ui--model-choices)))
+    (cond
+     ((null choices)
+      (user-error "No providers are configured"))
+     ((= (length choices) 1)
+      (message "%s" (chat-i18n 'only-one-provider
+                               "Only one provider is configured")))
+     (t
+      (let* ((title (chat-i18n 'switch-model-title "Provider"))
+             (chosen
+              (if (and (display-popup-menus-p) (listp event))
+                  ;; One pane of (LABEL . PROVIDER) items, so the click
+                  ;; hands back the provider symbol itself.
+                  (x-popup-menu event (list title (cons "" choices)))
+                (cdr (assoc (completing-read (format "%s: " title)
+                                             (mapcar #'car choices) nil t)
+                            choices)))))
+        (when chosen
+          (chat-set-model chosen)))))))
 
 (defun chat-ui--handle-tool-creation (content)
   "Handle tool creation request from CONTENT."

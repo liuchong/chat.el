@@ -887,8 +887,8 @@ both arrive from the same place."
 `-' used to be expanded as a path, so it named a directory called `-'
 under the current one and the command reported it missing."
   (chat-test-with-temp-dir
-   (let ((first (file-name-as-directory (expand-file-name "one")))
-         (second (file-name-as-directory (expand-file-name "two")))
+   (let ((first (file-name-as-directory (expand-file-name "one" temp-dir)))
+         (second (file-name-as-directory (expand-file-name "two" temp-dir)))
          (messages nil))
      (make-directory first t)
      (make-directory second t)
@@ -906,7 +906,7 @@ under the current one and the command reported it missing."
 (ert-deftest chat-ui-cd-dash-with-no-history-reports-instead-of-moving ()
   "And leaves the working directory alone."
   (chat-test-with-temp-dir
-   (let ((here (file-name-as-directory (expand-file-name ".")))
+   (let ((here (file-name-as-directory temp-dir))
          (messages nil))
      (with-temp-buffer
        (cl-letf (((symbol-function 'chat-ui--insert-system-message)
@@ -920,8 +920,8 @@ under the current one and the command reported it missing."
 (ert-deftest chat-ui-pushd-and-popd-walk-the-directory-stack ()
   "`pushd' remembers where it left and `popd' returns there."
   (chat-test-with-temp-dir
-   (let ((first (file-name-as-directory (expand-file-name "one")))
-         (second (file-name-as-directory (expand-file-name "two")))
+   (let ((first (file-name-as-directory (expand-file-name "one" temp-dir)))
+         (second (file-name-as-directory (expand-file-name "two" temp-dir)))
          (messages nil))
      (make-directory first t)
      (make-directory second t)
@@ -1387,26 +1387,186 @@ same thing any unrecognized slash does."
     (chat-ui--dispatch-command (chat-command-parse "/ask look at this"))
     (should (equal sent '("/ask look at this")))))
 
+(defun chat-ui-auto-test--drawn-prompt ()
+  "Return the prompt as it stands in the buffer, without properties."
+  (save-excursion
+    (goto-char (marker-position chat-ui--input-overlay))
+    (buffer-substring-no-properties
+     (line-beginning-position)
+     (marker-position chat-ui--input-overlay))))
+
 (ert-deftest chat-ui-the-prompt-says-which-command-holds-the-line ()
   "The status line is at the top; the cursor is at the bottom."
   (chat-ui-auto-test--with-session
-    (should (equal (chat-ui--input-prompt) "> "))
+    (should-not (string-suffix-p "cmd> " (chat-ui--input-prompt)))
     (chat-ui--dispatch-command (chat-command-parse "!ls"))
-    (should (string-prefix-p "cmd> " (chat-ui--input-prompt)))
+    (should (string-suffix-p "cmd> " (chat-ui--input-prompt)))
     (should (string-match-p
              "cmd> "
              (buffer-substring-no-properties (point-min) (point-max))))
     ;; And the marker still points just past it, or C-a and sending would
     ;; both be off by the width of the word.
-    (should (equal "cmd> "
-                   (buffer-substring-no-properties
-                    (line-beginning-position)
-                    (marker-position chat-ui--input-overlay))))
+    (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt)))
     (chat-ui--dispatch-command (chat-command-parse "/auto off"))
-    (should (equal (chat-ui--input-prompt) "> "))
+    (should-not (string-suffix-p "cmd> " (chat-ui--input-prompt)))
     (should-not (string-match-p
                  "cmd> "
                  (buffer-substring-no-properties (point-min) (point-max))))))
+
+(ert-deftest chat-ui-the-prompt-names-the-model-it-will-reach ()
+  "The window looking like one provider is how a question reaches another.
+
+The name shown has to be the one the request carries, not the provider
+symbol and not its display name."
+  (chat-ui-auto-test--with-session
+    (let ((model (plist-get (chat-llm-get-provider-config 'kimi) :model)))
+      (should model)
+      (should (string-match-p (regexp-quote model) (chat-ui--input-prompt)))
+      ;; The provider's mark stands where a generic star would, and the
+      ;; baseline command is still not announced by name.
+      (should (string-prefix-p "K " (chat-ui--input-prompt)))
+      (should-not (string-match-p "send" (chat-ui--input-prompt))))))
+
+(ert-deftest chat-ui-a-shell-line-does-not-advertise-a-model ()
+  "RET there does not reach one, and naming it would train the eye to skip."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (let ((prompt (chat-ui--input-prompt)))
+      (should (string-prefix-p "\u276F " prompt))
+      (should (string-suffix-p "cmd> " prompt))
+      (should-not (string-match-p
+                   (regexp-quote
+                    (plist-get (chat-llm-get-provider-config 'kimi) :model))
+                   prompt)))))
+
+(ert-deftest chat-ui-a-queued-line-carries-the-queue-mark ()
+  "The third mode that can hold plain input."
+  (chat-ui-auto-test--with-session
+    (chat-ui--set-default-command "queue")
+    (should (string-prefix-p "\u2261 " (chat-ui--input-prompt)))
+    (should (string-suffix-p "queue> " (chat-ui--input-prompt)))))
+
+(ert-deftest chat-ui-a-mode-with-no-mark-still-gets-a-prompt ()
+  "An unmarked command is a supported state, not an error."
+  (chat-ui-auto-test--with-session
+    (chat-ui--set-default-command "drop")
+    (should (equal "drop> " (chat-ui--input-prompt)))))
+
+(ert-deftest chat-ui-an-undisplayable-mark-leaves-a-usable-prompt ()
+  "On a frame that cannot draw the glyph, the prompt is the old one."
+  (chat-ui-auto-test--with-session
+    (cl-letf (((symbol-function 'char-displayable-p) (lambda (_c) nil)))
+      (chat-ui--dispatch-command (chat-command-parse "!ls"))
+      (should (equal "cmd> " (chat-ui--input-prompt)))
+      (chat-ui--set-default-command nil)
+      ;; The provider mark goes too, and the model name is still there.
+      (should (equal (concat (plist-get (chat-llm-get-provider-config 'kimi)
+                                        :model)
+                             "> ")
+                     (chat-ui--input-prompt))))))
+
+(ert-deftest chat-ui-a-long-model-name-is-truncated-by-columns ()
+  "Counted in columns, or a CJK name is measured at half its width."
+  (chat-ui-auto-test--with-session
+    (cl-letf (((symbol-function 'chat-llm-get-provider-config)
+               (lambda (_provider) (list :name "Wide" :model "模型名字很长的那个"))))
+      (let* ((chat-ui-prompt-model-width 8)
+             (prompt (chat-ui--input-prompt))
+             (shown (string-remove-suffix "> " (substring prompt 2))))
+        (should (<= (string-width shown) 8))
+        ;; And what was cut is still readable on hover.
+        (should (string-match-p
+                 "模型名字很长的那个"
+                 (or (get-text-property 2 'help-echo prompt) "")))))))
+
+(ert-deftest chat-ui-the-model-is-clickable-only-when-there-is-a-choice ()
+  "A `mouse-face' over a menu of one promises a choice that does not exist."
+  (chat-ui-auto-test--with-session
+    (let ((prompt (chat-ui--input-prompt)))
+      (should (get-text-property 2 'keymap prompt))
+      (should (get-text-property 2 'mouse-face prompt)))
+    (cl-letf (((symbol-function 'chat-llm-enabled-providers)
+               (lambda () '(kimi))))
+      (let ((prompt (chat-ui--input-prompt)))
+        (should-not (get-text-property 2 'keymap prompt))
+        (should-not (get-text-property 2 'mouse-face prompt))))))
+
+(ert-deftest chat-ui-the-input-does-not-inherit-the-mouse-binding ()
+  "A keymap that spread into the input would rebind clicks in the message."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-max))
+    (insert-and-inherit "hello")
+    (should-not (get-text-property (marker-position chat-ui--input-overlay)
+                                   'keymap))))
+
+(ert-deftest chat-ui-the-mark-is-as-protected-as-the-rest-of-the-prompt ()
+  "The mark is part of the prompt, not decoration sitting beside it."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (let ((start (car (chat-ui--input-prompt-bounds))))
+      (should (get-text-property start 'chat-ui-prompt))
+      (should (get-text-property start 'read-only))
+      ;; And the bounds cover the mark, so recovery redraws all of it.
+      (should (string-prefix-p
+               "\u276F " (buffer-substring-no-properties
+                          start (marker-position chat-ui--input-overlay)))))))
+
+(ert-deftest chat-ui-switching-provider-goes-through-the-command-that-checks ()
+  "Not by setting the session field, which would skip its refusals."
+  (chat-ui-auto-test--with-session
+    (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (seq-find (lambda (label) (string-prefix-p "Claude" label))
+                           collection))))
+      (chat-ui-switch-model)
+      (should (eq 'claude (chat-session-model-id chat--current-session)))
+      ;; And the prompt says so, or the two places that name the model
+      ;; would disagree.
+      (should (string-match-p
+               (regexp-quote (plist-get (chat-llm-get-provider-config 'claude)
+                                        :model))
+               (chat-ui-auto-test--drawn-prompt))))))
+
+(ert-deftest chat-ui-the-popup-menu-is-shaped-the-way-emacs-expects ()
+  "Batch mode never draws one, so the shape has to be asserted instead.
+
+A malformed pane would fail only on a real click, in a build no test
+runs."
+  (chat-ui-auto-test--with-session
+    (let ((menu nil))
+      (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () t))
+                ((symbol-function 'x-popup-menu)
+                 (lambda (_position m) (setq menu m) 'claude)))
+        (chat-ui-switch-model '(mouse-1 (nil . 1)))
+        ;; (TITLE (PANE-TITLE (LABEL . VALUE) ...)), and the value is the
+        ;; provider itself, so the click needs no decoding.
+        (should (stringp (car menu)))
+        (should (= 2 (length menu)))
+        (let ((pane (cadr menu)))
+          (should (stringp (car pane)))
+          (dolist (item (cdr pane))
+            (should (stringp (car item)))
+            (should (symbolp (cdr item))))
+          (should (rassq 'kimi (cdr pane))))
+        (should (eq 'claude (chat-session-model-id chat--current-session)))))))
+
+(ert-deftest chat-ui-switching-provider-is-refused-mid-response ()
+  "The reply would come back from a provider that was never asked."
+  (chat-ui-auto-test--with-session
+    (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _) (car collection)))
+              ((symbol-function 'chat-ui--response-active-p) (lambda () t)))
+      (should-error (chat-ui-switch-model) :type 'user-error))))
+
+(ert-deftest chat-ui-switching-provider-says-so-when-there-is-nothing-to-pick ()
+  "One provider is not a menu."
+  (chat-ui-auto-test--with-session
+    (cl-letf (((symbol-function 'chat-llm-enabled-providers)
+               (lambda () '(kimi))))
+      (chat-ui-switch-model)
+      (should (eq 'kimi (chat-session-model-id chat--current-session))))))
 
 (ert-deftest chat-ui-typing-survives-the-prompt-being-rewritten ()
   "The prompt is redrawn in a live input area, which may not be empty."
@@ -1426,10 +1586,7 @@ same thing any unrecognized slash does."
     (chat-ui--dispatch-command (chat-command-parse "!ls"))
     (goto-char (point-max))
     (should-error (delete-char -1) :type 'text-read-only)
-    (should (equal "cmd> "
-                   (buffer-substring-no-properties
-                    (line-beginning-position)
-                    (marker-position chat-ui--input-overlay))))))
+    (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt)))))
 
 (ert-deftest chat-ui-typing-after-the-prompt-is-not-protected-too ()
   "Protection that spread to the input would make the input unusable."
@@ -1459,10 +1616,7 @@ same thing any unrecognized slash does."
     (backward-char 3)
     (should-error (delete-char 1) :type 'text-read-only)
     (should-error (kill-line) :type 'text-read-only)
-    (should (equal "cmd> "
-                   (buffer-substring-no-properties
-                    (line-beginning-position)
-                    (marker-position chat-ui--input-overlay))))))
+    (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt)))))
 
 (ert-deftest chat-ui-claiming-the-line-leaves-the-cursor-after-the-prompt ()
   "`/cmd ls' widens the prompt under the cursor, which must not overtake it."
@@ -1520,10 +1674,7 @@ prompt and no way back short of reopening the session."
     (goto-char (point-max))
     (insert "echo hi")
     (chat-ui-send-message)
-    (should (equal "cmd> "
-                   (buffer-substring-no-properties
-                    (line-beginning-position)
-                    (marker-position chat-ui--input-overlay))))
+    (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt)))
     ;; The repair must not have swallowed what was typed.
     (should (equal (car shell-calls) "echo hi"))))
 
@@ -1535,10 +1686,7 @@ prompt and no way back short of reopening the session."
           (inhibit-read-only t))
       (delete-region (- end 2) end))
     (chat-ui--render-input-prompt)
-    (should (equal "cmd> "
-                   (buffer-substring-no-properties
-                    (line-beginning-position)
-                    (marker-position chat-ui--input-overlay))))))
+    (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt)))))
 
 (ert-deftest chat-ui-sending-leaves-the-prompt-alone-when-it-is-intact ()
   "The common case must not churn the buffer on every RET."
@@ -1549,10 +1697,7 @@ prompt and no way back short of reopening the session."
       (insert "echo hi")
       (chat-ui-send-message)
       (should (= before (marker-position chat-ui--input-overlay)))
-      (should (equal "cmd> "
-                     (buffer-substring-no-properties
-                      (line-beginning-position)
-                      (marker-position chat-ui--input-overlay)))))))
+      (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt))))))
 
 (ert-deftest chat-ui-a-slash-command-still-runs-while-auto-is-on ()
   "Auto claims plain input only.  An explicit command still means itself."
