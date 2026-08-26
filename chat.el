@@ -248,6 +248,7 @@ Keys:
   C-c C-t               - Toggle auto-approval for this session
   C-c C-q / C-c C-SPC   - Quote active region / ask about it
   C-c C-d               - Show or fold all detail
+  M-p / M-n             - Recall earlier / later input
   C-a                   - Go to the start of what you typed
   TAB                   - Complete: slash commands after /, paths otherwise
   C-c C-h               - This help
@@ -537,6 +538,9 @@ somewhere else is the same as advice that is wrong."
     ;; Detail.  A fold row carries its own RET and TAB, so these are for
     ;; reaching the detail without first finding a row to stand on.
     (define-key map (kbd "C-c C-d") 'chat-ui-toggle-all-folds)
+    ;; Input recall, where every shell and REPL in Emacs puts it.
+    (define-key map (kbd "M-p") 'chat-ui-previous-input)
+    (define-key map (kbd "M-n") 'chat-ui-next-input)
     ;; The prompt is buffer text, so the line begins before it.  Land on
     ;; what you typed instead.
     (define-key map (kbd "C-a") 'chat-ui-beginning-of-input)

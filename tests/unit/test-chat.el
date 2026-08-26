@@ -111,16 +111,25 @@
 `C-c C-SPC' has to be tried before `C-c C-[a-zA-Z]', or the alternation
 settles for `C-c C' and reports a key nobody wrote.")
 
+(defconst chat-test--help-standalone-key
+  (concat "\\(?:[CMSsH]-\\)*"
+          "\\(?:RET\\|TAB\\|SPC\\|DEL\\|ESC\\|<[a-z-]+>\\|[a-zA-Z]\\)")
+  "Matches one unprefixed key such as `RET', `C-g' or `M-p'.")
+
 (defconst chat-test--help-standalone-key-regexp
-  (concat "^ +\\("
-          "\\(?:[CMSsH]-\\)*"
-          "\\(?:RET\\|TAB\\|SPC\\|DEL\\|ESC\\|<[a-z-]+>\\|[a-zA-Z]\\)"
+  (concat "^ +\\(" chat-test--help-standalone-key
+          "\\(?: */ *" chat-test--help-standalone-key "\\)*"
           "\\)\\s-+- ")
-  "Matches an unprefixed key at the head of a help line.
+  "Matches the unprefixed keys at the head of a help line.
 
 The help documents `RET', `C-g' and `C-a' this way, and a regexp that
 only understood `C-c ...' left every one of them unchecked -- which is
-how `C-a' came to be bound without a line naming it.")
+how `C-a' came to be bound without a line naming it.
+
+A line may name a pair, as `M-p / M-n' does.  The prefixed regexp above
+reads both halves because it is not anchored; this one is, so it has to
+allow the pair explicitly or it sees only the first key and reports the
+second as undocumented when the help documents it perfectly well.")
 
 (defun chat-test--help-keys ()
   "Return the key sequences `chat-commands-help' names, normalized."
@@ -136,7 +145,8 @@ how `C-a' came to be bound without a line naming it.")
         (skip-chars-backward " \t"))
       (goto-char (point-min))
       (while (re-search-forward chat-test--help-standalone-key-regexp nil t)
-        (push (key-description (kbd (match-string 1))) keys)))
+        (dolist (key (split-string (match-string 1) "/" t "[ \t]+"))
+          (push (key-description (kbd key)) keys))))
     (delete-dups keys)))
 
 (defun chat-test--bound-keys ()

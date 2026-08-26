@@ -16,6 +16,7 @@
 
 (require 'chat-i18n)
 (require 'chat-command)
+(require 'chat-input-history)
 ;; Owned by `chat.el', which loads after this file.
 (defvar chat-commands-help)
 (defvar chat-auto-save-sessions)
@@ -1179,6 +1180,13 @@ box is how a question ends up being run as a command."
            (content (string-trim (buffer-substring-no-properties input-start input-end)))
            (command (chat-command-parse content))
            (control (chat-ui--control-command command)))
+      ;; Anything actually sent becomes recallable, commands included --
+      ;; that is what a shell does, and a mistyped command is exactly what
+      ;; one wants back.  Sending also ends any walk in progress, so the
+      ;; next `M-p' starts from the top.
+      (unless (eq (plist-get command :kind) 'empty)
+        (chat-input-history-add content)
+        (chat-input-history-reset-position))
       (cond
        ((eq (plist-get command :kind) 'empty)
         (message "%s" (chat-i18n 'empty-message "Cannot send empty message")))
@@ -1199,6 +1207,35 @@ box is how a question ends up being run as a command."
   "Remove the text between INPUT-START and INPUT-END from the input area."
   (delete-region input-start input-end)
   (goto-char input-start))
+
+;; ------------------------------------------------------------------
+;; Input history
+;; ------------------------------------------------------------------
+
+(defun chat-ui--input-text ()
+  "Return what is currently typed in the input area."
+  (if chat-ui--input-overlay
+      (buffer-substring-no-properties
+       (marker-position chat-ui--input-overlay) (point-max))
+    ""))
+
+(defun chat-ui--set-input-text (text)
+  "Replace the input area with TEXT and leave point at its end."
+  (when chat-ui--input-overlay
+    (let ((start (marker-position chat-ui--input-overlay)))
+      (delete-region start (point-max))
+      (goto-char start)
+      (insert (or text "")))))
+
+(defun chat-ui-previous-input ()
+  "Recall the previous input, keeping any unsent draft."
+  (interactive)
+  (chat-input-history-walk 1 #'chat-ui--input-text #'chat-ui--set-input-text))
+
+(defun chat-ui-next-input ()
+  "Recall the next input, restoring the draft past the newest entry."
+  (interactive)
+  (chat-input-history-walk -1 #'chat-ui--input-text #'chat-ui--set-input-text))
 
 (defun chat-ui--control-command (command)
   "Return the handler for COMMAND when it may run during a response."
@@ -2798,12 +2835,6 @@ This is an ephemeral query - the result is displayed but not persisted."
              nil
              '((reason . "edit-resend"))))
       (chat-ui--rebuild-buffer (chat-message-content user-msg)))))
-
-(defun chat-ui-previous-message ()
-  "Navigate to previous message."
-  (interactive)
-  ;; Implementation for history navigation
-  (message "History navigation not yet implemented"))
 
 ;; ------------------------------------------------------------------
 ;; View Raw Messages

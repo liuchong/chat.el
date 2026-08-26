@@ -107,6 +107,7 @@
   C-c C-t               - 切换本会话的自动批准
   C-c C-q / C-c C-SPC   - 引用选区 / 就选区提问
   C-c C-d               - 展开或折叠全部细节
+  M-p / M-n             - 召回更早 / 更晚的输入
   C-a                   - 跳到你输入内容的开头（不是行首）
   TAB                   - 补全：/ 之后补命令，其余补路径
   C-c C-h               - 本帮助
@@ -232,6 +233,8 @@ Wiki（/wiki <子命令>）：
 
    ;; Sending.
    (empty-message . "不能发送空消息")
+   (input-history-empty . "还没有输入历史")
+   (input-history-oldest . "已经是最早的输入")
    (send-usage . "用法：/send <消息>；单独写 /send 则把攒下的内容发出。")
    (request-in-progress . "已有回复正在生成。先取消它再发送新消息。")
    (request-cancelled . "请求已取消。")
