@@ -42,22 +42,31 @@ The input command layer landed earlier: chat input parses through
 `chat-ui.el`, with shell execution, history repeat, the session working
 directory, ephemeral queries and a literal escape.
 
-Canonical suite: 758 tests passing.
+The display now draws that record instead of keeping its own copy.
+Committed history is redrawn from `chat-session-messages`; a live tail
+holds only what has arrived and not been recorded; `message-appended`
+hands one to the other, which is what keeps an intermediate step on
+screen. Reasoning and tool work fold behind a summary row, interim prose
+is italic, the answer is ordinary text and never folds. Decision 0010
+records the shape and what it replaced.
+
+Canonical suite: 781 tests passing.
 
 ## Next Stage
 
-Render from `chat-transcript-plan`. The model is complete and the data is
-stored, but the display still draws an assistant turn into one mutable
-region, so intermediate steps remain invisible on screen. That is the
-whole reason the transcript work was started, and it is not finished
-until the display reads it.
+The `auto` mechanism. Two things share the name and both are wanted: a
+session's default command continuing without being retyped, and an agent
+running multiple rounds until its goal is met. `!!`, `/ask`, `/agent`,
+`/plan` and external-AI calls are repeatable and should engage it;
+`/goal`, `/cd`, `/pwd` and `/status` are not — a goal is a standing
+objective, not a loop.
 
-There is now one renderer to change, which is why the merge came first:
-this work would otherwise have been written twice.
+The intended shape is declarative: `:repeatable` on a command definition
+rather than a list of names checked at the call site.
 
-After that: fold interaction, the `auto` mechanism (declarative
-`:repeatable` on commands plus session default-command continuation),
-and specs for `/subagent`, `/send` and an external-AI prefix.
+After that: specs for `/subagent` and `/send [agent-id]`, and an
+external-AI prefix — `/call_ai <tool>` rather than one command per
+vendor.
 
 ## Not Doing Now
 

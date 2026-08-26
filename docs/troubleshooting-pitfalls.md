@@ -1172,4 +1172,50 @@ packages the suite does not load; require everything shipped here to
 exist. Count what was checked, so a regexp that stops matching fails
 rather than passes.
 
+### Every Assertion Passed And The Output Was Unreadable
+
+**Problem**: twenty tests covered the transcript display and passed, and
+the first look at real rendered output showed a raw JSON blob in the
+middle of a step and tool arguments printed as `(("path" . "config.el"))`.
+
+**Cause**: the assertions checked the properties that were thought of.
+`chat-ui-transcript-never-shows-the-tool-call-as-prose` searched the whole
+visible region for the function-call payload and passed, because the
+answer did not contain it — while the interim step above it still did.
+Nothing asserted on the argument text at all, because printing a Lisp
+object is not a bug until someone reads it.
+
+**Solution**: render a realistic turn and read it, before and after
+believing the suite. A display's requirement is that a person can read it,
+and that is not decomposable into the string searches one happens to
+write. When reading finds something, add the assertion then — the reading
+is what finds it.
+
+### A Marker Whose Insertion Type Decides Which Region Owns Text
+
+**Problem**: text arriving at the boundary between committed history and
+the live tail was drawn inside the wrong one, so a committed step could be
+overwritten by the next chunk.
+
+**Cause**: a marker with insertion type t advances past text inserted at
+its position; one with nil stays put and the text lands after it. The
+boundary marker had the type that made arriving text belong to history.
+
+**Solution**: set the boundary marker's insertion type from the invariant
+you want, and write it down where the marker is defined. Here: anything
+written past the committed history is by definition the tail, so
+`chat-ui--live-start` has insertion type nil.
+
+### A Batch Script Requires The UI And Gets An Unknown Provider
+
+**Problem**: a one-off rendering script failed with `Unknown provider:
+kimi`, while the whole suite passed against the same code.
+
+**Cause**: the provider registry is populated by loading `chat.el`.
+Requiring `chat-ui` pulls in the LLM layer but not the registration, so
+any session whose model is a real provider fails on lookup.
+
+**Solution**: `(require 'chat)` in scratch scripts. Cheap, and it makes
+the script exercise the same load order a user gets.
+
 Last updated: 2026-08-26

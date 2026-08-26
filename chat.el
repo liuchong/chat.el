@@ -227,7 +227,16 @@ Keys:
   C-c C-s / C-c C-p     - Request status / request panel
   C-c C-t               - Toggle auto-approval for this session
   C-c C-q / C-c C-SPC   - Quote active region / ask about it
+  C-c C-d               - Show or fold all detail
   C-c C-h               - This help
+
+Reading a Reply:
+  A run reasons, calls tools, reads results and only then answers, and
+  all of it is kept.  Reasoning and tool work start folded behind a
+  summary row; press RET or click it to open that group.  Prose the run
+  produced on the way to its answer shows in italics, so it can be read
+  without being mistaken for the answer.  C-c C-d opens or folds
+  everything at once.
 
 Coding Sessions:
   M-x chat-code-start        - Start a session with project context
@@ -444,6 +453,9 @@ how it is drawn, which is why it does not belong in either display."
     ;; Quoting the buffer you came from.
     (define-key map (kbd "C-c C-q") 'chat-quote-region)
     (define-key map (kbd "C-c C-SPC") 'chat-ask-region)
+    ;; Detail.  A fold row carries its own RET and TAB, so these are for
+    ;; reaching the detail without first finding a row to stand on.
+    (define-key map (kbd "C-c C-d") 'chat-ui-toggle-all-folds)
     map)
   "Keymap for chat mode buffers.
 

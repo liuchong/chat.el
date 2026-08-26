@@ -99,14 +99,36 @@
 (defvar-local chat-ui--last-tracked-tool-paths nil
   "Most recent file targets seen in this chat buffer.")
 
-(defvar-local chat-ui--live-response-start nil
-  "Marker at the current assistant response body.")
-
 (defvar-local chat-ui--live-response-content ""
   "Accumulated visible content for the current live response.")
 
 (defvar-local chat-ui--last-render nil
   "Last rendered slot state used by the streaming fast path.")
+
+(defvar-local chat-ui--conversation-start nil
+  "Marker where the conversation begins, just after the header.")
+
+(defvar-local chat-ui--live-start nil
+  "Marker where the in-flight part of the current turn begins.
+
+Everything before it has been recorded on the session and is redrawn only
+when the record changes.  Everything after it is the tail that has not
+been recorded yet, which is what a stream chunk rewrites.
+
+Insertion type nil, so text arriving at the boundary lands after it:
+anything written past the committed history is by definition the tail.")
+
+(defvar-local chat-ui--opened-fold-groups nil
+  "Fold group keys the reader opened by hand.
+
+Keyed by the first part of a run, so a group stays open while later parts
+of the same channel arrive.")
+
+(defvar-local chat-ui--live-trailers nil
+  "Plist of trailing notes for the in-flight turn.
+
+Holds `:tool-summary' and `:limit-reached', which belong to the turn as a
+whole rather than to any one part of it.")
 
 (defun chat-ui--pending-approval-event ()
   "Return the current pending approval event when present."
@@ -220,12 +242,12 @@ started on.  A session without code capability has no focus to move."
        (chat-ui--request-live-detail))))
 
 (defun chat-ui--refresh-live-response (&optional snapshot)
-  "Refresh the transcript live response slot from SNAPSHOT."
-  (when (and chat-ui--live-response-start
-             (marker-buffer chat-ui--live-response-start))
+  "Refresh the in-flight tail of the transcript from SNAPSHOT."
+  (when (and chat-ui--live-start
+             (marker-buffer chat-ui--live-start))
     (chat-ui--render-response-state
      (current-buffer)
-     chat-ui--live-response-start
+     chat-ui--live-start
      chat-ui--live-response-content
      chat-ui--request-tool-events
      (chat-ui--request-live-detail snapshot))))
@@ -277,8 +299,9 @@ started on.  A session without code capability has no focus to move."
   (setq chat-ui--request-tool-events nil)
   (setq chat-ui--last-approval-hint nil)
   (setq chat-ui--last-tracked-tool-paths nil)
-  (setq chat-ui--live-response-start nil)
   (setq chat-ui--live-response-content "")
+  (setq chat-ui--live-trailers nil)
+  (setq chat-ui--last-render nil)
   (setq chat-ui--current-request-id nil))
 
 (defun chat-ui--maybe-announce-approval-shortcuts (tool-events)
@@ -503,8 +526,10 @@ doubles as the answer to why a reply mentioned a file nobody named."
   (setq chat-ui--request-tool-events nil)
   (setq chat-ui--last-approval-hint nil)
   (setq chat-ui--last-tracked-tool-paths nil)
-  (setq chat-ui--live-response-start nil)
   (setq chat-ui--live-response-content "")
+  (setq chat-ui--live-trailers nil)
+  (setq chat-ui--last-render nil)
+  (setq chat-ui--opened-fold-groups nil)
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
@@ -515,28 +540,298 @@ doubles as the answer to why a reply mentioned a file nobody named."
     (when-let ((capability (chat-ui--capability-lines session)))
       (insert (propertize capability 'face 'shadow)))
     (insert "\n")
-    (dolist (msg (chat-session-messages session))
-      (chat-ui--insert-message msg))
+    (setq chat-ui--conversation-start (copy-marker (point) nil))
+    (chat-ui--render-messages (chat-session-messages session))
+    (setq chat-ui--live-start (copy-marker (point) nil))
     (setq chat-ui--messages-end (point-marker))
     (chat-ui--setup-input-area)))
 
 (defun chat-ui--insert-message (msg)
-  "Insert message MSG into buffer."
-  (let* ((role (chat-message-role msg))
-         (content (chat-message-content msg))
-         (role-face (pcase role
-                      (:user 'font-lock-keyword-face)
-                      (:assistant 'font-lock-function-name-face)
-                      (:system 'font-lock-comment-face)
-                      (_ 'default)))
-         (role-name (pcase role
-                      (:user "You")
-                      (:assistant "Assistant")
-                      (:system "System")
-                      (_ (symbol-name role)))))
-    (insert (propertize (format "%s:\n" role-name) 'face role-face))
-    (insert content)
-    (insert "\n\n")))
+  "Insert message MSG into the buffer as transcript parts.
+
+Goes through the transcript so a message drawn as it arrives looks the
+same as the same message drawn from the record after a reload."
+  (chat-ui--render-parts (chat-transcript-message-parts msg)))
+
+;; ------------------------------------------------------------------
+;; Transcript rendering
+;; ------------------------------------------------------------------
+;;
+;; A run is not one answer.  It reasons, calls a tool, reads the result,
+;; reasons again, and only then replies.  This display used to draw the
+;; whole run into one mutable region, so step N's text was deleted to
+;; make room for step N+1 and the reader was left with a question at the
+;; top, an answer at the bottom, and nothing in between.
+;;
+;; Every step is already recorded: the agent loop emits
+;; `message-appended' for each one and it is persisted immediately.  So
+;; the display does not need to keep anything -- it draws the record.
+;; `chat-transcript-plan' says what to draw and what to fold; this code
+;; only puts it on screen.
+;;
+;; Two regions, because they change at different rates.  Committed
+;; history is redrawn when the record changes: a message appended, a
+;; message sent, a fold toggled.  The live tail is redrawn on every
+;; stream chunk, and it is short, so a long conversation does not get
+;; slower to stream into.
+
+(defcustom chat-ui-detail-indent "  "
+  "Prefix marking a transcript part as detail rather than as the answer."
+  :type 'string
+  :group 'chat-ui)
+
+(defcustom chat-ui-detail-inline-max 64
+  "Longest detail text still shown on the same line as its label."
+  :type 'integer
+  :group 'chat-ui)
+
+(defun chat-ui--toggle-fold-at-mouse (event)
+  "Toggle the fold group EVENT was delivered on."
+  (interactive "e")
+  (mouse-set-point event)
+  (chat-ui-toggle-fold))
+
+(defvar chat-ui-fold-row-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'chat-ui-toggle-fold)
+    (define-key map (kbd "TAB") #'chat-ui-toggle-fold)
+    (define-key map [mouse-1] #'chat-ui--toggle-fold-at-mouse)
+    map)
+  "Keymap active on a fold row.
+
+Carried as a text property, so `RET' toggles a fold where a fold is and
+still sends the message everywhere else.")
+
+(defun chat-ui--insert-fold-row (instruction)
+  "Insert the summary row standing in for what INSTRUCTION hides."
+  (let ((group (plist-get instruction :group)))
+    (insert (propertize (concat chat-ui-detail-indent
+                                (chat-transcript-fold-row-text instruction)
+                                "\n")
+                        'face 'chat-transcript-fold-row
+                        'chat-ui-fold-group group
+                        'keymap chat-ui-fold-row-map
+                        'mouse-face 'highlight
+                        'help-echo (if (plist-get instruction :open)
+                                       "RET or mouse-1 to fold"
+                                     "RET or mouse-1 to expand")))))
+
+(defun chat-ui--insert-detail (label text face)
+  "Insert TEXT as a detail block titled LABEL, drawn in FACE."
+  (let* ((body (string-trim-right (or text "")))
+         (title (concat chat-ui-detail-indent (or label "Detail"))))
+    (if (string-empty-p body)
+        (insert (propertize (concat title "\n") 'face face))
+      (if (and (not (string-match-p "\n" body))
+               (<= (length body) chat-ui-detail-inline-max))
+          (insert (propertize (format "%s: %s\n" title body) 'face face))
+        (insert (propertize (concat title "\n") 'face face))
+        (dolist (line (split-string body "\n"))
+          (insert (propertize (concat chat-ui-detail-indent
+                                      chat-ui-detail-indent line "\n")
+                              'face face)))))))
+
+(defun chat-ui--open-block ()
+  "Ensure a blank line separates what follows from the detail above it.
+
+Detail lines end in a single newline so a run of them reads as one block.
+A question or an answer starting immediately after would be pulled into
+that block."
+  (unless (or (bolp) (bobp))
+    (insert "\n"))
+  (unless (or (bobp)
+              (and (> (point) (1+ (point-min)))
+                   (eq (char-before (1- (point))) ?\n)))
+    (insert "\n")))
+
+(defun chat-ui--insert-part (part)
+  "Insert transcript PART at point.
+
+A question and an answer read as themselves.  Everything else is the
+run's account of its own work, so it is indented, labeled and drawn in
+the face its channel calls for -- present, but not competing with the
+answer for the reader's attention."
+  (let ((text (or (plist-get part :text) "")))
+    (pcase (plist-get part :category)
+      ('user
+       (chat-ui--open-block)
+       (insert (propertize "You:\n" 'face 'font-lock-keyword-face))
+       (insert text)
+       (insert "\n\n"))
+      ('ai-final
+       (chat-ui--open-block)
+       (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
+       (chat-ui--insert-formatted-response text)
+       (insert "\n\n"))
+      (_
+       (chat-ui--insert-detail (chat-transcript-part-label part)
+                               text
+                               (chat-transcript-part-face part))))))
+
+(defun chat-ui--prose-part-p (part)
+  "Return non-nil when PART is prose rather than a labeled event.
+
+A tool call is worth a row even when its arguments are empty; prose with
+nothing left in it is not."
+  (memq (plist-get part :work) '(nil message)))
+
+(defun chat-ui--display-parts (parts)
+  "Return PARTS with their text prepared for display.
+
+A model that calls a tool puts the call in the content field as well, so
+the step's prose arrives with a JSON blob embedded in it.  Rendered as
+written it reads as the model having answered in JSON.  Stripping it can
+empty the prose out entirely, and an empty part must not reach the plan:
+it would be counted in a fold row standing for nothing."
+  (delq nil
+        (mapcar
+         (lambda (part)
+           (let ((text (if (chat-ui--prose-part-p part)
+                           (string-trim
+                            (chat-tool-caller-extract-content
+                             (or (plist-get part :text) "")))
+                         (plist-get part :text))))
+             (unless (and (chat-ui--prose-part-p part)
+                          (string-empty-p (or text "")))
+               (plist-put (copy-sequence part) :text text))))
+         parts)))
+
+(defun chat-ui--render-parts (parts)
+  "Insert PARTS at point, folding by channel."
+  (dolist (instruction (chat-transcript-plan (chat-ui--display-parts parts)
+                                             chat-ui--opened-fold-groups))
+    (pcase (plist-get instruction :type)
+      ('fold-row (chat-ui--insert-fold-row instruction))
+      ('part (chat-ui--insert-part (plist-get instruction :part))))))
+
+(defun chat-ui--render-messages (messages)
+  "Insert MESSAGES at point as a folded transcript."
+  (chat-ui--render-parts (chat-transcript-parts messages)))
+
+(defun chat-ui--insert-live-trailers ()
+  "Insert the notes that belong to the turn rather than to any one part."
+  (when-let ((line (chat-ui--live-narrative-line
+                    (plist-get chat-ui--live-trailers :detail))))
+    (insert (propertize (concat chat-ui-detail-indent line "\n")
+                        'face 'chat-transcript-fold-row)))
+  (when-let ((summary (plist-get chat-ui--live-trailers :tool-summary)))
+    (insert (propertize (format "%sTools used: %s\n"
+                                chat-ui-detail-indent summary)
+                        'face 'chat-transcript-system)))
+  (when (plist-get chat-ui--live-trailers :limit-reached)
+    (insert (propertize
+             (format "%sTool loop stopped after reaching the safety limit.\n"
+                     chat-ui-detail-indent)
+             'face 'chat-transcript-system))))
+
+(defun chat-ui--render-live-region ()
+  "Redraw the in-flight tail of the current turn.
+
+Called for every stream chunk, so it touches only the tail; the committed
+history above `chat-ui--live-start' is left alone.
+
+Within the tail it appends rather than rewrites when it can, because a
+reply arrives in many small chunks and reinserting all of it each time
+makes a long answer quadratic to display.  The append has to resume at a
+closed fence: cutting mid-block leaves a half-arrived code block drawn as
+prose, and the fence that would have closed it is never reconsidered."
+  (when (and chat-ui--live-start chat-ui--messages-end)
+    (let* ((inhibit-read-only t)
+           (content (string-trim-right (or chat-ui--live-response-content "")))
+           (last chat-ui--last-render)
+           (previous (and last (plist-get last :content)))
+           (body (and last (plist-get last :body-start)))
+           (append-p (and previous body
+                          (not (string-empty-p content))
+                          (= (plist-get last :live-start)
+                             (marker-position chat-ui--live-start))
+                          (string-prefix-p previous content)))
+           (cut (and append-p (chat-ui--fence-safe-prefix-length previous))))
+      (save-excursion
+        (if append-p
+            (progn
+              (goto-char (+ body cut))
+              (delete-region (point) chat-ui--messages-end)
+              (chat-ui--insert-formatted-response (substring content cut))
+              (insert "\n\n"))
+          (goto-char chat-ui--live-start)
+          (delete-region chat-ui--live-start chat-ui--messages-end)
+          (setq body nil)
+          (unless (string-empty-p content)
+            (insert (propertize "Assistant:\n"
+                                'face 'font-lock-function-name-face))
+            (setq body (point))
+            (chat-ui--insert-formatted-response content)
+            (insert "\n\n")))
+        (chat-ui--insert-live-trailers)
+        (set-marker chat-ui--messages-end (point)))
+      (setq chat-ui--last-render
+            (and body
+                 (list :content content
+                       :body-start body
+                       :live-start (marker-position chat-ui--live-start)))))))
+
+(defun chat-ui--redraw-conversation ()
+  "Redraw the whole conversation from the session record.
+
+The record is the only source: nothing the display has drawn before is
+consulted, so a message appended, a fold toggled and a session reopened
+all produce the same screen."
+  (when (and chat--current-session
+             chat-ui--conversation-start
+             chat-ui--messages-end)
+    (let ((inhibit-read-only t))
+      (save-excursion
+        (goto-char chat-ui--conversation-start)
+        (delete-region chat-ui--conversation-start chat-ui--messages-end)
+        (chat-ui--render-messages (chat-session-messages chat--current-session))
+        (setq chat-ui--live-start (copy-marker (point) nil))
+        (set-marker chat-ui--messages-end (point))))
+    (setq chat-ui--last-render nil)
+    (chat-ui--render-live-region)))
+
+(defun chat-ui-toggle-fold ()
+  "Expand or fold the group at point."
+  (interactive)
+  (let ((group (or (get-text-property (point) 'chat-ui-fold-group)
+                   (and (> (point) (point-min))
+                        (get-text-property (1- (point)) 'chat-ui-fold-group)))))
+    (unless group
+      (user-error "No folded section here"))
+    (setq chat-ui--opened-fold-groups
+          (if (member group chat-ui--opened-fold-groups)
+              (delete group chat-ui--opened-fold-groups)
+            (cons group chat-ui--opened-fold-groups)))
+    (let ((line (line-number-at-pos)))
+      (chat-ui--redraw-conversation)
+      (goto-char (point-min))
+      (forward-line (1- line)))))
+
+(defun chat-ui-toggle-all-folds ()
+  "Expand every folded group, or fold them all when all are open."
+  (interactive)
+  (let ((groups
+         (delq nil
+               (mapcar (lambda (instruction)
+                         (and (eq (plist-get instruction :type) 'fold-row)
+                              (plist-get instruction :group)))
+                       ;; Same filtering the renderer applies, or the
+                       ;; keys here would not be the keys on screen.
+                       (chat-transcript-plan
+                        (chat-ui--display-parts
+                         (chat-transcript-parts
+                          (chat-session-messages chat--current-session)))
+                        nil)))))
+    (setq chat-ui--opened-fold-groups
+          (if (cl-every (lambda (group)
+                          (member group chat-ui--opened-fold-groups))
+                        groups)
+              nil
+            groups))
+    (chat-ui--redraw-conversation)
+    (message "%s" (if chat-ui--opened-fold-groups
+                      "Showing all detail"
+                    "Detail folded"))))
 
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
@@ -637,10 +932,9 @@ is absent here is left as ordinary message text.")
                        :content content
                        :timestamp (current-time))))
         (chat-session-add-message chat--current-session user-msg)
-        (save-excursion
-          (goto-char chat-ui--messages-end)
-          (chat-ui--insert-message user-msg)
-          (set-marker chat-ui--messages-end (point)))
+        ;; Drawn from the record rather than inserted directly, so the
+        ;; live boundary lands after this message instead of before it.
+        (chat-ui--redraw-conversation)
         (chat-ui--get-response)))))
 
 (defun chat-ui--steer-active-agent (content)
@@ -651,10 +945,7 @@ is absent here is left as ordinary message text.")
                    :content content
                    :timestamp (current-time))))
     (chat-session-add-message chat--current-session user-msg)
-    (save-excursion
-      (goto-char chat-ui--messages-end)
-      (chat-ui--insert-message user-msg)
-      (set-marker chat-ui--messages-end (point)))
+    (chat-ui--redraw-conversation)
     (chat-agent-steer chat-ui--active-agent-run user-msg)
     (message "Message queued for the active response.")))
 
@@ -993,16 +1284,18 @@ formatting, so the block stays broken for the rest of the conversation."
                                                  &optional live-detail
                                                  tool-summary
                                                  tool-loop-limit-reached)
-  "Render CONTENT, TOOL-EVENTS, and optional LIVE-DETAIL at CONTENT-START.
+  "Render the in-flight tail of the current turn in UI-BUFFER.
 
-TOOL-SUMMARY and TOOL-LOOP-LIMIT-REACHED add trailing lines below the
-response when present.
+CONTENT is what has arrived and not yet been recorded; TOOL-EVENTS,
+LIVE-DETAIL, TOOL-SUMMARY and TOOL-LOOP-LIMIT-REACHED describe the state
+around it.  CONTENT-START is accepted for callers written against the
+mutable slot this replaced; the tail is positioned from
+`chat-ui--live-start', which the record moves as each step lands.
 
-This is the only response renderer.  It used to have a second copy on the
-code surface, and the two grew different strengths -- one learned to
-guard against a dead buffer, the other learned to cut streaming updates
-at a fence boundary and to format code blocks -- so a fix to either was
-half a fix."
+Only the tail is touched.  Committed steps are drawn from the session and
+are not this function's business, which is what keeps an intermediate
+step on screen once it has been recorded."
+  (ignore content-start)
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (setq chat-ui--request-tool-events tool-events)
@@ -1017,42 +1310,12 @@ half a fix."
          chat-ui--current-request-id
          tool-events))
       (chat-ui--render-status-line)
-      (save-excursion
-        (let ((inhibit-read-only t))
-          (let* ((last chat-ui--last-render)
-                 (old-content (and last (plist-get last :content)))
-                 (fast (and old-content
-                            (eq (plist-get last :content-start) content-start)
-                            (= (plist-get last :event-count)
-                               (length tool-events))
-                            (string-prefix-p old-content content)))
-                 (cut (and fast (chat-ui--fence-safe-prefix-length
-                                 old-content))))
-            (if fast
-                (progn
-                  (goto-char (+ (marker-position content-start) cut))
-                  (delete-region (point) chat-ui--messages-end)
-                  (chat-ui--insert-formatted-response (substring content cut)))
-              (delete-region content-start chat-ui--messages-end)
-              (goto-char content-start)
-              (unless (string-empty-p content)
-                (chat-ui--insert-formatted-response content)))
-            (when-let ((line (chat-ui--live-narrative-line live-detail)))
-              (unless (string-empty-p content)
-                (insert "\n"))
-              (insert line))
-            (when tool-summary
-              (insert "\n")
-              (insert (format "Tools used: %s" tool-summary)))
-            (when tool-loop-limit-reached
-              (insert "\n")
-              (insert "Tool loop stopped after reaching the safety limit."))
-            (insert "\n\n")
-            (set-marker chat-ui--messages-end (point))
-            (setq chat-ui--last-render
-                  (list :content content
-                        :content-start content-start
-                        :event-count (length tool-events)))))))))
+      (setq chat-ui--live-response-content (or content ""))
+      (setq chat-ui--live-trailers
+            (list :detail live-detail
+                  :tool-summary tool-summary
+                  :limit-reached tool-loop-limit-reached))
+      (chat-ui--render-live-region))))
 
 (defun chat-ui--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
@@ -1166,7 +1429,17 @@ assistant response being filled in."
          ((eq type 'message-appended)
           (chat-agent-transcript-persist-message
            session
-           (plist-get event :message)))
+           (plist-get event :message))
+          ;; The step is on the record now, so it becomes committed
+          ;; history and the live tail starts over.  This is what keeps
+          ;; an intermediate step on screen: the tail no longer owns it,
+          ;; so the next chunk cannot overwrite it.
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (setq chat-ui--live-response-content "")
+              (setq chat-ui--live-trailers
+                    (list :detail (chat-ui--request-live-detail)))
+              (chat-ui--redraw-conversation))))
          ((eq type 'response)
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
@@ -1237,14 +1510,15 @@ assistant response being filled in."
                     (chat-session-messages session)))
          (msg-id (chat-session-new-message-id))
          (ui-buffer (current-buffer))
-         assistant-start
-         (request-id (chat-ui--begin-request session model transport)))
-    (save-excursion
-      (goto-char chat-ui--messages-end)
-      (insert (propertize "Assistant:\n" 'face 'font-lock-function-name-face))
-      (set-marker chat-ui--messages-end (point))
-      (setq assistant-start (copy-marker (point))))
-    (setq chat-ui--live-response-start assistant-start)
+         (request-id (chat-ui--begin-request session model transport))
+         ;; No header is drawn up front: the tail draws its own once
+         ;; there is something under it, and until then the narrative
+         ;; line is what says the request is in flight.  A header planted
+         ;; here would be a second one.
+         (assistant-start chat-ui--live-start))
+    (setq chat-ui--live-response-content "")
+    (setq chat-ui--live-trailers nil)
+    (setq chat-ui--last-render nil)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
            (messages-final
             (chat-context-prepare-messages
@@ -1333,11 +1607,34 @@ without it the same fenced block is just text in a reply."
              (fboundp 'chat-code--parse-code-edit))
     (chat-code--parse-code-edit content)))
 
+(defun chat-ui--answer-on-record-p (session content)
+  "Return non-nil when CONTENT is already the recorded answer of SESSION.
+
+The agent loop records every step as it happens, the answer included, so
+by the time a run ends the reply is usually on screen already.  Rendering
+it as the live tail as well would show it twice.  It is not always
+recorded -- a run cut short, or one that ended without an answer -- so
+this is a question rather than an assumption."
+  (when (and session (not (string-empty-p (string-trim (or content "")))))
+    (let ((wanted (string-trim content)))
+      (cl-some
+       (lambda (message)
+         (and (eq (chat-transcript-category message) 'ai-final)
+              (equal (string-trim (or (chat-message-content message) ""))
+                     wanted)))
+       (chat-session-messages session)))))
+
 (defun chat-ui--finalize-response (session msg-id ui-buffer content-start processed
                                            &optional raw-request raw-response)
-  "Render PROCESSED response for SESSION.
+  "Settle the finished turn for SESSION from PROCESSED.
+
 MSG-ID, RAW-REQUEST, and RAW-RESPONSE are accepted for compatibility;
-agent messages are persisted incrementally from `message-appended'."
+agent messages are persisted incrementally from `message-appended'.
+
+The answer is already on the record and already on screen, so this does
+not draw it again.  What it adds is what belongs to the turn as a whole
+-- which tools ran, whether the step limit cut the run short -- and the
+edit a coding reply may be proposing."
   (let* ((content (string-trim-right
                    ;; Stripped here as well as while streaming.  A reply
                    ;; that arrives in one piece takes this path only, and
@@ -1349,21 +1646,27 @@ agent messages are persisted incrementally from `message-appended'."
          (tool-calls (plist-get processed :tool-calls))
          (tool-results (plist-get processed :tool-results))
          (tool-summary (chat-ui--tool-display-summary tool-calls tool-results))
-         (limit-reached (plist-get processed :tool-loop-limit-reached)))
+         (limit-reached (plist-get processed :tool-loop-limit-reached))
+         (recorded (chat-ui--answer-on-record-p session content)))
     (ignore msg-id raw-request raw-response)
     (if-let ((edit (chat-ui--proposed-edit session content)))
         (when (buffer-live-p ui-buffer)
           (with-current-buffer ui-buffer
             (chat-ui--replace-response-slot
-             content-start
+             chat-ui--live-start
              (lambda () (chat-code--propose-edit edit)))))
       (chat-ui--render-response-state
        ui-buffer content-start
-       (if (and (string-blank-p content) tool-summary) "" content)
+       ;; Drawing it again would show it twice: once as the recorded
+       ;; answer above the tail, once as the tail itself.
+       (if (or recorded (and (string-blank-p content) tool-summary))
+           ""
+         content)
        tool-events nil tool-summary limit-reached)
       (when (buffer-live-p ui-buffer)
         (with-current-buffer ui-buffer
-          (chat-ui--fontify-markdown-lite content-start chat-ui--messages-end))))
+          (chat-ui--fontify-markdown-lite chat-ui--conversation-start
+                                          chat-ui--messages-end))))
     (chat-log "[UI] Response rendered")))
 
 (defun chat-ui--render-error (ui-buffer error-message)

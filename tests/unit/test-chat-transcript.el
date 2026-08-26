@@ -456,5 +456,32 @@ instructions and its recovered history along with the chrome."
                   (list :type 'fold-row :channel 'tool-work :count 1 :open t))
                  "▾ Tool work · 1")))
 
+(ert-deftest chat-transcript-tool-call-label-names-the-arguments ()
+  "A reader wants to see which file, not the shape of the transport."
+  (should (equal (chat-transcript-tool-call-label
+                  '(:name "files_read" :arguments (("path" . "config.el"))))
+                 "files_read path=config.el"))
+  (should (equal (chat-transcript-tool-call-label
+                  '(:name "shell" :arguments (("command" . "ls") ("cwd" . "/tmp"))))
+                 "shell command=ls cwd=/tmp")))
+
+(ert-deftest chat-transcript-tool-call-label-survives-odd-arguments ()
+  "Arguments are not always a mapping, and a label is still wanted."
+  (should (equal (chat-transcript-tool-call-label '(:name "ping")) "ping"))
+  (should (equal (chat-transcript-tool-call-label
+                  '(:name "ping" :arguments ""))
+                 "ping"))
+  (should (string-prefix-p "ping "
+                           (chat-transcript-tool-call-label
+                            '(:name "ping" :arguments "raw text")))))
+
+(ert-deftest chat-transcript-tool-call-label-shortens-a-long-value ()
+  "A label is one line, so a large argument cannot take the whole row."
+  (let ((label (chat-transcript-tool-call-label
+                `(:name "write"
+                  :arguments (("body" . ,(make-string 400 ?x)))))))
+    (should (< (length label) 120))
+    (should (string-match-p "\\.\\.\\." label))))
+
 (provide 'test-chat-transcript)
 ;;; test-chat-transcript.el ends here

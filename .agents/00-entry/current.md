@@ -43,9 +43,13 @@ HTML-comment markers that Markdown hides and other tools ignore.
 
 The typed transcript model in `lisp/core/chat-transcript.el` stamps turn,
 step, category and work on every message and projects the record down to
-what a request may carry. **The display does not render from it yet**, so
-intermediate steps are still invisible on screen; that is the next stage,
-and there is now one renderer to change rather than two.
+what a request may carry. The display renders from it: committed history
+is redrawn from the session's messages, a live tail holds only what has
+arrived and not been recorded, and `message-appended` hands one to the
+other. That handoff is what keeps an intermediate step on screen instead
+of being overwritten by the step after it. Reasoning and tool work fold
+behind a summary row, interim prose is italic, the answer is ordinary text
+and never folds. Decision 0010 records the shape.
 
 Storage and self-knowledge landed on the same day. A run is told where its
 own transcript is and can filter it back through `session_log`
@@ -59,7 +63,7 @@ space. The assembled block measures itself against the system prompt share
 and shortens to paths alone when it does not fit, which is what an 8K
 window requires.
 
-Canonical suite: 758 tests passing.
+Canonical suite: 781 tests passing.
 
 The input command layer completed earlier the same day. Chat input parses
 into commands through `lisp/core/chat-command.el`, covering shell
@@ -125,12 +129,14 @@ surface advertises only relevant scoped tools.
 
 - `../10-active/focus.md`
 - `../20-reference/knowledge/agent-kernel-contract.md`
+- `../20-reference/decisions/0010-rendering-the-transcript.md`
 - `../20-reference/decisions/0009-one-chat-surface.md`
 - `../20-reference/decisions/0008-self-knowledge-and-shared-storage.md`
 - `../20-reference/decisions/0007-context-budget-and-resident-context.md`
 - `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`
 - `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-26-transcript-rendering.md`
 - `../30-records/logs/stage-2026-08-25-self-knowledge-and-shared-storage.md`
 - `../30-records/logs/stage-2026-08-25-context-budget-and-resident-context.md`
 - `../30-records/logs/stage-2026-08-25-transcript-model-and-step-budget.md`

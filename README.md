@@ -460,6 +460,30 @@ You can override this with `chat-files-allowed-directories`.
       (list default-directory "/tmp/" "/var/tmp/"))
 ```
 
+## Reading a Reply
+
+A run is not one answer. It reasons, calls a tool, reads the result,
+reasons again, and only then replies. All of it is kept, and the display
+draws it from the session record rather than from anything it is holding
+in a buffer — so an intermediate step cannot be overwritten by the step
+that follows it, and reopening a session shows what the run showed.
+
+| Part of a run | How it appears |
+|---------------|----------------|
+| Your question | Ordinary text |
+| Reasoning | Folded behind a summary row, dimmed |
+| Tool calls and results | Folded behind a summary row; a call and its result are one group |
+| Prose on the way to the answer | Shown, in italics — meant to be read, not to be mistaken for the answer |
+| The answer | Ordinary text, never folded |
+
+Press `RET` on a summary row, or click it, to open that group; press
+again to fold it. `C-c C-d` opens or folds everything at once. A group
+stays as you left it while later parts of the same kind arrive.
+
+Fold defaults are configurable through `chat-transcript-fold-styles`,
+which also offers `latest-expanded` for keeping only the newest part of a
+channel in view.
+
 ## Code Capability (AI Programming)
 
 Code capability is a property of a chat session, not a second interface.

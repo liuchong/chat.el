@@ -527,7 +527,7 @@ one that was asked."
       (insert "Assistant:\n")
       (setq-local chat-ui--messages-end (point-max-marker))
       (let ((content-start (point-marker)))
-        (setq-local chat-ui--live-response-start content-start)
+        (setq-local chat-ui--live-start content-start)
         (setq-local chat-ui--live-response-content "")
         (setq-local chat-ui--current-request-id "req-ui")
         (chat-ui--handle-request-diagnostics-update "req-ui" nil nil)

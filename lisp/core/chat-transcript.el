@@ -250,12 +250,35 @@ becoming its own message, so it never enters the request context."
         (concat (substring flat 0 72) "...")
       flat)))
 
+(defun chat-transcript--argument-pairs (arguments)
+  "Return ARGUMENTS as `key=value' text, or nil when it is not a mapping.
+
+Tool arguments arrive as an alist of names to values.  Printed as a Lisp
+object they read as `((\"path\" . \"x\"))', which is the transport showing
+through; a reader wants to see which file."
+  (when (and (consp arguments) (not (keywordp (car arguments))))
+    (let (pairs)
+      (dolist (entry arguments)
+        (when (consp entry)
+          (let ((key (car entry))
+                (value (cdr entry)))
+            (push (format "%s=%s"
+                          (if (stringp key) key (format "%s" key))
+                          (chat-transcript--compact
+                           (if (stringp value) value (format "%S" value))))
+                  pairs))))
+      (and pairs (string-join (nreverse pairs) " ")))))
+
 (defun chat-transcript-tool-call-label (call)
   "Return a one line label for tool CALL."
-  (let ((name (or (plist-get call :name) "tool"))
-        (arguments (plist-get call :arguments)))
-    (if (and arguments (not (equal arguments "")))
-        (format "%s %s" name (chat-transcript--compact arguments))
+  (let* ((name (or (plist-get call :name) "tool"))
+         (arguments (plist-get call :arguments))
+         (rendered (and arguments
+                        (not (equal arguments ""))
+                        (or (chat-transcript--argument-pairs arguments)
+                            (chat-transcript--compact arguments)))))
+    (if rendered
+        (format "%s %s" name rendered)
       (format "%s" name))))
 
 (defun chat-transcript--blank-p (text)
