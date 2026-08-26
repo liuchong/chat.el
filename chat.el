@@ -99,6 +99,9 @@ Returns the list of files that were loaded."
 (chat-session-index-install)
 (require 'chat-session-tree)
 (require 'chat-transcript)
+(require 'chat-align)
+(require 'chat-markdown)
+(require 'chat-mdp)
 (require 'chat-memory)
 (require 'chat-project)
 (require 'chat-stream)
@@ -253,6 +256,7 @@ Keys:
   C-c C-t               - Toggle auto-approval for this session
   C-c C-q / C-c C-SPC   - Quote active region / ask about it
   C-c C-d               - Show or fold all detail
+  C-c C-u               - Show or hide the Markdown markers
   M-p / M-n             - Recall earlier / later input
   C-a                   - Go to the start of what you typed
   TAB                   - Complete: slash commands after /, paths otherwise
@@ -543,6 +547,10 @@ somewhere else is the same as advice that is wrong."
     ;; Detail.  A fold row carries its own RET and TAB, so these are for
     ;; reaching the detail without first finding a row to stand on.
     (define-key map (kbd "C-c C-d") 'chat-ui-toggle-all-folds)
+    ;; The Markdown source, for when the source is what you want to read.
+    ;; Hiding a marker never removed it, so this is one line of display
+    ;; state and nothing is redrawn.
+    (define-key map (kbd "C-c C-u") 'chat-markdown-toggle-markers)
     ;; Input recall, where every shell and REPL in Emacs puts it.
     (define-key map (kbd "M-p") 'chat-ui-previous-input)
     (define-key map (kbd "M-n") 'chat-ui-next-input)
@@ -649,6 +657,10 @@ the header and in which commands do anything."
   :group 'chat
   (setq buffer-read-only nil)
   (setq truncate-lines nil)
+  ;; Wrapping at word boundaries, and Markdown markers hidden.  Not
+  ;; `visual-line-mode', which would rebind C-a away from
+  ;; `chat-ui-beginning-of-input'.
+  (chat-markdown-setup-buffer)
   (setq-local completion-at-point-functions
               '(chat-ui--command-completion-at-point
                 chat-ui--path-completion-at-point))

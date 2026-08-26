@@ -681,18 +681,25 @@ anyone who turns it back on."
      (should path-triggered)
      (should-not plain-triggered))))
 
-(ert-deftest chat-ui-fence-safe-prefix-length-tracks-open-fences ()
-  "A streaming cut never lands inside an unfinished code block."
-  ;; Nothing fenced, and nothing fenced left open: all of it can be kept.
-  (should (= (chat-ui--fence-safe-prefix-length "no fences here")
-             (length "no fences here")))
-  (let ((closed "text ```el\n(one)\n```\ntail"))
-    (should (= (chat-ui--fence-safe-prefix-length closed) (length closed))))
-  ;; An open fence means everything from it onward may still be
-  ;; reformatted, so the safe prefix stops before it.
-  (should (= (chat-ui--fence-safe-prefix-length "intro ```el\n(part") 0))
-  (should (= (chat-ui--fence-safe-prefix-length "a ```x\n1\n``` b ```y\n2")
-             (length "a ```x\n1\n```"))))
+(ert-deftest chat-ui-fence-safe-prefix-length-tracks-unfinished-blocks ()
+  "A streaming cut never lands inside a block that is still arriving.
+
+Every block now, not only fenced ones.  A table gains columns as its
+rows arrive and a list item gains its hanging indent, so a cut inside
+either of those froze it half-drawn for the same reason a cut inside a
+fence did."
+  ;; A closed fence finishes a block, so everything up to it can be kept.
+  (let ((closed "```el\n(one)\n```\ntail"))
+    (should (= (chat-ui--fence-safe-prefix-length closed)
+               (length "```el\n(one)\n```\n"))))
+  ;; An open one may still be reformatted, so nothing from it is kept.
+  (should (= (chat-ui--fence-safe-prefix-length "intro\n\n```el\n(part")
+             (length "intro\n\n")))
+  ;; A paragraph is finished by the blank line after it, and the one
+  ;; still being written is not.
+  (should (= (chat-ui--fence-safe-prefix-length "done\n\nwriting")
+             (length "done\n\n")))
+  (should (= (chat-ui--fence-safe-prefix-length "first words") 0)))
 
 (ert-deftest chat-ui-finalize-hides-tool-json-at-loop-limit ()
   "A stalled tool loop shows why it stopped, not the raw call JSON."
@@ -2187,22 +2194,36 @@ as the send having waited for it."
          (chat-ui--render-response-state (current-buffer) content-start "ab" nil)
          (should (string-match-p "Assistant:\nab\n\n" (buffer-string))))))))
 
-(ert-deftest chat-ui-fontify-markdown-lite-styles-blocks-and-emphasis ()
-  "Test markdown lite fontification styles code blocks, headers, and bold."
+(ert-deftest chat-ui-insertion-goes-through-the-one-renderer ()
+  "Styling arrives with the text rather than from a pass over it after.
+
+The pass that used to add headings and bold ran in one place, at the end
+of a turn, so the next redraw -- a fold, a reopen, an appended message --
+dropped what it had added.  There is nothing to re-run now: the styling
+is a property of the rendering, and every path renders from the same
+recorded Markdown."
   (with-temp-buffer
-    (insert "Intro\n```elisp\n(code here)\n```\n# Title\n**bold** end\n")
-    (chat-ui--fontify-markdown-lite (point-min) (point-max))
+    (chat-ui--insert-formatted-response
+     "## Title\n\nA **bold** word.\n\n```elisp\n(code here)\n```")
     (goto-char (point-min))
-    (search-forward "(code here)")
-    (should (eq (get-text-property (line-beginning-position) 'face)
-                'chat-ui-code-block-face))
-    (goto-char (point-min))
-    (search-forward "# Title")
-    (should (equal (get-text-property (line-beginning-position) 'face)
-                   '(:weight bold)))
+    (search-forward "Title")
+    (should (memq 'chat-markdown-heading-1
+                  (let ((face (get-text-property (1- (point)) 'face)))
+                    (if (listp face) face (list face)))))
     (goto-char (point-min))
     (search-forward "bold")
-    (should (eq (get-text-property (1- (point)) 'face) 'bold))))
+    (should (memq 'bold (let ((face (get-text-property (1- (point)) 'face)))
+                          (if (listp face) face (list face)))))
+    (goto-char (point-min))
+    (search-forward "(code here)")
+    (should (memq 'chat-code-block-face
+                  (let ((face (get-text-property (line-beginning-position)
+                                                 'face)))
+                    (if (listp face) face (list face)))))
+    ;; And the buffer still holds what the model wrote, hashes and stars
+    ;; included, so copying a reply gives back its source.
+    (should (string-match-p "## Title" (buffer-string)))
+    (should (string-match-p "\\*\\*bold\\*\\*" (buffer-string)))))
 
 (ert-deftest chat-ui-request-state-is-buffer-local-per-session ()
   "Test two chat buffers keep independent active run state."

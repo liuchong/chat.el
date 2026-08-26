@@ -21,6 +21,7 @@
 (require 'chat-files)
 (require 'chat-i18n)
 (require 'chat-llm)
+(require 'chat-mdp)
 (require 'chat-session)
 (require 'chat-tool-forge)
 (require 'json)
@@ -492,20 +493,101 @@ provider refused the history with `tool_call_id is not found'."
                       call)))
           calls))
 
+;; ------------------------------------------------------------------
+;; Accepting MDP as well as JSON
+;; ------------------------------------------------------------------
+
+;; Both, during the changeover, and not out of compatibility habit: models
+;; differ in how closely they follow a prompt, so switching one way only
+;; would take tool calling away from whichever of them did not comply.
+;;
+;; Which format arrived is counted, because that count is the evidence for
+;; deciding whether the JSON branch can ever be removed.  Removing it on a
+;; feeling would be betting usability on one.
+
+(defvar chat-tool-caller-format-counts nil
+  "How many tool calls arrived in each format, as an alist.")
+
+(defun chat-tool-caller--count-format (format)
+  "Record that a tool call arrived as FORMAT."
+  (let ((entry (assq format chat-tool-caller-format-counts)))
+    (if entry
+        (setcdr entry (1+ (cdr entry)))
+      (push (cons format 1) chat-tool-caller-format-counts))))
+
+(defun chat-tool-caller--mdp-to-json (value)
+  "Return MDP VALUE in the shape the tool layer reads.
+
+MDP keeps `false', `null', `[]' and `{}' apart, and the tool layer
+inherited json.el's conventions for them, so the two representations have
+to be translated rather than assumed to match."
+  (cond
+   ((eq value :false) :json-false)
+   ((eq value :null) nil)
+   ((eq value :empty-object) nil)
+   ((and (consp value) (consp (car value)) (stringp (caar value)))
+    (mapcar (lambda (field)
+              (cons (car field) (chat-tool-caller--mdp-to-json (cdr field))))
+            value))
+   ((consp value) (mapcar #'chat-tool-caller--mdp-to-json value))
+   (t value)))
+
+(defconst chat-tool-caller--mdp-call-keys '("function_call" "tool_call")
+  "Field or section names holding a single call.")
+
+(defun chat-tool-caller--calls-from-mdp (content)
+  "Return the tool calls MDP CONTENT declares.
+
+Nothing here repairs anything.  What makes MDP worth accepting is that
+prose around the payload is a comment by specification, so the tolerance
+`chat-tool-caller--fix-broken-json' had to be guessed at is already in the
+grammar.  Copying those repairs onto a new format would bring the old
+format's illness along with them."
+  (let ((value (chat-mdp-parse content)))
+    (unless (or (chat-mdp-error-p value) (not (consp value)))
+      (let ((calls nil))
+        (dolist (key chat-tool-caller--mdp-call-keys)
+          (when-let ((call (chat-tool-caller--mdp-call
+                            (cdr (assoc key value)))))
+            (push call calls)))
+        (dolist (entry (cdr (assoc "tool_calls" value)))
+          (when-let ((call (chat-tool-caller--mdp-call entry)))
+            (push call calls)))
+        (nreverse calls)))))
+
+(defun chat-tool-caller--mdp-call (value)
+  "Return the tool call VALUE describes, or nil."
+  (when (and (consp value) (consp (car value)))
+    (let ((name (cdr (assoc "name" value)))
+          (arguments (cdr (assoc "arguments" value))))
+      (when (and (stringp name) (not (string-empty-p name)))
+        (list :name name
+              :arguments (let ((converted (chat-tool-caller--mdp-to-json
+                                           arguments)))
+                           (if (listp converted) converted nil)))))))
+
 (defun chat-tool-caller-parse (content)
-  "Parse tool calls from CONTENT."
-  (let ((calls nil))
-    (dolist (candidate (chat-tool-caller--extract-json-candidates content))
-      (condition-case nil
-          (let ((call (chat-tool-caller--call-from-data
-                       (chat-tool-caller--decode-json candidate))))
-            (when call
-              (push call calls)))
-        (error nil)))
+  "Parse tool calls from CONTENT.
+
+MDP first, then JSON, and only when MDP found nothing: a payload that
+declares a call in MDP has said so unambiguously, while a reply that
+merely mentions JSON in prose has not."
+  (let ((calls (chat-tool-caller--calls-from-mdp content)))
+    (if calls
+        (chat-tool-caller--count-format 'mdp)
+      (dolist (candidate (chat-tool-caller--extract-json-candidates content))
+        (condition-case nil
+            (let ((call (chat-tool-caller--call-from-data
+                         (chat-tool-caller--decode-json candidate))))
+              (when call
+                (push call calls)))
+          (error nil)))
+      (setq calls (nreverse calls))
+      (when calls
+        (chat-tool-caller--count-format 'json)))
     ;; Ids after `delete-dups', which compares whole plists: minted any
     ;; earlier and no two calls would ever look alike.
-    (chat-tool-caller--with-call-ids
-     (nreverse (delete-dups calls)))))
+    (chat-tool-caller--with-call-ids (delete-dups calls))))
 
 (defconst chat-tool-caller--missing-argument
   (make-symbol "chat-tool-caller-missing-argument")

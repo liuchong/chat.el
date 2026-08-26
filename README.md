@@ -792,6 +792,50 @@ Fold defaults are configurable through `chat-transcript-fold-styles`,
 which also offers `latest-expanded` for keeping only the newest part of a
 channel in view.
 
+### Markdown, Shown As A Document
+
+What models write is Markdown, so the system prompt asks for it and
+narrows it to what a buffer displays well: `##` headings no deeper than
+four, no hard-wrapped paragraphs, a language on every code fence, tables
+only for tabular data.
+
+It is displayed the way Org-mode displays Org, not the way a browser
+displays HTML. The document stays plain text and becomes presentable in
+place: `#` and `**` disappear, headings take levels, code blocks are
+coloured by their actual major mode, tables line up by display width so
+Chinese cells do not skew them, bullets become `•`, links show their text.
+No preview window, no external renderer.
+
+Markers are hidden rather than removed, so copying a reply gives back the
+Markdown the model wrote, stars and hashes included. `C-c C-;` shows the
+markers when the source is what you want to read.
+
+One renderer does all of it — streaming, redraw, folding, quick answers,
+error text — from the same recorded Markdown, so a fold and reopen cannot
+change how a reply looks.
+
+### MDP
+
+[MDP](../mdp) is a data format that is also Markdown: one text, two
+readings. A person reads headings, fields and tables; a program reads an
+object, its keys and an array. Everything outside its small whitelist —
+prose, `###` headings, emphasis, fenced blocks — is a comment by
+specification and cannot affect what the program sees.
+
+That is why tool calls may arrive in it. A model asked for JSON produces
+JSON with an explanation in front of it; a model writing MDP can put the
+explanation *in* the payload. Both formats are accepted, and which one
+arrived is counted in `chat-tool-caller-format-counts` — evidence for
+whether the JSON branch can ever be dropped, rather than a guess.
+
+`chat-mdp-parse` and `chat-mdp-encode` are the codec; the round trip is
+lossless in the value, not in the text, since comments are dropped when
+parsing and no encoder can put them back.
+`chat-mdp-machine-view` shows what the parser actually extracted, which
+is the only way to check that the two readings agree: a payload that
+reads correctly to a person while parsing one field short has no other
+symptom.
+
 ## Code Capability (AI Programming)
 
 Code capability is a property of a chat session, not a second interface.
@@ -937,6 +981,9 @@ same scoped tool and approval policy as other capabilities.
 | `chat.el` | Entry point and command wiring |
 | `lisp/ui/chat-ui.el` | Chat buffer rendering and response lifecycle |
 | `lisp/ui/chat-mark.el` | Glyphs and brand colours for modes and providers |
+| `lisp/core/chat-markdown.el` | Markdown shown as a document, in the buffer |
+| `lisp/core/chat-mdp.el` | The MDP codec and the machine view of a payload |
+| `lisp/core/chat-align.el` | Laying out columns by display width, shared by both views |
 | `lisp/core/chat-session.el` | Session and message persistence |
 | `lisp/llm/chat-llm.el` | Provider abstraction and async request handling |
 | `lisp/core/chat-stream.el` | SSE parsing and chunk handling |

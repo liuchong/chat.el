@@ -29,6 +29,7 @@
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
 (require 'chat-transcript)
+(require 'chat-markdown)
 (require 'chat-llm)
 (require 'chat-stream)
 (require 'chat-tool-forge-ai)
@@ -1112,7 +1113,14 @@ prose, and the fence that would have closed it is never reconsidered."
             (progn
               (goto-char (+ body cut))
               (delete-region (point) chat-ui--messages-end)
-              (chat-ui--insert-formatted-response (substring content cut))
+              ;; The unfinished tail rather than the delta.  Appending only
+              ;; what was new was cheaper, but it meant the block had
+              ;; already been drawn as prose by the time the rest of it
+              ;; arrived, so a table never got its columns and a list item
+              ;; never got its bullet.  The tail is bounded by where the
+              ;; last finished block ended, and degrades when even that is
+              ;; long.
+              (insert (chat-markdown-render-tail (substring content cut)))
               (insert "\n\n"))
           (goto-char chat-ui--live-start)
           (delete-region chat-ui--live-start chat-ui--messages-end)
@@ -2270,15 +2278,6 @@ proportional font makes `ls' ragged however carefully the tabs were
 expanded."
   :group 'chat-ui)
 
-(defface chat-code-block-face
-  '((t :inherit font-lock-constant-face :extend t))
-  "Face for fenced code blocks in chat buffers.
-
-Named for the surface that introduced it, and kept under that name so
-existing customization keeps applying now that every chat buffer
-formats code blocks this way."
-  :group 'chat-ui)
-
 (defcustom chat-ui-tool-summary-max-chars 240
   "Longest tool argument or result summary shown inline."
   :type 'integer
@@ -2401,52 +2400,26 @@ happened instead of showing the first line of a serialized plist."
       (set-marker chat-ui--messages-end (point)))))
 
 (defun chat-ui--fence-safe-prefix-length (content)
-  "Return the length of the CONTENT prefix after the last closed fence.
+  "Return the length of the CONTENT prefix the fast path may keep.
 
 The streaming fast path may only keep text it will not have to reformat.
 Cutting at the previous length leaves a half-arrived code block rendered
 as prose, and the fence that closes it later never re-runs the
-formatting, so the block stays broken for the rest of the conversation."
-  (let ((pos 0)
-        (last-close 0)
-        (count 0))
-    (while (string-match "```" content pos)
-      (setq count (1+ count)
-            pos (match-end 0))
-      (when (zerop (mod count 2))
-        (setq last-close pos)))
-    (if (zerop (mod count 2))
-        (length content)
-      last-close)))
+formatting, so the block stays broken for the rest of the conversation.
 
-(defconst chat-ui--fenced-block-regexp
-  "^\\(```\\([^\n]*\\)\n\\(?:.\\|\n\\)*?\n```\\)"
-  "A fenced code block: group 1 is the block, group 2 its language.")
+Now every block rather than only fenced ones: a table gains columns as
+its rows arrive, and a list gains its hanging indent, so cutting inside
+either of those froze them half-drawn for the same reason."
+  (chat-markdown-stable-prefix-length content))
 
 (defun chat-ui--insert-formatted-response (content)
-  "Insert CONTENT, giving fenced code blocks their own face.
+  "Insert CONTENT as Markdown rendered for display.
 
-Searched from an offset rather than from a copy of the remaining text.
-The copy was made twice per block, so drawing a reply cost time and
-memory proportional to its length times its number of blocks: measured on
-320KB of prose and code, 986MB allocated and 592ms spent -- ten times the
-collection threshold, for one draw of one reply."
-  (let ((pos 0)
-        (len (length content)))
-    (while (< pos len)
-      (if (string-match chat-ui--fenced-block-regexp content pos)
-          (let ((block (match-string 1 content))
-                (lang (match-string 2 content))
-                (start (match-beginning 0))
-                (end (match-end 0)))
-            (insert (substring content pos start))
-            (insert (propertize block
-                                'face (if (string-empty-p lang)
-                                          'default
-                                        'chat-code-block-face)))
-            (setq pos end))
-        (insert (substring content pos))
-        (setq pos len)))))
+One renderer, called from here, from the redraw, from the quick answer
+and from errors -- so those paths cannot produce different styling for
+the same text, which they did as long as each carried its own
+formatting."
+  (insert (chat-markdown-render content)))
 
 (defun chat-ui--render-response-state (ui-buffer content-start content tool-events
                                                  &optional live-detail
@@ -2802,44 +2775,6 @@ assistant response being filled in."
       (chat-ui--clock "start")
       (chat-ui--clock-report (format "%s send" transport)))))
 
-(defface chat-ui-code-block-face
-  '((t :inherit font-lock-constant-face :extend t))
-  "Face for fenced code block lines in chat buffers."
-  :group 'chat)
-
-(defun chat-ui--fontify-markdown-lite (start end)
-  "Apply lightweight markdown fontification between START and END.
-Fenced code blocks use `chat-ui-code-block-face', fence markers use
-`font-lock-comment-face', ATX headers become bold, and **bold**
-spans use the bold face."
-  (save-excursion
-    (let ((in-fence nil))
-      (goto-char start)
-      (while (< (point) end)
-        (let ((line (buffer-substring-no-properties
-                     (line-beginning-position)
-                     (line-end-position))))
-          (cond
-           ((string-match-p "^\\s-*```" line)
-            (add-text-properties (line-beginning-position)
-                                 (min (1+ (line-end-position)) end)
-                                 '(face font-lock-comment-face))
-            (setq in-fence (not in-fence)))
-           (in-fence
-            (add-text-properties (line-beginning-position)
-                                 (min (1+ (line-end-position)) end)
-                                 '(face chat-ui-code-block-face)))
-           ((string-match-p "^\\s-*#+\\s-" line)
-            (add-text-properties (line-beginning-position)
-                                 (line-end-position)
-                                 '(face (:weight bold))))))
-        (forward-line 1))
-      (goto-char start)
-      (while (re-search-forward "\\*\\*\\([^*\n]+\\)\\*\\*" end t)
-        (add-text-properties (match-beginning 1)
-                             (match-end 1)
-                             '(face bold))))))
-
 (defun chat-ui--proposed-edit (session content)
   "Return the edit CONTENT proposes for SESSION, or nil.
 
@@ -2906,11 +2841,13 @@ edit a coding reply may be proposing."
        (if (or recorded (and (string-blank-p content) tool-summary))
            ""
          content)
-       tool-events nil tool-summary limit-reached)
-      (when (buffer-live-p ui-buffer)
-        (with-current-buffer ui-buffer
-          (chat-ui--fontify-markdown-lite chat-ui--conversation-start
-                                          chat-ui--messages-end))))
+       tool-events nil tool-summary limit-reached))
+    ;; No second pass over the whole conversation to add styling.  The one
+    ;; that used to be here ran only here, so the next redraw -- a fold, a
+    ;; reopen, an appended message -- dropped the headings and the bold it
+    ;; had added, and the streaming path and the redraw path had produced
+    ;; different styling for the same text all along.  Both go through the
+    ;; renderer now, from the same recorded Markdown.
     (chat-log "[UI] Response rendered")))
 
 (defun chat-ui--render-error (ui-buffer error-message)
@@ -2924,7 +2861,10 @@ edit a coding reply may be proposing."
     (with-current-buffer ui-buffer
       (save-excursion
         (goto-char chat-ui--messages-end)
-        (insert (format "[Error: %s]" error-message))
+        ;; Through the renderer too: an error message often quotes a path
+        ;; or a command, and a provider's message is frequently Markdown.
+        (chat-ui--insert-formatted-response
+         (format "[Error: %s]" error-message))
         (insert "\n\n")
         (set-marker chat-ui--messages-end (point))))))
 
@@ -3477,7 +3417,10 @@ This is an ephemeral query - the result is displayed but not persisted."
     (goto-char chat-ui--messages-end)
     (chat-ui--delete-pending-query-note)
     (chat-ui--insert-role-label 'assistant-quick)
-    (insert content)
+    ;; A quick answer is Markdown for the same reason a long one is.  It
+    ;; used to be inserted raw, so the same reply looked different
+    ;; depending on which command had asked for it.
+    (chat-ui--insert-formatted-response content)
     (insert "\n\n")
     (set-marker chat-ui--messages-end (point))))
 

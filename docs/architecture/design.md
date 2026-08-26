@@ -709,6 +709,8 @@ chat.el/
 ├── chat-hub.el
 ├── chat-utils.el
 ├── chat-markdown.el
+├── chat-mdp.el
+├── chat-align.el
 └── chat-completion.el
 ```
 

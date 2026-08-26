@@ -30,6 +30,7 @@ Required field order:
 - Capability Packs
 - Testing and Batch Mode
 - Development Hygiene
+- Display and Rendering
 
 ---
 
@@ -2177,5 +2178,75 @@ those positions fails at runtime, not at compile time.
 
 **General rule**: a guard inside a function guards the body, not the call.
 When the arguments are the expensive part, the guard has to be outside.
+
+## Display and Rendering
+
+### Rebuilding Whitespace Instead Of Carrying It Through
+
+**Problem**: rendering `- [ ] todo` produced `-[ ] todo`. One space, in a
+renderer whose entire premise is that the buffer text is unchanged.
+
+**Cause**: the line was reassembled from its parts, and the space between
+the bullet and the checkbox was not one of the parts:
+
+```elisp
+;; indent + bullet + " " + rest, when the source was
+;; indent + bullet + " " + checkbox + rest
+(concat indent bullet (if checkbox (render checkbox) " ") rest)
+```
+
+**Solution**: carry the span through rather than reconstituting it —
+`(substring line (match-end 2) (or (match-beginning 3) (match-end 0)))` —
+so whatever was between them is what appears between them.
+
+**General rule**: a renderer that must not change text should never write
+a literal separator. What is not read from the source cannot match it. The
+useful part here is that the invariant found the bug: a test asserting
+only that a checkbox displays as `☐` passes on the broken version, and the
+one asserting the text survives does not.
+
+### Excluding From A Pattern What You Meant To Reject
+
+**Problem**: MDP forbids tab indentation on a structure line, and a
+tab-indented field reported nothing at all — it was silently data that
+never arrived.
+
+**Cause**: the pattern for a field was `\`\\( *\\)- \\(.*\\)\\'`. Tabs were
+kept out of it, so a tab-indented line did not match, and a line that
+matches nothing is a comment by specification. The rule that was supposed
+to reject it never saw it.
+
+**Solution**: match `[ \t]*`, then fail on the tab. Recognise first, refuse
+second.
+
+**General rule**: a validator only validates what reaches it. When a format
+has a rule against a construction, the pattern has to admit that
+construction so the rule can fire — otherwise "illegal" and "not present"
+become the same code path, and the stricter format is the more silent one.
+
+### Appending Only The New Text Draws A Block Before It Is One
+
+**Problem**: a table streamed in unaligned and stayed unaligned, and a
+list item never got its hanging indent, even though the renderer handled
+both correctly when the same text was redrawn.
+
+**Cause**: the streaming fast path kept everything already on screen and
+appended only the delta. That is the cheapest possible update and it is
+wrong for anything whose appearance depends on text that has not arrived:
+a table's column widths need every row, a list item's `wrap-prefix` needs
+its whole first line. By the time the second row arrived, the first had
+been drawn as prose, and nothing revisits it.
+
+**Solution**: keep the prefix consisting of *finished blocks* and redraw
+the unfinished tail each time, generalising the existing "resume at a
+closed fence" rule from fences to blocks. The cost is bounded by the tail
+rather than the reply, and capped again for a tail that is itself long
+(`chat-markdown-streaming-tail-max-chars`), which degrades to a plain face
+until the block finishes.
+
+**General rule**: incremental rendering is only safe up to the last point
+whose appearance is settled. Cutting past it trades a correct display for
+an append, and the display never recovers, because the append path has no
+reason to look back.
 
 Last updated: 2026-08-27
