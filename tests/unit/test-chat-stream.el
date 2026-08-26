@@ -228,5 +228,71 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-a-request-marks-its-own-phases ()
+  "Timing the send only from the UI left a phase nothing could explain.
+
+Two hundred milliseconds of every send sat inside one call into the
+transport, where the pieces differ by kind: building a payload, encoding
+it, appending to the log, and forking -- and forking is the one cost that
+cannot be measured anywhere but the sender's own Emacs, because it scales
+with the heap the parent has accumulated."
+  (let ((log-file (make-temp-file "chat-stream-timing")))
+    (unwind-protect
+        (let ((chat-log-file log-file)
+              (chat-log-enabled t)
+              (chat-log-timings t)
+              (chat-stream--curl "/usr/bin/curl")
+              (buffers nil)
+              ;; Made before the stub is installed: a stub that reaches
+              ;; for `start-process' lands back in itself.
+              (stand-in (start-process "chat-stream-timing" nil "true")))
+          (cl-letf (((symbol-function 'chat-llm--make-headers)
+                     (lambda (&rest _) '(("Authorization" . "Bearer x"))))
+                    ((symbol-function 'make-process)
+                     (lambda (&rest args)
+                       (push (plist-get args :buffer) buffers)
+                       stand-in)))
+            (chat-log-timing-start)
+            (chat-stream-request
+             'deepseek
+             (list (make-chat-message :id "u" :role :user :content "hi"))
+             #'ignore)
+            (chat-log-timing-report "stream send"))
+          (dolist (buffer buffers)
+            (when (buffer-live-p buffer) (kill-buffer buffer)))
+          (when (process-live-p stand-in) (delete-process stand-in))
+          (let ((logged (with-temp-buffer
+                          (insert-file-contents log-file)
+                          (buffer-string))))
+            (dolist (phase '("headers" "build" "encode" "log" "spawn"
+                             "diagnostics"))
+              (should (string-match-p (concat phase " [0-9]+") logged)))))
+      (delete-file log-file))))
+
+(ert-deftest chat-stream-curl-is-looked-for-once ()
+  "`executable-find' walks `exec-path' and stats every entry.
+
+That took 11ms per request here and grows with the path, and it was paid
+on the keystroke path to answer a question whose answer does not change
+while Emacs runs."
+  (let ((chat-stream--curl nil)
+        (lookups 0))
+    (cl-letf* ((original (symbol-function 'executable-find))
+               ((symbol-function 'executable-find)
+                (lambda (&rest args)
+                  (setq lookups (1+ lookups))
+                  (apply original args))))
+      (chat-stream--ensure-curl)
+      (chat-stream--ensure-curl)
+      (chat-stream--ensure-curl))
+    (should (= lookups 1))
+    (should chat-stream--curl))
+  ;; And a missing curl is still an error rather than a silent nil, every
+  ;; time it is asked, since nothing was remembered.
+  (let ((chat-stream--curl nil))
+    (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
+      (should-error (chat-stream--ensure-curl))
+      (should-error (chat-stream--ensure-curl)))))
+
 (provide 'test-chat-stream)
 ;;; test-stream.el ends here

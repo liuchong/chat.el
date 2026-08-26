@@ -1348,57 +1348,29 @@ where some of it is."
 ;; reader's configuration has installed, and neither exists in batch mode
 ;; or in an `emacs -Q'.  So the path measures itself, in the session where
 ;; the complaint happens, and says so in one line.
+;;
+;; The clock itself lives in `chat-log' rather than here, because the marks
+;; that named the two costs worth fixing came from below this layer: a
+;; phase measured only at the door tells you the room is slow, not which
+;; piece of furniture.
 
-(defvar chat-ui--send-clock nil
-  "Start time of the send in progress, or nil.")
-
-(defvar chat-ui--send-marks nil
-  "Reversed list of (LABEL . MILLISECONDS) for the send in progress.")
-
-(defcustom chat-ui-log-send-timings t
-  "Whether each send records where its time went.
-
-One log line per send, which is what makes a hitch diagnosable after the
-fact rather than only while someone is watching for it."
-  :type 'boolean
-  :group 'chat)
-
-(defun chat-ui--clock-start ()
-  "Begin timing a send."
-  (setq chat-ui--send-clock (and chat-ui-log-send-timings (float-time))
-        chat-ui--send-marks nil))
-
-(defun chat-ui--clock (label)
-  "Record LABEL as reached, with the time since the send began."
-  (when chat-ui--send-clock
-    (push (cons label (* 1000 (- (float-time) chat-ui--send-clock)))
-          chat-ui--send-marks)))
+(defalias 'chat-ui--clock-start #'chat-log-timing-start)
+(defalias 'chat-ui--clock #'chat-log-timing-mark)
 
 (defun chat-ui--clock-report (what)
   "Log the marks collected for this send, described as WHAT."
-  (when (and chat-ui--send-clock chat-ui--send-marks)
-    (let ((marks (nreverse chat-ui--send-marks))
-          (previous 0))
-      (chat-log
-       "[TIMING] %s: %s | total %.0fms | buffer %dk, %d messages, undo %s, %d post-command hooks, %d change hooks"
-       what
-       (mapconcat
-        (lambda (mark)
-          (prog1 (format "%s %.0f" (car mark) (- (cdr mark) previous))
-            (setq previous (cdr mark))))
-        marks " -> ")
-       previous
-       (/ (buffer-size) 1024)
-       (if chat--current-session
-           (length (chat-session-messages chat--current-session))
-         0)
-       (cond ((eq buffer-undo-list t) "off")
-             ((listp buffer-undo-list) (format "%d" (length buffer-undo-list)))
-             (t "?"))
-       (length (default-value 'post-command-hook))
-       (length (if (listp after-change-functions) after-change-functions nil))))
-    (setq chat-ui--send-marks nil
-          chat-ui--send-clock nil)))
+  (chat-log-timing-report
+   what
+   (format "buffer %dk, %d messages, undo %s, %d post-command hooks, %d change hooks"
+           (/ (buffer-size) 1024)
+           (if chat--current-session
+               (length (chat-session-messages chat--current-session))
+             0)
+           (cond ((eq buffer-undo-list t) "off")
+                 ((listp buffer-undo-list) (format "%d" (length buffer-undo-list)))
+                 (t "?"))
+           (length (default-value 'post-command-hook))
+           (length (if (listp after-change-functions) after-change-functions nil)))))
 
 (defun chat-ui-send-message ()
   "Act on the input area, either as a command or as a message."
@@ -2535,10 +2507,11 @@ assistant response being filled in."
     ;; request was already on the wire, which reads as the send having
     ;; waited for it.
     ;;
-    ;; A paint rather than a deferral because the preparation is a few
-    ;; milliseconds -- moving that off the command loop would buy nothing
-    ;; and cost the synchronous contract the rest of the send path is
-    ;; written against.
+    ;; The paint goes here, ahead of the preparation, rather than being
+    ;; relied on to happen afterwards: measured in a real session, 28ms
+    ;; stand between RET and this point and a few hundred more follow it.
+    ;; Whatever those turn out to cost, the reader sees their question
+    ;; first.
     ;;
     ;; Forced, because the plain `redisplay' does nothing at all when any
     ;; input is pending and returns nil to say so.  A send is exactly the
@@ -2555,24 +2528,17 @@ assistant response being filled in."
     (chat-ui--clock "PAINT")
     (let* ((messages-with-tools
             (prog1 (chat-ui--prepare-messages-with-tools messages)
-              (chat-ui--clock "tools")))
-           (messages-final
-            (prog1
-                (chat-context-prepare-messages
-                 messages-with-tools
-                 ;; Without a limit derived from the model this compacted
-                 ;; against a flat figure, throwing away history a large
-                 ;; window had ample room for.
-                 (chat-context-budget-compaction-limit
-                  (chat-session-model-id session))
-                 session)
-              (chat-ui--clock "context"))))
+              (chat-ui--clock "tools"))))
+      ;; Handed over unprepared, because the run prepares the context
+      ;; before every step including the first.  Doing it here as well
+      ;; compacted the same history twice per send, and a compaction
+      ;; rewrites the whole session file.
       (chat-log "[UI] Starting %s agent run with %d messages"
-                transport (length messages-final))
+                transport (length messages-with-tools))
       (setq chat-ui--active-agent-run
             (chat-agent-start
              (list :model model
-                   :messages messages-final
+                   :messages messages-with-tools
                    :session session
                    :transport transport
                    :max-steps chat-ui-tool-loop-max-steps

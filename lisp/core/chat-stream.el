@@ -28,6 +28,18 @@
 (defvar-local chat-stream--partial-line ""
   "Incomplete SSE line carried between process filter calls.")
 
+(defvar chat-stream--curl nil
+  "Cached location of the curl executable, or nil when not yet looked up.")
+
+(defun chat-stream--ensure-curl ()
+  "Signal unless curl can be found, remembering where it was.
+`executable-find' walks `exec-path' and stats each entry, which costs
+real milliseconds on a long path -- and it was paying that on every
+request to answer a question whose answer does not change."
+  (or chat-stream--curl
+      (setq chat-stream--curl (executable-find "curl"))
+      (error "curl executable not found in PATH")))
+
 (defun chat-stream--redact-curl-args-for-log (args)
   "Return ARGS with sensitive values redacted for logging."
   (let ((result nil))
@@ -288,7 +300,9 @@ Returns the process object."
          (reasoning-callback (plist-get options :on-reasoning))
          ;; Build request body
          (opts (plist-put (copy-tree options) :stream t))
+         (_ (chat-log-timing-mark "headers"))
          (body (chat-llm--build-request provider messages opts))
+         (_ (chat-log-timing-mark "build"))
          ;; Get User-Agent from resolved headers
          (user-agent (or (cdr (assoc "User-Agent" headers))
                          "chat.el/1.0"))
@@ -297,6 +311,7 @@ Returns the process object."
          (body-encoded (if (multibyte-string-p body-str)
                            (encode-coding-string body-str 'utf-8)
                          body-str))
+         (_ (chat-log-timing-mark "encode"))
          ;; Create curl command
          (curl-args (let ((base-args (list "-s" "-N"
                                            "-X" "POST"))
@@ -322,17 +337,17 @@ Returns the process object."
       (setq-local chat-stream--partial-line ""))
     
     ;; Check curl is available
-    (unless (executable-find "curl")
-      (error "curl executable not found in PATH"))
-    
-    ;; Log request metadata without leaking user content or secrets.
-    (chat-log "[REQUEST] URL: %s" url)
-    (chat-log "[REQUEST] Body length: %d bytes" (string-bytes body-encoded))
-    (chat-log "[REQUEST] Message count: %d" (length messages))
-    
-    ;; Start curl process
-    (chat-log "[STREAM] Starting curl with args: %S"
+    (chat-stream--ensure-curl)
+
+    ;; Log request metadata without leaking user content or secrets.  One
+    ;; line rather than four: each `chat-log' call opens the file, appends
+    ;; and closes it, and this happens while the reader is waiting.
+    (chat-log "[REQUEST] %s | %d bytes | %d messages | args %S"
+              url
+              (string-bytes body-encoded)
+              (length messages)
               (chat-stream--redact-curl-args-for-log curl-args))
+    (chat-log-timing-mark "log")
     (condition-case err
         (setq process (make-process
                       :name "chat-stream"
@@ -369,6 +384,10 @@ Returns the process object."
        (chat-log "[STREAM] make-process FAILED: %s" (error-message-string err))
        (kill-buffer buffer)
        (signal (car err) (cdr err))))
+    ;; Forking is the one cost on this path that cannot be measured
+    ;; anywhere but the reader's own Emacs: it scales with the heap the
+    ;; parent has accumulated, and a batch process has almost none.
+    (chat-log-timing-mark "spawn")
     (when request-id
       (process-put process 'chat-request-id request-id)
       (chat-request-diagnostics-record
@@ -378,6 +397,7 @@ Returns the process object."
        :transport 'stream
        :summary (format "Started streaming request to %s" provider)))
     (chat-log "[STREAM] Process started: %S" process)
+    (chat-log-timing-mark "diagnostics")
     process))
 
 (defun chat-stream--handle-output

@@ -264,16 +264,41 @@ the reader's own hooks, and neither exists in batch mode or in an
 phases in order, the pre-paint window separated out, plus buffer size,
 message count, undo state and hook counts to explain an outlier.
 
-That first real line also showed 1381ms after the paint, blocking the
-command loop, in one unbroken phase. Pure-Lisp preparation accounts for
-only about 25ms of it (code context 0.7ms, capability prompt 0.2ms,
-tools 6.8ms, context 17ms on the real session), so the rest is inside
-`chat-agent-start` and below. A single phase holding 98% of a send is an
-instrument failure rather than a finding, so the marks were split into
-`tools`, `context` and `start`; the next real send will name the culprit.
-No fix attempted until it does.
+The split marks then named two things across four real sends. The
+pre-paint window is 28–33ms on every send including the first, so that
+half is closed. What remained is after the paint, and the reader does
+feel it: their question is on screen while the editor is dead, 1.17s on
+the first send and ~290ms on each one after.
 
-Canonical suite: 1084 tests passing.
+The 924ms that appeared once in `context` and then 29ms three times
+running was a collection, not work — compaction on a copy of that exact
+session is 28.6ms with one full save at 23.8ms. So phases now carry the
+collections that happened inside them, `[gc N, Mms]`, which is what
+separates doing expensive work from allocating past the threshold on
+everyone else's behalf.
+
+The clock moved from the UI into `chat-log` so the layers below can mark
+their own phases: a clock at the door says the room is slow, not which
+piece of furniture. `spawn` is deliberately separate, since forking is
+the one cost that cannot be measured anywhere but the sender's Emacs.
+
+Weighing those phases against the real session found three wastes on the
+keystroke path. Every request printed its whole payload through `%S` — a
+second formatting pass, a quarter-megabyte of `prin1`, appended to a
+100MB log — which took `chat-llm--build-request` from 7.4ms to 0.7ms once
+it logged the shape instead. `executable-find "curl"` ran per request at
+11–15ms to answer an unchanging question. And the UI prepared a context
+that the run prepares again before every step, compacting the same
+history twice per send when a compaction rewrites the whole session file.
+
+About 200ms of the per-send `start` is still unnamed: everything on that
+path adds to ~60ms here, of which 30ms is now gone, and the remainder
+does not exist on this machine. The phase marks will say whether it is
+the fork. Deferring the work onto an idle timer was considered and
+rejected for now — a timer blocks input just the same when it fires, so
+it relocates the pause rather than removing it.
+
+Canonical suite: 1088 tests passing.
 
 ## Next Stage
 

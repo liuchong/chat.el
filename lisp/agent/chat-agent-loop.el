@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'chat-agent-types)
+(require 'chat-log)
 (require 'chat-session)
 (require 'chat-transcript)
 (require 'chat-context-budget)
@@ -76,7 +77,9 @@
           (1+ (chat-agent-run-state-step run)))
     (chat-agent--apply-steering run)
     (chat-agent--hook-all 'chat-plugin-pre-step-functions run)
+    (chat-log-timing-mark "steer")
     (chat-agent--transform-context run)
+    (chat-log-timing-mark "transform")
     (chat-agent--emit run 'turn-start)
     (chat-agent--dispatch run))))
 
@@ -228,10 +231,13 @@ last because that is where a short instruction is actually noticed."
   "Dispatch RUN through the streaming transport."
   (let ((content-acc "")
         (reasoning-acc ""))
-    (let ((proc
+    (let* ((request-messages
+            (prog1 (chat-agent--request-messages run)
+              (chat-log-timing-mark "budget")))
+           (proc
            (chat-stream-request
             (chat-agent-run-state-model run)
-            (chat-agent--request-messages run)
+            request-messages
             (lambda (chunk)
               (when (and chunk (> (length chunk) 0))
                 (setq content-acc (concat content-acc chunk))

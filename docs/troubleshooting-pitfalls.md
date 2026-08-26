@@ -1785,12 +1785,16 @@ drawn by a refresh timer a second out, so the first second had no
 indicator at all.
 
 **Solution**: draw the waiting state at the point the request is created,
-not on the next tick, and `redisplay` once before the work. Measure
-before reaching for anything heavier -- the preparation here was a few
-milliseconds, so moving it off the command loop would have bought nothing
-and cost the synchronous contract the send path is written against. The
-complaint was never about the milliseconds; it was about the frame that
-was never drawn.
+not on the next tick, and `redisplay` once before the work. The complaint
+was never about the milliseconds; it was about the frame that was never
+drawn.
+
+Measured afterwards in the session that complained, 28ms stand between
+RET and that paint. What follows it is another 245ms to 291ms, every
+send, and the reader feels that too -- their question is on screen but
+the editor is dead until the request is away. So the paint fixes what the
+reader sees, not what the command loop is doing, and the work after it
+still has to be either cheap or off the loop.
 
 ### `redisplay` Is The Version That Might Not
 
@@ -1823,7 +1827,14 @@ the system prompt on another.
 whichever function was running. `gcs-done` and `gc-elapsed` around the
 path showed one collection every second or third iteration.
 
-**Solution**: measure `gcs-done`, `gc-elapsed` and `memory-use-counts`
+**Solution**: charge each phase for the collection that happened while it
+ran. The timing line carries `[gc N, Mms]` on any phase that provoked
+one, which is what separates a phase that did expensive work from a phase
+that merely allocated past the threshold on everyone else's behalf. A
+phase measured at 924ms once and 29ms every time after is the second
+kind, and no amount of staring at its code will show that.
+
+Measure `gcs-done`, `gc-elapsed` and `memory-use-counts`
 around a path before believing any per-function number, since a sampling
 profiler and wall-clock advice will both blame the innocent. Where the
 allocation is repeated work, remove the work: every send re-read every
@@ -1868,10 +1879,40 @@ how long its list is, and how many `post-command-hook` and
 `after-change-functions` entries are installed. The first real line
 answered in one send what three rounds of reproduction had not.
 
-Split the phases finely enough to name a culprit. That first line put 98%
-of the send inside one unbroken phase, which is an instrument failure, not
-a finding, and the marks were divided at the two points where the work
-changes hands.
+Split the phases finely enough to name a culprit, and put the clock where
+every layer can reach it. That first line put 98% of the send inside one
+unbroken phase, which is an instrument failure, not a finding. Dividing
+it at the points where work changes hands moved the unexplained cost from
+one phase into another, because a clock that only marks at the door can
+say the room is slow but not which piece of furniture: the marks had to
+go into the transport and the request builder themselves, which is why
+the clock lives in `chat-log` rather than in the UI that starts it.
+
+### A Log Line On The Keystroke Path Is Work
+
+**Problem**: 250ms of every send sat in the handover to the transport,
+which does nothing but build a payload and fork `curl`.
+
+**Cause**: two habits, both invisible in review. Every request printed
+its whole formatted payload through `%S` -- a second formatting pass, a
+quarter of a megabyte of `prin1` output, and an append to a log already
+past a hundred megabytes, for a line nobody reads. And `executable-find`
+was asked where `curl` lives on every request, which walks `exec-path`
+and stats each entry: 11ms to 15ms here, growing with the path, to answer
+a question whose answer does not change while Emacs runs.
+
+**Solution**: log the shape, not the content -- counts, sizes and roles.
+The content is in the session file already, and a reader chasing a bug
+wants to know there were 41 messages and 250KB, not to scroll past them.
+Look up an executable once and remember it. Together these took
+`chat-llm--build-request` from 7.4ms to 0.7ms and removed a 250KB write
+per send.
+
+Two other habits in the same shape: four consecutive `chat-log` calls
+where one would do, since each opens the file, appends and closes it; and
+preparing the context in the UI when the run prepares it again before
+every step, which compacted the same history twice per send -- and a
+compaction rewrites the entire session file.
 
 **Related hazard**: the prompt asks whether more than one model is
 configured every time it is drawn, which asks every provider for its key.

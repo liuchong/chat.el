@@ -698,5 +698,34 @@ model a session had actually used."
     (should (member model (chat-llm-provider-models 'deepseek)))
     (should-not (equal model "deepseek-chat"))))
 
+(ert-deftest chat-llm-building-a-request-does-not-log-the-request ()
+  "Every request printed its whole payload into the log with `%S'.
+
+That cost a second formatting pass, a quarter of a megabyte of `prin1'
+output and an append to a log already past a hundred megabytes, all on
+the keystroke path, for a line whose content is in the session file
+anyway.  What a reader of the log needs is the shape."
+  (let ((log-file (make-temp-file "chat-llm-log")))
+    (unwind-protect
+        (let* ((chat-log-file log-file)
+               (chat-log-enabled t)
+               (secret "an unmistakable sentence of user content")
+               (messages
+                (list (make-chat-message :id "s" :role :system
+                                         :content "be brief")
+                      (make-chat-message :id "u" :role :user
+                                         :content secret))))
+          (chat-llm--build-request 'deepseek messages '(:stream t))
+          (let ((logged (with-temp-buffer
+                          (insert-file-contents log-file)
+                          (buffer-string))))
+            (should (string-match-p "\\[BUILD-REQUEST\\]" logged))
+            (should-not (string-match-p (regexp-quote secret) logged))
+            ;; The shape, which is what makes a log line worth reading.
+            (should (string-match-p "2 messages" logged))
+            (should (string-match-p "system:1" logged))
+            (should (string-match-p "user:1" logged))))
+      (delete-file log-file))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

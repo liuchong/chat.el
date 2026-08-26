@@ -219,7 +219,7 @@ reader seeing their own question."
         (chat-test-with-temp-dir
          (let* ((chat-log-file log-file)
                 (chat-log-enabled t)
-                (chat-ui-log-send-timings t)
+                (chat-log-timings t)
                 (chat-session-directory temp-dir)
                 (chat-input-history-file
                  (expand-file-name "history.eld" temp-dir))
@@ -240,24 +240,62 @@ reader seeing their own question."
              ;; enough to name a culprit: the first real measurement put
              ;; 98% of a send inside one unbroken phase, which located
              ;; nothing.
-             (should (string-match
-                      (concat "prompt [0-9]+ -> history [0-9]+ -> record [0-9]+"
-                              " -> redraw [0-9]+ -> live [0-9]+ -> PAINT [0-9]+"
-                              " -> tools [0-9]+ -> context [0-9]+"
-                              " -> start [0-9]+")
-                      logged))
+             ;; The run itself marks the phases past this point, so with
+             ;; the transport stubbed out the line ends at the handover.
+             (should (equal (chat-test-timing-phases logged)
+                            '("prompt" "history" "record" "redraw" "live"
+                              "PAINT" "tools" "start")))
              ;; And the facts about the buffer that explain an outlier.
              (should (string-match-p "total [0-9]+ms" logged))
              (should (string-match-p "post-command hooks" logged)))))
       (delete-file log-file))))
 
+(defun chat-test-timing-phases (logged)
+  "Return the phase labels, in order, from the timing line in LOGGED."
+  (let ((line (car (last (split-string (string-trim logged) "\n")))))
+    (mapcar (lambda (phase) (car (split-string (string-trim phase) " ")))
+            (split-string
+             (car (split-string
+                   (cadr (split-string line "\\[TIMING\\] [^:]+: "))
+                   " | "))
+             " -> "))))
+
+(ert-deftest chat-ui-a-phase-is-charged-for-the-collection-it-triggered ()
+  "A wall-clock number alone blames whoever was running when the GC landed.
+
+The same phase measured 924ms once and 29ms every time after, which reads
+as expensive work but is the shape of a collection falling on whoever
+happened to allocate past the threshold.  Attributing the collections to
+the phase they happened in is what tells those two apart."
+  (let ((log-file (make-temp-file "chat-timing")))
+    (unwind-protect
+        (let ((chat-log-file log-file)
+              (chat-log-enabled t)
+              (chat-log-timings t))
+          (chat-log-timing-start)
+          (chat-log-timing-mark "quiet")
+          (garbage-collect)
+          (chat-log-timing-mark "collected")
+          (chat-log-timing-report "probe")
+          (let ((logged (with-temp-buffer
+                          (insert-file-contents log-file)
+                          (buffer-string))))
+            ;; The phase that provoked the collection carries it, and the
+            ;; one before it stays clean.
+            (should (string-match-p "collected [0-9]+ \\[gc [0-9]+, [0-9]+ms\\]"
+                                    logged))
+            (should-not (string-match-p "quiet [0-9]+ \\[gc" logged))
+            (should (string-match-p "total [0-9]+ms, gc [0-9]+ [0-9]+ms"
+                                    logged))))
+      (delete-file log-file))))
+
 (ert-deftest chat-ui-timings-can-be-turned-off ()
   "Measuring is cheap, but nothing that logs every send is unconditional."
-  (let ((chat-ui-log-send-timings nil))
+  (let ((chat-log-timings nil))
     (chat-ui--clock-start)
     (chat-ui--clock "prompt")
-    (should-not chat-ui--send-clock)
-    (should-not chat-ui--send-marks)))
+    (should-not chat-log--clock)
+    (should-not chat-log--marks)))
 
 (ert-deftest chat-ui-the-paint-before-the-request-cannot-be-skipped ()
   "`redisplay' with no argument does nothing while input is pending.

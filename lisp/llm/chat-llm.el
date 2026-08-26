@@ -393,6 +393,26 @@ into tool role messages."
   (or (plist-get config :response-fn)
       #'chat-llm--default-parse-response))
 
+(defun chat-llm--message-shape (messages)
+  "Describe MESSAGES by count, size and roles, for a log line."
+  (let ((chars 0)
+        (roles nil))
+    (dolist (msg messages)
+      (cl-incf chars (length (or (chat-message-content msg) "")))
+      (let* ((role (chat-message-role msg))
+             (cell (assq role roles)))
+        (if cell
+            (cl-incf (cdr cell))
+          (push (cons role 1) roles))))
+    (format "%d messages, %dk chars, %s"
+            (length messages)
+            (/ chars 1024)
+            (mapconcat (lambda (cell)
+                         (format "%s:%d"
+                                 (string-remove-prefix ":" (symbol-name (car cell)))
+                                 (cdr cell)))
+                       (nreverse roles) " "))))
+
 (defun chat-llm--build-request (provider messages options)
   "Build request payload for PROVIDER with MESSAGES and OPTIONS."
   (let* ((config (chat-llm--ensure-provider provider))
@@ -401,14 +421,18 @@ into tool role messages."
                     (plist-get config :model)))
          (temperature (or (plist-get options :temperature) 0.7))
          (max-tokens (plist-get options :max-tokens))
-         (stream (plist-get options :stream))
-         (formatted-msgs (chat-llm--format-messages messages)))
-    (chat-log "[BUILD-REQUEST] Provider: %s, Model: %s" provider model)
-    (chat-log "[BUILD-REQUEST] Formatted messages: %S" formatted-msgs)
+         (stream (plist-get options :stream)))
+    ;; The whole payload used to go through `%S' here on every request,
+    ;; which formatted the messages an extra time, printed a quarter of a
+    ;; megabyte and appended it to a log already past a hundred megabytes
+    ;; -- on the keystroke path, for a line nobody reads.  What a reader
+    ;; needs is the shape; the content is in the session file already.
+    (chat-log "[BUILD-REQUEST] Provider: %s, Model: %s, %s"
+              provider model (chat-llm--message-shape messages))
     (if builder
         (funcall builder messages options)
       (list :model model
-            :messages formatted-msgs
+            :messages (chat-llm--format-messages messages)
             :temperature temperature
             :stream stream
             :max_tokens max-tokens))))
