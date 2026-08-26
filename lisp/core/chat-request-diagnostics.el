@@ -29,6 +29,8 @@
   process
   stream-chunk-count
   last-chunk-at
+  reasoning-count
+  reasoning-chars
   last-error
   last-event
   metadata
@@ -163,6 +165,19 @@ dropped once the limit is exceeded."
           (setf (chat-request-trace-stream-chunk-count trace)
                 (1+ (or (chat-request-trace-stream-chunk-count trace) 0)))
           (setf (chat-request-trace-last-chunk-at trace) now))
+        ;; Reasoning counts as arriving data.  It was recorded nowhere
+        ;; before, so a model that thought for a minute looked identical to
+        ;; one that had died, and the stall notice said no chunks had
+        ;; arrived while reasoning chunks were arriving the whole time.
+        (when (eq event-type 'stream-reasoning)
+          (setf (chat-request-trace-reasoning-count trace)
+                (1+ (or (chat-request-trace-reasoning-count trace) 0)))
+          ;; `:chars' is this chunk's length, so it accumulates; assigning
+          ;; it would report the size of the last chunk as the total.
+          (setf (chat-request-trace-reasoning-chars trace)
+                (+ (or (chat-request-trace-reasoning-chars trace) 0)
+                   (or (plist-get props :chars) 0)))
+          (setf (chat-request-trace-last-chunk-at trace) now))
         (let ((events (cons event (chat-request-trace-events trace))))
           (setf (chat-request-trace-events trace)
                 (if (> (length events) chat-request-diagnostics-max-events)
@@ -188,6 +203,8 @@ dropped once the limit is exceeded."
        :transport (chat-request-trace-transport trace)
        :stream-chunk-count (or (chat-request-trace-stream-chunk-count trace) 0)
        :last-chunk-at (chat-request-trace-last-chunk-at trace)
+       :reasoning-count (or (chat-request-trace-reasoning-count trace) 0)
+       :reasoning-chars (or (chat-request-trace-reasoning-chars trace) 0)
        :last-error (chat-request-trace-last-error trace)
        :last-event (chat-request-trace-last-event trace)
        :handle-live-p (chat-request-diagnostics--handle-live-p
@@ -219,16 +236,20 @@ dropped once the limit is exceeded."
          (phase (plist-get snapshot :phase))
          (age (chat-request-diagnostics--seconds-since
                (plist-get snapshot :updated-at)))
-         (chunk-count (plist-get snapshot :stream-chunk-count)))
+         (chunk-count (plist-get snapshot :stream-chunk-count))
+         (reasoning-count (or (plist-get snapshot :reasoning-count) 0)))
     (when (and age
                (> age chat-request-diagnostics-stall-threshold))
       (pcase phase
         ('waiting
          "Still waiting for provider response.")
         ('streaming
-         (if (> chunk-count 0)
-             "Stream has stalled without a new chunk."
-           "Stream started but no chunks have arrived yet."))
+         (cond
+          ((> chunk-count 0) "Stream has stalled without a new chunk.")
+          ;; Reasoning updates `last-chunk-at', so reaching here with a
+          ;; reasoning count means thinking has stopped too.
+          ((> reasoning-count 0) "Reasoning has stalled without new output.")
+          (t "Stream started but no chunks have arrived yet.")))
         ('tool-loop
          "Waiting for tool follow-up resolution.")
         (_ nil)))))
@@ -257,11 +278,25 @@ FALLBACK is used when SNAPSHOT does not provide a better detail."
               (plist-get pending-approval :tool)))
      (stalled stalled)
      ((eq phase 'streaming)
-      (if (> chunk-count 0)
+      (let ((reasoning-count (or (plist-get snapshot :reasoning-count) 0))
+            (reasoning-chars (or (plist-get snapshot :reasoning-chars) 0))
+            (waited (truncate
+                     (or (chat-request-diagnostics--seconds-since
+                          (plist-get snapshot :started-at))
+                         0))))
+        (cond
+         ((> chunk-count 0)
           (format "Receiving response (%d chunks, last %ss ago)"
                   chunk-count
-                  (or chunk-age 0))
-        "Streaming, waiting for first chunk"))
+                  (or chunk-age 0)))
+         ;; Thinking is work, and saying so is the difference between a
+         ;; reader who waits and a reader who assumes a hang.
+         ((> reasoning-count 0)
+          (format "Thinking (%d chars, %ss elapsed)" reasoning-chars waited))
+         ;; The seconds are the point: a number that moves says the request
+         ;; is alive, and a first token can be twenty seconds out on a large
+         ;; prompt.
+         (t (format "Waiting for the first token (%ss)" waited)))))
      ((eq phase 'tool-loop)
       (or last-summary
           (pcase (plist-get latest-tool-event :type)

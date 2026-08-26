@@ -414,6 +414,16 @@ Returns the process object."
                                       decoded))))
                           (when (and (stringp reasoning)
                                      (not (string-empty-p reasoning)))
+                            ;; Recorded nowhere before, so a model thinking
+                            ;; for a minute registered as a request that had
+                            ;; produced nothing at all.
+                            (when request-id
+                              (chat-request-diagnostics-record
+                               request-id
+                               'stream-reasoning
+                               :process proc
+                               :chars (length reasoning)
+                               :summary "Receiving reasoning"))
                             (condition-case callback-error
                                 (funcall reasoning-callback reasoning)
                               (error

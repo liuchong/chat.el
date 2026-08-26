@@ -81,4 +81,62 @@
         (should (= (plist-get (car events) :n) 5))
         (should (= (plist-get (car (last events)) :n) 9))))))
 
+;; ------------------------------------------------------------------
+;; Reasoning is arriving data
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-request-diagnostics-counts-reasoning-chunks ()
+  "Reasoning was recorded nowhere, so thinking read as having produced nothing."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal)))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record id 'stream-reasoning :chars 10)
+      (chat-request-diagnostics-record id 'stream-reasoning :chars 15)
+      (let ((snapshot (chat-request-diagnostics-snapshot id)))
+        (should (= (plist-get snapshot :reasoning-count) 2))
+        ;; The delta accumulates; assigning it would report 15 as the total.
+        (should (= (plist-get snapshot :reasoning-chars) 25))))))
+
+(ert-deftest chat-request-diagnostics-reasoning-keeps-a-request-alive ()
+  "A reasoning chunk counts as progress, so the stall clock restarts."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal)))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record id 'stream-reasoning :chars 10)
+      (should (plist-get (chat-request-diagnostics-snapshot id) :last-chunk-at)))))
+
+(ert-deftest chat-request-diagnostics-says-thinking-while-reasoning-arrives ()
+  "Naming the work is what stops a reader assuming a hang."
+  (let ((detail (chat-request-diagnostics-live-detail
+                 (list :phase 'streaming
+                       :stream-chunk-count 0
+                       :reasoning-count 3
+                       :reasoning-chars 420
+                       :started-at (current-time)))))
+    (should (string-match-p "Thinking (420 chars" detail))))
+
+(ert-deftest chat-request-diagnostics-counts-the-wait-for-a-first-token ()
+  "A number that moves is the difference between waiting and giving up.
+
+A large prompt can be twenty seconds from its first token, and the message
+before this said only that the stream had started."
+  (let ((detail (chat-request-diagnostics-live-detail
+                 (list :phase 'streaming
+                       :stream-chunk-count 0
+                       :reasoning-count 0
+                       :started-at (time-subtract (current-time) 7)))))
+    (should (string-match-p "Waiting for the first token (7s)" detail))))
+
+(ert-deftest chat-request-diagnostics-stall-tells-reasoning-from-nothing ()
+  "Saying no chunks arrived while reasoning arrived is simply untrue."
+  (let ((chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        (chat-request-diagnostics-stall-threshold 0))
+    (let ((id (chat-request-diagnostics-create 'chat 'kimi 'kimi nil)))
+      (chat-request-diagnostics-record id 'stream-started)
+      (should (string-match-p
+               "no chunks have arrived"
+               (chat-request-diagnostics-stall-message id)))
+      (chat-request-diagnostics-record id 'stream-reasoning :chars 10)
+      (should (string-match-p
+               "Reasoning has stalled"
+               (chat-request-diagnostics-stall-message id))))))
+
 (provide 'test-chat-request-diagnostics)
