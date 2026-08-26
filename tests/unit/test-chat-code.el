@@ -49,8 +49,8 @@
                     (setq sent t))))
          (chat-code-send-message))
        (should sent)
-       (should (= (length (chat-session-messages (chat-code-session-base-session session))) 1))
-       (let ((saved (car (chat-session-messages (chat-code-session-base-session session)))))
+       (should (= (length (chat-session-messages session)) 1))
+       (let ((saved (car (chat-session-messages session))))
          (should (eq (chat-message-role saved) :user))
          (should (string= (chat-message-content saved) "Fix this function")))
        (should (= (marker-position chat-code--input-marker) (point-max)))
@@ -77,14 +77,14 @@
                     (setq sent t))))
          (chat-code-send-message))
        (should-not sent)
-       (should-not (chat-session-messages (chat-code-session-base-session session)))))))
+       (should-not (chat-session-messages session))))))
 
 (ert-deftest chat-code-send-message-steers-active-agent-run ()
   "Test code-mode input during an agent run is queued as steering."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-code-session-create "Steer Code" temp-dir))
-          (base-session (chat-code-session-base-session session))
+          (base-session session)
           (run (chat-agent--run-create
                 :model 'kimi
                 :messages nil
@@ -116,24 +116,122 @@
                     (setq opened-session session))))
          (chat-code-from-chat))
        (should (chat-code-session-p opened-session))
-       (should (eq (chat-code-session-base-session opened-session)
+       (should (eq opened-session
                    base-session))
        (should (string= (chat-session-name
-                         (chat-code-session-base-session opened-session))
+                         opened-session)
                         "Chat Session"))))))
 
+(ert-deftest chat-code-session-survives-being-saved-and-reopened ()
+  "A code session reloads with its project context intact.
+
+Code capability used to live in a wrapper struct that was never
+serialized, so the more capable surface was the one that could not resume
+a conversation. Putting it in session metadata is what fixes that."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Code: demo" "/tmp/proj/"
+                                             nil)))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should loaded)
+       (should (chat-code-session-p loaded))
+       (should (equal (chat-code-session-project-root loaded) "/tmp/proj/"))
+       (should (eq (chat-code-session-context-strategy loaded)
+                   chat-code-default-strategy))))))
+
+(ert-deftest chat-code-session-properties-keep-their-type-across-a-save ()
+  "Metadata reads back as the type the code compares against.
+
+JSON does not distinguish a symbol from a string or a list from an array,
+so a strategy written as a symbol returns as a string after a save and
+every `eq' against it silently stops matching."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (focus (expand-file-name "a.el" temp-dir))
+          (session (chat-code-session-create "Code: types" temp-dir focus)))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (symbolp (chat-code-session-context-strategy loaded)))
+       (should (eq (chat-code-session-context-strategy loaded)
+                   (chat-code-session-context-strategy session)))
+       (should (listp (chat-code-session-context-files loaded)))))))
+
+(ert-deftest chat-code-session-appears-in-the-session-list ()
+  "A code session is an ordinary session, so it lists like one."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-code-session-create "Code: listed" temp-dir nil)))
+     (chat-session-save session)
+     (should (cl-find (chat-session-id session) (chat-session-list)
+                      :key (lambda (entry)
+                             (if (chat-session-p entry)
+                                 (chat-session-id entry)
+                               (cdr (assq 'id entry))))
+                      :test #'equal)))))
+
+(ert-deftest chat-code-session-reopens-on-the-code-surface ()
+  "Reopening routes by recorded capability, not by which command was used.
+
+Resuming a project conversation on the plain surface would drop its
+project context, which is not resuming it."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (code (chat-code-session-create "Code: routed" temp-dir nil))
+          (plain (chat-session-create "Plain" 'kimi))
+          code-opened plain-opened)
+     (cl-letf (((symbol-function 'chat-code--open-session)
+                (lambda (session) (setq code-opened session)))
+               ((symbol-function 'chat--open-chat-session)
+                (lambda (session) (setq plain-opened session))))
+       (chat--open-session code)
+       (chat--open-session plain))
+     (should (eq code-opened code))
+     (should (eq plain-opened plain))
+     (should-not (eq code-opened plain)))))
+
+(ert-deftest chat-code-focus-file-is-recorded-on-the-session ()
+  "Focus and context files are session state, so they persist too."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (focus (expand-file-name "a.el" temp-dir))
+          (session (chat-code-session-create "Code: focus" temp-dir focus)))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (equal (chat-code-session-focus-file loaded) focus))
+       (should (member focus (chat-code-session-context-files loaded)))))))
+
+(ert-deftest chat-code-enable-does-not-restart-a-conversation ()
+  "Turning capability on keeps the session and its history.
+
+`chat-code-from-chat' used to create a session and then overwrite its
+contents with the existing one, which read as reuse and was a swap."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Ongoing" 'kimi)))
+     (chat-session-add-message
+      session (make-chat-message :id "u1" :role :user :content "hi"))
+     (let ((same (chat-code-enable session temp-dir nil)))
+       (should (eq same session))
+       (should (chat-code-session-p session))
+       (should (equal (mapcar #'chat-message-id
+                              (chat-session-messages session))
+                      '("u1")))))))
+
 (ert-deftest chat-code-regenerate-last-response-creates-sibling-branch ()
-  "Test code mode regenerates on a branch without truncating history."
+  "Test code mode regenerates on a branch without truncating history.
+
+The branch replaces the buffer's session rather than the contents of a
+wrapper, so it is read back from the buffer-local binding."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-code-session-create "Replay Session" temp-dir))
-          (base-session (chat-code-session-base-session session))
           replayed)
      (chat-session-add-message
-      base-session
+      session
       (make-chat-message :id "u1" :role :user :content "Fix bug" :timestamp (current-time)))
      (chat-session-add-message
-      base-session
+      session
       (make-chat-message :id "a1" :role :assistant :content "Old fix" :timestamp (current-time)))
      (with-temp-buffer
        (chat-code-mode)
@@ -144,15 +242,20 @@
                     (setq replayed t))))
          (chat-code-regenerate-last-response))
        (should replayed)
-       (should (equal (mapcar #'chat-message-id (chat-session-messages base-session))
+       (should (equal (mapcar #'chat-message-id (chat-session-messages session))
                       '("u1" "a1")))
-       (let ((branch (chat-code-session-base-session session)))
-         (should-not (eq branch base-session))
+       (let ((branch chat-code--current-session))
+         (should-not (eq branch session))
          (should (equal (mapcar #'chat-message-id
                                 (chat-session-messages branch))
                         '("u1")))
          (should (equal (chat-session-parent-session-id branch)
-                        (chat-session-id base-session))))
+                        (chat-session-id session)))
+         ;; Code capability survives the branch, so the regenerated turn
+         ;; still assembles project context.
+         (should (chat-code-session-p branch))
+         (should (equal (chat-code-session-project-root branch)
+                        (chat-code-session-project-root session))))
        (goto-char (point-min))
        (should (search-forward "Fix bug" nil t))
        (should-not (search-forward "Old fix" nil t))))))
@@ -161,33 +264,32 @@
   "Test code mode branches before restoring the user turn for editing."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
-          (session (chat-code-session-create "Edit Session" temp-dir))
-          (base-session (chat-code-session-base-session session)))
+          (session (chat-code-session-create "Edit Session" temp-dir)))
      (chat-session-add-message
-      base-session
+      session
       (make-chat-message :id "u1" :role :user :content "First" :timestamp (current-time)))
      (chat-session-add-message
-      base-session
+      session
       (make-chat-message :id "a1" :role :assistant :content "Answer 1" :timestamp (current-time)))
      (chat-session-add-message
-      base-session
+      session
       (make-chat-message :id "u2" :role :user :content "Refine this" :timestamp (current-time)))
      (chat-session-add-message
-      base-session
+      session
       (make-chat-message :id "a2" :role :assistant :content "Answer 2" :timestamp (current-time)))
      (with-temp-buffer
        (chat-code-mode)
        (setq-local chat-code--current-session session)
        (chat-code--setup-buffer session)
        (chat-code-edit-last-user-message)
-       (should (equal (mapcar #'chat-message-id (chat-session-messages base-session))
+       (should (equal (mapcar #'chat-message-id (chat-session-messages session))
                       '("u1" "a1" "u2" "a2")))
        (should
         (equal
          (mapcar #'chat-message-id
-                 (chat-session-messages
-                  (chat-code-session-base-session session)))
+                 (chat-session-messages chat-code--current-session))
          '("u1" "a1")))
+       (should (chat-code-session-p chat-code--current-session))
        (should (string= (buffer-substring-no-properties
                          (marker-position chat-code--input-marker)
                          (point-max))
@@ -570,10 +672,10 @@
            (chat-code--start-agent-run 'sync 'kimi '(message-a) content-start)))
        (should-not (chat-agent-active-p chat-code--active-agent-run))
        (should (= (length (chat-session-messages
-                           (chat-code-session-base-session session)))
+                           session))
                   1))
        (let ((saved (car (chat-session-messages
-                          (chat-code-session-base-session session)))))
+                          session))))
          (should (eq (chat-message-role saved) :assistant))
          (should (string= (chat-message-content saved) "Here is the answer.")))
        (should (eq chat-code--status-state 'success))
@@ -628,7 +730,7 @@
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (session (chat-code-session-create "History Session" temp-dir))
-          (base-session (chat-code-session-base-session session))
+          (base-session session)
           captured-messages)
      (chat-session-add-message
       base-session
@@ -751,7 +853,7 @@ file contents instead of only a short summary."
                    :timestamp (current-time)))
             content-start)))
        (let* ((messages (chat-session-messages
-                         (chat-code-session-base-session session)))
+                         session))
               (assistant (nth 0 messages))
               (tool (nth 1 messages))
               (final (nth 2 messages)))

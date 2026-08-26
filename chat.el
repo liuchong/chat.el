@@ -313,25 +313,43 @@ MODEL is an optional model identifier, uses chat-default-model if not provided."
 (defun chat--open-session (session)
   "Open SESSION in a chat buffer.
 
-SESSION is a chat-session struct."
+SESSION is a chat-session struct.  A session that recorded code
+capability reopens on the code surface, since resuming a project
+conversation without its project context is not resuming it."
+  (if (and (fboundp 'chat-code-session-p)
+           (fboundp 'chat-code--open-session)
+           (chat-code-session-p session))
+      (chat-code--open-session session)
+    (chat--open-chat-session session)))
+
+(defun chat-prepare-session-buffer (session)
+  "Apply the session-level setup every chat surface needs to SESSION.
+
+Called from both surfaces so neither can drift out of the other's
+behaviour.  Everything here is a property of the session rather than of
+how it is drawn, which is why it does not belong in either display."
+  (setq-local chat--current-session session)
+  ;; Without this the buffer would inherit the directory of whatever
+  ;; buffer happened to be current, discarding the directory this
+  ;; session was pointed at.
+  (when-let ((directory (chat-session-working-directory session)))
+    (setq-local default-directory directory))
+  ;; Scratch space is created here rather than on first write so that
+  ;; the path named in the system prompt exists by the time the model
+  ;; is told about it.  Pruning rides along because this is the moment
+  ;; nothing is mid-write, and it spares the session being opened.
+  (chat-scratch-session-directory session t)
+  (chat-scratch-prune (chat-session-id session))
+  (setq chat--last-session-id (chat-session-id session)))
+
+(defun chat--open-chat-session (session)
+  "Open SESSION on the plain chat surface."
   (let* ((buffer-name (chat--buffer-name session))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
       (chat-mode)
-      (setq-local chat--current-session session)
-      ;; Without this the buffer would inherit the directory of whatever
-      ;; buffer happened to be current, discarding the directory this
-      ;; session was pointed at.
-      (when-let ((directory (chat-session-working-directory session)))
-        (setq-local default-directory directory))
-      ;; Scratch space is created here rather than on first write so that
-      ;; the path named in the system prompt exists by the time the model
-      ;; is told about it.  Pruning rides along because this is the moment
-      ;; nothing is mid-write, and it spares the session being opened.
-      (chat-scratch-session-directory session t)
-      (chat-scratch-prune (chat-session-id session))
+      (chat-prepare-session-buffer session)
       (chat-ui-setup-buffer session))
-    (setq chat--last-session-id (chat-session-id session))
     (pop-to-buffer buffer)))
 
 (defun chat--buffer-name (session)

@@ -260,17 +260,69 @@ When making changes:
 ;; Data Structures
 ;; ------------------------------------------------------------------
 
-(cl-defstruct chat-code-session
-  "A code editing session.
-Inherits from chat-session with additional code-specific fields."
-  base-session          ; The underlying chat-session
-  project-root          ; Project root directory
-  focus-file            ; Currently focused file (if any)
-  focus-range           ; Focus range (start . end) in focus-file
-  context-strategy      ; Context strategy symbol
-  context-files         ; List of files in current context
-  language              ; Primary language symbol
-  edit-history)         ; List of applied edits
+;; Code capability is a property of a session, not a kind of session.
+;;
+;; It used to be a struct wrapping a `chat-session', which had three
+;; costs.  Every access had to unwrap, so the two surfaces operated on
+;; different objects and neither could render the other's conversation.
+;; The wrapper was not serialized, so a code session could not be
+;; reopened -- the more capable surface was the one that could not resume,
+;; which read as a design decision and was an artifact.  And two of its
+;; fields, language and edit-history, were written at creation and never
+;; read by anything.
+;;
+;; Session metadata already persists through the JSONL state entry and
+;; already carries the working directory, so putting these there makes a
+;; code session an ordinary session that happens to know its project.
+
+(defun chat-code-session-p (session)
+  "Return non-nil when SESSION has code capability enabled."
+  (and session
+       (chat-session-p session)
+       (chat-session-metadata-get session 'code-enabled)
+       t))
+
+;; Metadata survives as JSON, which does not distinguish a symbol from a
+;; string or a list from an array.  A symbol written before a save reads
+;; back as a string afterwards, and code comparing it with `eq' then
+;; silently stops matching -- the same trap the message metadata hit.  So
+;; the accessor is where the type is guaranteed, and each property
+;; declares the shape it promises.
+
+(defun chat-code--as-symbol (value)
+  "Return VALUE as a symbol, or nil."
+  (cond ((null value) nil)
+        ((symbolp value) value)
+        ((stringp value) (intern value))
+        (t nil)))
+
+(defun chat-code--as-list (value)
+  "Return VALUE as a list."
+  (cond ((null value) nil)
+        ((vectorp value) (append value nil))
+        ((listp value) value)
+        (t (list value))))
+
+(defmacro chat-code--define-property (name key &optional normalizer)
+  "Define accessor NAME reading session metadata KEY, with a setter.
+
+NORMALIZER, when given, converts what storage returns into the type the
+rest of the code expects."
+  `(progn
+     (defun ,name (session)
+       ,(format "Return the %s recorded for SESSION." key)
+       (let ((value (chat-session-metadata-get session ',key)))
+         ,(if normalizer `(,normalizer value) 'value)))
+     (gv-define-setter ,name (value session)
+       (list 'chat-session-metadata-set session '',key value))))
+
+(chat-code--define-property chat-code-session-project-root project-root)
+(chat-code--define-property chat-code-session-focus-file focus-file)
+(chat-code--define-property chat-code-session-focus-range focus-range)
+(chat-code--define-property chat-code-session-context-strategy
+                            context-strategy chat-code--as-symbol)
+(chat-code--define-property chat-code-session-context-files
+                            context-files chat-code--as-list)
 
 ;; ------------------------------------------------------------------
 ;; Session Management
@@ -580,7 +632,7 @@ When SILENT is non-nil, do not show minibuffer feedback."
   "Create diagnostics state for MODEL and TRANSPORT."
   (let* ((session chat-code--current-session)
          (source-buffer (current-buffer))
-         (base-session (and session (chat-code-session-base-session session)))
+         (base-session session)
          (request-id
           (chat-request-diagnostics-create
            'code
@@ -627,9 +679,13 @@ When SILENT is non-nil, do not show minibuffer feedback."
    chat-code--request-tool-events))
 
 (defun chat-code--base-session ()
-  "Return the base chat session for the current code session."
-  (and chat-code--current-session
-       (chat-code-session-base-session chat-code--current-session)))
+  "Return the chat session backing this code buffer.
+
+A code session is an ordinary session, so this is the session itself.
+Kept as a name because the request and rendering paths read better
+saying which session they mean, and because those paths are shared with
+the chat surface."
+  chat-code--current-session)
 
 (defun chat-code--status-label (state)
   "Return display label for STATUS."
@@ -1221,27 +1277,43 @@ Returns either the block body string or a list of (LANG BODY)."
         default-directory)))
 
 (defun chat-code-session-create (name &optional project-root focus-file)
-  "Create a new code mode session.
+  "Create a new session with code capability enabled.
 
 NAME is the session name.
 PROJECT-ROOT is the project root directory.
-FOCUS-FILE is an optional file to focus on."
-  (let* ((project-root (or project-root (chat-code--detect-project-root)))
-         (base-session (chat-session-create
-                        name
-                        (if (boundp 'chat-default-model)
-                            chat-default-model
-                          'kimi)))
-         (language (and focus-file (chat-code--detect-language focus-file)))
-         (code-session (make-chat-code-session
-                        :base-session base-session
-                        :project-root project-root
-                        :focus-file focus-file
-                        :context-strategy chat-code-default-strategy
-                        :context-files (if focus-file (list focus-file) nil)
-                        :language language
-                        :edit-history nil)))
-    code-session))
+FOCUS-FILE is an optional file to focus on.
+
+Returns an ordinary `chat-session', so it saves, lists and reopens like
+any other."
+  (let ((session (chat-session-create
+                  name
+                  (if (boundp 'chat-default-model)
+                      chat-default-model
+                    'kimi))))
+    (chat-code-enable session
+                      (or project-root (chat-code--detect-project-root))
+                      focus-file)
+    session))
+
+(defun chat-code-enable (session &optional project-root focus-file)
+  "Turn on code capability for SESSION.
+
+Separate from creation so an existing conversation can gain project
+context without being restarted, which is what `chat-code-from-chat'
+needs and what a reopened session needs when its capability is already
+recorded."
+  (chat-session-metadata-set session 'code-enabled t)
+  (setf (chat-code-session-project-root session)
+        (or project-root
+            (chat-code-session-project-root session)
+            (chat-code--detect-project-root)))
+  (unless (chat-code-session-context-strategy session)
+    (setf (chat-code-session-context-strategy session)
+          chat-code-default-strategy))
+  (when focus-file
+    (setf (chat-code-session-focus-file session) focus-file)
+    (setf (chat-code-session-context-files session) (list focus-file)))
+  session)
 
 ;; ------------------------------------------------------------------
 ;; Entry Points
@@ -1304,16 +1376,11 @@ Optional PROJECT-ROOT overrides the detected project root."
   (interactive)
   (unless chat-code-enabled
     (error "Code mode is not enabled. Set chat-code-enabled to t"))
-  (unless (boundp 'chat--current-session)
+  (unless (and (boundp 'chat--current-session) chat--current-session)
     (error "Not in a chat buffer"))
-  (let* ((base-session chat--current-session)
-         (code-session (chat-code-session-create
-                        (chat-session-name base-session)
-                        (chat-code--detect-project-root)
-                        nil)))
-    ;; Reuse existing session but switch to code mode
-    (setf (chat-code-session-base-session code-session) base-session)
-    (chat-code--open-session code-session)))
+  ;; Enabling capability on the session in hand, rather than creating one
+  ;; and swapping its contents, is what the command name always claimed.
+  (chat-code--open-session (chat-code-enable chat--current-session)))
 
 ;; ------------------------------------------------------------------
 ;; Buffer Management
@@ -1321,8 +1388,7 @@ Optional PROJECT-ROOT overrides the detected project root."
 
 (defun chat-code--buffer-name (session)
   "Generate buffer name for SESSION."
-  (format "*chat:code:%s*" (chat-session-name
-                            (chat-code-session-base-session session))))
+  (format "*chat:code:%s*" (chat-session-name session)))
 
 (defun chat-code--open-session (code-session)
   "Open CODE-SESSION in a code mode buffer."
@@ -1331,6 +1397,11 @@ Optional PROJECT-ROOT overrides the detected project root."
     (with-current-buffer buffer
       (chat-code-mode)
       (setq-local chat-code--current-session code-session)
+      ;; The same session-level setup the chat surface performs: working
+      ;; directory, scratch space, and the canonical session binding.
+      ;; Both variables point at one object until the surfaces merge.
+      (when (fboundp 'chat-prepare-session-buffer)
+        (chat-prepare-session-buffer code-session))
       (chat-code--setup-buffer code-session))
     (pop-to-buffer buffer)))
 
@@ -1354,8 +1425,7 @@ Optional PROJECT-ROOT overrides the detected project root."
     (chat-code--insert-header code-session)
     ;; Initial context summary
     (chat-code--insert-context-summary code-session)
-    (dolist (message (chat-session-messages
-                      (chat-code-session-base-session code-session)))
+    (dolist (message (chat-session-messages code-session))
       (chat-code--insert-session-message message))
     (setq chat-code--messages-end (point-marker))
     (chat-code--set-status 'idle "Ready")
@@ -1368,8 +1438,7 @@ Optional PROJECT-ROOT overrides the detected project root."
   (insert (propertize
            (format "════════════════════════════════════════════════════════════════════\n")
            'face '(:weight bold)))
-  (let* ((base (chat-code-session-base-session code-session))
-         (name (chat-session-name base))
+  (let* ((name (chat-session-name code-session))
          (strategy (chat-code-session-context-strategy code-session))
          (project (chat-code-session-project-root code-session))
          (focus (chat-code-session-focus-file code-session)))
@@ -1937,7 +2006,7 @@ If CONTENT-START is non nil, replace the pending assistant slot."
             (chat-session-find-last-message-by-role base-session :assistant)))
       (unless assistant-msg
         (user-error "No assistant response available to regenerate"))
-      (setf (chat-code-session-base-session chat-code--current-session)
+      (setq chat-code--current-session
             (chat-session-create-branch-before-message
              base-session
              (chat-message-id assistant-msg)
@@ -1958,7 +2027,7 @@ If CONTENT-START is non nil, replace the pending assistant slot."
             (chat-session-find-last-message-by-role base-session :user)))
       (unless user-msg
         (user-error "No user message available to edit"))
-      (setf (chat-code-session-base-session chat-code--current-session)
+      (setq chat-code--current-session
             (chat-session-create-branch-before-message
              base-session
              (chat-message-id user-msg)

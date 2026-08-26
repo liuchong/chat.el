@@ -535,6 +535,58 @@
                        (chat-message-branch-ids user)))
        (should (chat-session-load (chat-session-id branch)))))))
 
+(ert-deftest chat-session-branch-carries-forward-what-the-session-knew ()
+  "A branch keeps the parent's metadata, not only its own entries.
+
+A branch continues a session, so the working directory and every other
+recorded property continue with it. Replacing the alist wholesale is
+invisible until a shell command runs in the wrong place after a
+regenerate."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Root" 'kimi)))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-session-metadata-set session 'code-enabled t)
+     (chat-session-add-message
+      session (make-chat-message :id "u1" :role :user :content "ask"))
+     (chat-session-add-message
+      session (make-chat-message :id "a1" :role :assistant :content "answer"))
+     (let ((branch (chat-session-create-branch-before-message
+                    session "a1" nil '((reason . "regenerate")))))
+       (should (equal (chat-session-working-directory branch)
+                      (chat-session-working-directory session)))
+       (should (eq (chat-session-metadata-get branch 'code-enabled) t))
+       ;; The branch's own entries still take effect.
+       (should (equal (chat-session-metadata-get branch 'reason)
+                      "regenerate"))))))
+
+(ert-deftest chat-session-branch-metadata-does-not-mutate-the-parent ()
+  "Merging for a branch leaves the source session alone.
+
+Sharing structure would let a branch's entry appear in the session it
+came from, which is worse than losing it."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Root" 'kimi)))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-session-add-message
+      session (make-chat-message :id "u1" :role :user :content "ask"))
+     (chat-session-add-message
+      session (make-chat-message :id "a1" :role :assistant :content "answer"))
+     (chat-session-create-branch-before-message
+      session "a1" nil '((reason . "regenerate")))
+     (should-not (chat-session-metadata-get session 'reason)))))
+
+(ert-deftest chat-session-metadata-merge-overrides-by-key ()
+  "An override replaces the parent value for the same key."
+  (let ((session (make-chat-session
+                  :id "m" :metadata '((working-directory . "/old/")
+                                      (keep . "kept")))))
+    (let ((merged (chat-session-metadata-merge
+                   session '((working-directory . "/new/")))))
+      (should (equal (cdr (assq 'working-directory merged)) "/new/"))
+      (should (equal (cdr (assq 'keep merged)) "kept")))))
+
 (ert-deftest chat-session-tool-pair-safe-cut-index-refuses-open-pair ()
   "Test compaction cut points do not split assistant/tool pairs."
   (let ((session (make-chat-session :id "safe-cut")))

@@ -109,6 +109,25 @@ KEY may be a keyword or a plain symbol.  Returns the updated metadata."
         (setq metadata (cons (cons symbol value) metadata)))
       (setf (chat-session-metadata session) metadata))))
 
+(defun chat-session-metadata-merge (session overrides)
+  "Return SESSION metadata with OVERRIDES applied over a copy of it.
+
+A branch is a continuation of a session, so what the session knew about
+itself continues with it.  Replacing the whole alist with the branch's
+own entries drops the working directory and every other recorded
+property, which is invisible until a shell command runs in the wrong
+place after a regenerate."
+  (let ((merged (copy-alist
+                 (chat-session--metadata-as-alist
+                  (and session (chat-session-metadata session))))))
+    (dolist (entry (chat-session--metadata-as-alist overrides))
+      (let* ((symbol (chat-session--metadata-key (car entry)))
+             (existing (assq symbol merged)))
+        (if existing
+            (setcdr existing (cdr entry))
+          (setq merged (cons (cons symbol (cdr entry)) merged)))))
+    merged))
+
 (defun chat-session-working-directory (session)
   "Return the working directory recorded for SESSION, or nil.
 A recorded directory that no longer exists reads as nil so a stale value
@@ -576,7 +595,7 @@ branch starts with no messages. SESSION is never truncated."
              :summaries nil
              :recovery-state nil
              :auto-approve (chat-session-auto-approve session)
-             :metadata metadata)))
+             :metadata (chat-session-metadata-merge session metadata))))
       (when index
         (let ((parent-message (nth index messages)))
           (cl-pushnew id (chat-message-branch-ids parent-message)

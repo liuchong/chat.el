@@ -28,7 +28,7 @@
   (if session
       (progn
         (message "  ✓ Session created: %s" 
-                 (chat-session-name (chat-code-session-base-session session)))
+                 (chat-session-name session))
         (message "  ✓ Project root: %s" (chat-code-session-project-root session))
         (message "  ✓ Focus file: %s" (chat-code-session-focus-file session)))
     (message "  ✗ Failed to create session")))
