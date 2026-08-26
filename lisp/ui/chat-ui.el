@@ -2553,16 +2553,20 @@ assistant response being filled in."
     ;; between the keystroke and the reader seeing their own question, and
     ;; the paint's own cost is invisible anywhere but a real frame.
     (chat-ui--clock "PAINT")
-    (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
+    (let* ((messages-with-tools
+            (prog1 (chat-ui--prepare-messages-with-tools messages)
+              (chat-ui--clock "tools")))
            (messages-final
-            (chat-context-prepare-messages
-             messages-with-tools
-             ;; Without a limit derived from the model this compacted
-             ;; against a flat figure, throwing away history a large
-             ;; window had ample room for.
-             (chat-context-budget-compaction-limit
-              (chat-session-model-id session))
-             session)))
+            (prog1
+                (chat-context-prepare-messages
+                 messages-with-tools
+                 ;; Without a limit derived from the model this compacted
+                 ;; against a flat figure, throwing away history a large
+                 ;; window had ample room for.
+                 (chat-context-budget-compaction-limit
+                  (chat-session-model-id session))
+                 session)
+              (chat-ui--clock "context"))))
       (chat-log "[UI] Starting %s agent run with %d messages"
                 transport (length messages-final))
       (setq chat-ui--active-agent-run

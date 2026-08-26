@@ -236,10 +236,14 @@ reader seeing their own question."
                            (insert-file-contents log-file)
                            (buffer-string))))
              (should (string-match-p "\\[TIMING\\]" logged))
-             ;; The phases, in the order the path runs them.
+             ;; The phases, in the order the path runs them.  Split finely
+             ;; enough to name a culprit: the first real measurement put
+             ;; 98% of a send inside one unbroken phase, which located
+             ;; nothing.
              (should (string-match
                       (concat "prompt [0-9]+ -> history [0-9]+ -> record [0-9]+"
                               " -> redraw [0-9]+ -> live [0-9]+ -> PAINT [0-9]+"
+                              " -> tools [0-9]+ -> context [0-9]+"
                               " -> start [0-9]+")
                       logged))
              ;; And the facts about the buffer that explain an outlier.

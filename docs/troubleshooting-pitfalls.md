@@ -1812,33 +1812,66 @@ outcome. Asserted in the source rather than at runtime, because batch
 mode never paints and reports no window worth painting into, so a test
 that called it could not tell the two apart.
 
-### The Pause You Feel Is The Collection Your Allocation Bought
+### A Wall-Clock Number Blames Whoever Was Running When The GC Landed
 
-**Problem**: the send path timed at 3ms on one keystroke and 400ms on the
+**Problem**: the send path timed at 3ms on one iteration and 400ms on the
 next, with nothing different about the two. Instrumenting the callees
 blamed a different function each time -- project instructions on one run,
-the system prompt on another -- which is the signature of measuring
-something that is not there.
+the system prompt on another.
 
 **Cause**: garbage collection, landing wherever it landed and billing
 whichever function was running. `gcs-done` and `gc-elapsed` around the
-path showed one collection every second or third send, and the allocation
-that paid for it was mostly repeated work: every send re-read every
-applicable `AGENTS.md` off disk -- 20KB to 30KB here -- and re-ran the
-resident-span partition over the result, throwing all of it away
-afterwards.
+path showed one collection every second or third iteration.
 
 **Solution**: measure `gcs-done`, `gc-elapsed` and `memory-use-counts`
-around the path before believing any per-function number, since a
-sampling profiler and wall-clock advice will both blame the innocent.
-Then allocate less rather than collecting later: caching the instructions
-halved the allocation per send, and the collections disappeared from the
-sample entirely. Raising `gc-cons-threshold` around the send was
-considered and rejected -- a deferred pause is still a pause, and it
-lands somewhere less predictable, which trades a measurable problem for
-an unmeasurable one. Note that the effect is worse, not better, in a
-long-lived Emacs with a raised threshold: rarer collections over a larger
-heap are exactly the several-hundred-millisecond kind.
+around a path before believing any per-function number, since a sampling
+profiler and wall-clock advice will both blame the innocent. Where the
+allocation is repeated work, remove the work: every send re-read every
+applicable `AGENTS.md` off disk and re-ran the resident-span partition
+over 20KB to 30KB to reach the answer it had last time. Caching that
+halved the allocation per send and took the collections out of the
+sample. Raising `gc-cons-threshold` around the send was considered and
+rejected -- a deferred pause is still a pause, in a less predictable
+place.
+
+**But do not mistake this for a hitch the user can feel.** It was
+presented as the cause of a reported RET hitch and it was not. The
+collections were real, the caching was worth doing, and neither had
+anything to do with the complaint: the actual cause was a preemptible
+`redisplay`, and the actual pre-paint cost in the session that complained
+was 28ms. See below for why the measurement said otherwise.
+
+### A Reproduction Cannot Measure What The Reader's Emacs Is Doing
+
+**Problem**: a reported hitch between RET and the typed line appearing
+survived three rounds of diagnosis. Each round measured a reproduction of
+the send path, each produced a confident cause, and each was wrong: batch
+mode made garbage collection the largest term; a purpose-built GUI frame
+was used to test whether the prompt marks paid for a font fallback on
+macOS, and `char-displayable-p` turned out to be 0.018ms cold and free
+warm; the transport, the body encoding and the log were measured and
+cleared in turn.
+
+**Cause**: the costs that decide whether a keystroke feels instant live in
+the display and in whatever hooks the reader's configuration has
+installed. Batch mode has no display and runs no `post-command-hook`. An
+`emacs -Q` has a display and no configuration. Neither is the machine
+where the complaint happened, and the program logged nothing between the
+keystroke and the prepared request, so the one window under discussion
+was the only part of the path with no record of itself.
+
+**Solution**: make the path measure itself in the session where the
+complaint happens. One log line per send: the phases in the order they
+run, the mark before the paint separated out, and the facts that explain
+an outlier -- buffer size, message count, whether undo is recording and
+how long its list is, and how many `post-command-hook` and
+`after-change-functions` entries are installed. The first real line
+answered in one send what three rounds of reproduction had not.
+
+Split the phases finely enough to name a culprit. That first line put 98%
+of the send inside one unbroken phase, which is an instrument failure, not
+a finding, and the marks were divided at the two points where the work
+changes hands.
 
 **Related hazard**: the prompt asks whether more than one model is
 configured every time it is drawn, which asks every provider for its key.

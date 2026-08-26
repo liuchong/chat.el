@@ -254,7 +254,26 @@ pre-paint term at 400 messages (17.9ms) but its contract — the record is
 the only source, so append, fold and reopen all produce the same screen —
 is what an append path beside it would break.
 
-Canonical suite: 1082 tests passing.
+The forced paint is what fixed the reported hitch, confirmed from the
+session where it happened rather than from a reproduction: 28ms from
+keystroke to painted question. Getting there took three wrong guesses,
+all of them made outside that session, and the lesson is recorded: the
+costs that decide whether RET feels instant live in the display and in
+the reader's own hooks, and neither exists in batch mode or in an
+`emacs -Q`. So the send path now measures itself and logs one line —
+phases in order, the pre-paint window separated out, plus buffer size,
+message count, undo state and hook counts to explain an outlier.
+
+That first real line also showed 1381ms after the paint, blocking the
+command loop, in one unbroken phase. Pure-Lisp preparation accounts for
+only about 25ms of it (code context 0.7ms, capability prompt 0.2ms,
+tools 6.8ms, context 17ms on the real session), so the rest is inside
+`chat-agent-start` and below. A single phase holding 98% of a send is an
+instrument failure rather than a finding, so the marks were split into
+`tools`, `context` and `start`; the next real send will name the culprit.
+No fix attempted until it does.
+
+Canonical suite: 1084 tests passing.
 
 ## Next Stage
 
