@@ -10,9 +10,10 @@
 
 ;;; Commentary:
 
-;; This module implements Karpathy's LLM Wiki pattern for chat.el.
-;; It provides knowledge management through a structured wiki system
-;; with sources, entities, concepts, and Obsidian-compatible linking.
+;; A knowledge base kept as markdown on disk: typed pages that link to
+;; each other with [[wikilinks]], with an index and a log generated from
+;; them.  Being ordinary files is the point -- the store stays greppable,
+;; versionable and editable by hand instead of living inside this program.
 ;;
 ;; The wiki is stored in a directory structure:
 ;;   wiki/
@@ -23,11 +24,38 @@
 ;;   ├── sources/            # Source document summaries
 ;;   ├── comparisons/        # Comparison analyses
 ;;   └── synthesis/          # Synthesis pages
+;;
+;; Two things separate this from `chat-knowledge.el', which also keeps
+;; notes across sessions.  That store is flat, written by a run about what
+;; it worked out, and its index rides in every prompt.  This one is
+;; structured and linked, is meant to be read by a person as much as by a
+;; model, and deliberately does not ride in the prompt: a wiki grows
+;; without bound, and an index of it sitting in the fixed region of the
+;; context would slowly starve the work it is supposed to help.  The model
+;; reaches it through tools and pays for only the pages it asks for.
+;;
+;; The surface is one command with subcommands -- `/wiki ingest', `/wiki
+;; ask' -- rather than a family of `/wiki-ingest' names.  Five top-level
+;; names for one feature crowd the completion list of every other command,
+;; and the shared prefix is doing the work of a namespace without being
+;; one.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'seq)
+(require 'subr-x)
+(require 'chat-command)
+(require 'chat-i18n)
+
+;; The chat surface lives a layer up and requires this file, so the few
+;; functions needed to answer in the buffer are declared rather than
+;; required, and every call is guarded by `fboundp'.  Same arrangement as
+;; `chat-knowledge.el' uses for the tool forge.
+(declare-function chat-ui--insert-system-message "chat-ui" (content))
+(declare-function chat-ui--send-user-message "chat-ui" (content))
+(declare-function chat-tool-forge-register "chat-tool-forge" (tool))
+(declare-function make-chat-forged-tool "chat-tool-forge" (&rest slots))
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -38,10 +66,13 @@
   :group 'chat
   :prefix "chat-wiki-")
 
-(defcustom chat-wiki-root
-  (expand-file-name "wiki" (or (bound-and-true-p chat-root-directory)
-                               default-directory))
-  "Root directory for the wiki."
+(defcustom chat-wiki-root (expand-file-name "~/.chat/wiki/")
+  "Root directory for the wiki.
+
+Under the user's chat state, beside the session and knowledge stores.  It
+used to be \"wiki\" under `default-directory', resolved while this file
+loaded, which made the location depend on where Emacs happened to be
+started and let a `wiki' folder in an unrelated project become the target."
   :type 'directory
   :group 'chat-wiki)
 
@@ -97,16 +128,64 @@
   (unless (file-directory-p dir)
     (make-directory dir t)))
 
+(defconst chat-wiki--slug-max-length 80
+  "Longest slug this generates, in characters.
+
+Filenames have limits and titles do not.  Truncating here rather than
+letting the filesystem refuse the write keeps the failure in one place.")
+
 (defun chat-wiki--slugify (title)
-  "Convert TITLE to a URL-friendly slug."
-  (downcase
-   (replace-regexp-in-string
-    "[^a-z0-9]+" "-"
-    (replace-regexp-in-string
-     "'" ""
-     (replace-regexp-in-string
-      "[^[:ascii:]]" ""
-      title)))))
+  "Convert TITLE to a slug usable as a filename.
+
+Letters and digits survive whatever script they are written in; anything
+else collapses to a single hyphen.  Stripping non-ASCII, which is what
+this did, slugified every CJK title to the empty string: the first such
+page took the name, and creating a second one failed outright because the
+name was already there.  A title made only of punctuation still needs a
+name of its own, so it falls back to a digest rather than to nothing."
+  (let* ((slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase title)))
+         (slug (replace-regexp-in-string "\\`-+\\|-+\\'" "" slug))
+         (slug (if (> (length slug) chat-wiki--slug-max-length)
+                   (replace-regexp-in-string
+                    "-+\\'" "" (substring slug 0 chat-wiki--slug-max-length))
+                 slug)))
+    (if (string-empty-p slug)
+        (format "page-%s" (substring (secure-hash 'sha1 title) 0 8))
+      slug)))
+
+(defun chat-wiki--cjk-char-p (ch)
+  "Return non-nil when CH carries meaning on its own.
+
+Han, kana and hangul, which are written without spaces between words."
+  (or (<= #x3400 ch #x4DBF)             ; CJK extension A
+      (<= #x4E00 ch #x9FFF)             ; CJK unified ideographs
+      (<= #xF900 ch #xFAFF)             ; compatibility ideographs
+      (<= #x3040 ch #x30FF)             ; hiragana and katakana
+      (<= #xAC00 ch #xD7AF)))           ; hangul syllables
+
+(defun chat-wiki--tokenize (text)
+  "Split TEXT into search tokens.
+
+Runs of letters and digits tokenize as words, except that CJK tokenizes
+one character at a time.  Splitting on whitespace, which is what the
+search did, turns a Chinese question into a single token that is the whole
+sentence -- then matched as a substring, which is why searching in Chinese
+found nothing at all."
+  (let ((tokens nil))
+    (dolist (chunk (split-string (downcase text) "[^[:alnum:]]+" t))
+      (let ((run nil))
+        (dotimes (i (length chunk))
+          (let ((ch (aref chunk i)))
+            (if (chat-wiki--cjk-char-p ch)
+                (progn
+                  (when run
+                    (push (apply #'string (nreverse run)) tokens)
+                    (setq run nil))
+                  (push (char-to-string ch) tokens))
+              (push ch run))))
+        (when run
+          (push (apply #'string (nreverse run)) tokens))))
+    (delete-dups (nreverse tokens))))
 
 (defun chat-wiki--today-string ()
   "Return today's date as YYYY-MM-DD string."
@@ -138,24 +217,41 @@
 
 (defun chat-wiki--parse-frontmatter (content)
   "Parse YAML frontmatter from CONTENT.
-Returns a cons cell (frontmatter-alist . body-string)."
-  (if (string-match "^---\\s-*\n\\(.*?\\)\\n---\\s-*\n\\(.*\\)" content)
-      (let* ((yaml-text (match-string 1 content))
-             (body (match-string 2 content))
-             (frontmatter nil))
-        ;; Parse simple key: value pairs
-        (dolist (line (split-string yaml-text "\n"))
-          (when (string-match "^\\([^:]+\\):\\s-*\\(.+\\)" line)
-            (let ((key (intern (downcase (match-string 1 line))))
-                  (value (string-trim (match-string 2 line))))
-              ;; Remove quotes if present
-              (when (string-match "^\"\\(.*\\)\"$" value)
-                (setq value (match-string 1 value)))
-              (when (string-match "^'\\(.*\\)'$" value)
-                (setq value (match-string 1 value)))
-              (push (cons key value) frontmatter))))
-        (cons (nreverse frontmatter) body))
-    (cons nil content)))
+
+Returns a cons cell (FRONTMATTER-ALIST . BODY).  Frontmatter is recognized
+only when the text opens with a `---' line that a later `---' line closes.
+
+Scanned over lines rather than matched with one regexp, because `.' does
+not match a newline in an Emacs regexp: the pattern this replaces could
+only ever match frontmatter that fitted on a single line, so every real
+page parsed as having none at all.  That is what lost every title and
+date -- both fell back to the filename -- and left the raw YAML sitting
+at the top of the body, where it counted as content and made an empty
+page look like a written one."
+  (with-temp-buffer
+    (insert content)
+    (goto-char (point-min))
+    (if (not (looking-at "---[ \t]*$"))
+        (cons nil content)
+      (forward-line 1)
+      (let ((yaml-start (point)))
+        (if (not (re-search-forward "^---[ \t]*$" nil t))
+            (cons nil content)
+          (let ((yaml-text (buffer-substring yaml-start (match-beginning 0)))
+                (body (buffer-substring (min (point-max) (1+ (match-end 0)))
+                                        (point-max)))
+                (frontmatter nil))
+            (dolist (line (split-string yaml-text "\n" t))
+              (when (string-match "\\`\\([^:]+\\):[ \t]*\\(.+\\)\\'" line)
+                (let ((key (intern (downcase (string-trim
+                                              (match-string 1 line)))))
+                      (value (string-trim (match-string 2 line))))
+                  (when (string-match "\\`\"\\(.*\\)\"\\'" value)
+                    (setq value (match-string 1 value)))
+                  (when (string-match "\\`'\\(.*\\)'\\'" value)
+                    (setq value (match-string 1 value)))
+                  (push (cons key value) frontmatter))))
+            (cons (nreverse frontmatter) body)))))))
 
 (defun chat-wiki--write-frontmatter (alist)
   "Write YAML frontmatter from ALIST."
@@ -347,21 +443,16 @@ If TYPE is specified, only check that type."
           (format "# %s\n\n" title)
           "## Metadata\n"
           (format "- **Date**: %s\n" date)
-          (format "- **Source**: %s\n" (or source-url "TODO: Add source URL"))
+          (format "- **Source**: %s\n" (or source-url "unknown"))
           "- **Type**: article\n"
           "- **Projects**: all\n\n"
-          "## Summary\n"
-          "- Key takeaway 1\n"
-          "- Key takeaway 2\n"
-          "- Key takeaway 3\n\n"
-          "## Extracted Entities\n"
-          "- [[entity1]]\n"
-          "- [[entity2]]\n\n"
-          "## Related Concepts\n"
-          "- [[concept1]]\n"
-          "- [[concept2]]\n\n"
-          "## Integration Notes\n"
-          "How this applies to our system...\n"))
+          ;; Empty sections rather than "Key takeaway 1" and [[entity1]].
+          ;; The invented links were dangling by construction, so a fresh
+          ;; page failed the module's own lint the moment it was created.
+          "## Summary\n\n"
+          "## Extracted Entities\n\n"
+          "## Related Concepts\n\n"
+          "## Integration Notes\n\n"))
 
 (defun chat-wiki--entity-template (name type)
   "Generate entity page template."
@@ -372,15 +463,10 @@ If TYPE is specified, only check that type."
           (format "# %s\n\n" name)
           "## Basic Info\n"
           (format "- **Type**: %s\n" type)
-          (format "- **Created**: %s\n" (chat-wiki--today-string))
-          "- **Related**: [[link1]], [[link2]]\n\n"
-          "## Description\n"
-          "What is this entity...\n\n"
-          "## In Our System\n"
-          "How it relates to chat/d/chat.el...\n\n"
-          "## Sources\n"
-          "- [[source1]]\n"
-          "- [[source2]]\n"))
+          (format "- **Created**: %s\n\n" (chat-wiki--today-string))
+          "## Description\n\n"
+          "## Related\n\n"
+          "## Sources\n\n"))
 
 (defun chat-wiki--concept-template (name)
   "Generate concept page template."
@@ -389,19 +475,10 @@ If TYPE is specified, only check that type."
              (type . "concept")
              (created . ,(chat-wiki--today-string))))
           (format "# %s\n\n" name)
-          "## Definition\n"
-          "Clear definition of the concept...\n\n"
-          "## In d/ (Rust)\n"
-          "Implementation in Rust...\n\n"
-          "## In chat.zig (Zig)\n"
-          "Implementation in Zig...\n\n"
-          "## In chat.el (Elisp)\n"
-          "Implementation in Emacs Lisp...\n\n"
-          "## Comparisons\n"
-          "- [[comparison-concept-a-vs-b]]\n\n"
-          "## Sources\n"
-          "- [[source1]]\n"
-          "- [[source2]]\n"))
+          "## Definition\n\n"
+          "## Notes\n\n"
+          "## Comparisons\n\n"
+          "## Sources\n\n"))
 
 ;; ------------------------------------------------------------------
 ;; Index Management
@@ -428,8 +505,11 @@ Returns the path to the index file."
         ('synthesis (push page synthesis))))
     ;; Generate index
     (with-temp-file index-path
+      ;; Backquote, not quote: under a plain quote the comma is not an
+      ;; unquote but two characters of data, and the literal text
+      ;; "(, (chat-wiki--now-string))" went into the file as the timestamp.
       (insert (chat-wiki--write-frontmatter
-               '((title . "Wiki Index")
+               `((title . "Wiki Index")
                  (type . "index")
                  (updated . ,(chat-wiki--now-string)))))
       (insert "# Wiki Index\n\n")
@@ -475,75 +555,87 @@ Returns the path to the index file."
     index-path))
 
 (defun chat-wiki-index-search (query)
-  "Search index for pages matching QUERY.
-Returns list of matching page plists."
-  (let ((pages (chat-wiki-list-pages))
-        (matches nil)
-        (query-re (concat "\\(" (mapconcat #'regexp-quote
-                                            (split-string query)
-                                            "\\|") "\\)")))
-    (dolist (page pages)
-      (when (or (string-match-p query-re (plist-get page :title))
-                (let ((content (ignore-errors
-                                 (plist-get (chat-wiki-read-page (plist-get page :path))
-                                            :body))))
-                  (and content (string-match-p query-re content))))
-        (push page matches)))
-    (nreverse matches)))
+  "Return pages matching QUERY, best match first.
+
+Scored rather than filtered: a page earns a point for each distinct token
+it contains and three for a token in its title, so a page about the
+subject outranks one that mentions a word of it in passing.  The previous
+version was an OR over the query's words and returned them in directory
+order, which put an incidental match level with a real one."
+  (let ((tokens (chat-wiki--tokenize query))
+        (scored nil))
+    (when tokens
+      (dolist (page (chat-wiki-list-pages))
+        (let* ((title (downcase (or (plist-get page :title) "")))
+               (body (downcase
+                      (or (ignore-errors
+                            (plist-get (chat-wiki-read-page
+                                        (plist-get page :path))
+                                       :body))
+                          "")))
+               (score 0))
+          (dolist (token tokens)
+            (when (string-match-p (regexp-quote token) title)
+              (setq score (+ score 3)))
+            (when (string-match-p (regexp-quote token) body)
+              (setq score (1+ score))))
+          (when (> score 0)
+            (push (cons score page) scored))))
+      (mapcar #'cdr
+              (sort (nreverse scored)
+                    (lambda (a b) (> (car a) (car b))))))))
 
 ;; ------------------------------------------------------------------
 ;; Log Management
 ;; ------------------------------------------------------------------
 
 (defun chat-wiki-log-append (operation description)
-  "Append entry to log.md.
-OPERATION is a symbol like `ingest', `query', `lint', etc.
-DESCRIPTION is the log message."
+  "Append an entry for OPERATION with DESCRIPTION to log.md.
+
+Only the new entry is written, at the end.  Reading the whole log in to
+insert one line at the front and writing all of it back made each entry
+cost more than the last, and `write-file' left a backup file beside the
+log every single time.  Newest is therefore last, which is what
+`chat-wiki-log-recent' now reads from."
   (chat-wiki--ensure-directory chat-wiki-root)
   (let ((log-path (chat-wiki--log-path))
         (entry (format "## [%s] %s | %s\n\n"
                        (chat-wiki--now-string)
                        (symbol-name operation)
                        description)))
-    (if (file-exists-p log-path)
-        (with-temp-buffer
-          (insert-file-contents log-path)
-          (goto-char (point-min))
-          (insert entry)
-          (write-file log-path))
+    (unless (file-exists-p log-path)
       (with-temp-file log-path
         (insert (chat-wiki--write-frontmatter
                  '((title . "Wiki Log")
                    (type . "log"))))
         (insert "# Wiki Log\n\n")
-        (insert "Chronological record of wiki operations.\n\n")
-        (insert entry)))
+        (insert "Chronological record of wiki operations.\n\n")))
+    (write-region entry nil log-path t 'silent)
     log-path))
 
 (defun chat-wiki-log-recent (&optional n)
-  "Get recent N log entries (default 20).
-Returns list of entry strings."
+  "Return the last N log entries, oldest first (default 20).
+
+Taken from the end, because entries are appended there."
   (let ((log-path (chat-wiki--log-path))
         (n (or n 20)))
-    (if (file-exists-p log-path)
-        (with-temp-buffer
-          (insert-file-contents log-path)
-          (let ((entries nil)
-                (count 0))
-            (goto-char (point-min))
-            (while (and (< count n)
-                        (re-search-forward "^## \\[[0-9]" nil t))
-              (let ((start (match-beginning 0))
-                    (end (or (save-excursion
-                              (re-search-forward "^## \\[[0-9]" nil t)
-                              (match-beginning 0))
-                             (point-max))))
-                (push (string-trim (buffer-substring start end)) entries)
-                (setq count (1+ count))
-                (goto-char start)
-                (forward-line 1)))
-            (nreverse entries)))
-      nil)))
+    (when (file-exists-p log-path)
+      (with-temp-buffer
+        (insert-file-contents log-path)
+        (let ((entries nil))
+          (goto-char (point-min))
+          (while (re-search-forward "^## \\[[0-9]" nil t)
+            (let* ((start (match-beginning 0))
+                   (end (or (save-excursion
+                              (when (re-search-forward "^## \\[[0-9]" nil t)
+                                (match-beginning 0)))
+                            (point-max))))
+              (push (string-trim (buffer-substring start end)) entries)
+              (goto-char end)))
+          (setq entries (nreverse entries))
+          (if (> (length entries) n)
+              (last entries n)
+            entries))))))
 
 ;; ------------------------------------------------------------------
 ;; Core Functions
@@ -626,6 +718,24 @@ This is a basic implementation - returns relevant pages."
             (pop-to-buffer (current-buffer))))
         result))))
 
+(defcustom chat-wiki-prose-minimum 40
+  "How many characters of non-heading text make a page more than a skeleton."
+  :type 'integer
+  :group 'chat-wiki)
+
+(defun chat-wiki--page-has-prose-p (body)
+  "Return non-nil when BODY has content and not only headings.
+
+Measured by what is left once headings, list markers and blank lines are
+removed.  The test used to be a search for the words TODO, FIXME, stub or
+placeholder, which flagged any page that discussed them -- a wiki about
+software being exactly where those words legitimately appear."
+  (and body
+       (let ((prose (replace-regexp-in-string
+                     "^[ \t]*[-*+][ \t]*$" ""
+                     (replace-regexp-in-string "^#+.*$" "" body))))
+         (>= (length (string-trim prose)) chat-wiki-prose-minimum))))
+
 (defun chat-wiki-lint ()
   "Run wiki health check, report issues.
 Returns list of issues found."
@@ -663,14 +773,11 @@ Returns list of issues found."
     ;; Check for empty pages
     (dolist (page pages)
       (let ((body (plist-get (chat-wiki-read-page (plist-get page :path)) :body)))
-        (when (or (null body)
-                  (string-match-p "^\\s-*$" body)
-                  (string-match-p "TODO\\|FIXME\\|stub\\|placeholder"
-                                  (downcase body)))
+        (unless (chat-wiki--page-has-prose-p body)
           (push `(:type empty
-                         :page ,page
-                         :message ,(format "%s appears empty or stub"
-                                           (plist-get page :title)))
+                        :page ,page
+                        :message ,(format "%s has headings but no content"
+                                          (plist-get page :title)))
                 issues))))
     ;; Remove duplicates and sort
     (setq issues (delete-dups issues))
@@ -827,33 +934,363 @@ Returns a string with relevant page content."
                 (mapconcat #'identity (nreverse context-parts) "\n---\n"))
       nil)))
 
-(defun chat-wiki-command-handler (command args)
-  "Handle wiki-related chat commands.
-COMMAND is the command symbol, ARGS is the argument string.
-Returns nil if command not handled."
-  (pcase command
-    ('wiki-ingest
-     (let ((files (split-string args)))
-       (dolist (file files)
-         (if (file-exists-p file)
-             (chat-wiki-ingest file (file-name-base file))
-           (message "File not found: %s" file))))
-     t)
-    ('wiki-query
-     (let ((result (chat-wiki-query args)))
-       (when result
-         (message "Query results in *Wiki Query Result* buffer"))
-       t))
-    ('wiki-lint
-     (chat-wiki-lint)
-     t)
-    ('wiki-index
-     (chat-wiki-browse-index)
-     t)
-    ('wiki-log
-     (chat-wiki-browse-log)
-     t)
-    (_ nil)))
+(defun chat-wiki--resolve-page (name)
+  "Return the path of the page called NAME, or nil.
+
+Matched on the title as written or on the slug, and for sources also on
+the slug at the end, since those are filed under a date."
+  (let ((slug (chat-wiki--slugify name)))
+    (catch 'found
+      (dolist (page (chat-wiki-list-pages))
+        (let* ((path (plist-get page :path))
+               (base (file-name-base path)))
+          (when (or (equal (plist-get page :title) name)
+                    (equal base slug)
+                    (string-suffix-p (concat "-" slug) base))
+            (throw 'found path))))
+      nil)))
+
+(defun chat-wiki--report (format-string &rest args)
+  "Show FORMAT-STRING with ARGS where the reader is looking.
+
+In the chat buffer when there is one, so the answer lands in the
+transcript beside the command that asked for it; in the echo area
+otherwise, which is where `M-x' callers are looking."
+  (let ((text (apply #'format format-string args)))
+    (if (and (fboundp 'chat-ui--insert-system-message)
+             (derived-mode-p 'chat-mode))
+        (chat-ui--insert-system-message text)
+      (message "%s" text))))
+
+;; ------------------------------------------------------------------
+;; The /wiki command
+;; ------------------------------------------------------------------
+;;
+;; One command with subcommands rather than `/wiki-ingest', `/wiki-query'
+;; and three more.  Five top-level entries for one feature crowd the
+;; completion list every other command shares, and a common prefix is a
+;; namespace that the parser does not know is a namespace: it cannot
+;; complete the second half, cannot report an unknown one usefully, and
+;; cannot localize the verb without inventing five more aliases.
+
+(defconst chat-wiki--subcommands
+  '(("index"  . chat-wiki--sub-index)
+    ("log"    . chat-wiki--sub-log)
+    ("lint"   . chat-wiki--sub-lint)
+    ("search" . chat-wiki--sub-search)
+    ("find"   . chat-wiki--sub-find)
+    ("new"    . chat-wiki--sub-new)
+    ("ingest" . chat-wiki--sub-ingest)
+    ("ask"    . chat-wiki--sub-ask))
+  "What each `/wiki' subcommand runs.
+
+The handler takes the rest of the line, which may be empty.")
+
+(defconst chat-wiki--subcommand-aliases
+  '(("索引" . "index")
+    ("日志" . "log")
+    ("检查" . "lint")
+    ("搜索" . "search")
+    ("查找" . "find")
+    ("新建" . "new")
+    ("导入" . "ingest")
+    ("问答" . "ask")
+    ("询问" . "ask")
+    ("query" . "ask")
+    ("q" . "ask")
+    ("s" . "search"))
+  "Other spellings of a subcommand, localized or abbreviated.
+
+Kept here rather than in `chat-i18n-aliases', which is the slash command
+namespace: putting a subcommand there would offer it in the completion of
+top-level commands, where it means nothing.")
+
+(defun chat-wiki-subcommand-names ()
+  "Return the canonical `/wiki' subcommand names."
+  (mapcar #'car chat-wiki--subcommands))
+
+(defun chat-wiki--usage ()
+  "Return the `/wiki' usage text."
+  (chat-i18n
+   'wiki-usage
+   (concat "Usage: /wiki <subcommand>\n"
+           "  index             open the generated index\n"
+           "  log               open the operation log\n"
+           "  lint              report orphans, broken links, empty pages\n"
+           "  search <text>     list pages matching text\n"
+           "  find              pick a page to open\n"
+           "  new <type> <name> create a page\n"
+           "  ingest <file>     add a document and have it summarized\n"
+           "  ask <question>    answer using the wiki")))
+
+(defun chat-wiki-dispatch (arg)
+  "Run the `/wiki' subcommand at the head of ARG.
+
+The subcommand name belongs to this program's vocabulary, so it folds
+from fullwidth, matches case-insensitively and accepts a localized alias.
+What follows it is the subcommand's own argument and is passed on
+untouched: a path, a title or a question is data, and folding data is how
+you corrupt it."
+  (let* ((text (string-trim (or arg "")))
+         (split (string-match "[ \t]" text))
+         (head (if split (substring text 0 split) text))
+         (rest (if split (string-trim (substring text split)) ""))
+         (name (downcase (chat-command-fold-name head)))
+         (canonical (or (cdr (assoc name chat-wiki--subcommand-aliases)) name))
+         (handler (cdr (assoc canonical chat-wiki--subcommands))))
+    (cond
+     ((string-empty-p name)
+      (chat-wiki--report "%s" (chat-wiki--usage)))
+     ((null handler)
+      (chat-wiki--report
+       "%s\n%s"
+       (chat-i18n 'wiki-unknown-subcommand "No /wiki subcommand called %s."
+                  head)
+       (chat-wiki--usage)))
+     (t (funcall handler rest)))))
+
+(defun chat-wiki--sub-index (_arg)
+  "Regenerate the index and open it."
+  (find-file (chat-wiki-index-update)))
+
+(defun chat-wiki--sub-log (_arg)
+  "Open the operation log."
+  (chat-wiki-browse-log))
+
+(defun chat-wiki--sub-lint (_arg)
+  "Report what the health check found."
+  (let ((issues (chat-wiki-lint)))
+    (if (null issues)
+        (chat-wiki--report "%s" (chat-i18n 'wiki-lint-clean "Wiki: no issues."))
+      (chat-wiki--report
+       "%s\n%s"
+       (chat-i18n 'wiki-lint-found "Wiki: %d issues." (length issues))
+       (mapconcat (lambda (issue) (format "  - %s" (plist-get issue :message)))
+                  (seq-take issues 10) "\n")))))
+
+(defun chat-wiki--sub-search (arg)
+  "List the pages matching ARG."
+  (if (string-empty-p arg)
+      (chat-wiki--report "%s" (chat-i18n 'wiki-search-usage
+                                         "Usage: /wiki search <text>"))
+    (let ((pages (chat-wiki-index-search arg)))
+      (if (null pages)
+          (chat-wiki--report "%s" (chat-i18n 'wiki-search-none
+                                             "Wiki: nothing matches %s." arg))
+        (chat-wiki--report
+         "%s\n%s"
+         (chat-i18n 'wiki-search-found "Wiki: %d pages match %s."
+                    (length pages) arg)
+         (mapconcat (lambda (page)
+                      (format "  - %s (%s)"
+                              (plist-get page :title)
+                              (symbol-name (plist-get page :type))))
+                    (seq-take pages 10) "\n"))))))
+
+(defun chat-wiki--sub-find (_arg)
+  "Pick a page and open it."
+  (chat-wiki-find-page))
+
+(defun chat-wiki--sub-new (arg)
+  "Create a page, ARG being a type followed by a name."
+  (let* ((split (string-match "[ \t]" (string-trim arg)))
+         (text (string-trim arg))
+         (type-token (if split (substring text 0 split) text))
+         ;; The name is data: whatever the user typed is the title.
+         (name (if split (string-trim (substring text split)) ""))
+         (type (intern-soft (downcase (chat-command-fold-name type-token)))))
+    (cond
+     ((or (string-empty-p type-token) (string-empty-p name))
+      (chat-wiki--report
+       "%s" (chat-i18n 'wiki-new-usage "Usage: /wiki new <%s> <name>"
+                       (mapconcat (lambda (p) (symbol-name (car p)))
+                                  chat-wiki--page-types "|"))))
+     ((null (assq type chat-wiki--page-types))
+      (chat-wiki--report
+       "%s" (chat-i18n 'wiki-new-bad-type "No such page type: %s. One of: %s."
+                       type-token
+                       (mapconcat (lambda (p) (symbol-name (car p)))
+                                  chat-wiki--page-types ", "))))
+     (t
+      (condition-case err
+          (let ((path (chat-wiki-create-page type name)))
+            (chat-wiki--report "%s" (chat-i18n 'wiki-created "Wiki: created %s."
+                                               (file-name-nondirectory path)))
+            (find-file path))
+        (error (chat-wiki--report "%s" (error-message-string err))))))))
+
+(defun chat-wiki--sub-ingest (arg)
+  "Add the document at ARG, then have the model summarize the page.
+
+The summary is the model's work, asked for as a recorded turn: the
+request and the tool calls that answer it both end up on screen, where
+before this the page was created with `Key takeaway 1' in it and nothing
+ever filled it in."
+  (let ((path (and (not (string-empty-p arg)) (expand-file-name arg))))
+    (cond
+     ((null path)
+      (chat-wiki--report "%s" (chat-i18n 'wiki-ingest-usage
+                                         "Usage: /wiki ingest <file>")))
+     ((not (file-readable-p path))
+      (chat-wiki--report "%s" (chat-i18n 'wiki-ingest-missing
+                                         "Cannot read %s." path)))
+     (t
+      (condition-case err
+          (let ((page (chat-wiki-ingest path (file-name-base path))))
+            (chat-wiki--report
+             "%s" (chat-i18n 'wiki-ingested "Wiki: ingested %s."
+                             (file-name-nondirectory page)))
+            (if (fboundp 'chat-ui--send-user-message)
+                (chat-ui--send-user-message
+                 (chat-i18n
+                  'wiki-ingest-request
+                  (concat "Read the wiki page \"%s\" and fill in its Summary, "
+                          "Extracted Entities and Related Concepts from its "
+                          "Full Content, using the wiki tools. Link entities "
+                          "and concepts as [[wikilinks]] and create the pages "
+                          "you link to.")
+                  (file-name-base page)))
+              (chat-wiki--report
+               "%s" (chat-i18n 'wiki-no-surface
+                               "Open a chat buffer to have it summarized."))))
+        (error (chat-wiki--report "%s" (error-message-string err))))))))
+
+(defun chat-wiki--sub-ask (arg)
+  "Ask the model ARG with the wiki available to it.
+
+Retrieval is left to the tools rather than pasted in here.  Two reasons:
+the pages the model actually consulted show up as tool calls instead of
+being invisible, and a long page cannot silently crowd the rest of the
+context out of the request."
+  (cond
+   ((string-empty-p arg)
+    (chat-wiki--report "%s" (chat-i18n 'wiki-ask-usage
+                                       "Usage: /wiki ask <question>")))
+   ((not (fboundp 'chat-ui--send-user-message))
+    (chat-wiki--report "%s" (chat-i18n 'wiki-no-surface
+                                       "Open a chat buffer to ask.")))
+   (t
+    (chat-ui--send-user-message
+     (format "%s\n\n%s" arg
+             (chat-i18n 'wiki-ask-note
+                        (concat "(Consult the wiki with wiki_search and "
+                                "wiki_read before answering.)")))))))
+
+;; ------------------------------------------------------------------
+;; Tools
+;; ------------------------------------------------------------------
+;;
+;; How the model reaches the wiki.  Deliberately not an index in the
+;; system prompt, which is how `chat-knowledge.el' works: that store is
+;; bounded by what one run learns, while a wiki is meant to grow for
+;; years, and a growing block in the fixed region of the context steadily
+;; shrinks the room left to work in.  Tools cost nothing until used.
+
+(defun chat-wiki-tool-search (text)
+  "Return the titles of wiki pages matching TEXT."
+  (let ((pages (seq-take (chat-wiki-index-search (or text "")) 20)))
+    (if (null pages)
+        (format "No wiki page matches %s." text)
+      (concat "Matching wiki pages:\n"
+              (mapconcat (lambda (page)
+                           (format "- %s (%s)"
+                                   (plist-get page :title)
+                                   (symbol-name (plist-get page :type))))
+                         pages "\n")))))
+
+(defun chat-wiki-tool-read (name)
+  "Return the body of the wiki page called NAME."
+  (let ((path (chat-wiki--resolve-page (or name ""))))
+    (if (null path)
+        (format "No wiki page called %s." name)
+      (let ((page (chat-wiki-read-page path)))
+        (format "# %s\n\n%s"
+                (plist-get page :title)
+                (plist-get page :body))))))
+
+(defun chat-wiki-tool-write (type name content &optional mode)
+  "Create or update the wiki page called NAME of TYPE with CONTENT.
+
+MODE \"append\" adds to the page instead of replacing it.  The index is
+not regenerated here: it is a full read of every page, and a run writing
+ten pages would pay for it ten times.  `/wiki index' regenerates it."
+  (cond
+   ((or (null name) (string-empty-p (string-trim name)))
+    "A wiki page needs a name.")
+   ((or (null content) (string-empty-p content))
+    "A wiki page needs content.")
+   (t
+    (let* ((existing (chat-wiki--resolve-page name))
+           (kind (intern-soft (downcase (chat-command-fold-name
+                                         (or type "concepts"))))))
+      (cond
+       (existing
+        (let ((body (if (equal mode "append")
+                        (concat (plist-get (chat-wiki-read-page existing) :body)
+                                "\n" content)
+                      content)))
+          (chat-wiki-update-page existing body)
+          (format "Updated %s." (file-relative-name existing chat-wiki-root))))
+       ((null (assq kind chat-wiki--page-types))
+        (format "No such page type: %s. One of: %s." type
+                (mapconcat (lambda (p) (symbol-name (car p)))
+                           chat-wiki--page-types ", ")))
+       (t
+        ;; Given a title and a body, not a file.  Without frontmatter the
+        ;; page has no title but its filename, so a wiki written through
+        ;; this tool would list slugs where it should list titles.
+        (let* ((page (if (string-prefix-p "---" (string-trim-left content))
+                         content
+                       (concat (chat-wiki--write-frontmatter
+                                `((title . ,name)
+                                  (type . ,(symbol-name kind))
+                                  (created . ,(chat-wiki--today-string))))
+                               (format "# %s\n\n" name)
+                               content "\n")))
+               (path (chat-wiki-create-page kind name page)))
+          (format "Created %s."
+                  (file-relative-name path chat-wiki-root)))))))))
+
+;;;###autoload
+(defun chat-wiki-register-tools ()
+  "Register the wiki tools."
+  (when (fboundp 'chat-tool-forge-register)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'wiki_search :name "Wiki Search"
+      :description
+      (concat "Find wiki pages matching some text. Returns titles and "
+              "types, not bodies; read a page to see its content.")
+      :language 'elisp
+      :parameters '((:name "text" :type "string" :required t))
+      :owner 'wiki :sensitivity 'project :effects '(read)
+      :compiled-function #'chat-wiki-tool-search
+      :is-active t :usage-count 0))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'wiki_read :name "Wiki Read"
+      :description "Read one wiki page by title."
+      :language 'elisp
+      :parameters '((:name "name" :type "string" :required t))
+      :owner 'wiki :sensitivity 'project :effects '(read)
+      :compiled-function #'chat-wiki-tool-read
+      :is-active t :usage-count 0))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'wiki_write :name "Wiki Write"
+      :description
+      (concat "Create or update a wiki page. TYPE is one of sources, "
+              "entities, concepts, comparisons, synthesis and is used only "
+              "when creating. Link related pages as [[Title]]. Use MODE "
+              "\"append\" to extend a page rather than replace it.")
+      :language 'elisp
+      :parameters '((:name "type" :type "string" :required t)
+                    (:name "name" :type "string" :required t)
+                    (:name "content" :type "string" :required t)
+                    (:name "mode" :type "string" :required nil))
+      :owner 'wiki :sensitivity 'project :effects '(write)
+      :compiled-function #'chat-wiki-tool-write
+      :is-active t :usage-count 0))))
 
 ;; ------------------------------------------------------------------
 ;; Initialization
@@ -874,10 +1311,12 @@ Creates necessary directories if they don't exist."
     (chat-wiki-log-append 'init "Wiki initialized"))
   (message "Wiki initialized at: %s" chat-wiki-root))
 
-;; Auto-initialize on load if wiki root exists or is configured
-(when (or (file-directory-p chat-wiki-root)
-          (bound-and-true-p chat-root-directory))
-  (chat-wiki-initialize))
+;; Nothing runs on load.  This file used to call `chat-wiki-initialize'
+;; when a `wiki' directory happened to exist next to wherever Emacs was
+;; started, so merely loading chat.el created directories and wrote two
+;; files -- in a directory the user had not named, for a feature they had
+;; not asked for.  Every writer below ensures its own directory, so first
+;; use is early enough.
 
 ;; ------------------------------------------------------------------
 ;; Provide

@@ -1473,4 +1473,74 @@ interprets. Guard both directions — a widening fold needs tests that the
 data positions were *not* folded, or the next widening will quietly rewrite
 what someone is sending.
 
+### Unreachable Is Not Inert
+
+**Problem**: a module no command could invoke was nevertheless creating
+directories and writing two files on every startup — and, because the test
+runner sets `default-directory` to the repository root, on every test run.
+
+**Cause**: a top-level `(when (or (file-directory-p chat-wiki-root)
+(bound-and-true-p chat-root-directory)) (chat-wiki-initialize))` at the end
+of the file. The second condition was dead — that variable is defined
+nowhere — so what remained was "initialize if a `wiki` directory happens to
+exist next to wherever Emacs started", with the root itself computed from
+`default-directory` at load time. Reviewing the module as dead code missed
+it, because the question asked was whether anything called *in*, not
+whether it did anything *on its own*.
+
+**Solution**: no side effects at load time; let each writer ensure its own
+directory. When auditing a module for reachability, grep its top level for
+forms that run — the entry points are not the only way in.
+
+### A Regexp That Cannot Match What It Is For
+
+**Problem**: every wiki page's title and date silently fell back to the
+filename, and a page containing nothing but headings counted as written.
+
+**Cause**: `^---\s-*\n\(.*?\)\n---\s-*\n\(.*\)` for a YAML frontmatter
+block. In an Emacs regexp `.` does not match a newline, so this only ever
+matched frontmatter that fitted on one line. Real frontmatter has one key
+per line, so it never matched at all: the parse reported "no frontmatter"
+and handed the YAML back as part of the body. Both symptoms were downstream
+and neither pointed here.
+
+**Solution**: scan the block over lines rather than with one pattern.
+Any regexp meant to span a multi-line construct needs a test with two
+lines in it — one line is exactly the case that passes by accident.
+
+### Deleting The Characters You Cannot Handle
+
+**Problem**: two Chinese wiki pages could not coexist. Creating the second
+one signalled that the file already existed.
+
+**Cause**: the slug function ran `(replace-regexp-in-string "[^[:ascii:]]"
+"" title)` before collapsing the rest. Every CJK title reduced to the empty
+string, so all of them mapped to the same filename. Searching had the
+matching defect from the other direction: the query was split on
+whitespace, and a Chinese sentence has none, so the whole question became
+one token and was matched as a substring.
+
+**Solution**: keep letters whatever script they are in — `[:alnum:]`
+already matches Han, kana and hangul — and tokenize CJK one character at a
+time. Watch the alternation when doing this: a class that matches letters
+matches both scripts, so `[[:alnum:]]+` starting on Latin will swallow the
+CJK that follows it. Test a mixed-script string, not just one of each.
+
+### A Template That Fails Its Own Linter
+
+**Problem**: a freshly created page was immediately reported as a stub with
+broken links, on a wiki nobody had touched.
+
+**Cause**: the templates emitted `Key takeaway 1` and `[[entity1]]` as
+prompts to the author, and the lint flagged pages whose body matched
+`TODO\|FIXME\|stub\|placeholder` and links whose targets did not exist. The
+generator and the checker had each been written reasonably and never run
+against each other.
+
+**Solution**: emit empty sections and invent no links, and make the
+emptiness check measure content — what is left after headings come off —
+rather than search for words that legitimately appear in the subject
+matter. When one part of a module generates what another part judges, test
+the pair together.
+
 Last updated: 2026-08-26

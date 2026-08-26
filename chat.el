@@ -151,6 +151,7 @@ Returns the list of files that were loaded."
 (chat-capability-register-tools)
 (chat-session-log-register-tools)
 (chat-knowledge-register-tools)
+(chat-wiki-register-tools)
 (chat-plugin-provide 'tools t)
 (chat-plugin-load-user-files)
 (chat-plugin-start-enabled)
@@ -318,12 +319,15 @@ Reading Workflow:
   M-x chat-ask-near-point     - Ask about nearby context
   M-x chat-ask-current-file   - Ask about current file
 
-Wiki Commands:
-  /wiki-ingest <path>   - Ingest source document
-  /wiki-query <question> - Query wiki knowledge
-  /wiki-lint            - Run wiki health check
-  /wiki-index           - Open wiki index
-  /wiki-log             - Open wiki log
+Wiki (/wiki <subcommand>):
+  /wiki index             - Open the generated index
+  /wiki log               - Open the operation log
+  /wiki lint              - Report orphans, broken links, empty pages
+  /wiki search <text>     - List pages matching text
+  /wiki find              - Pick a page to open
+  /wiki new <type> <name> - Create a page
+  /wiki ingest <file>     - Add a document and have it summarized
+  /wiki ask <question>    - Answer using the wiki
 
 In the chat buffer, type a message and press RET to send it."
   "Help text displayed for chat commands.

@@ -22,6 +22,7 @@
 (declare-function chat-help-text "chat" ())
 (declare-function chat-new-session "chat" (&optional name model))
 (declare-function chat-list-sessions "chat" ())
+(declare-function chat-wiki-dispatch "chat-wiki" (arg))
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
 (require 'chat-transcript)
@@ -456,6 +457,7 @@ design was.")
     (:name "list"     :handler chat-ui--command-list)
     (:name "save"     :handler chat-ui--command-save)
     (:name "clear"    :handler chat-ui--command-clear)
+    (:name "wiki"     :handler chat-wiki-dispatch)
     (:name "auto"     :handler chat-ui--command-auto))
   "What each slash command is, declared rather than listed per property.
 

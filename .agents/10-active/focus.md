@@ -108,7 +108,21 @@ what it interprets and leaves what it forwards, so `！` folds and the `ls`
 after it does not. Decision 0014 records that rule, and AGENTS.md carries
 it forward so it binds the next normalization rather than only this one.
 
-Canonical suite: 886 tests passing.
+The wiki is a feature rather than 887 lines nothing could reach. One
+`/wiki` with subcommands replaced five `/wiki-*` names that had no
+handler; the subcommand folds from fullwidth and takes a localized alias
+while its argument does not, which is decision 0014 one level down. The
+model reaches it through tools rather than a prompt index, because a wiki
+grows without bound and `chat-knowledge.el`'s arrangement would put that
+growth in the fixed region of the context. Six defects came out with it,
+two of them silent data loss: frontmatter was matched with `.` and so
+never parsed across lines, losing every title and date to a filename
+fallback, and CJK titles were slugified by deleting non-ASCII, which made
+them all collide on the empty string. Loading the file also wrote to disk
+whenever a `wiki` directory sat beside `default-directory` — which, in the
+test runner, is this repository. Decision 0015 records it.
+
+Canonical suite: 931 tests passing.
 
 ## Next Stage
 
@@ -126,9 +140,6 @@ arrive as one `/call_ai <tool>` rather than a command per vendor.
 has nothing underneath it, and a standing objective is not a command with
 a handler. It needs designing before it gets a name.
 
-Standing debt, visible in a test: the five `/wiki-*` names are in the help
-and answer nothing. Build them or take them out.
-
 ## Not Doing Now
 
 - No DI kernel or contribution-point framework
@@ -136,8 +147,7 @@ and answer nothing. Build them or take them out.
   draft-only
 - User plugin files under `~/.chat/plugins/` stay off unless
   `chat-plugin-load-user-directory` is set
-- The `/wiki-*` help entries stay unimplemented, and unknown slash
-  commands stay ordinary text
+- Unknown slash commands stay ordinary text
 - Shell history for `!!` stays per buffer rather than persisted
 
 ## Immediate Next Step
@@ -145,10 +155,6 @@ and answer nothing. Build them or take them out.
 No deterministic implementation gap from the execution audit remains.
 Run credential-dependent provider or live-server checks only when their
 environments are intentionally available.
-
-`chat-wiki-command-handler` has no caller. Either wire the documented
-`/wiki-*` names into `chat-ui--command-table` or drop them from
-`chat-commands-help`, so the help text stops promising them.
 
 Only `kimi-code` declares a `:context-window`; every other provider falls
 back to `chat-context-window-default` at 131072. That default is wrong in

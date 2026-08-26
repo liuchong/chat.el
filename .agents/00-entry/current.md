@@ -88,9 +88,22 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 886 tests passing.
+Canonical suite: 931 tests passing.
 
-Two fixes landed after that. Tool call ids are now answered by one
+The wiki became a feature. `lisp/wiki/chat-wiki.el` had been in the tree
+four months with five documented `/wiki-*` names, no handler behind any of
+them and no tests; it is now one `/wiki` with subcommands, reached by the
+model through `wiki_search`, `wiki_read` and `wiki_write` rather than
+through a prompt index, because a wiki grows without bound and that growth
+does not belong in the fixed region of the context. Unreachable turned out
+not to mean inert: a top-level form wrote to disk whenever a `wiki`
+directory sat beside `default-directory`, which in the test runner is this
+repository. Six defects came out with it, two of them silent — frontmatter
+matched with `.` never parsed across lines, so every title and date fell
+back to a filename, and CJK titles were slugified by deleting non-ASCII,
+which collided them all on the empty string. Decision 0015 records it.
+
+Two fixes landed before that. Tool call ids are now answered by one
 function, so the assistant `tool_calls` entry and the `tool_call_id` of its
 result cannot disagree; two fallbacks that did disagree made any session
 with an id-less turn unsendable. And the session loader no longer wraps
@@ -170,6 +183,7 @@ surface advertises only relevant scoped tools.
 - `../20-reference/decisions/0013-naming-the-commands.md`
 - `../20-reference/decisions/0012-input-surface-and-language.md`
 - `../20-reference/decisions/0011-auto-and-the-command-table.md`
+- `../20-reference/decisions/0015-one-wiki-command.md`
 - `../20-reference/decisions/0014-whose-command-is-it.md`
 - `../20-reference/decisions/0010-rendering-the-transcript.md`
 - `../20-reference/decisions/0009-one-chat-surface.md`

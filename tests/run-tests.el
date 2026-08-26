@@ -32,6 +32,7 @@
       (setq chat-edit-backup-directory (expand-file-name "backups/" chat-test-run-root))
       (setq chat-code-intel-index-directory (expand-file-name "index/" chat-test-run-root))
       (setq chat-log-file (expand-file-name "chat.log" chat-test-run-root))
+      (setq chat-wiki-root (expand-file-name "wiki/" chat-test-run-root))
       (make-directory chat-session-directory t)
       (make-directory chat-tool-forge-directory t)
       (make-directory chat-edit-backup-directory t)

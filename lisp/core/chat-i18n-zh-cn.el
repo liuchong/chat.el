@@ -51,6 +51,7 @@
    ("列表" . "list")
    ("保存" . "save")
    ("清理" . "clear")
+   ("知识库" . "wiki")
    ("自动" . "auto")))
 
 (chat-i18n-register
@@ -167,12 +168,15 @@ Auto（默认命令）：
   M-x chat-ask-near-point     - 就光标附近的上下文提问
   M-x chat-ask-current-file   - 就当前文件提问
 
-Wiki 命令：
-  /wiki-ingest <路径>   - 导入源文档
-  /wiki-query <问题>    - 查询 wiki 知识
-  /wiki-lint            - 运行 wiki 健康检查
-  /wiki-index           - 打开 wiki 索引
-  /wiki-log             - 打开 wiki 日志
+Wiki（/wiki <子命令>）：
+  /wiki index             - 打开生成的索引
+  /wiki log               - 打开操作日志
+  /wiki lint              - 报告孤儿页、坏链、空页
+  /wiki search <文本>     - 列出匹配的页面
+  /wiki find              - 挑一个页面打开
+  /wiki new <类型> <名称> - 新建页面
+  /wiki ingest <文件>     - 导入文档并让模型写摘要
+  /wiki ask <问题>        - 用 wiki 回答
 
 在聊天缓冲区里输入消息，按 RET 发送。")
 
@@ -253,7 +257,35 @@ Wiki 命令：
    ;; Tool forge.
    (tool-forge-creating . "🔨 正在根据你的描述创建工具……")
    (tool-forge-created . "✅ 工具 '%s'（%s）已创建并注册！")
-   (tool-forge-failed . "❌ 创建工具失败。请把描述写得更清楚一些再试。")))
+   (tool-forge-failed . "❌ 创建工具失败。请把描述写得更清楚一些再试。")
+
+   ;; Wiki.  The subcommand names themselves stay as typed; these are the
+   ;; sentences around them.
+   (wiki-usage . "用法：/wiki <子命令>
+  index             打开生成的索引
+  log               打开操作日志
+  lint              报告孤儿页、坏链、空页
+  search <文本>     列出匹配的页面
+  find              挑一个页面打开
+  new <类型> <名称> 新建页面
+  ingest <文件>     导入文档并让模型写摘要
+  ask <问题>        用 wiki 回答")
+   (wiki-unknown-subcommand . "没有叫 %s 的 /wiki 子命令。")
+   (wiki-lint-clean . "Wiki：没有问题。")
+   (wiki-lint-found . "Wiki：%d 个问题。")
+   (wiki-search-usage . "用法：/wiki search <文本>")
+   (wiki-search-none . "Wiki：没有页面匹配 %s。")
+   (wiki-search-found . "Wiki：%d 个页面匹配 %s。")
+   (wiki-new-usage . "用法：/wiki new <%s> <名称>")
+   (wiki-new-bad-type . "没有这种页面类型：%s。可选：%s。")
+   (wiki-created . "Wiki：已新建 %s。")
+   (wiki-ingest-usage . "用法：/wiki ingest <文件>")
+   (wiki-ingest-missing . "读不了 %s。")
+   (wiki-ingested . "Wiki：已导入 %s。")
+   (wiki-ingest-request . "请读 wiki 页面「%s」，用 wiki 工具，依据它的 Full Content 补全 Summary、Extracted Entities 和 Related Concepts。实体和概念用 [[双链]] 标注，并把链到的页面建出来。")
+   (wiki-ask-usage . "用法：/wiki ask <问题>")
+   (wiki-ask-note . "（回答前请用 wiki_search 和 wiki_read 查一下 wiki。）")
+   (wiki-no-surface . "请在聊天缓冲区里用。")))
 
 ;; Prompt text.  Switched by `chat-prompt-language', not by
 ;; `chat-language': translated guidance changes what the model does, and

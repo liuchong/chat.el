@@ -198,13 +198,14 @@ became one keymap, one of the two would have lost silently."
     (should-not undocumented)))
 
 (defconst chat-test--unimplemented-slash-commands
-  '("wiki-ingest" "wiki-query" "wiki-lint" "wiki-index" "wiki-log")
+  '()
   "Slash names the help promises that no handler answers.
 
-Listed here rather than left implicit, because a documented command that
-does nothing is a bug report waiting to happen and this is the only place
-that says so out loud.  Either implement them or take them out of
-`chat-commands-help'; do not grow this list.")
+Empty, and meant to stay that way.  It held the five `/wiki-*' names for
+as long as they were documented without being wired to anything; they are
+now one `/wiki' command with subcommands.  A documented command that does
+nothing is a bug report waiting to happen, so either implement it or take
+it out of `chat-commands-help' rather than adding it here.")
 
 (defun chat-test--help-slash-names ()
   "Return the slash command names `chat-commands-help' promises."

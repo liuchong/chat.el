@@ -466,6 +466,47 @@ conversation is worthless if it crowds out the conversation.
 
 See [docs/self-knowledge-and-storage.md](docs/self-knowledge-and-storage.md).
 
+## Wiki
+
+A structured knowledge base under `chat-wiki-root`, one command with
+subcommands:
+
+```
+/wiki index             open the generated index
+/wiki log               open the operation log
+/wiki lint              report orphans, broken links, empty pages
+/wiki search <text>     list pages matching text
+/wiki find              pick a page to open
+/wiki new <type> <name> create a page
+/wiki ingest <file>     add a document and have it summarized
+/wiki ask <question>    answer using the wiki
+```
+
+Pages are Markdown with YAML frontmatter, filed under `sources/`,
+`entities/`, `concepts/`, `comparisons/` and `synthesis/`, linked to each
+other as `[[Title]]`. Being ordinary files is the point: the store stays
+greppable, versionable and editable by hand rather than living inside this
+program.
+
+`/wiki ingest` creates the source page and then asks the model to fill in
+its summary, entities and concepts using the wiki tools, as a recorded
+turn -- so both the request and the tool calls that answer it are on
+screen. It used to write `Key takeaway 1` into the page and stop, which
+also meant a freshly created page failed the module's own lint.
+
+The model reaches the wiki through `wiki_search`, `wiki_read` and
+`wiki_write` rather than through an index in the system prompt. This is
+the opposite choice from knowledge notes, and deliberately: that store is
+bounded by what runs happen to learn, while a wiki is meant to grow for
+years, and a growing block in the fixed region of the context steadily
+shrinks the room left to work in. `wiki_search` returns titles, never
+bodies, for the same reason.
+
+Subcommand names fold from fullwidth and take a localized alias, so
+`/wiki search`, `/wiki ｓｅａｒｃｈ` and `/知识库 搜索` are one command.
+What follows the subcommand does not fold: a path, a title or a question
+is data. See [Fullwidth Input](#fullwidth-input).
+
 ## File Access Defaults
 
 By default file tools can access:
