@@ -66,8 +66,20 @@
 (defvar chat--current-session nil
   "Current chat session bound by chat buffers.")
 
-(defvar chat-ui-use-streaming nil
-  "Whether chat UI should use streaming responses.")
+(defcustom chat-ui-use-streaming t
+  "Use streaming responses for real-time display.
+
+Declared twice before, as a `defvar' here and a `defcustom' near the end
+of the file.  `custom-declare-variable' leaves an already-bound variable
+alone, so the `defcustom' form's value never took effect and `customize'
+edited a setting the code did not read.  One declaration now, and it is
+the customizable one.
+
+On by default.  Off meant the whole reply arrived in a single callback
+when the request finished, which is the behaviour that made a slow answer
+indistinguishable from a hung one."
+  :type 'boolean
+  :group 'chat)
 
 (defvar-local chat-ui--active-stream-process nil
   "Currently active stream process for cancellation.")
@@ -110,6 +122,14 @@
 
 (defvar-local chat-ui--live-response-content ""
   "Accumulated visible content for the current live response.")
+
+(defvar-local chat-ui--live-reasoning-content ""
+  "Accumulated reasoning for the current live response.
+
+A reasoning model can spend a minute here before its first word of answer.
+Dropping this is what made the screen sit still for that minute and then
+paint the whole reply at once: the agent emitted `stream-reasoning' and
+nothing listened.")
 
 (defvar-local chat-ui--last-render nil
   "Last rendered slot state used by the streaming fast path.")
@@ -321,6 +341,7 @@ started on.  A session without code capability has no focus to move."
   (setq chat-ui--last-approval-hint nil)
   (setq chat-ui--last-tracked-tool-paths nil)
   (setq chat-ui--live-response-content "")
+  (setq chat-ui--live-reasoning-content "")
   (setq chat-ui--live-trailers nil)
   (setq chat-ui--last-render nil)
   (setq chat-ui--current-request-id nil))
@@ -380,6 +401,7 @@ started on.  A session without code capability has no focus to move."
      :summary (format "Preparing %s request" transport))
     (setq chat-ui--request-tool-events nil)
     (setq chat-ui--live-response-content "")
+    (setq chat-ui--live-reasoning-content "")
     (setq chat-ui--request-diagnostics-observer
           (chat-request-surface-buffer-observer
            (current-buffer)
@@ -723,6 +745,7 @@ doubles as the answer to why a reply mentioned a file nobody named."
   (setq chat-ui--last-approval-hint nil)
   (setq chat-ui--last-tracked-tool-paths nil)
   (setq chat-ui--live-response-content "")
+  (setq chat-ui--live-reasoning-content "")
   (setq chat-ui--live-trailers nil)
   (setq chat-ui--last-render nil)
   (setq chat-ui--opened-fold-groups nil)
@@ -953,6 +976,44 @@ it would be counted in a fold row standing for nothing."
                      "\n")
              'face 'chat-transcript-system))))
 
+(defcustom chat-ui-live-reasoning-lines 6
+  "How many trailing lines of live reasoning to show while it arrives.
+
+The whole of it goes on the record and can be unfolded there.  Only the
+tail is shown live, because a reasoning model emits tens of kilobytes and
+pasting all of it into the buffer on every chunk is both unreadable and
+quadratic."
+  :type 'integer
+  :group 'chat)
+
+(defun chat-ui--insert-live-reasoning ()
+  "Draw the reasoning for the in-flight turn, if any.
+
+Expanded while it is the newest thing happening, and reduced to a single
+summary line once answer text starts arriving -- which is folding rule 2
+of specs/004 applied to the tail, where there is only ever one reasoning
+segment in flight."
+  (let ((reasoning (string-trim (or chat-ui--live-reasoning-content "")))
+        (answering (not (string-empty-p
+                         (string-trim (or chat-ui--live-response-content ""))))))
+    (unless (string-empty-p reasoning)
+      (let ((label (chat-i18n 'part-thinking "Thinking")))
+        (if answering
+            (insert (propertize
+                     (format "%s%s (%d chars)\n"
+                             chat-ui-detail-indent label (length reasoning))
+                     'face 'chat-transcript-fold-row))
+          (let* ((lines (split-string reasoning "\n"))
+                 (shown (if (> (length lines) chat-ui-live-reasoning-lines)
+                            (last lines chat-ui-live-reasoning-lines)
+                          lines)))
+            (insert (propertize (format "%s%s\n" chat-ui-detail-indent label)
+                                'face 'chat-transcript-fold-row))
+            (dolist (line shown)
+              (insert (propertize (concat chat-ui-detail-indent line "\n")
+                                  'face 'chat-transcript-thinking)))
+            (insert "\n")))))))
+
 (defun chat-ui--render-live-region ()
   "Redraw the in-flight tail of the current turn.
 
@@ -967,11 +1028,15 @@ prose, and the fence that would have closed it is never reconsidered."
   (when (and chat-ui--live-start chat-ui--messages-end)
     (let* ((inhibit-read-only t)
            (content (string-trim-right (or chat-ui--live-response-content "")))
+           (reasoning (or chat-ui--live-reasoning-content ""))
            (last chat-ui--last-render)
            (previous (and last (plist-get last :content)))
            (body (and last (plist-get last :body-start)))
+           ;; Reasoning is drawn above the body, so appending is only safe
+           ;; while it has not changed.
            (append-p (and previous body
                           (not (string-empty-p content))
+                          (equal reasoning (plist-get last :reasoning))
                           (= (plist-get last :live-start)
                              (marker-position chat-ui--live-start))
                           (string-prefix-p previous content)))
@@ -986,6 +1051,7 @@ prose, and the fence that would have closed it is never reconsidered."
           (goto-char chat-ui--live-start)
           (delete-region chat-ui--live-start chat-ui--messages-end)
           (setq body nil)
+          (chat-ui--insert-live-reasoning)
           (unless (string-empty-p content)
             (chat-ui--insert-role-label 'assistant)
             (setq body (point))
@@ -996,6 +1062,7 @@ prose, and the fence that would have closed it is never reconsidered."
       (setq chat-ui--last-render
             (and body
                  (list :content content
+                       :reasoning reasoning
                        :body-start body
                        :live-start (marker-position chat-ui--live-start)))))))
 
@@ -2023,6 +2090,21 @@ assistant response being filled in."
                tool-events
                (chat-ui--request-live-detail))
               (chat-ui--follow-live-output ui-buffer))))
+         ((eq type 'stream-reasoning)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              ;; `:reasoning' is the accumulation; `:text' is only the
+              ;; latest delta.  The chunk event names its two the other way
+              ;; round, as `:content' and `:text'.
+              (setq chat-ui--live-reasoning-content
+                    (or (plist-get event :reasoning) ""))
+              (chat-ui--render-response-state
+               ui-buffer
+               content-start
+               chat-ui--live-response-content
+               tool-events
+               (chat-ui--request-live-detail))
+              (chat-ui--follow-live-output ui-buffer))))
          ((eq type 'tool-event)
           (setq tool-events (append tool-events
                                     (list (plist-get event :event))))
@@ -2046,6 +2128,7 @@ assistant response being filled in."
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
               (setq chat-ui--live-response-content "")
+              (setq chat-ui--live-reasoning-content "")
               (setq chat-ui--live-trailers
                     (list :detail (chat-ui--request-live-detail)))
               (chat-ui--redraw-conversation))))
@@ -2106,7 +2189,13 @@ assistant response being filled in."
              (chat-ui--render-error
               ui-buffer
               (or (plist-get event :reason) "Unknown error"))
-             (message "Error: %s" (plist-get event :reason))))))))))
+             (message "Error: %s" (plist-get event :reason)))))
+         ;; Nothing falls off the end.  The agent emits more kinds of event
+         ;; than this handler names, and a `cond' with no final clause drops
+         ;; the rest without a word -- which is how a minute of reasoning
+         ;; went missing and looked like a hung screen rather than a bug.
+         (t
+          (chat-log "[UI] Unhandled agent event: %s %S" type event)))))))
 
 (defun chat-ui--start-agent-run (transport)
   "Start an agent run for the current session through TRANSPORT."
@@ -2126,6 +2215,7 @@ assistant response being filled in."
          ;; here would be a second one.
          (assistant-start chat-ui--live-start))
     (setq chat-ui--live-response-content "")
+    (setq chat-ui--live-reasoning-content "")
     (setq chat-ui--live-trailers nil)
     (setq chat-ui--last-render nil)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
@@ -2775,10 +2865,6 @@ This is an ephemeral query - the result is displayed but not persisted."
 ;; Streaming Response (Phase 2)
 ;; ------------------------------------------------------------------
 
-(defcustom chat-ui-use-streaming nil
-  "Use streaming responses for real-time display."
-  :type 'boolean
-  :group 'chat)
 
 ;;;###autoload
 (defun chat-ui-cancel-response ()
