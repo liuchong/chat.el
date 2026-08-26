@@ -94,7 +94,21 @@ told: `chat-reply-language` for the answer, `chat-prompt-language` for the
 instructions, with JSON keys, tool names and patch envelopes never
 translated at either.
 
-Canonical suite: 861 tests passing.
+Three defects reported from real use were fixed after that, and two of
+them had been silently corrupting data. A tool call id is now answered by
+one function, so the assistant `tool_calls` entry and the `tool_call_id`
+of its result cannot disagree; two fallbacks that did disagree — one
+keyed on the tool name, one on the position — made any session containing
+an id-less turn unsendable, which is how it was found. The session loader
+no longer wraps `parse-time-string` in `decode-time`, which had dated
+every reopened message to 1970 and written it back; dates already on disk
+are lost. And fullwidth normalization is a Unicode range rather than a
+punctuation table, with its boundary drawn by ownership: chat.el folds
+what it interprets and leaves what it forwards, so `！` folds and the `ls`
+after it does not. Decision 0014 records that rule, and AGENTS.md carries
+it forward so it binds the next normalization rather than only this one.
+
+Canonical suite: 886 tests passing.
 
 ## Next Stage
 
