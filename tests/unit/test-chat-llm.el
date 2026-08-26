@@ -70,6 +70,63 @@
                    "function-key")))
 
 ;; ------------------------------------------------------------------
+;; Registered, enabled, configured
+;; ------------------------------------------------------------------
+
+(defmacro test-chat-llm--with-own-registry (&rest body)
+  "Evaluate BODY over a provider registry of its own.
+
+The real one is global and every registration in this file adds to it
+permanently, so a test about which providers exist has to bring its own."
+  (declare (indent 0))
+  `(let ((chat-llm-providers nil)
+         (chat-llm-enabled-providers nil))
+     ,@body))
+
+(ert-deftest chat-llm-configured-is-narrower-than-registered ()
+  "chat.el registers every vendor it can speak to; a key says which are real.
+
+Without this distinction the provider list offered to someone is a
+catalogue of everything the package was built against."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'has-key :name "Has" :api-key "k")
+    (chat-llm-register-provider 'no-key :name "None")
+    (should (equal '(has-key no-key)
+                   (sort (chat-llm-enabled-providers) #'string<)))
+    (should (equal '(has-key) (chat-llm-configured-providers)))
+    (should (chat-llm-provider-configured-p 'has-key))
+    (should-not (chat-llm-provider-configured-p 'no-key))
+    (should-not (chat-llm-provider-configured-p 'never-registered))))
+
+(ert-deftest chat-llm-configured-is-sensed-not-remembered ()
+  "A key set halfway through a session counts from the next look."
+  (test-chat-llm--with-own-registry
+    (let ((key nil))
+      (chat-llm-register-provider 'later :name "Later"
+                                  :api-key-fn (lambda () key))
+      (should-not (chat-llm-configured-providers))
+      (setq key "arrived")
+      (should (equal '(later) (chat-llm-configured-providers)))
+      (setq key nil)
+      (should-not (chat-llm-configured-providers)))))
+
+(ert-deftest chat-llm-configured-still-honours-the-enabled-list ()
+  "Disabling a provider outranks having a key for it."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'wanted :name "Wanted" :api-key "k")
+    (chat-llm-register-provider 'unwanted :name "Unwanted" :api-key "k")
+    (let ((chat-llm-enabled-providers '(wanted)))
+      (should (equal '(wanted) (chat-llm-configured-providers))))))
+
+(ert-deftest chat-llm-a-key-lookup-that-fails-answers-no ()
+  "This runs while drawing, so the error belongs to the request instead."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'broken :name "Broken"
+                                :api-key-fn (lambda () (error "No keyring")))
+    (should-not (chat-llm-provider-configured-p 'broken))
+    (should-not (chat-llm-configured-providers))))
+
+;; ------------------------------------------------------------------
 ;; Message Formatting
 ;; ------------------------------------------------------------------
 

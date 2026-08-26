@@ -73,12 +73,44 @@ Each entry is a pair of (SYMBOL . CONFIG-PLIST).")
            (memq symbol chat-llm-enabled-providers))))
 
 (defun chat-llm-enabled-providers ()
-  "Return the list of enabled provider symbols."
+  "Return the list of enabled provider symbols.
+
+Enabled is not the same as usable.  chat.el registers every provider it
+knows how to speak to at load time, so by default this is all of them --
+sixteen vendors nobody has an account with.  Use
+`chat-llm-configured-providers' to offer someone a choice."
   (mapcar #'car
           (seq-filter
            (lambda (entry)
              (chat-llm-provider-enabled-p (car entry)))
            chat-llm-providers)))
+
+(defun chat-llm-provider-configured-p (symbol)
+  "Return non-nil when provider SYMBOL is enabled and has a key to use.
+
+The key is what separates a provider chat.el can speak to from one this
+machine can actually reach, and it is the only test available: nothing
+else about a registration says whether an account exists behind it.
+
+Answered afresh each time rather than remembered, so a key set halfway
+through a session counts from the next look.  That costs a call to the
+provider's key function, which is why one should be cheap or cache its
+own answer -- the request path already calls it per request.
+
+A key function that fails answers no.  This runs while drawing, and a
+provider whose key cannot be fetched is unusable either way, so the
+error belongs to the request that tries it rather than to the prompt."
+  (and (chat-llm-provider-enabled-p symbol)
+       (not (null (condition-case nil
+                      (chat-llm--get-api-key symbol)
+                    (error nil))))))
+
+(defun chat-llm-configured-providers ()
+  "Return the enabled provider symbols that have a key to use.
+
+What to offer someone choosing a provider.  A list of every vendor chat.el
+was built to speak to is not a choice; it is a catalogue."
+  (seq-filter #'chat-llm-provider-configured-p (chat-llm-enabled-providers)))
 
 (defun chat-llm-register-provider (symbol &rest config)
   "Register a new LLM provider with SYMBOL and CONFIG.

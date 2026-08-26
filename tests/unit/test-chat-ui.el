@@ -1479,17 +1479,58 @@ symbol and not its display name."
                  "模型名字很长的那个"
                  (or (get-text-property 2 'help-echo prompt) "")))))))
 
+(defmacro chat-ui-auto-test--with-providers (providers &rest body)
+  "Evaluate BODY as though exactly PROVIDERS had a key configured.
+
+Stated rather than inherited: several tests elsewhere register providers
+with a key into the global registry and never take them out, so the real
+answer during a full run depends on what ran first."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'chat-llm-configured-providers)
+              (lambda () ,providers)))
+     ,@body))
+
+(ert-deftest chat-ui-only-configured-providers-are-offered ()
+  "chat.el registers sixteen vendors; a machine reaches the ones with a key.
+
+The register is a catalogue, not a choice, and the difference is what
+someone sees when they go to switch."
+  (chat-ui-auto-test--with-session
+    (chat-ui-auto-test--with-providers '(kimi deepseek)
+      (let ((offered (chat-ui--offered-providers)))
+        (should (equal '(kimi deepseek) offered))
+        (should-not (memq 'openai offered))
+        (should-not (memq 'gemini offered))))
+    ;; Sensed, not declared: a key appearing counts immediately.
+    (chat-ui-auto-test--with-providers '(kimi deepseek claude)
+      (should (memq 'claude (chat-ui--offered-providers))))))
+
+(ert-deftest chat-ui-the-session-provider-is-offered-even-without-a-key ()
+  "A session sitting on one has to see where it is and be able to leave."
+  (chat-ui-auto-test--with-session
+    (chat-ui-auto-test--with-providers '(deepseek)
+      (let ((offered (chat-ui--offered-providers)))
+        (should (memq 'kimi offered))
+        (should (memq 'deepseek offered))
+        ;; And it is not listed twice once it does have a key.
+        (chat-ui-auto-test--with-providers '(kimi deepseek)
+          (should (equal '(kimi deepseek) (chat-ui--offered-providers))))))))
+
 (ert-deftest chat-ui-the-model-is-clickable-only-when-there-is-a-choice ()
   "A `mouse-face' over a menu of one promises a choice that does not exist."
   (chat-ui-auto-test--with-session
-    (let ((prompt (chat-ui--input-prompt)))
-      (should (get-text-property 2 'keymap prompt))
-      (should (get-text-property 2 'mouse-face prompt)))
-    (cl-letf (((symbol-function 'chat-llm-enabled-providers)
-               (lambda () '(kimi))))
+    (chat-ui-auto-test--with-providers '(kimi deepseek)
+      (let ((prompt (chat-ui--input-prompt)))
+        (should (get-text-property 2 'keymap prompt))
+        (should (get-text-property 2 'mouse-face prompt))))
+    (chat-ui-auto-test--with-providers '(kimi)
       (let ((prompt (chat-ui--input-prompt)))
         (should-not (get-text-property 2 'keymap prompt))
-        (should-not (get-text-property 2 'mouse-face prompt))))))
+        (should-not (get-text-property 2 'mouse-face prompt))))
+    ;; Nothing configured at all is also not a choice.
+    (chat-ui-auto-test--with-providers nil
+      (let ((prompt (chat-ui--input-prompt)))
+        (should-not (get-text-property 2 'keymap prompt))))))
 
 (ert-deftest chat-ui-the-input-does-not-inherit-the-mouse-binding ()
   "A keymap that spread into the input would rebind clicks in the message."
@@ -1514,11 +1555,12 @@ symbol and not its display name."
 (ert-deftest chat-ui-switching-provider-goes-through-the-command-that-checks ()
   "Not by setting the session field, which would skip its refusals."
   (chat-ui-auto-test--with-session
-    (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
-              ((symbol-function 'completing-read)
-               (lambda (_prompt collection &rest _)
-                 (seq-find (lambda (label) (string-prefix-p "Claude" label))
-                           collection))))
+    (chat-ui-auto-test--with-providers '(kimi claude)
+     (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
+               ((symbol-function 'completing-read)
+                (lambda (_prompt collection &rest _)
+                  (seq-find (lambda (label) (string-prefix-p "Claude" label))
+                            collection))))
       (chat-ui-switch-model)
       (should (eq 'claude (chat-session-model-id chat--current-session)))
       ;; And the prompt says so, or the two places that name the model
@@ -1526,7 +1568,7 @@ symbol and not its display name."
       (should (string-match-p
                (regexp-quote (plist-get (chat-llm-get-provider-config 'claude)
                                         :model))
-               (chat-ui-auto-test--drawn-prompt))))))
+               (chat-ui-auto-test--drawn-prompt)))))))
 
 (ert-deftest chat-ui-the-popup-menu-is-shaped-the-way-emacs-expects ()
   "Batch mode never draws one, so the shape has to be asserted instead.
@@ -1534,6 +1576,7 @@ symbol and not its display name."
 A malformed pane would fail only on a real click, in a build no test
 runs."
   (chat-ui-auto-test--with-session
+   (chat-ui-auto-test--with-providers '(kimi claude)
     (let ((menu nil))
       (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () t))
                 ((symbol-function 'x-popup-menu)
@@ -1549,24 +1592,24 @@ runs."
             (should (stringp (car item)))
             (should (symbolp (cdr item))))
           (should (rassq 'kimi (cdr pane))))
-        (should (eq 'claude (chat-session-model-id chat--current-session)))))))
+        (should (eq 'claude (chat-session-model-id chat--current-session))))))))
 
 (ert-deftest chat-ui-switching-provider-is-refused-mid-response ()
   "The reply would come back from a provider that was never asked."
   (chat-ui-auto-test--with-session
+   (chat-ui-auto-test--with-providers '(kimi claude)
     (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
               ((symbol-function 'completing-read)
                (lambda (_prompt collection &rest _) (car collection)))
               ((symbol-function 'chat-ui--response-active-p) (lambda () t)))
-      (should-error (chat-ui-switch-model) :type 'user-error))))
+      (should-error (chat-ui-switch-model) :type 'user-error)))))
 
 (ert-deftest chat-ui-switching-provider-says-so-when-there-is-nothing-to-pick ()
   "One provider is not a menu."
   (chat-ui-auto-test--with-session
-    (cl-letf (((symbol-function 'chat-llm-enabled-providers)
-               (lambda () '(kimi))))
-      (chat-ui-switch-model)
-      (should (eq 'kimi (chat-session-model-id chat--current-session))))))
+   (chat-ui-auto-test--with-providers '(kimi)
+    (chat-ui-switch-model)
+    (should (eq 'kimi (chat-session-model-id chat--current-session))))))
 
 (ert-deftest chat-ui-typing-survives-the-prompt-being-rewritten ()
   "The prompt is redrawn in a live input area, which may not be empty."

@@ -618,10 +618,20 @@ truncates a long model name, and hovering shows it in full.
 Clicking the model name opens a menu of the configured providers and
 switches this session to the one picked, which is the same thing
 `M-x chat-set-model` does -- the model was visible in one place and
-changeable in another. The click is only offered when more than one
-provider is configured, and it is refused mid-response for the same
-reason `chat-set-model` refuses: the reply would come back from a
-provider that was never asked.
+changeable in another. It is refused mid-response for the same reason
+`chat-set-model` refuses: the reply would come back from a provider that
+was never asked.
+
+Configured means a key can be fetched for it. chat.el registers every
+vendor it knows how to speak to at load time, so `chat-llm-providers`
+holds sixteen while a typical machine reaches two, and offering the
+register would be offering a catalogue rather than a choice. The list is
+sensed rather than declared -- there is nothing to keep in step, and a
+key set halfway through a session counts from the next time the prompt is
+drawn. The session's own provider is always offered, with or without a
+key, so a session sitting on one can see where it is and leave; and the
+click affordance appears only when that leaves more than one to pick
+from.
 
 `:default sticky` in `chat-ui--command-table` says a command may claim
 plain input; `:default reset` says using it hands the claim back. `/quick`

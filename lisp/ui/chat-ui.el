@@ -1231,7 +1231,7 @@ Clickable only when there is more than one provider to choose from.  A
                     (and provider (symbol-name provider))
                     ""))
          (mark (chat-mark-for-provider provider display-name))
-         (switchable (> (length (chat-llm-enabled-providers)) 1))
+         (switchable (> (length (chat-ui--model-choices)) 1))
          (shown (truncate-string-to-width
                  model chat-ui-prompt-model-width nil nil "\u2026"))
          (help (if switchable
@@ -2674,8 +2674,11 @@ from a different provider than the one that was asked."
    (list (intern
           (completing-read
            "Model: "
-           (mapcar #'symbol-name (chat-llm-enabled-providers))
-           nil t nil nil
+           (mapcar #'symbol-name (chat-ui--offered-providers))
+           ;; Offers what is configured but accepts what is registered: a
+           ;; key set moments from now is a reason to switch, and the
+           ;; check below still catches a name that is nobody's provider.
+           nil nil nil nil
            (and chat--current-session
                 (symbol-name (chat-session-model-id chat--current-session)))))))
   (unless chat--current-session
@@ -2693,6 +2696,26 @@ from a different provider than the one that was asked."
   (chat-ui--render-input-prompt)
   (message "Model switched to %s" model))
 
+(defun chat-ui--offered-providers ()
+  "Return the providers worth offering a reader, in display order.
+
+Only the ones with a key, because chat.el registers every vendor it knows
+how to speak to whether or not this machine has an account with it --
+sixteen of them, of which a typical configuration reaches two.  Offering
+the register was offering a catalogue and calling it a choice.
+
+Sensed rather than declared: there is no list to maintain, and a key
+added or removed shows up the next time the prompt is drawn.
+
+The session's own provider is included even without a key, since a
+session sitting on one has to be able to see where it is and move off."
+  (let* ((configured (chat-llm-configured-providers))
+         (current (and chat--current-session
+                       (chat-session-model-id chat--current-session))))
+    (if (and current (not (memq current configured)))
+        (cons current configured)
+      configured)))
+
 (defun chat-ui--model-choices ()
   "Return the providers to offer, as an alist of label and symbol."
   (mapcar
@@ -2702,7 +2725,7 @@ from a different provider than the one that was asked."
                      (or (plist-get config :name) (symbol-name provider))
                      (or (plist-get config :model) ""))
              provider)))
-   (chat-llm-enabled-providers)))
+   (chat-ui--offered-providers)))
 
 (defun chat-ui-switch-model (&optional event)
   "Choose the provider this session talks to, from a menu.
