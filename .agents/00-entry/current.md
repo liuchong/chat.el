@@ -66,9 +66,11 @@ window requires.
 The commands were given names that mean what they say. `/send` is the
 recorded multi-step conversation -- the main behaviour of the surface,
 which had no name until now -- and `/quick` is the ephemeral aside it was
-being confused with. `/ask`, `/question`, `/?` and `/!` are aliases
-through one mechanism, so `chat-ui--command-table` holds one entry per
-command. Auto returns to `/send` rather than to a cleared variable:
+being confused with. `/?` and `/!` are aliases through one
+mechanism, so `chat-ui--command-table` holds one entry per command;
+`/ask` and `/question` are deleted, because both read equally well as
+either way of asking and a name that must be memorized to be told apart
+from its neighbour earns nothing. Auto returns to `/send` rather than to a cleared variable:
 commands declare `:default sticky` or `reset`, anything that asks the
 model releases the claim, and the holder shows in the input prompt as
 `cmd> `. `/queue`, `/flush` and `/drop` collect notes and send them as one

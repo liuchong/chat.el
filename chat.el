@@ -195,7 +195,6 @@ Returns the list of files that were loaded."
   "Talking to the Model:
   /send <message>       - Send and record it; the model may use tools and
                           take several steps. Same as typing with no prefix.
-                          Also /ask and /question.
   /send                 - Send whatever /queue has collected
   /quick <question>     - Ask once, without recording it or using tools.
                           Also /? and the shorthand ?<question>

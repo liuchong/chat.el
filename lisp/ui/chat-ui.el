@@ -483,18 +483,18 @@ went wrong when only `/cmd' could hold plain input.
 One entry per command, and every other spelling is an alias.  `/ask' and
 `/question' were once entries of their own sharing a handler, which is
 how they came to have three names between them for the aside and none at
-all for the conversation.")
+all for the conversation.  They are gone rather than reassigned: both
+names read equally well as `/send' and as `/quick', so whichever one they
+pointed at, a reader would have had to remember which.  A name that has to
+be memorized to be distinguished from its neighbour is not carrying its
+weight.")
 
-;; `/ask' reads as `ask the model', so it is the recorded conversation
-;; rather than the aside beside it -- which is what a reader means by it
-;; and, for a long time, was not what it did.  These are declared as
-;; aliases so the table stays one entry per command; being registered as
-;; a language means they are accepted whatever `chat-language' says.
+;; Punctuation, not translation: registered as aliases so the table stays
+;; one entry per command, and registered under a language so they are
+;; accepted whatever `chat-language' says.
 (chat-i18n-register-aliases
  'en
- '(("ask" . "send")
-   ("question" . "send")
-   ("?" . "quick")
+ '(("?" . "quick")
    ("!" . "cmd")))
 
 (defun chat-ui--command-entry (name)

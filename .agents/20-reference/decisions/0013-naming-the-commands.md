@@ -33,15 +33,25 @@ appeared nowhere in it.
 lets the run use tools over several steps — which is what plain input has
 always done. Naming it is what makes the rest of this possible.
 
-**One entry per command; everything else is an alias.** `/ask` and
-`/question` are spellings of `/send`, `/?` of `/quick`, `/!` of `/cmd`,
-registered through the same alias mechanism that carries `/自动`. Two
-entries sharing a handler is how four names for one thing accumulated;
-the fix is structural, not editorial.
+**One entry per command; everything else is an alias.** `/?` is a
+spelling of `/quick` and `/!` of `/cmd`, registered through the same alias
+mechanism that carries `/自动`. Two table entries sharing a handler is how
+four names for one thing accumulated; the fix is structural, not
+editorial.
 
-**`/ask` means the conversation, not the aside.** It reads as "ask the
-model", and the ephemeral one-shot is now `/quick` — which also matches
-the `Assistant (quick)` label it has always been drawn under.
+**`/ask` and `/question` are deleted, not reassigned.** The first attempt
+pointed them at `/send`, on the grounds that "ask the model" is what a
+reader means by them. That is true and it is not enough: both names read
+equally well as either command, so whichever one they pointed at, a
+reader would have had to remember which. A name that must be memorized to
+be told apart from its neighbour is not carrying its weight, and two of
+them is how the confusion started. The ephemeral one-shot is `/quick`,
+matching the `Assistant (quick)` label it has always been drawn under,
+and there is now exactly one name for each of the two ways of asking.
+
+Deleting a name is safe here because an unrecognized slash is ordinary
+text: `/ask look at this` reaches the model as what it says, rather than
+as an error.
 
 **Three default effects instead of a boolean.** `sticky` claims plain
 input, `reset` hands it back to `/send`, nil leaves it alone. The
@@ -96,10 +106,11 @@ Added in the same pass, and each of them failed first:
 - Every command in the table appears in the help. Caught `/help` itself
   being dropped from the help while the help was being restructured.
 - Every command has a Chinese alias. Caught `ask` and `question` still
-  being table entries rather than aliases.
+  being table entries rather than aliases, back when they still existed.
 - The first alias declared for a command is the one offered for it.
   Caught `提问` displacing `发送` in completion, because the registration
-  built its list with `push`.
+  built its list with `push`. `提问` is gone too, for the same reason
+  `/ask` is: in Chinese it reads as either way of asking.
 - Asking the model gets you out of shell mode, by prefix and by name.
   This is the reported bug, held in place.
 - Typing survives the prompt being rewritten, because the prompt is

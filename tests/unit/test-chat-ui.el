@@ -916,8 +916,9 @@ both arrive from the same place."
 
 (ert-deftest chat-ui-slash-commands-cover-the-documented-names ()
   "Every command named in the help text has a handler."
-  (dolist (name '("cancel" "model" "cmd" "!" "cd" "pwd" "question" "ask" "?"
-                  "auto"))
+  (dolist (name '("cancel" "help" "model" "send" "quick" "?" "cmd" "!"
+                  "queue" "flush" "drop" "cd" "pwd" "new" "list" "save"
+                  "clear" "auto"))
     (let ((handler (chat-ui--command-handler name)))
       (should handler)
       (should (fboundp handler)))))
@@ -1236,17 +1237,35 @@ Every way of reaching the model now releases the claim."
     (should (equal sent '("back to talking")))
     (should-not (chat-ui-default-command-claimed-p))))
 
-(ert-deftest chat-ui-ask-and-question-are-the-recorded-path ()
-  "Four names for the ephemeral ask and none for the conversation was
-backwards.  `/ask' is the conversation; `/quick' is the aside."
-  (should (eq (chat-ui--command-handler "ask")
-              (chat-ui--command-handler "send")))
-  (should (eq (chat-ui--command-handler "question")
-              (chat-ui--command-handler "send")))
+(ert-deftest chat-ui-there-is-one-name-for-each-way-of-asking ()
+  "`/ask' and `/question' are gone, not reassigned.
+
+Four names once reached the ephemeral aside and none reached the recorded
+conversation.  Naming the conversation `/send' fixed the gap; deleting
+these two fixed the ambiguity, which reassigning them would not have.
+Both read equally well as either command, so whichever one they pointed
+at, a reader would have had to remember which."
+  (should (chat-ui--command-handler "send"))
+  (should (chat-ui--command-handler "quick"))
+  (should-not (eq (chat-ui--command-handler "send")
+                  (chat-ui--command-handler "quick")))
+  (should-not (chat-ui--command-handler "ask"))
+  (should-not (chat-ui--command-handler "question"))
+  ;; Only punctuation is a second spelling, because punctuation cannot be
+  ;; mistaken for a word that means something slightly different.
   (should (eq (chat-ui--command-handler "?")
               (chat-ui--command-handler "quick")))
-  (should-not (eq (chat-ui--command-handler "ask")
-                  (chat-ui--command-handler "quick"))))
+  (should (eq (chat-ui--command-handler "!")
+              (chat-ui--command-handler "cmd"))))
+
+(ert-deftest chat-ui-a-deleted-command-name-is-ordinary-text ()
+  "Removing a name must not turn it into an error.
+
+`/ask look at this' now reaches the model as what it says, which is the
+same thing any unrecognized slash does."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/ask look at this"))
+    (should (equal sent '("/ask look at this")))))
 
 (ert-deftest chat-ui-the-prompt-says-which-command-holds-the-line ()
   "The status line is at the top; the cursor is at the bottom."

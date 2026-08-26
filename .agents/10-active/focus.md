@@ -53,10 +53,11 @@ records the shape and what it replaced.
 The commands have names that mean what they say. `/send` is the recorded
 multi-step conversation, which until now was the one behaviour on the
 surface with no name; `/quick` is the ephemeral aside it was being
-confused with. `/ask`, `/question`, `/?` and `/!` are aliases through one
-mechanism, so the table is one entry per command. Decision 0013 records
-why four names had accumulated for the aside and none for the
-conversation.
+confused with. `/?` and `/!` are aliases through one mechanism, so the
+table is one entry per command; `/ask` and `/question` are gone rather
+than reassigned, because both read equally well as either way of asking.
+Decision 0013 records why four names had accumulated for the aside and
+none for the conversation.
 
 Auto returns to a command rather than to a cleared variable. Commands
 declare `:default sticky` or `:default reset`; the baseline is `/send`,

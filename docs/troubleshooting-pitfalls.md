@@ -1333,6 +1333,13 @@ mechanism. Then name the thing that works by default, because "it is
 already what plain input does" is a description of a behaviour that
 deserves a name.
 
+Reassigning the surplus names was the first attempt and was not enough:
+both read equally well as either command, so whichever one they pointed
+at, the reader still had to remember which. They were deleted instead. A
+name that has to be memorized to be told apart from its neighbour earns
+nothing, and deleting one is cheap where an unrecognized command is
+ordinary text rather than an error.
+
 ### A Sticky Mode With No Way Back Except A Word You Have To Remember
 
 **Problem**: after one `!ls`, every plain line went to the shell. An

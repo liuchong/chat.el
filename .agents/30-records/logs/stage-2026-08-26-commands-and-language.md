@@ -28,10 +28,13 @@ listed nine commands that did not exist and none of those four that did.
 
 `/send` names the recorded multi-step path. `/quick` is the ephemeral
 one-shot, matching the `Assistant (quick)` label it was already drawn
-under. `/ask` and `/question` are aliases of `/send`, because that is what
-a reader means by them; `/?` and `/!` became aliases too, so the table is
-one entry per command and every other spelling goes through the same
-mechanism that carries `/自动`.
+under. `/ask` and `/question` are deleted: they were first pointed at
+`/send`, since "ask the model" is what a reader means by them, and that
+was not enough — both read equally well as either command, so either way
+the reader had to remember which. `/?` and `/!` stayed as aliases, because
+punctuation cannot be mistaken for a word that means something slightly
+different, so the table is one entry per command and every other spelling
+goes through the same mechanism that carries `/自动`.
 
 Auto has three effects instead of a boolean: `sticky` claims plain input,
 `reset` hands it back, nil leaves it. The baseline is `/send`, so there is

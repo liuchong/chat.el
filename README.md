@@ -197,9 +197,11 @@ command prefix.
 | `!cd <dir>` | Change the working directory; a bare `cd` goes home |
 | `/cd [dir]` | Change the working directory; with no argument, prompt for one |
 | `/pwd` | Show the working directory |
-| `?<question>` | Ask the model without recording the exchange in the session |
-| `/question <q>`, `/ask <q>` | Same as `?<question>` |
+| `/send <message>` | Send and record it, as plain input does |
+| `/quick <q>`, `?<q>` | Ask the model without recording the exchange |
+| `/queue <note>`, `/flush`, `/drop` | Collect notes and send them as one |
 | `/model [name]` | Retarget this session; with no name, prompt for one |
+| `/new`, `/list`, `/save`, `/clear` | Session housekeeping |
 | `/cancel` | Cancel the response in flight |
 | `\<text>` | Send text as is, even when it starts with `!` or `/` |
 
@@ -474,8 +476,10 @@ kept.
 
 `/send` is the surface. It writes the turn into the session, and the run
 answering it can read files, call tools and work over several steps.
-`/ask` and `/question` are other spellings of it, because "ask the model"
-is what a reader means by them.
+`/ask` and `/question` used to exist and are gone. Both read equally well
+as either of these two commands, so whichever one they pointed at, you had
+to remember which -- and a name you have to memorize to tell apart from
+its neighbour is not carrying its weight.
 
 `/quick` is a question asked next to the conversation. Nothing is
 recorded and no tools are used, which is what makes it cheap and what

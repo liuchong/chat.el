@@ -255,9 +255,10 @@ own would pad the help to make a test happy."
 
 This is the direction the slash tests were missing.  The keymap has had
 both for a while; slashes only checked that documented names worked, so
-`/ask', `/question' and `/?' all ran and none of them were written down
-anywhere.  A one-way consistency test is a blind spot with a passing
-badge on it."
+`/ask', `/question', `/?' and `/!' all ran and none of them were written
+down anywhere -- which is part of how the first two survived long enough
+to become confusing.  A one-way consistency test is a blind spot with a
+passing badge on it."
   (let (undocumented)
     (dolist (entry chat-ui--command-table)
       (let ((name (plist-get entry :name)))

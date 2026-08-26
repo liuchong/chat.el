@@ -253,11 +253,11 @@ reader cannot tell which names have a translation and which do not."
     (should-not untranslated)))
 
 (ert-deftest chat-i18n-the-first-alias-declared-is-the-one-offered ()
-  "Two names for one command is fine; which one is shown is not arbitrary.
+  "Where a command has two names, which one is shown is not arbitrary.
 
-`发送' and `提问' both mean /send, and the completion list has to show the
-one that matches the help.  Built with `push', the list would have handed
-back whichever synonym happened to be declared last."
+Built with `push', the list handed back whichever synonym happened to be
+declared last -- which is how `提问' came to be offered for /send in place
+of `发送'."
   (should (equal (chat-i18n-localized-name "send" 'zh-CN) "发送"))
   (let ((chat-i18n-aliases (copy-tree chat-i18n-aliases)))
     (chat-i18n-register-aliases 'probe-lang '(("first" . "send")
@@ -268,12 +268,12 @@ back whichever synonym happened to be declared last."
     (should (equal (chat-i18n-localized-name "send" 'probe-lang) "first"))))
 
 (ert-deftest chat-i18n-english-aliases-are-spellings-not-translations ()
-  "`/ask' is another way to write `/send', so completion still offers
-`send': the canonical name is the one the rest of the surface uses."
-  (should (equal (chat-i18n-resolve-alias "ask") "send"))
-  (should-not (chat-i18n-localized-name "send" 'en))
+  "`?' is another way to write `/quick', so completion still offers
+`quick': the canonical name is the one the rest of the surface uses."
+  (should (equal (chat-i18n-resolve-alias "?") "quick"))
+  (should-not (chat-i18n-localized-name "quick" 'en))
   (let ((chat-language 'en))
-    (should (equal (chat-ui--display-command-name "send") "send"))))
+    (should (equal (chat-ui--display-command-name "quick") "quick"))))
 
 ;; ------------------------------------------------------------------
 ;; What the model is told
