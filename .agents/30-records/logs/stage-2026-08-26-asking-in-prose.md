@@ -1,4 +1,4 @@
-# Stage log 2026-08-26 — asking the user in prose, not in a dialog
+# Stage log 2026-08-26 — questions belong in the prose, next to the plan
 
 - Type: records
 - Attention: log
@@ -6,38 +6,42 @@
 
 ## What prompted it
 
-A standing instruction that agents must not put questions to the user
-through the IDE's structured-question UI — multiple choice popups, option
-lists, confirmation dialogs, form questionnaires — existed only outside the
-repository, so it applied to one tool on one machine and travelled with
-neither.
+Agents kept putting decisions to the user through the editor's
+structured-question controls — multiple choice popups, option lists,
+confirmation dialogs. `AGENTS.md` had nothing to say about it either way.
 
-## Why the rule exists at all
+## Why it is forbidden
 
-The controls hold a label and nothing else. A question worth asking carries
-the fact that triggered it, where in the tree that fact lives, what each
-answer costs, and which parts are verified against which are guessed. None
-of that fits on a button, so the user is shown a row of conclusions with no
-account of where they came from, and can only guess or cancel. A cancelled
-dialog is then easy to misread as consent or as refusal to decide, when
-what it actually means is that the question was unanswerable as posed.
+The controls hold a label and nothing else. A decision worth putting to the
+user carries the fact that triggered it, where in the tree that fact lives,
+what each option costs, and which claims are verified against which are
+guessed. None of that fits on a button, so the user is handed a row of
+conclusions with no account of where they came from, and can only guess or
+cancel. A cancelled dialog then reads as consent, or as a refusal to
+decide, when all it means is that the question was unanswerable as posed.
 
 ## Where it went
 
-`AGENTS.md`, as a new `## Asking The User` section, in four parts: the
-prohibition, what a question must contain, what to check before asking at
-all, and what to do having already popped one.
+Not into a section of its own. Asking the user to decide something is the
+same act `Plan Before Business Code` already governed, and that section
+already carried a four-item list of what a plan must contain — problem,
+scope, options and trade-offs, recommendation. A second list beside it
+would have said the same thing twice and then drifted.
 
-`AGENTS.md` is the only rule file in this repository that declares itself
-binding on every agent and IDE plugin, and it is the only one that travels
-with a clone. `.cursor/rules/` reaches one editor.
+So the list grew to six and the items gained their substance: the problem
+names the triggering fact and what stalls without a decision, scope names
+what the decision changes downstream, options name each one's premise, cost
+and risk, and the recommendation names the condition that would flip it.
+The two new items are the ones a popup structurally cannot carry — where
+the evidence lives, by path and line, and which facts are verified against
+which are still guesses. The section now opens by saying plans and
+questions use the one form, and closes with the self-check: anything
+readable from the code, the docs, a command or a log is not the user's to
+answer.
 
-One copy, deliberately. The single existing file under `.cursor/rules/`
-mirrors the `Documentation Must Be Updated` section of `AGENTS.md`, and the
-two have already drifted — the mirror names `docs/PROJECT_STATUS.md` and
-the original does not. That is the argument against making a second copy of
-this rule: a duplicated rule is a rule that will disagree with itself, and
-then neither version can be trusted.
+The prohibition itself went to `Absolutely Forbidden`, which is the section
+that exists for prohibitions, and points at `Plan Before Business Code` for
+the form rather than restating it.
 
 ## Verification
 
