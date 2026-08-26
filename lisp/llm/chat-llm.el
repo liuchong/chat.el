@@ -23,6 +23,16 @@
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 
+;; Declared rather than required: `chat-session' defines the message
+;; struct and sits above this layer, so requiring it here would close a
+;; loop.
+(declare-function chat-message-id "chat-session" (message))
+(declare-function chat-message-role "chat-session" (message))
+(declare-function chat-message-content "chat-session" (message))
+(declare-function chat-message-metadata "chat-session" (message))
+(declare-function chat-message-tool-calls "chat-session" (message))
+(declare-function chat-message-tool-results "chat-session" (message))
+
 (defgroup chat-llm nil
   "LLM provider abstraction for chat.el."
   :group 'chat)
@@ -158,10 +168,33 @@ Checks in order:
    (t
     (plist-get obj (intern (concat ":" (symbol-name key)))))))
 
-(defun chat-llm--tool-call-payload (call)
-  "Encode CALL as an OpenAI tool_calls item."
+(defun chat-llm--tool-call-id (msg call index)
+  "Return the id that pairs CALL with its result in a request payload.
+
+INDEX is the 1-based position of CALL within MSG.
+
+This is the only place that answers the question, because it has to be
+answered the same way twice: once in the assistant `tool_calls' entry and
+once in the `tool_call_id' of the result.  They used to be answered
+separately, and by different rules -- the call fell back to the tool name
+and the result to its position -- so a turn whose calls had no id of
+their own advertised `files_read' and then referred to `call-1', and the
+provider rejected the request with `tool_call_id is not found'.
+
+Calls carrying a provider id use it.  The fallback is for transcripts
+already on disk that were written without one; it is positional rather
+than name-derived because a single turn may call one tool repeatedly, and
+it is qualified by the message so that two such turns in one history do
+not both claim the same ids."
+  (or (plist-get call :id)
+      (format "call-%s-%d"
+              (or (and msg (chat-message-id msg)) "turn")
+              index)))
+
+(defun chat-llm--tool-call-payload (msg call index)
+  "Encode CALL at INDEX of MSG as an OpenAI tool_calls item."
   (let* ((name (or (plist-get call :name) ""))
-         (id (or (plist-get call :id) name))
+         (id (chat-llm--tool-call-id msg call index))
          (arguments (plist-get call :arguments))
          (encoded (cond
                    ((stringp arguments) arguments)
@@ -188,8 +221,11 @@ Checks in order:
      ((and (eq role :assistant) calls)
       `((role . "assistant")
         (content . ,(if (string-blank-p content) json-null content))
-        (tool_calls . ,(vconcat (mapcar #'chat-llm--tool-call-payload
-                                        calls)))))
+        (tool_calls . ,(vconcat
+                        (seq-map-indexed
+                         (lambda (call index)
+                           (chat-llm--tool-call-payload msg call (1+ index)))
+                         calls)))))
      ((and (eq role :assistant) (string-blank-p content))
       nil)
      (t
@@ -201,7 +237,11 @@ Checks in order:
 (defun chat-llm--synthetic-tool-messages (msg)
   "Expand persisted tool-results on assistant MSG into tool payloads.
 Kernel transcripts already store :tool messages, so those assistants
-have no tool-results field and this returns nil."
+have no tool-results field and this returns nil.
+
+The id comes from `chat-llm--tool-call-id', the same function the
+assistant entry above used, so the two sides of the pair agree by
+construction rather than by two fallbacks happening to match."
   (when (and (eq (chat-message-role msg) :assistant)
              (chat-message-tool-calls msg)
              (chat-message-tool-results msg))
@@ -211,13 +251,10 @@ have no tool-results field and this returns nil."
           out)
       (while (and calls results)
         (setq index (1+ index))
-        (let* ((call (car calls))
-               (id (or (plist-get call :id)
-                       (format "call-%d" index))))
-          (push `((role . "tool")
-                  (tool_call_id . ,id)
-                  (content . ,(or (car results) "")))
-                out))
+        (push `((role . "tool")
+                (tool_call_id . ,(chat-llm--tool-call-id msg (car calls) index))
+                (content . ,(or (car results) "")))
+              out)
         (setq calls (cdr calls)
               results (cdr results)))
       (nreverse out))))
@@ -548,11 +585,25 @@ ERROR receives a string message."
    ((listp arguments) arguments)
    (t nil)))
 
+(defvar chat-llm--tool-call-counter 0
+  "Counter behind `chat-llm-new-tool-call-id'.")
+
+(defun chat-llm-new-tool-call-id (name)
+  "Mint an id for a call to NAME that no other call will claim.
+
+Needed because a provider may omit the id, and the two halves of a tool
+call have to agree on one.  Deriving it from NAME instead is what this
+replaces: a turn that reads a long file in three chunks calls one tool
+three times, and all three then answer to the same id."
+  (format "call-%s-%d"
+          (or name "tool")
+          (cl-incf chat-llm--tool-call-counter)))
+
 (defun chat-llm--normalize-tool-call (id name arguments)
   "Return a tool-call plist for ID, NAME, and ARGUMENTS."
   (when (and (stringp name) (not (string-empty-p name)))
     (list :id (or (and (stringp id) id)
-                  (format "call-%s" name))
+                  (chat-llm-new-tool-call-id name))
           :name name
           :arguments (or (chat-llm--parse-tool-arguments arguments) nil))))
 

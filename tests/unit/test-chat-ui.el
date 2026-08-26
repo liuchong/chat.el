@@ -180,12 +180,16 @@ one that was asked."
          (should (equal roles '(:user :assistant :tool :assistant))))
        (let* ((messages (chat-session-messages session))
               (assistant (nth 1 messages))
-              (tool (nth 2 messages)))
-         (should (string= (plist-get (car (chat-message-tool-calls assistant)) :id)
-                          "call-1"))
+              (tool (nth 2 messages))
+              (offered (plist-get (car (chat-message-tool-calls assistant)) :id))
+              (referred (plist-get (chat-message-metadata tool) :tool-call-id)))
+         ;; What matters is that the two halves name the same id, not what
+         ;; it is spelled.  This used to assert the literal "call-1", which
+         ;; is how two sides drifting onto different fallbacks went unseen:
+         ;; the spelling was pinned on the path that worked.
+         (should (stringp offered))
+         (should (equal offered referred))
          (should (eq (chat-message-role tool) :tool))
-         (should (string= (plist-get (chat-message-metadata tool) :tool-call-id)
-                          "call-1"))
          (should (string-match-p "echo:hi" (chat-message-content tool))))
        (let ((loaded (chat-session-load session-id)))
          (should (equal (mapcar #'chat-message-role

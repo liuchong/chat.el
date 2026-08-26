@@ -20,6 +20,7 @@
 (require 'chat-approval)
 (require 'chat-files)
 (require 'chat-i18n)
+(require 'chat-llm)
 (require 'chat-session)
 (require 'chat-tool-forge)
 (require 'json)
@@ -406,7 +407,11 @@ will ask again for something it was already told."
     (nreverse (delete-dups candidates))))
 
 (defun chat-tool-caller--call-from-data (data)
-  "Extract one tool call plist from decoded JSON DATA."
+  "Extract one tool call plist from decoded JSON DATA.
+
+Deliberately id-free: `chat-tool-caller-parse' drops duplicate calls by
+comparing the plists, so an id minted here would make every call unique
+and defeat that.  Ids are assigned once the list is settled."
   (let* ((function-call (cdr (assoc "function_call" data)))
          (name (and (listp function-call)
                     (cdr (assoc "name" function-call))))
@@ -431,6 +436,22 @@ examples in prose do not count as attempts."
    "or answer normally without any JSON.")
   "Follow-up text sent when a tool call attempt fails to parse.")
 
+(defun chat-tool-caller--with-call-ids (calls)
+  "Return CALLS with an id on each, minting the ones that are missing.
+
+A call parsed out of the reply text carries no provider id, and the id is
+not decoration: it is what pairs the call with its result in the next
+request.  Turns went to disk without one, and the request builder then
+invented an id for the call and a different one for its result, so the
+provider refused the history with `tool_call_id is not found'."
+  (mapcar (lambda (call)
+            (if (plist-get call :id)
+                call
+              (append (list :id (chat-llm-new-tool-call-id
+                                 (plist-get call :name)))
+                      call)))
+          calls))
+
 (defun chat-tool-caller-parse (content)
   "Parse tool calls from CONTENT."
   (let ((calls nil))
@@ -441,7 +462,10 @@ examples in prose do not count as attempts."
             (when call
               (push call calls)))
         (error nil)))
-    (nreverse (delete-dups calls))))
+    ;; Ids after `delete-dups', which compares whole plists: minted any
+    ;; earlier and no two calls would ever look alike.
+    (chat-tool-caller--with-call-ids
+     (nreverse (delete-dups calls)))))
 
 (defconst chat-tool-caller--missing-argument
   (make-symbol "chat-tool-caller-missing-argument")
@@ -907,7 +931,10 @@ If SESSION is nil, uses `chat--current-session' if bound."
         (string-trim-right result))))))
 
 (defun chat-tool-caller-process-response-data (content &optional session observer)
-  "Process CONTENT for SESSION and return a result plist."
+  "Process CONTENT for SESSION and return a result plist.
+
+The calls returned here are persisted alongside their results, so they
+have to carry the ids the next request will pair them by."
   (let* ((calls (chat-tool-caller-parse content))
          (parse-error (and (null calls)
                            (chat-tool-caller--attempted-tool-call-p content)))

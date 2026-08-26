@@ -308,10 +308,9 @@ last because that is where a short instruction is actually noticed."
    :raw-response raw-response
    :timestamp (current-time)))
 
-(defun chat-agent--make-tool-message (run call result-text)
+(defun chat-agent--make-tool-message (_run call result-text)
   "Build a :tool transcript message for CALL and RESULT-TEXT."
-  (let ((id (or (plist-get call :id)
-                (format "call-%s" (plist-get call :name))))
+  (let ((id (chat-agent-tool-call-id call))
         (name (plist-get call :name)))
     (make-chat-message
      :id (chat-session-new-message-id (format "tool-%s" id))

@@ -816,12 +816,10 @@ branch starts with no messages. SESSION is never truncated."
            (make-chat-session
             :id (chat-session--alist-get data 'id)
             :name (chat-session--alist-get data 'name)
-            :created-at (decode-time
-                         (parse-time-string
-                          (chat-session--alist-get data 'createdAt)))
-            :updated-at (decode-time
-                         (parse-time-string
-                          (chat-session--alist-get data 'updatedAt)))
+            :created-at (chat-session--parse-timestamp
+                         (chat-session--alist-get data 'createdAt))
+            :updated-at (chat-session--parse-timestamp
+                         (chat-session--alist-get data 'updatedAt))
             :model-id (intern (chat-session--alist-get data 'modelId))
             :messages (mapcar #'chat-message--deserialize
                               (chat-session--alist-get data 'messages))
@@ -987,15 +985,27 @@ matching `:tool' result."
           (setq safe-index index))))
     safe-index))
 
+(defun chat-session--parse-timestamp (text)
+  "Return the time value TEXT was serialized from.
+
+`parse-time-string' already returns a decoded time, and this used to hand
+that straight to `decode-time', which reads its argument as a time value
+instead: the leading seconds and minutes were taken for the high and low
+halves of an epoch offset, so every message came back from disk dated a
+few weeks into 1970.  Serialization was fine, so the damage only appeared
+once a session had been reopened -- and then got written back."
+  (when (stringp text)
+    (ignore-errors
+      (encode-time (parse-time-string text)))))
+
 (defun chat-message--deserialize (data)
   "Convert JSON-parsed DATA to chat-message struct."
   (make-chat-message
    :id (chat-session--alist-get data 'id)
    :role (intern (chat-session--alist-get data 'role))
    :content (chat-session--alist-get data 'content)
-   :timestamp (decode-time
-               (parse-time-string
-                (chat-session--alist-get data 'timestamp)))
+   :timestamp (chat-session--parse-timestamp
+               (chat-session--alist-get data 'timestamp))
    :parent-id (chat-session--alist-get data 'parentId)
    :branch-ids (chat-session--normalize-list
                 (chat-session--alist-get data 'branchIds))

@@ -116,6 +116,61 @@
        (should (string= (chat-message-raw-request message) "{\"request\":true}"))
        (should (string= (chat-message-raw-response message) "{\"response\":true}"))))))
 
+(ert-deftest chat-session-a-message-keeps-its-date-through-a-reopen ()
+  "A reopened session used to come back dated 1970.
+
+`parse-time-string' returns a decoded time and the loader handed it to
+`decode-time', which reads its argument as a time value instead: the
+seconds and minutes were taken for the halves of an epoch offset, so every
+message landed a few weeks into January 1970.  Saving was correct, which
+is why this only showed up in sessions that had been opened again -- and
+then the wrong date was written back over the right one."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-session-create "Test" 'gpt-4o))
+          (session-id (chat-session-id session))
+          (when-sent (encode-time 30 45 14 26 8 2026)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "m1" :role :user :content "hi"
+                         :timestamp when-sent))
+     (chat-session-save session)
+     (let* ((loaded (chat-session-load session-id))
+            (message (car (chat-session-messages loaded))))
+       (should (equal (format-time-string "%Y-%m-%dT%H:%M:%S"
+                                          (chat-message-timestamp message))
+                      "2026-08-26T14:45:30"))))))
+
+(ert-deftest chat-session-a-date-survives-two-reopens ()
+  "The corrupted date was written back, so each reopen had to be checked."
+  (chat-test-with-temp-dir
+   (let ((session-id nil))
+     (let ((session (chat-session-create "Test" 'gpt-4o)))
+       (setq session-id (chat-session-id session))
+       (chat-session-add-message
+        session
+        (make-chat-message :id "m1" :role :user :content "hi"
+                           :timestamp (encode-time 0 0 12 1 6 2026)))
+       (chat-session-save session))
+     (chat-session-save (chat-session-load session-id))
+     (let ((message (car (chat-session-messages
+                          (chat-session-load session-id)))))
+       (should (equal (format-time-string "%Y-%m-%d"
+                                          (chat-message-timestamp message))
+                      "2026-06-01"))))))
+
+(ert-deftest chat-session-keeps-its-own-dates-through-a-reopen ()
+  "The session header carried the same bug as its messages."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-session-create "Test" 'gpt-4o))
+          (session-id (chat-session-id session))
+          (created (chat-session-created-at session)))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load session-id)))
+       (should (equal (format-time-string "%Y-%m-%dT%H:%M:%S" created)
+                      (format-time-string
+                       "%Y-%m-%dT%H:%M:%S"
+                       (chat-session-created-at loaded))))))))
+
 (ert-deftest chat-session-save-and-load-preserves-keyword-roles ()
   "Test role keywords survive a save and load round trip."
   (chat-test-with-temp-dir

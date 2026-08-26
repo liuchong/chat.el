@@ -1384,4 +1384,59 @@ it was supposed to be replaced by.
 literal used both to write and to find text is a latent version of this
 bug, and localization is what triggers it.
 
+### Two Halves Of One Pair, Each With Its Own Fallback
+
+**Problem**: an old session refused to send at all. The provider answered
+`tool_call_id is not found`, so nothing could be asked of a conversation
+that had once used tools.
+
+**Cause**: a tool call id has to be written twice into a request — once in
+the assistant's `tool_calls` and once as the `tool_call_id` of the result
+— and two different functions supplied it. Both had a fallback for calls
+that arrived without an id, and the fallbacks disagreed: the call side
+used the tool name, the result side used the position. A turn parsed out
+of the reply text has no provider id, so both fallbacks fired, and the
+request advertised `files_read` while referring to `call-1`. Five places
+in the tree invented ids, in two incompatible schemes.
+
+**Solution**: one function answers the question, and both sides call it.
+A fallback that is reached from a single place cannot disagree with
+itself. Two further notes: the name is not available as a fallback,
+because a turn that reads a file in chunks calls one tool repeatedly and
+all the chunks would answer to one id; and the fallback is qualified by
+the message, because a bare position would make every turn claim `call-1`.
+Assert that the two sides *agree*, never what the id says — the test that
+existed pinned the literal `call-1` on the path that worked, which is
+exactly how the disagreement stayed hidden.
+
+### Ids Minted Before Duplicates Are Dropped Defeat The Dedup
+
+**Problem**: none shipped — caught while fixing the above.
+
+**Cause**: the parser drops repeated calls with `delete-dups`, which
+compares whole plists. Minting an id during extraction makes every call
+unique, so a call the model emitted twice would run twice.
+
+**Solution**: assign ids after the list settles. Anything that gives an
+element its own identity has to happen downstream of anything that
+compares elements for equality.
+
+### A Round Trip Verified In Only One Direction
+
+**Problem**: every message in a reopened session was dated January 1970.
+
+**Cause**: the loader wrapped `parse-time-string` in `decode-time`.
+`parse-time-string` already returns a decoded time, and `decode-time`
+reads its argument as a *time value*, so the leading seconds and minutes
+were taken for the halves of an epoch offset. Writing was correct, which
+is why the tests passed: they built a session and checked what came back
+within one process, and nothing asserted a date. The wrong date was then
+written back over the right one, so the damage was permanent and grew
+with every reopen.
+
+**Solution**: `encode-time` the parsed list, and test the reopen rather
+than the object — save, load, and compare against the value that went in.
+Test the second reopen too: a loader that corrupts and re-saves needs one
+cycle to lose the data and another to look stable.
+
 Last updated: 2026-08-26

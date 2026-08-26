@@ -22,6 +22,7 @@
 
 (require 'cl-lib)
 (require 'chat-agent-budget)
+(require 'chat-llm)
 
 (defcustom chat-agent-native-tools t
   "When non-nil, advertise tools through the provider tool-calling API."
@@ -50,22 +51,28 @@
   (cancel-functions nil)
   (native-tools t))
 
-(defun chat-agent-tool-call-id (call index)
-  "Return a stable id for CALL, synthesizing one from INDEX when missing."
+(defun chat-agent-tool-call-id (call &optional _index)
+  "Return the id of CALL, minting one when it arrived without.
+
+Callers used to pass an index and get `call-<index>' back, which is safe
+only while the whole turn is numbered by one loop.  It is minted instead,
+so an id is a property of the call rather than of where it was standing
+when someone asked."
   (or (plist-get call :id)
-      (format "call-%d" index)))
+      (chat-llm-new-tool-call-id (plist-get call :name))))
 
 (defun chat-agent-ensure-tool-call-ids (calls)
-  "Return CALLS with an :id on every plist."
-  (let ((index 0)
-        (out nil))
-    (dolist (call calls)
-      (setq index (1+ index))
-      (push (if (plist-get call :id)
+  "Return CALLS with an :id on every plist.
+
+Every path that produces tool calls has to go through here.  The one that
+did not -- `chat-tool-caller-process-response-data', which reads calls out
+of the reply text -- wrote turns to disk with no ids at all, and each half
+of the request then invented its own."
+  (mapcar (lambda (call)
+            (if (plist-get call :id)
                 call
-              (append (list :id (chat-agent-tool-call-id call index)) call))
-            out))
-    (nreverse out)))
+              (append (list :id (chat-agent-tool-call-id call)) call)))
+          calls))
 
 (provide 'chat-agent-types)
 ;;; chat-agent-types.el ends here

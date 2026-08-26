@@ -381,6 +381,126 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
     (should (equal (cdr (assoc 'tool_call_id (aref formatted 1))) "call-9"))
     (should (equal (cdr (assoc 'content (aref formatted 1))) "echo:x"))))
 
+(defun test-chat-llm--unpaired-tool-ids (messages)
+  "Return the tool_call_ids in MESSAGES that no assistant turn offered.
+
+This is the check the provider performs on a request, so it is the check
+worth making here: walk the payload in order, collect the ids each
+assistant advertises, and report any `tool_call_id' that arrives without
+one.  Asserting on the ids themselves would only have pinned down the
+fallback that was already wrong."
+  (let ((offered nil)
+        (unpaired nil))
+    (dotimes (index (length messages))
+      (let* ((entry (aref messages index))
+             (role (cdr (assoc 'role entry))))
+        (cond
+         ((equal role "assistant")
+          (dolist (call (append (cdr (assoc 'tool_calls entry)) nil))
+            (push (cdr (assoc 'id call)) offered)))
+         ((equal role "tool")
+          (let ((id (cdr (assoc 'tool_call_id entry))))
+            (unless (member id offered)
+              (push id unpaired)))))))
+    (nreverse unpaired)))
+
+(defun test-chat-llm--offered-tool-ids (messages)
+  "Return every id the assistant turns in MESSAGES advertise."
+  (let (ids)
+    (dotimes (index (length messages))
+      (let ((entry (aref messages index)))
+        (when (equal (cdr (assoc 'role entry)) "assistant")
+          (dolist (call (append (cdr (assoc 'tool_calls entry)) nil))
+            (push (cdr (assoc 'id call)) ids)))))
+    (nreverse ids)))
+
+(ert-deftest chat-llm-a-turn-without-call-ids-still-pairs ()
+  "A transcript written before calls carried ids has to remain sendable.
+
+This is the shape that produced `tool_call_id is not found': the calls
+were parsed out of the reply text, so they reached disk with no ids, and
+the results were stored on the same assistant message.  The call side then
+fell back to the tool name and the result side to its position, leaving
+the request advertising `files_read' while referring to `call-1'."
+  (let* ((messages
+          (list (make-chat-message :id "u1" :role :user :content "review this")
+                (make-chat-message
+                 :id "a1"
+                 :role :assistant
+                 :content "here is the review"
+                 :tool-calls '((:name "files_read"
+                                :arguments (("path" . "design.md")))
+                               (:name "shell_execute"
+                                :arguments (("command" . "wc -l design.md"))))
+                 :tool-results '("# Design" "1437 design.md"))))
+         (formatted (chat-llm--format-messages messages)))
+    (should (= (length formatted) 4))
+    (should-not (test-chat-llm--unpaired-tool-ids formatted))))
+
+(ert-deftest chat-llm-calling-one-tool-twice-gives-two-ids ()
+  "Reading a long file in chunks calls one tool repeatedly.
+
+The fallback used to be the tool name, so every chunk answered to the same
+id and the results were indistinguishable."
+  (let* ((messages
+          (list (make-chat-message
+                 :id "a1"
+                 :role :assistant
+                 :content ""
+                 :tool-calls '((:name "files_read_lines"
+                                :arguments (("start_line" . 1)))
+                               (:name "files_read_lines"
+                                :arguments (("start_line" . 301)))
+                               (:name "files_read_lines"
+                                :arguments (("start_line" . 601))))
+                 :tool-results '("part one" "part two" "part three"))))
+         (formatted (chat-llm--format-messages messages))
+         (offered (test-chat-llm--offered-tool-ids formatted)))
+    (should (= (length offered) 3))
+    (should (= (length (delete-dups (copy-sequence offered))) 3))
+    (should-not (test-chat-llm--unpaired-tool-ids formatted))))
+
+(ert-deftest chat-llm-two-idless-turns-do-not-claim-the-same-ids ()
+  "Ids are unique across the history, not just within one turn.
+
+A positional fallback alone would number both turns from one, and the
+second turn's results would pair with the first turn's calls."
+  (let* ((messages
+          (list (make-chat-message
+                 :id "a1" :role :assistant :content "first"
+                 :tool-calls '((:name "files_read" :arguments nil))
+                 :tool-results '("one"))
+                (make-chat-message :id "u2" :role :user :content "again")
+                (make-chat-message
+                 :id "a2" :role :assistant :content "second"
+                 :tool-calls '((:name "files_read" :arguments nil))
+                 :tool-results '("two"))))
+         (formatted (chat-llm--format-messages messages))
+         (offered (test-chat-llm--offered-tool-ids formatted)))
+    (should (= (length offered) 2))
+    (should-not (equal (car offered) (cadr offered)))
+    (should-not (test-chat-llm--unpaired-tool-ids formatted))))
+
+(ert-deftest chat-llm-a-provider-id-is-never-replaced ()
+  "The fallback is for transcripts that lack ids, not a rewrite."
+  (let* ((messages
+          (list (make-chat-message
+                 :id "a1" :role :assistant :content ""
+                 :tool-calls '((:id "call_abc123" :name "demo" :arguments nil))
+                 :tool-results '("done"))))
+         (formatted (chat-llm--format-messages messages)))
+    (should (equal (test-chat-llm--offered-tool-ids formatted)
+                   '("call_abc123")))
+    (should (equal (cdr (assoc 'tool_call_id (aref formatted 1)))
+                   "call_abc123"))))
+
+(ert-deftest chat-llm-a-minted-id-is-not-the-tool-name ()
+  "Two calls to one tool have to be told apart."
+  (let ((first (chat-llm-new-tool-call-id "files_read"))
+        (second (chat-llm-new-tool-call-id "files_read")))
+    (should-not (equal first second))
+    (should-not (equal first "files_read"))))
+
 (ert-deftest chat-llm-extracts-openai-tool-calls ()
   "Test native OpenAI tool_calls decode into plists."
   (let ((calls (chat-llm--extract-tool-calls

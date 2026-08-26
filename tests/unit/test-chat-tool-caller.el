@@ -22,6 +22,37 @@
     (should (= (length calls) 1))
     (should (string= (plist-get (car calls) :name) "demo"))))
 
+(ert-deftest chat-tool-caller-a-parsed-call-arrives-with-an-id ()
+  "A call read out of the reply text is persisted with its result, so it
+needs the id that will pair the two in the next request.  Without one,
+turns reached disk id-less and the request builder guessed twice."
+  (let* ((response "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")
+         (calls (chat-tool-caller-parse response)))
+    (should (= (length calls) 1))
+    (should (stringp (plist-get (car calls) :id)))))
+
+(ert-deftest chat-tool-caller-two-calls-to-one-tool-get-two-ids ()
+  "Ids identify a call, not a tool."
+  (let* ((response (concat
+                    "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"n\":1}}}\n"
+                    "```json\n"
+                    "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"n\":2}}}\n"
+                    "```"))
+         (calls (chat-tool-caller-parse response))
+         (ids (mapcar (lambda (call) (plist-get call :id)) calls)))
+    (should (= (length calls) 2))
+    (should (= (length (delete-dups (copy-sequence ids))) 2))))
+
+(ert-deftest chat-tool-caller-still-drops-a-call-repeated-verbatim ()
+  "Ids are assigned after duplicates are dropped.
+
+Minting them during extraction would make every call unique and quietly
+turn one repeated call into two executions."
+  (let* ((fragment "{\"function_call\":{\"name\":\"demo\",\"arguments\":{\"input\":\"hello\"}}}")
+         (response (concat fragment "\n```json\n" fragment "\n```"))
+         (calls (chat-tool-caller-parse response)))
+    (should (= (length calls) 1))))
+
 (ert-deftest chat-tool-caller-normalizes-json-false-to-nil ()
   "Test JSON false values are converted to nil for tool arguments."
   (should-not (chat-tool-caller--argument-value '(("recursive" . :json-false)) "recursive")))
