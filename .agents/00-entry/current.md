@@ -113,12 +113,26 @@ system prompt asks for it and narrows it to the subset a buffer displays
 well -- ATX headings from level two, no hand-wrapped paragraphs, a
 language on every fence, shallow lists, narrow tables, no HTML or math.
 Each restriction carries its reason, because a prompt rule without one
-reads as optional. Specs 005 and 006 record where this goes next: a
-built-in Markdown display engine that gets an Org-like result out of
-Markdown syntax without an external renderer, and a judgement on MDP,
-which is adopted for tool calls and tool results and declined for
-multi-line payloads, where its single-line values need the same escaping
-JSON does and the existing patch envelope is better.
+reads as optional.
+
+Specs 005 and 006 record where this goes next, with two divisions stated
+outright. Markdown the format owns full-document input and output and is
+the source of truth; `lisp/core/chat-markdown.el` owns only its display,
+gets an Org-like result out of Markdown syntax without an external
+renderer, and never lets a rendering flow back as data. And MDP is a data
+transport protocol with JSON's standing rather than a document tool, so
+`chat-mdp.el` is a codec first — MDP text to and from an Elisp
+representation — with its display role bounded by a two-views rule: the
+document view belongs to 005 and comes free because an MDP payload is
+valid Markdown, while the machine view belongs to the codec because 005
+has no parse result and cannot tell structure from comment. Both modules
+sit in core on the precedent of `chat-transcript.el`, which keeps the
+repository's strict ui → core direction intact and lets them share one
+implementation of width-aware column layout. MDP is adopted for tool calls
+and tool results and declined for multi-line payloads, whose single-line
+values need the same escaping JSON does while the existing patch envelope
+needs none. MDS is deferred at zero cost, since its own specification
+makes validation a layer separable from parsing.
 
 A run is now something you can watch happen. It used to be that a
 reasoning model thought for a minute with the screen perfectly still and

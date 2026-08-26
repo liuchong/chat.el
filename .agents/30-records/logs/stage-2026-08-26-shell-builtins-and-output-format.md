@@ -179,12 +179,91 @@ still completes, and three over the output-format prompt — that it asks
 for Markdown, that each restriction and each reason is present, and that
 it is stated whether or not tools exist.
 
+## Two Alignments That Changed The Specs
+
+Both specs were corrected after review, and the second correction was a
+structural error rather than a wording one.
+
+**Format and display are two layers.** Markdown the format owns
+full-document input and output: it is what the model writes, what the
+session record stores, what leaves the buffer on a copy, and what goes
+back to the model next turn. It is the single source of truth.
+`chat-markdown.el` owns only its display in Emacs. The consequence worth
+stating as a constraint is that a rendering never flows back as data —
+buffer styling is a view of the document, not the document. Spec 005's
+pure-function rule and its insistence that hiding be reversible are both
+consequences of that, not independent preferences.
+
+**MDP is a data transport protocol with JSON's standing, not a document
+tool.** Its readability is a property, not its purpose; JSON pretty-prints
+too and nobody calls JSON a document format. Spec 006 had the positioning
+right in prose and then contradicted it in Requirement 4, which said MDP
+payloads must have no display logic of their own and must go through spec
+005. That would make `lisp/core/chat-mdp.el` depend on
+`lisp/core/chat-markdown.el` to display anything, tying a protocol
+module's usability to a display layer, and — as originally written, with
+the renderer in `lisp/ui/` — inverting the repository's dependency
+direction, which is strictly ui → core with no core module requiring
+`chat-ui` anywhere.
+
+The fix came from MDP's own claim, one text with two readings. Two
+readings means two views with two owners. The document view belongs to
+spec 005, free because an MDP payload is valid Markdown, and `chat-mdp.el`
+may not compete: no marker hiding, no code fontification, no bullet
+substitution, no link folding. The machine view belongs to `chat-mdp.el`,
+and it is the half spec 005 structurally cannot do, because it sees only
+Markdown syntax and has no parse result — it cannot know which line is
+structure and which is comment, or that `- age: 28` holds the number 28.
+That view is not a debugging extra: whether the two readings agree cannot
+be judged without seeing the machine one.
+
+The renderer moved to `lisp/core/chat-markdown.el` as part of this. The
+precedent is `lisp/core/chat-transcript.el`, which also defines faces and
+decides typography and sits in core because it is pure — it computes
+styling and never touches a buffer or a window. With both modules in core,
+`chat-mdp.el` can share the width-aware column layout without inverting
+anything, and that layout must have exactly one implementation: a Chinese
+table aligned in one view and ragged in the other is harder to find than
+one that is ragged in both.
+
+`chat-mdp.el` is therefore a codec first. Its irreplaceable job is MDP
+text to and from an Elisp representation, and the representation is now
+pinned down because `nil` in Elisp is falsehood, the empty list and the
+empty value all at once, while MDP's `false`, `[]` and `null` are three
+distinct values — using `nil` for any of them makes the round trip lossy.
+
+## MDS
+
+Considered and deferred, and the deferral costs nothing, which is the only
+reason a deferral needs. MDS's own specification says core parsers do not
+know it exists and that validation is an independent layer above parsing,
+so it can be added later without touching the codec.
+
+Three reasons not now: it is a draft that explicitly permits breaking
+changes while MDP claims stability; we already express schemas in the tool
+registry's parameter declarations, and two schemas would diverge for the
+same reason two renderers would; and it belongs after the payload layer is
+proven on the tool-call path rather than before.
+
+One candidate use is recorded so the reasoning need not be redone:
+emitting MDS from the tool registry, so the schema the model reads and the
+payload it writes share one syntax. The value there is in the emitter, not
+the validator — parameter checking already exists. One constraint holds
+now to keep that door open: the parser does only MDP's four line types and
+never guesses at dates, enums or amounts, because semantic inference in
+the parser would fight the schema layer over whether `2026-07-21` is a
+string or a date. And no hooks are pre-placed for MDS, since the spec
+already guarantees separability and a reserved hook would take on the
+coupling early for nothing.
+
 ## What Is Left
 
 Specs 005 and 006 are specifications, not implementations. Neither
-`lisp/ui/chat-markdown.el` nor `lisp/core/chat-mdp.el` exists yet. Two
-documentation inconsistencies found during the audit are recorded in spec
-005's acceptance list rather than fixed here: `docs/index.html:104`
-claims header and emphasis styling follows differential streaming when it
-runs once at finalize, and `docs/architecture/design.md:711` lists
-`chat-markdown.el` as though it were present.
+`lisp/core/chat-markdown.el` nor `lisp/core/chat-mdp.el` exists yet, and
+005 comes first because 006 depends on it for the document view and for
+the shared column layout. Two documentation inconsistencies found during
+the audit are recorded in spec 005's acceptance list rather than fixed
+here: `docs/index.html:104` claims header and emphasis styling follows
+differential streaming when it runs once at finalize, and
+`docs/architecture/design.md:711` lists `chat-markdown.el` as though it
+were present.

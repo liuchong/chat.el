@@ -18,6 +18,20 @@
 没有图形 widget。用 Markdown 的语法拿到 org 的观感，这件事本身就值得单独做一份
 spec。
 
+## Division Of Responsibility
+
+这两件事必须分清，否则模块会长成一个既管格式又管显示的东西：
+
+- **Markdown 这个格式**承担完整文档的输入输出。模型写出来的是它，会话记录里存的
+  是它，从缓冲区复制出去的是它，下一轮送回模型的还是它。它是唯一的事实来源
+- **`chat-markdown.el`** 只承担这份文档在 Emacs 里的渲染美化。它是显示层，
+  不是 Markdown 的实现，也不是格式的定义者
+
+由此得出一条贯穿全文的硬约束：**渲染结果永远不回流成数据**。缓冲区里的样式是
+文档的一个视图，不是文档。任何需要文档内容的地方——重绘、复制、送回模型、
+落盘——取的都是那份原始 Markdown，不是渲染后的产物。Requirement 1.1 的纯函数
+和 2.1 的"隐藏必须可逆"都是这条约束的推论，不是独立的偏好。
+
 ## Current Status
 
 **现在没有 Markdown 引擎。** 有的是两处互不相干的薄涂层。
@@ -88,8 +102,19 @@ spec。
 
 ### 1.1 纯函数
 
-新模块 `lisp/ui/chat-markdown.el`（`docs/architecture/design.md:711` 已经预留了
-这个名字）。核心是一个纯函数：
+新模块 `lisp/core/chat-markdown.el`（`docs/architecture/design.md:711` 已经预留了
+这个名字）。
+
+放在 core 而不是 ui，依据是仓库自己的先例：`lisp/core/chat-transcript.el` 也定义
+face、也决定排版，它在 core，因为它是纯的——算样式，不碰缓冲区和窗口。
+`chat-markdown.el` 是同一类东西。而 `lisp/ui/` 里的模块碰缓冲区、窗口和键盘。
+
+这个位置还有一个必须满足的约束：本仓库的依赖方向是严格的 ui → core，
+core 从不 require ui（可核实：`lisp/core/` 里没有一处 require `chat-ui`）。
+`lisp/core/chat-mdp.el`（spec 006）需要用到这里的列宽对齐，如果渲染器在 ui，
+那就得由 core 去依赖 ui，把方向倒过来。放 core 就没有这个问题。
+
+核心是一个纯函数：
 
 ```
 chat-markdown-render (source &optional base-face) → propertized string
@@ -239,6 +264,18 @@ MUST 加一段输出格式约定，与已有的回答语言约定（`:218`）并
   （`lisp/ui/chat-ui.el:2610`）已经踩过并记下了这一条
 - 每列取该列所有单元格显示宽度的最大值，补空格对齐
 
+### 5.1.1 对齐只有一份实现
+
+按显示宽度排版列，在本仓库里有三个调用方：本 spec 的表格、spec 006 的 MDP
+机器视图、以及已有的 shell 输出制表位展开。所以它 MUST 是一个独立的纯函数，
+放在 core 且不依赖任何显示模块，两份 spec 都 require 同一个它。
+
+理由是这份 spec 存在的同一个理由：同样的东西有两份实现，就一定会分叉。一个中文
+表格在文档视图里对齐、在机器视图里错位，比两边都不对齐更难查。
+
+`chat-ui--expand-tabs` 是它未来的第三个调用方，但把那处改过来不在本 spec 范围内，
+不为了整齐去动一段正在正常工作的代码。
+
 ### 5.2 分隔行
 
 `| --- | --- |` 那一行换成连续横线，与列宽对齐。用 `display` 属性，不改文本。
@@ -289,6 +326,12 @@ chat-markdown-stable-prefix-length (source) → integer
 
 ## Acceptance
 
+### 职责边界
+
+- [ ] 渲染结果不回流成数据：重绘、复制、送回模型、落盘取的都是原始 Markdown
+- [ ] `chat-markdown.el` 在 `lisp/core/`，且不 require `lisp/ui/` 下任何模块
+      （静态断言，保证 spec 006 的 core 模块能 require 它而不倒置方向）
+
 ### 渲染一致性
 
 - [ ] 同一段 Markdown，流式接收后与关闭重开后，缓冲区的文本属性完全相同
@@ -323,6 +366,8 @@ chat-markdown-stable-prefix-length (source) → integer
 - [ ] 分隔行显示为横线
 - [ ] 复制出来的表格是合法 Markdown
 - [ ] 超宽表格不横向溢出，落地为写进本 spec 的那一种确定行为
+- [ ] 按显示宽度排版列只有一处实现，放在 core 且不依赖任何显示模块，
+      spec 006 的机器视图 require 的是同一个它
 
 ### 换行
 
@@ -352,6 +397,8 @@ chat-markdown-stable-prefix-length (source) → integer
 
 ## Behavior Boundaries
 
+- **格式与显示分属两层。** Markdown 这个格式承担完整文档的输入输出，是事实来源；
+  这个引擎只承担它在 Emacs 里的显示。渲染结果永远不回流成数据
 - **只管显示，不管编辑。** 这个引擎把 Markdown 显示成文档。它不提供 Markdown
   的编辑命令、补全、大纲跳转、表格编辑。`chat-mode` 仍然是 `chat-mode`，
   不会变成 `markdown-mode`
@@ -365,5 +412,15 @@ chat-markdown-stable-prefix-length (source) → integer
 
 ## Notes
 
-`markdown.el` 这个名字在本仓库落成 `lisp/ui/chat-markdown.el`：仓库里所有模块都是
+`markdown.el` 这个名字在本仓库落成 `lisp/core/chat-markdown.el`：仓库里所有模块都是
 `chat-` 前缀，而且 `docs/architecture/design.md:711` 早就以这个名字预留了位置。
+放 core 而不是 ui 的两条依据见 Requirement 1.1——它是纯函数（先例是同样定义 face
+的 `lisp/core/chat-transcript.el`），而且 spec 006 的 core 模块要能 require 它。
+
+相关 spec：
+
+- **004** 拥有频道排版（推理、工具、中间说明、答案的前缀、字形、折叠）。
+  本 spec 只管频道**内部**的结构，两者叠加而非覆盖，见 Requirement 1.2
+- **006** 拥有 MDP 的编解码与机器视图。MDP 报文是合法 Markdown，
+  所以它的文档视图由本 spec 免费提供；反过来本 spec 不知道 MDP 存在，
+  也不该知道

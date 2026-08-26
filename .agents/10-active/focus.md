@@ -157,20 +157,42 @@ alone. It is now asked for and narrowed to what a buffer displays well,
 with a reason on every restriction, since a prompt rule without one reads
 as optional.
 
-Specs 005 and 006 are written and not implemented. 005 is the built-in
-Markdown display engine: an Org-like result from Markdown syntax using
-Emacs means only — `invisible` for markers so copying still yields the
-source, real major modes for code with an explicit language table so model
-output cannot decide which packages load, `string-width` for table columns
-because CJK is double-width. Its governing rule is one renderer as a pure
-function of the source, which is the structural answer to the two paths
-that style differently today. 006 judges MDP: adopted for the text
-tool-call protocol, where its comment rule retires the empirical repairs
-in `chat-tool-caller--fix-broken-json`, and for structured tool results,
-where one text serving a program, a person and the next turn is exactly
-its design; declined for multi-line payloads, where its single-line values
-need the same escaping JSON does and the existing patch envelope is
-better.
+Specs 005 and 006 are written and not implemented, and both were corrected
+on review.
+
+005 is the built-in Markdown display engine, at
+`lisp/core/chat-markdown.el`: an Org-like result from Markdown syntax
+using Emacs means only — `invisible` for markers so copying still yields
+the source, real major modes for code behind an explicit language table so
+model output cannot decide which packages load, `string-width` for table
+columns because CJK is double-width. Its governing rule is one renderer as
+a pure function of the source, the structural answer to the two paths that
+style differently today. The division it now states outright: Markdown the
+format owns full-document input and output and is the source of truth,
+this module owns only its display, and a rendering never flows back as
+data. It sits in core rather than ui on the precedent of
+`chat-transcript.el` — pure, computes styling, never touches a buffer —
+which is also what lets a core module reach it without inverting the
+repository's strict ui → core direction.
+
+006 judges MDP, which is a data transport protocol with JSON's standing
+rather than a document tool; its readability is a property, not its
+purpose. Adopted for the text tool-call protocol, where its comment rule
+retires the empirical repairs in `chat-tool-caller--fix-broken-json`, and
+for structured tool results, where one text serving a program, a person and
+the next turn is exactly its design. Declined for multi-line payloads,
+whose single-line values need the same escaping JSON does while the
+existing patch envelope needs none.
+
+`chat-mdp.el` is a codec first: MDP text to and from an Elisp
+representation, pinned down because `nil` is falsehood, the empty list and
+the empty value at once while MDP's `false`, `[]` and `null` are three
+values. Its display role is bounded by the two-views rule — the document
+view belongs to 005 and is free, the machine view belongs here because 005
+has no parse result and so cannot tell structure from comment. MDS is
+deferred at zero cost, since its own spec makes validation a separable
+layer above parsing; the parser keeps to four line types so that stays
+true.
 
 Canonical suite: 1009 tests passing.
 
