@@ -1223,20 +1223,19 @@ causing them.
 
 Clickable only when there is more than one provider to choose from.  A
 `mouse-face' over a menu of one promises a choice that does not exist."
-  (let* ((provider (and chat--current-session
-                        (chat-session-model-id chat--current-session)))
+  (let* ((provider (chat-ui--session-provider))
          (config (and provider (chat-llm-get-provider-config provider)))
          (display-name (plist-get config :name))
-         (model (or (plist-get config :model)
+         (model (or (chat-ui--session-model-name)
                     (and provider (symbol-name provider))
                     ""))
          (mark (chat-mark-for-provider provider display-name))
-         (switchable (> (length (chat-ui--model-choices)) 1))
+         (switchable (> (chat-ui--model-choice-count) 1))
          (shown (truncate-string-to-width
                  model chat-ui-prompt-model-width nil nil "\u2026"))
          (help (if switchable
                    (chat-i18n 'prompt-model-switch
-                              "%s -- mouse-1 to switch provider" model)
+                              "%s -- mouse-1 to switch model" model)
                  model)))
     (concat
      (chat-ui--prompt-mark (car mark) (cdr mark))
@@ -2505,6 +2504,13 @@ assistant response being filled in."
                     (list :temperature 0.7
                           :max-tokens (chat-ui--request-output-budget model)
                           :timeout chat-ui-request-timeout)
+                    ;; Only when the session pinned one.  Absent, every
+                    ;; payload builder falls back to the provider's
+                    ;; current default, which is what an unpinned
+                    ;; session wants -- including after the default
+                    ;; changes under it.
+                    (when-let ((name (chat-session-model-name session)))
+                      (list :model name))
                     (when request-id
                       (list :request-id request-id)))
                    :followup-request-options
@@ -2659,7 +2665,7 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
 ;; ------------------------------------------------------------------
 
 ;;;###autoload
-(defun chat-set-model (model)
+(defun chat-set-model (model &optional model-name)
   "Point the current chat session at provider MODEL.
 
 Every session stores its own provider, so `chat-default-model' only
@@ -2667,6 +2673,16 @@ decides what new sessions start with; a session restored from disk keeps
 whatever it was created with, even after the default changes or its
 provider stops working. This retargets the session in front of you and
 persists the change.
+
+MODEL-NAME pins which of that provider's models to ask for.  Given
+together rather than in two steps on purpose: between changing the
+provider and changing the name the session would be pointing at a new
+vendor with the old vendor's model id, which is nobody's valid pairing.
+
+Left out, any name the session had pinned is dropped, because a model id
+belongs to the vendor that serves it -- carrying `k3' over to DeepSeek
+would produce a request only the vendor can refuse.  The session then
+follows the new provider's default.
 
 Refuses while a response is in flight, because the reply would come back
 from a different provider than the one that was asked."
@@ -2685,16 +2701,20 @@ from a different provider than the one that was asked."
     (user-error "No chat session in this buffer"))
   (unless (chat-llm-get-provider-config model)
     (user-error "Unknown provider: %s" model))
+  (when (and model-name
+             (not (member model-name (chat-llm-provider-models model))))
+    (user-error "Provider %s does not serve model %s" model model-name))
   (when (chat-ui--response-active-p)
     (user-error "Response in progress; cancel it before switching model"))
   (setf (chat-session-model-id chat--current-session) model)
+  (setf (chat-session-model-name chat--current-session) model-name)
   (when chat-session-auto-save
     (chat-session-save chat--current-session))
   (chat-ui--render-status-line)
   ;; The prompt names the model too, so leaving it alone here would leave
   ;; one of the two places that state it saying the wrong thing.
   (chat-ui--render-input-prompt)
-  (message "Model switched to %s" model))
+  (message "Model switched to %s" (or model-name model)))
 
 (defun chat-ui--offered-providers ()
   "Return the providers worth offering a reader, in display order.
@@ -2716,48 +2736,119 @@ session sitting on one has to be able to see where it is and move off."
         (cons current configured)
       configured)))
 
+(defun chat-ui--session-model-name (&optional session)
+  "Return the model id SESSION will actually ask for.
+
+What it pinned, or the provider's current default.  The one answer to
+\"which model is this\", so that the prompt, the menu's current marker and
+the request cannot disagree."
+  (let ((session (or session chat--current-session)))
+    (when session
+      (or (chat-session-model-name session)
+          (plist-get (chat-llm-get-provider-config
+                      (chat-session-model-id session))
+                     :model)))))
+
+(defun chat-ui--vendor-label (vendor provider)
+  "Return the display name for VENDOR, reached through PROVIDER."
+  (let ((name (plist-get (chat-llm-get-provider-config provider) :name)))
+    ;; A vendor serving two protocols names them apart -- \"Kimi Code\"
+    ;; and \"Kimi Code (Anthropic)\".  The group is the vendor, so the
+    ;; protocol's parenthetical does not belong in its heading.
+    (if (and name (string-match "\\`\\(.*?\\)[ ]*(\\(?:.*\\))\\'" name))
+        (match-string 1 name)
+      (or name (symbol-name vendor)))))
+
 (defun chat-ui--model-choices ()
-  "Return the providers to offer, as an alist of label and symbol."
-  (mapcar
-   (lambda (provider)
-     (let ((config (chat-llm-get-provider-config provider)))
-       (cons (format "%s  %s"
-                     (or (plist-get config :name) (symbol-name provider))
-                     (or (plist-get config :model) ""))
-             provider)))
-   (chat-ui--offered-providers)))
+  "Return what to offer, grouped by vendor.
+
+A list of (VENDOR-LABEL . ITEMS), where each item is
+\(MODEL-LABEL PROVIDER . MODEL-NAME).  Two levels because vendor and
+model are two questions: a flat list of every provider read as one
+vendor per protocol variant and no models at all.
+
+Only the vendor's primary provider contributes models, so a vendor
+reachable over two protocols appears once."
+  (delq nil
+        (mapcar
+         (lambda (vendor)
+           (when-let* ((provider (chat-llm-vendor-primary-provider vendor))
+                       (models (chat-llm-provider-models provider)))
+             (cons (chat-ui--vendor-label vendor provider)
+                   (mapcar
+                    (lambda (model)
+                      ;; The reader's first question on opening the menu
+                      ;; is where they already are.
+                      (cons (if (and (eq provider (chat-ui--session-provider))
+                                     (equal model (chat-ui--session-model-name)))
+                                (concat "* " model)
+                              (concat "  " model))
+                            (cons provider model)))
+                    models))))
+         (chat-ui--offered-vendors))))
+
+(defun chat-ui--session-provider ()
+  "Return the provider the current session runs on, if there is one."
+  (and chat--current-session
+       (chat-session-model-id chat--current-session)))
+
+(defun chat-ui--offered-vendors ()
+  "Return the vendors worth offering, the session's own included."
+  (let* ((vendors (chat-llm-configured-vendors))
+         (current (when-let ((provider (chat-ui--session-provider)))
+                    (chat-llm-provider-vendor provider))))
+    (if (and current (not (memq current vendors)))
+        (cons current vendors)
+      vendors)))
+
+(defun chat-ui--model-choice-count ()
+  "Return how many model choices there are across all vendors."
+  (apply #'+ (mapcar (lambda (group) (length (cdr group)))
+                     (chat-ui--model-choices))))
 
 (defun chat-ui-switch-model (&optional event)
-  "Choose the provider this session talks to, from a menu.
+  "Choose the model this session talks to, from a menu.
 
 Bound to a click on the model named in the prompt, which is where the
 reader is already looking when they want to change it -- the model was
 visible in one place and changeable in another.
 
-Falls back to the minibuffer where a popup menu cannot be drawn, because
-Emacs in a terminal is not an edge case, and going through
-`chat-set-model' rather than setting the session field directly keeps its
-refusal while a response is in flight."
+Grouped by vendor, one item per model.  Falls back to the minibuffer
+where a popup menu cannot be drawn, because Emacs in a terminal is not an
+edge case, and going through `chat-set-model' rather than setting the
+session fields directly keeps its refusal while a response is in flight."
   (interactive (list last-nonmenu-event))
-  (let ((choices (chat-ui--model-choices)))
+  (let ((groups (chat-ui--model-choices)))
     (cond
-     ((null choices)
+     ((null groups)
       (user-error "No providers are configured"))
-     ((= (length choices) 1)
+     ((= (chat-ui--model-choice-count) 1)
       (message "%s" (chat-i18n 'only-one-provider
-                               "Only one provider is configured")))
+                               "Only one model is configured")))
      (t
-      (let* ((title (chat-i18n 'switch-model-title "Provider"))
+      (let* ((title (chat-i18n 'switch-model-title "Model"))
              (chosen
               (if (and (display-popup-menus-p) (listp event))
-                  ;; One pane of (LABEL . PROVIDER) items, so the click
-                  ;; hands back the provider symbol itself.
-                  (x-popup-menu event (list title (cons "" choices)))
-                (cdr (assoc (completing-read (format "%s: " title)
-                                             (mapcar #'car choices) nil t)
-                            choices)))))
+                  ;; One pane per vendor; each item's value is the
+                  ;; (PROVIDER . MODEL) pair, so the click hands back
+                  ;; both halves of the answer at once.
+                  (x-popup-menu event (cons title groups))
+                (let* ((flat (apply #'append
+                                    (mapcar
+                                     (lambda (group)
+                                       (mapcar
+                                        (lambda (item)
+                                          (cons (format "%s %s"
+                                                        (car group)
+                                                        (string-trim (car item)))
+                                                (cdr item)))
+                                        (cdr group)))
+                                     groups))))
+                  (cdr (assoc (completing-read (format "%s: " title)
+                                               (mapcar #'car flat) nil t)
+                              flat))))))
         (when chosen
-          (chat-set-model chosen)))))))
+          (chat-set-model (car chosen) (cdr chosen))))))))
 
 (defun chat-ui--handle-tool-creation (content)
   "Handle tool creation request from CONTENT."

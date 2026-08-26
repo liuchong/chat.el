@@ -47,7 +47,8 @@
   name                  ; Display name
   created-at            ; Creation timestamp
   updated-at            ; Last update timestamp
-  model-id              ; LLM model symbol
+  model-id              ; Provider symbol: how to reach the vendor
+  model-name            ; Remote model id string, or nil for the provider default
   messages              ; List of chat-message structs
   prompt-stack          ; Multi-level prompt stack
   context-window        ; Context window settings
@@ -179,12 +180,16 @@ directory survives reopening.  Returns the stored directory."
   (unless (file-directory-p chat-session-directory)
     (make-directory chat-session-directory t)))
 
-(defun chat-session-create (name &optional model-id)
+(defun chat-session-create (name &optional model-id model-name)
   "Create a new chat session with NAME and optional MODEL-ID.
 
 NAME is a string identifying the session.
-MODEL-ID is a symbol specifying the LLM model, defaults to
+MODEL-ID is the provider symbol to reach, defaults to
 chat-default-model if nil.
+MODEL-NAME is the remote model id to ask that provider for.  Left nil,
+the session follows whatever the provider's default is at the time of
+each request, which is what most sessions want: pinning a name here
+would freeze one snapshot of a setting the configuration may change.
 
 Returns the newly created chat-session struct."
   (chat-session--ensure-directory)
@@ -196,6 +201,7 @@ Returns the newly created chat-session struct."
                    :created-at now
                    :updated-at now
                    :model-id (or model-id (bound-and-true-p chat-default-model) 'kimi)
+                   :model-name model-name
                    :messages nil
                    :prompt-stack nil
                    :tool-config nil
@@ -255,12 +261,18 @@ to know the naming scheme."
         (cons 'modelId (symbol-name (chat-session-model-id session)))))
 
 (defun chat-session--state-entry (session)
-  "Return the JSONL state entry for SESSION."
+  "Return the JSONL state entry for SESSION.
+
+Which provider and model a session runs on is state, not identity: both
+can change mid-session, and only a full rewrite refreshes the header.
+`modelId' therefore appears in both, and the loader prefers this one."
   (list (cons 'type "state")
         (cons 'name (chat-session-name session))
         (cons 'updatedAt (format-time-string
                           "%Y-%m-%dT%H:%M:%S"
                           (chat-session-updated-at session)))
+        (cons 'modelId (symbol-name (chat-session-model-id session)))
+        (cons 'modelName (chat-session-model-name session))
         (cons 'autoApprove (let ((aa (chat-session-auto-approve session)))
                              (cond ((eq aa t) t)
                                    ((eq aa nil) :json-false)
@@ -380,7 +392,9 @@ skipped."
                (cons 'createdAt (cdr (assoc 'createdAt header)))
                (cons 'updatedAt (or (and state (cdr (assoc 'updatedAt state)))
                                     (cdr (assoc 'createdAt header))))
-               (cons 'modelId (cdr (assoc 'modelId header)))
+               (cons 'modelId (or (and state (cdr (assoc 'modelId state)))
+                                  (cdr (assoc 'modelId header))))
+               (cons 'modelName (and state (cdr (assoc 'modelName state))))
                (cons 'messages (nreverse message-datas))
                (cons 'autoApprove (and state (cdr (assoc 'autoApprove state))))
                (cons 'toolConfig (and state
@@ -594,6 +608,7 @@ branch starts with no messages. SESSION is never truncated."
              :created-at now
              :updated-at now
              :model-id (chat-session-model-id session)
+             :model-name (chat-session-model-name session)
              :messages copied
              :prompt-stack (copy-tree (chat-session-prompt-stack session))
              :context-window (copy-tree (chat-session-context-window session))
@@ -658,6 +673,7 @@ branch starts with no messages. SESSION is never truncated."
                    "%Y-%m-%dT%H:%M:%S"
                    (chat-session-updated-at session)))
     (modelId . ,(symbol-name (chat-session-model-id session)))
+    (modelName . ,(chat-session-model-name session))
     (messages . ,(mapcar #'chat-message--serialize
                          (chat-session-messages session)))
     (autoApprove . ,(let ((aa (chat-session-auto-approve session)))
@@ -831,6 +847,12 @@ branch starts with no messages. SESSION is never truncated."
             :updated-at (chat-session--parse-timestamp
                          (chat-session--alist-get data 'updatedAt))
             :model-id (intern (chat-session--alist-get data 'modelId))
+            ;; JSON null reads back as :json-null under some readers and
+            ;; nil under others.  Both mean "no model pinned".
+            :model-name (let ((name (chat-session--alist-get data 'modelName)))
+                          (and (stringp name)
+                               (not (string-empty-p name))
+                               name))
             :messages (mapcar #'chat-message--deserialize
                               (chat-session--alist-get data 'messages))
             :tool-config (chat-session--alist-to-plist

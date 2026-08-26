@@ -136,6 +136,15 @@ UA 是验证不了的），再走反馈渠道申请把 chat.el 纳入可识别�
 ;; Provider Registration
 ;; ------------------------------------------------------------------
 
+(defconst chat-llm-kimi-code-models
+  '("k3" "k3-256k" "kimi-for-coding" "kimi-for-coding-highspeed")
+  "Model ids the Kimi Code channel serves, as its own /models returns them.
+
+`k3' carries a million tokens of context for members who have unlocked
+it, `k3-256k' is the same model at a quarter of that and about half the
+consumption, and the two `kimi-for-coding' ids are the previous
+generation, the highspeed one gated behind a higher tier.")
+
 (chat-llm-register-provider
  'kimi-code
  :name "Kimi Code"
@@ -143,6 +152,8 @@ UA 是验证不了的），再走反馈渠道申请把 chat.el 纳入可识别�
  :async-transport 'curl
  :api-key-fn #'chat-llm-kimi-code--get-api-key
  :model chat-llm-kimi-code-default-model
+ :vendor 'kimi-code
+ :models chat-llm-kimi-code-models
  :context-window 262144
  :max-output-tokens 32768
  :headers #'chat-llm-kimi-code--headers
@@ -159,6 +170,8 @@ UA 是验证不了的），再走反馈渠道申请把 chat.el 纳入可识别�
  chat-llm-kimi-code-default-model
  :async-transport 'curl
  :api-key-fn #'chat-llm-kimi-code--get-api-key
+ :vendor 'kimi-code
+ :models chat-llm-kimi-code-models
  :context-window 262144
  :max-output-tokens 32768)
 

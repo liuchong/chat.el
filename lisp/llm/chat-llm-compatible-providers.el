@@ -6,6 +6,8 @@
 ;; This module registers mainstream OpenAI compatible providers.
 ;;; Code:
 (require 'chat-llm)
+;; For the Anthropic factory: one of these vendors serves both protocols.
+(require 'chat-llm-claude)
 (defgroup chat-llm-compatible-providers nil
   "OpenAI compatible provider configuration."
   :group 'chat-llm)
@@ -17,8 +19,12 @@
         (funcall fn))
       (chat-llm--auth-source-lookup provider
                                     (chat-llm-get-provider-config provider))))
-(defmacro chat-llm-compatible--define-provider (symbol display-name base-url default-model)
-  "Define one OpenAI compatible provider SYMBOL."
+(defmacro chat-llm-compatible--define-provider (symbol display-name base-url default-model &rest options)
+  "Define one OpenAI compatible provider SYMBOL.
+
+OPTIONS are passed through to the registration, for the things that vary
+between vendors rather than between compatibility layers -- a vendor
+identity shared with another protocol, or the model list it serves."
   (let* ((prefix (format "chat-llm-%s" symbol))
          (group-symbol (intern prefix))
          (default-model-symbol (intern (format "%s-default-model" prefix)))
@@ -42,21 +48,48 @@
          :type '(choice (const :tag "None" nil)
                         (function :tag "Key function"))
          :group ',group-symbol)
-       (chat-llm-register-openai-compatible-provider
-        ',symbol
-        ,display-name
-        ,base-url
-        ,default-model-symbol
-        :api-key-fn (lambda ()
-                       (chat-llm-compatible--api-key
-                        ',symbol
-                        ',api-key-symbol
-                        ',api-key-fn-symbol))))))
+       (apply #'chat-llm-register-openai-compatible-provider
+              ',symbol
+              ,display-name
+              ,base-url
+              ,default-model-symbol
+              :api-key-fn (lambda ()
+                            (chat-llm-compatible--api-key
+                             ',symbol
+                             ',api-key-symbol
+                             ',api-key-fn-symbol))
+              (list ,@options)))))
+;; `deepseek-chat' used to stand here.  It answers, but as an alias: a
+;; request naming it comes back reporting `deepseek-v4-flash', so the
+;; registration could not say which model a session had actually used.
+;; The ids below are what the vendor's own /models returns.
 (chat-llm-compatible--define-provider
  deepseek
  "DeepSeek"
  "https://api.deepseek.com/v1"
- "deepseek-chat")
+ "deepseek-v4-flash"
+ :vendor 'deepseek
+ :models '("deepseek-v4-flash"
+           "deepseek-v4-pro"
+           "deepseek-v4-flash-vision-exp"))
+
+;; The same host also speaks the Anthropic Messages protocol, under a
+;; path of its own.  Kept out of menus, reachable by name -- see
+;; `chat-llm-vendor-primary-provider'.
+(chat-llm-register-anthropic-compatible-provider
+ 'deepseek-anthropic
+ "DeepSeek (Anthropic)"
+ "https://api.deepseek.com/anthropic"
+ chat-llm-deepseek-default-model
+ :vendor 'deepseek
+ :models '("deepseek-v4-flash"
+           "deepseek-v4-pro"
+           "deepseek-v4-flash-vision-exp")
+ :api-key-fn (lambda ()
+               (chat-llm-compatible--api-key
+                'deepseek
+                'chat-llm-deepseek-api-key
+                'chat-llm-deepseek-api-key-fn)))
 (chat-llm-compatible--define-provider
  qwen
  "Qwen"

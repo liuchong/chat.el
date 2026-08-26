@@ -776,5 +776,68 @@ which is knowledge that belongs here."
     (let ((chat-session-directory "/two/"))
       (should (equal (chat-session-history-file session) "/two/abc.jsonl")))))
 
+;; ------------------------------------------------------------------
+;; The model a session runs on
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-session-a-new-session-pins-no-model ()
+  "nil means \"the provider's default at request time\", which is what
+almost every session wants.  Writing the default in would freeze one
+snapshot of a setting the configuration may change."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently (chat-session-create "T" 'kimi-code))))
+     (should (null (chat-session-model-name session))))))
+
+(ert-deftest chat-session-a-pinned-model-survives-a-round-trip ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently
+                    (chat-session-create "T" 'kimi-code "k3-256k"))))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (equal "k3-256k" (chat-session-model-name loaded)))))))
+
+(ert-deftest chat-session-an-unpinned-model-reads-back-unpinned ()
+  "JSON null must not come back as a model called \"null\"."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently (chat-session-create "T" 'kimi-code))))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (null (chat-session-model-name loaded)))))))
+
+(ert-deftest chat-session-a-provider-changed-mid-session-is-persisted ()
+  "Which provider a session runs on is state, not identity.
+
+It lived only in the header, and the append path does not rewrite the
+header, so a switch made mid-session could be saved and lost."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently (chat-session-create "T" 'kimi-code))))
+     (chat-session-save session)
+     (setf (chat-session-model-id session) 'deepseek)
+     (setf (chat-session-model-name session) "deepseek-v4-pro")
+     (chat-session-add-message session
+                               (make-chat-message :id "m1" :role :user
+                                                  :content "hi"))
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (eq 'deepseek (chat-session-model-id loaded)))
+       (should (equal "deepseek-v4-pro" (chat-session-model-name loaded)))))))
+
+(ert-deftest chat-session-a-branch-inherits-the-model-it-branched-from ()
+  "A branch continues a conversation; a different model is a different one."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently
+                    (chat-session-create "T" 'kimi-code "k3"))))
+     (chat-session-add-message session
+                               (make-chat-message :id "m1" :role :user
+                                                  :content "hi"))
+     (let ((branch (chat-test-silently
+                    (chat-session-create-branch session "m1"))))
+       (should (eq 'kimi-code (chat-session-model-id branch)))
+       (should (equal "k3" (chat-session-model-name branch)))))))
+
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here

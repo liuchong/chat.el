@@ -112,6 +112,82 @@ What to offer someone choosing a provider.  A list of every vendor chat.el
 was built to speak to is not a choice; it is a catalogue."
   (seq-filter #'chat-llm-provider-configured-p (chat-llm-enabled-providers)))
 
+;; ------------------------------------------------------------------
+;; Vendor, protocol, models
+;; ------------------------------------------------------------------
+;;
+;; A provider symbol answers three questions at once: which vendor, over
+;; which protocol, running which model.  That is why one vendor speaking
+;; two protocols reads as two vendors, and why the several models a vendor
+;; offers are nowhere to be seen.  These three read the questions apart
+;; again, each with a default that leaves an existing registration alone.
+
+(defun chat-llm-provider-vendor (provider)
+  "Return the vendor symbol PROVIDER belongs to.
+
+Itself, unless the registration says otherwise.  A vendor reachable over
+two protocols registers twice and names the same vendor in both, which is
+what stops it from looking like two companies."
+  (or (plist-get (chat-llm-get-provider-config provider) :vendor)
+      provider))
+
+(defun chat-llm-provider-protocol (provider)
+  "Return the wire protocol PROVIDER speaks, `openai' or `anthropic'.
+
+Injected by whichever compatibility factory registered it.  A provider
+registered directly is assumed to speak the OpenAI shape, which is what
+every one of them does today."
+  (or (plist-get (chat-llm-get-provider-config provider) :protocol)
+      'openai))
+
+(defun chat-llm-provider-models (provider)
+  "Return the model ids PROVIDER offers, its default first if listed alone.
+
+The one place to ask, so that discovering this from the vendor rather than
+reading it from the registration is a change in one function instead of
+everywhere a menu is built.
+
+A registration that lists nothing offers exactly its default model.  That
+is not a claim about the vendor -- most of them serve many more -- it is
+the honest extent of what was written down."
+  (let ((config (chat-llm-get-provider-config provider)))
+    (or (plist-get config :models)
+        (when-let ((model (plist-get config :model)))
+          (list model)))))
+
+(defun chat-llm-vendor-providers (vendor)
+  "Return the providers belonging to VENDOR.
+
+Which vendor a provider belongs to is a fact about the registration;
+whether it has a key is a separate question, asked by
+`chat-llm-configured-vendors'.  Keeping them apart is what lets a session
+sitting on a keyless provider still see which models that vendor serves,
+which is exactly when it needs to."
+  (seq-filter (lambda (provider)
+                (eq (chat-llm-provider-vendor provider) vendor))
+              (chat-llm-enabled-providers)))
+
+(defun chat-llm-vendor-primary-provider (vendor)
+  "Return the provider to reach VENDOR through by default.
+
+The OpenAI-shaped one where there is a choice, because that is the path
+everything else in chat.el is exercised against; the only one otherwise.
+
+A vendor's other protocol is still reachable by name through
+`chat-set-model'.  It is kept out of menus because the protocol is not
+what someone choosing a model is choosing -- \"I want k3\" is the
+request, and which wire format carries it is not."
+  (let ((providers (chat-llm-vendor-providers vendor)))
+    (or (seq-find (lambda (provider)
+                    (eq (chat-llm-provider-protocol provider) 'openai))
+                  providers)
+        (car providers))))
+
+(defun chat-llm-configured-vendors ()
+  "Return the vendors with a configured provider, in registration order."
+  (delete-dups (mapcar #'chat-llm-provider-vendor
+                       (chat-llm-configured-providers))))
+
 (defun chat-llm-register-provider (symbol &rest config)
   "Register a new LLM provider with SYMBOL and CONFIG.
 
@@ -937,6 +1013,10 @@ OPTIONS are appended to the provider plist."
          :name name
          :base-url base-url
          :model model
+         ;; The factory knows the protocol, so no registration has to
+         ;; remember to say it.  Overridable by OPTIONS all the same,
+         ;; which is why it goes before them.
+         :protocol 'openai
          :request-fn (lambda (messages request-options)
                        (chat-llm-build-openai-compatible-request
                         symbol messages request-options))

@@ -53,6 +53,7 @@
  "Ark Code"
  "https://ark.cn-beijing.volces.com/api/plan/v3"
  chat-llm-ark-default-model
+ :vendor 'ark
  :api-key-fn #'chat-llm-ark--get-api-key)
 
 (chat-llm-register-anthropic-compatible-provider
@@ -60,6 +61,7 @@
  "Ark Code (Anthropic)"
  "https://ark.cn-beijing.volces.com/api/plan"
  chat-llm-ark-default-model
+ :vendor 'ark
  :api-key-fn #'chat-llm-ark--get-api-key)
 
 (provide 'chat-llm-ark)

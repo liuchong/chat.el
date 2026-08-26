@@ -221,9 +221,9 @@ Wiki（/wiki <子命令>）：
    (status-queued . "已攒：%d")
 
    ;; The prompt, and switching provider from it.
-   (prompt-model-switch . "%s —— 鼠标左键切换厂商")
-   (switch-model-title . "厂商")
-   (only-one-provider . "只配置了一个厂商")
+   (prompt-model-switch . "%s —— 鼠标左键切换模型")
+   (switch-model-title . "模型")
+   (only-one-provider . "只配置了一个模型")
 
    ;; Completion annotations.
    (command-annotation-sticky . "可接管直接输入")

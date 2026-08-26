@@ -211,13 +211,31 @@ box, so the prompt degrades to exactly what it was. And brand colours are
 used for brands only — a static test fails if any file outside
 `chat-mark.el` names one.
 
-Clicking the model opens a provider menu and goes through
-`chat-set-model`, which already refuses mid-response and already
-persists; the affordance appears only when there is more than one
-provider, and a terminal without popup menus falls back to
-`completing-read` rather than losing the feature.
+Clicking the model opens the menu and goes through `chat-set-model`,
+which already refuses mid-response and already persists; the affordance
+appears only when there is more than one model to pick, and a terminal
+without popup menus falls back to `completing-read` rather than losing
+the feature.
 
-Canonical suite: 1044 tests passing.
+That menu then had to be about models rather than providers (spec 008).
+The list was every registered vendor, sixteen of them, so it was narrowed
+to the ones a key can be fetched for — and what remained still showed a
+two-protocol vendor twice and none of its models, because a provider
+symbol was answering three questions at once. Vendor, protocol and model
+are now separate fields on a registration, each defaulting so that the
+registrations without a variant say nothing new; the model name lives on
+the session, nil meaning "the provider's default at request time" so that
+a default changed in configuration still reaches sessions that never
+pinned one. The protocol is deliberately not offered — "I want k3" is the
+request, the wire format is not — but stays reachable by name.
+
+Both real vendors answer `GET /models` with exactly the list now written
+into their registrations, which makes discovery the obvious next layer;
+it cannot be synchronous while a menu is being drawn, so the written list
+is the fallback and `chat-llm-provider-models` is the one place that has
+to change.
+
+Canonical suite: 1075 tests passing.
 
 ## Next Stage
 

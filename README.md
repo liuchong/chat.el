@@ -615,12 +615,18 @@ than shown as a hollow box, so the prompt degrades to `cmd>` and
 `moonshot-v1-8k>` on a terminal without them. `chat-ui-prompt-model-width`
 truncates a long model name, and hovering shows it in full.
 
-Clicking the model name opens a menu of the configured providers and
-switches this session to the one picked, which is the same thing
-`M-x chat-set-model` does -- the model was visible in one place and
-changeable in another. It is refused mid-response for the same reason
-`chat-set-model` refuses: the reply would come back from a provider that
-was never asked.
+Clicking the model name opens a menu and switches this session to the
+model picked, which is the same thing `M-x chat-set-model` does -- the
+model was visible in one place and changeable in another. It is refused
+mid-response for the same reason `chat-set-model` refuses: the reply
+would come back from a model that was never asked.
+
+The menu is grouped by vendor, one item per model, with the session's
+current model marked. Vendor and model are two questions, and a flat list
+of providers answered neither: a vendor speaking two protocols read as
+two companies, and the several models each one serves were nowhere to be
+seen. A vendor therefore appears once, under its own name, listing what
+it serves.
 
 Configured means a key can be fetched for it. chat.el registers every
 vendor it knows how to speak to at load time, so `chat-llm-providers`
@@ -628,10 +634,39 @@ holds sixteen while a typical machine reaches two, and offering the
 register would be offering a catalogue rather than a choice. The list is
 sensed rather than declared -- there is nothing to keep in step, and a
 key set halfway through a session counts from the next time the prompt is
-drawn. The session's own provider is always offered, with or without a
-key, so a session sitting on one can see where it is and leave; and the
-click affordance appears only when that leaves more than one to pick
+drawn. The session's own vendor is always offered, with or without a key,
+so a session sitting on one can see where it is and leave; and the click
+affordance appears only when that leaves more than one model to pick
 from.
+
+The protocol is not in the menu. A vendor serving both the OpenAI and the
+Anthropic shape is reached through the OpenAI one, because that is the
+path the rest of chat.el is exercised against; the other stays reachable
+by name through `M-x chat-set-model`, since it is a genuinely different
+code path and has to be testable. "I want `k3`" is the request; which
+wire format carries it is not.
+
+### Which model, and whose default
+
+A session stores a provider and, optionally, a model name. The provider
+says how to reach a vendor; the name says which of its models to ask for.
+Left unset -- which is the normal state -- the session follows whatever
+that provider's default is at the time of each request, so a default
+changed in configuration reaches every session that never pinned one.
+Writing the default into the session instead would freeze one snapshot of
+a setting meant to be changeable.
+
+Switching vendor without naming a model drops any name the session had
+pinned, because a model id belongs to the vendor that serves it: carried
+over, `k3` would be sent to DeepSeek, which can only refuse it. Naming a
+model the provider does not serve is refused outright, and the session is
+left where it was rather than half-moved.
+
+`chat-llm-provider-models` is the one place that answers what a provider
+serves. Today it reads a list written into the registration; both vendors
+above also answer `GET /models` with exactly that list, so replacing the
+written list with what the vendor says is a change in one function rather
+than everywhere a menu is built.
 
 `:default sticky` in `chat-ui--command-table` says a command may claim
 plain input; `:default reset` says using it hands the claim back. `/quick`

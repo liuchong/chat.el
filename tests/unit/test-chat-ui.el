@@ -1580,19 +1580,153 @@ runs."
     (let ((menu nil))
       (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () t))
                 ((symbol-function 'x-popup-menu)
-                 (lambda (_position m) (setq menu m) 'claude)))
+                 (lambda (_position m)
+                   (setq menu m)
+                   ;; Answer with a real item's value, the way a click
+                   ;; does, so the pair has to survive the round trip.
+                   (cdr (car (cdr (car (cdr m))))))))
         (chat-ui-switch-model '(mouse-1 (nil . 1)))
-        ;; (TITLE (PANE-TITLE (LABEL . VALUE) ...)), and the value is the
-        ;; provider itself, so the click needs no decoding.
+        ;; (TITLE (PANE-TITLE (LABEL . VALUE) ...)) with one pane per
+        ;; vendor, and each value the (PROVIDER . MODEL) pair, so the
+        ;; click hands back both halves of the answer.
         (should (stringp (car menu)))
-        (should (= 2 (length menu)))
-        (let ((pane (cadr menu)))
+        (should (>= (length menu) 3))
+        (dolist (pane (cdr menu))
           (should (stringp (car pane)))
           (dolist (item (cdr pane))
             (should (stringp (car item)))
-            (should (symbolp (cdr item))))
-          (should (rassq 'kimi (cdr pane))))
-        (should (eq 'claude (chat-session-model-id chat--current-session))))))))
+            (should (symbolp (car (cdr item))))
+            (should (stringp (cdr (cdr item))))))
+        ;; Whichever vendor came first, both halves of its item landed.
+        (let ((provider (chat-session-model-id chat--current-session)))
+          (should (memq provider '(kimi claude)))
+          (should (member (chat-session-model-name chat--current-session)
+                          (chat-llm-provider-models provider)))))))))
+
+(ert-deftest chat-ui-the-menu-groups-models-under-their-vendor ()
+  "Vendor and model are two questions; a flat list answers neither.
+
+A provider list read as one vendor per protocol variant and showed no
+models at all, which is how four Kimi models and three DeepSeek ones were
+invisible behind two entries that looked like two companies."
+  (chat-ui-auto-test--with-session
+   (chat-ui-auto-test--with-providers '(kimi claude)
+    (let ((groups (chat-ui--model-choices)))
+      (should (= 2 (length groups)))
+      (dolist (group groups)
+        (should (stringp (car group)))
+        (should (cdr group)))
+      ;; Two vendors, one model each in the stub, so the count is the
+      ;; number of choices rather than the number of vendors.
+      (should (= 2 (chat-ui--model-choice-count)))))))
+
+(ert-deftest chat-ui-a-vendor-with-two-protocols-appears-once ()
+  "The protocol is not what someone choosing a model is choosing.
+
+Kimi Code registers twice, once per protocol.  Listing both put \"Kimi
+Code\" and \"Kimi Code (Anthropic)\" side by side as if they were two
+companies."
+  (chat-ui-auto-test--with-session
+   (chat-ui-auto-test--with-providers '(kimi-code kimi-code-anthropic)
+    ;; On this vendor already, so the session contributes no second group.
+    (chat-set-model 'kimi-code)
+    (let ((groups (chat-ui--model-choices)))
+      (should (= 1 (length groups)))
+      ;; The group is the vendor, so the protocol's parenthetical is not
+      ;; part of its heading.
+      (should (equal "Kimi Code" (car (car groups))))
+      ;; And every model reached through the primary provider.
+      (dolist (item (cdr (car groups)))
+        (should (eq 'kimi-code (car (cdr item)))))
+      (should (equal (chat-llm-provider-models 'kimi-code)
+                     (mapcar (lambda (item) (cdr (cdr item)))
+                             (cdr (car groups)))))))))
+
+(ert-deftest chat-ui-the-other-protocol-is-still-reachable-by-name ()
+  "Kept out of the menu, not out of reach: it is a different code path."
+  (chat-ui-auto-test--with-session
+   (should (chat-llm-get-provider-config 'kimi-code-anthropic))
+   (chat-set-model 'kimi-code-anthropic "k3")
+   (should (eq 'kimi-code-anthropic
+               (chat-session-model-id chat--current-session)))
+   (should (equal "k3" (chat-session-model-name chat--current-session)))))
+
+(ert-deftest chat-ui-the-menu-marks-where-the-session-already-is ()
+  "The first question on opening the menu is where you already are."
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code "k3-256k")
+   (let* ((groups (chat-ui--model-choices))
+          (marked (seq-filter
+                   (lambda (item) (string-prefix-p "*" (car item)))
+                   (apply #'append (mapcar #'cdr groups)))))
+     (should (= 1 (length marked)))
+     (should (equal "k3-256k" (cdr (cdr (car marked))))))))
+
+(ert-deftest chat-ui-the-prompt-names-the-model-the-session-pinned ()
+  "Not the provider's default, which is a different answer once pinned.
+
+A prompt naming something other than what the request carries stops
+preventing mistakes and starts causing them."
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code "k3-256k")
+   (let ((prompt (chat-ui-auto-test--drawn-prompt)))
+     (should (string-match-p "k3-256k" prompt))
+     ;; And not the default it was pinned away from.
+     (should-not
+      (string-match-p
+       (regexp-quote (plist-get (chat-llm-get-provider-config 'kimi-code)
+                                :model))
+       prompt)))))
+
+(ert-deftest chat-ui-an-unpinned-session-follows-the-provider-default ()
+  "nil is a value, not an absence: it means \"whatever the default is\".
+
+Writing the default into the session would freeze one snapshot of a
+setting the configuration may change -- the registry bug, moved."
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code)
+   (should (null (chat-session-model-name chat--current-session)))
+   (should (equal (plist-get (chat-llm-get-provider-config 'kimi-code) :model)
+                  (chat-ui--session-model-name)))))
+
+(ert-deftest chat-ui-switching-vendor-drops-the-old-vendor-model ()
+  "A model id belongs to the vendor that serves it.
+
+Carried over, `k3' would be sent to DeepSeek, which can only refuse it."
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code "k3")
+   (chat-set-model 'deepseek)
+   (should (null (chat-session-model-name chat--current-session)))))
+
+(ert-deftest chat-ui-a-model-the-provider-does-not-serve-is-refused ()
+  "And the session is left where it was, not half-moved."
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code "k3")
+   (should-error (chat-set-model 'deepseek "k3") :type 'user-error)
+   (should (eq 'kimi-code (chat-session-model-id chat--current-session)))
+   (should (equal "k3" (chat-session-model-name chat--current-session)))))
+
+(defun chat-ui-auto-test--request-options ()
+  "Return the request options a run would hand the transport."
+  (let ((options nil))
+    (cl-letf (((symbol-function 'chat-agent-start)
+               (lambda (config)
+                 (setq options (plist-get config :request-options))
+                 nil)))
+      (chat-ui--start-agent-run 'stream))
+    options))
+
+(ert-deftest chat-ui-the-pinned-model-is-what-the-request-carries ()
+  "The point of pinning.  Read out of the same options the transport gets."
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code "k3-256k")
+   (should (equal "k3-256k"
+                  (plist-get (chat-ui-auto-test--request-options) :model))))
+  ;; An unpinned session says nothing, leaving the choice to the provider
+  ;; at request time -- including after its default changes.
+  (chat-ui-auto-test--with-session
+   (chat-set-model 'kimi-code)
+   (should-not (plist-member (chat-ui-auto-test--request-options) :model))))
 
 (ert-deftest chat-ui-switching-provider-is-refused-mid-response ()
   "The reply would come back from a provider that was never asked."

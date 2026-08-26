@@ -599,5 +599,104 @@ second turn's results would pair with the first turn's calls."
     (should (equal (plist-get request :tool_choice) "auto"))
     (should (equal (plist-get request :tools) tools))))
 
+;; ------------------------------------------------------------------
+;; Vendor, protocol, models
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-llm-a-provider-is-its-own-vendor-unless-told-otherwise ()
+  "So that the fifteen registrations with no variant need no new field."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'lonely :name "Lonely" :model "m")
+    (should (eq 'lonely (chat-llm-provider-vendor 'lonely)))))
+
+(ert-deftest chat-llm-a-provider-lists-its-default-model-if-nothing-else ()
+  "The honest extent of what was written down, not a claim about the vendor."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'terse :name "Terse" :model "only-one")
+    (should (equal '("only-one") (chat-llm-provider-models 'terse)))))
+
+(ert-deftest chat-llm-a-listed-provider-offers-what-it-lists ()
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'many :name "Many" :model "a"
+                                :models '("a" "b" "c"))
+    (should (equal '("a" "b" "c") (chat-llm-provider-models 'many)))))
+
+(ert-deftest chat-llm-the-factories-say-which-protocol-they-speak ()
+  "Injected by whoever registered it, so no registration has to remember."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-openai-compatible-provider
+     'oai "OAI" "https://example.invalid/v1" "m")
+    (chat-llm-register-anthropic-compatible-provider
+     'ant "Ant" "https://example.invalid" "m")
+    (should (eq 'openai (chat-llm-provider-protocol 'oai)))
+    (should (eq 'anthropic (chat-llm-provider-protocol 'ant)))))
+
+(ert-deftest chat-llm-a-provider-registered-directly-is-assumed-openai ()
+  "Which is what every one of them speaks today."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'direct :name "Direct" :model "m")
+    (should (eq 'openai (chat-llm-provider-protocol 'direct)))))
+
+(ert-deftest chat-llm-one-vendor-over-two-protocols-is-one-vendor ()
+  "The reason vendor exists: two registrations, one company.
+
+Listed separately they read as two companies, which is what made a
+two-vendor configuration look like four."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-openai-compatible-provider
+     'acme "Acme" "https://example.invalid/v1" "m"
+     :vendor 'acme :api-key "k")
+    (chat-llm-register-anthropic-compatible-provider
+     'acme-anthropic "Acme (Anthropic)" "https://example.invalid" "m"
+     :vendor 'acme :api-key "k")
+    (should (equal '(acme) (chat-llm-configured-vendors)))
+    (should (= 2 (length (chat-llm-vendor-providers 'acme))))
+    ;; And the OpenAI-shaped one is the way in, because that is the path
+    ;; the rest of chat.el is exercised against.
+    (should (eq 'acme (chat-llm-vendor-primary-provider 'acme)))))
+
+(ert-deftest chat-llm-a-vendor-with-only-one-protocol-uses-it ()
+  "Even when that protocol is the Anthropic one."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-anthropic-compatible-provider
+     'solo "Solo" "https://example.invalid" "m" :api-key "k")
+    (should (eq 'solo (chat-llm-vendor-primary-provider 'solo)))))
+
+(ert-deftest chat-llm-an-unconfigured-vendor-is-not-a-vendor-to-offer ()
+  "Same rule as providers: no key, no appearance in the list to offer.
+
+Belonging is still answered, though -- a session already sitting on a
+keyless provider has to be able to see where it is."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider 'keyed :name "Keyed" :model "m" :api-key "k")
+    (chat-llm-register-provider 'bare :name "Bare" :model "m")
+    (should (equal '(keyed) (chat-llm-configured-vendors)))
+    (should (eq 'bare (chat-llm-vendor-primary-provider 'bare)))))
+
+(ert-deftest chat-llm-the-two-real-vendors-list-their-real-models ()
+  "Verified against each vendor's own /models, not transcribed from prose.
+
+The registration used to name one model, snapshotted at load time, which
+is why choosing another meant reaching into the registry by hand."
+  (should (equal '("k3" "k3-256k" "kimi-for-coding" "kimi-for-coding-highspeed")
+                 (chat-llm-provider-models 'kimi-code)))
+  (should (equal '("deepseek-v4-flash"
+                   "deepseek-v4-pro"
+                   "deepseek-v4-flash-vision-exp")
+                 (chat-llm-provider-models 'deepseek)))
+  ;; Both protocols of a vendor serve the same models.
+  (should (equal (chat-llm-provider-models 'kimi-code)
+                 (chat-llm-provider-models 'kimi-code-anthropic)))
+  (should (equal (chat-llm-provider-models 'deepseek)
+                 (chat-llm-provider-models 'deepseek-anthropic))))
+
+(ert-deftest chat-llm-a-registration-names-a-model-not-an-alias ()
+  "`deepseek-chat' answered, but as an alias: the response came back
+reporting `deepseek-v4-flash', so the registration could not say which
+model a session had actually used."
+  (let ((model (plist-get (chat-llm-get-provider-config 'deepseek) :model)))
+    (should (member model (chat-llm-provider-models 'deepseek)))
+    (should-not (equal model "deepseek-chat"))))
+
 (provide 'test-chat-llm)
 ;;; test-chat-llm.el ends here

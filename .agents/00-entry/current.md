@@ -88,7 +88,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1044 tests passing.
+Canonical suite: 1075 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark
@@ -100,10 +100,30 @@ follow the background from light to dark and only one column keeps a
 monospaced buffer in step, and a glyph the frame cannot draw is dropped
 so the prompt degrades to exactly what it was before. Brand colours are
 used for brands only, asserted by a static test over the tree. Clicking
-the model opens a provider menu and switches through `chat-set-model`,
-which already refuses mid-response and already persists; the affordance
-appears only when more than one provider is configured, and a terminal
-without popup menus gets `completing-read`.
+the model opens the menu and switches through `chat-set-model`, which
+already refuses mid-response and already persists; the affordance appears
+only when there is more than one model to pick, and a terminal without
+popup menus gets `completing-read`.
+
+Which model is a session-level choice, not a registry snapshot (spec
+008). A provider symbol used to answer three questions at once -- which
+vendor, over which protocol, running which model -- so a vendor speaking
+two protocols read as two companies and the models each one serves were
+invisible. Registrations now carry `:vendor` (defaulting to themselves),
+`:protocol` (injected by whichever compatibility factory registered them)
+and `:models` (defaulting to the one default model), and the session
+carries a `model-name` that is nil when it means "the provider's default
+at request time" -- writing that default in would freeze a snapshot of a
+changeable setting, which is the bug being removed. The menu groups by
+vendor, one item per model, current one marked; the protocol is not
+offered, since "I want k3" is the request and the wire format is not, and
+the other protocol stays reachable by name because it is a different code
+path. `chat-llm-provider-models` is the single question "what does this
+serve": both real vendors answer `GET /models` with exactly the written
+list, so replacing the list with discovery is one function, not every
+menu. Provider and model also moved into the JSONL state entry, since the
+append path does not rewrite the header and a mid-session switch could be
+saved and lost.
 
 The command prompt behaves like a shell in the two places it did not. A
 subprocess cannot move its parent's working directory or set its parent's

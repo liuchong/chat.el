@@ -159,6 +159,9 @@ OPTIONS are appended to the provider plist; useful keys include
          :base-url base-url
          :request-path "/v1/messages"
          :model model
+         ;; The factory knows the protocol, so no registration has to
+         ;; remember to say it.
+         :protocol 'anthropic
          :auth-headers-fn #'chat-llm-claude--auth-headers
          :request-fn (lambda (messages request-options)
                        (chat-llm-claude--build-request
