@@ -88,7 +88,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 931 tests passing.
+Canonical suite: 945 tests passing.
 
 The wiki became a feature. `lisp/wiki/chat-wiki.el` had been in the tree
 four months with five documented `/wiki-*` names, no handler behind any of
@@ -98,10 +98,17 @@ through a prompt index, because a wiki grows without bound and that growth
 does not belong in the fixed region of the context. Unreachable turned out
 not to mean inert: a top-level form wrote to disk whenever a `wiki`
 directory sat beside `default-directory`, which in the test runner is this
-repository. Six defects came out with it, two of them silent — frontmatter
-matched with `.` never parsed across lines, so every title and date fell
-back to a filename, and CJK titles were slugified by deleting non-ASCII,
-which collided them all on the empty string. Decision 0015 records it.
+repository. Ten defects came out with it, most of them silent —
+frontmatter matched with `.` never parsed across lines, so every title and
+date fell back to a filename; CJK titles were slugified by deleting
+non-ASCII, which collided them all on the empty string; and the wikilink
+pattern used `[^\]]`, where a backslash is not an escape inside a
+character alternative, so link extraction always returned nothing and
+backlinks, orphans and broken links had never worked at all. The last four
+were found not by tests but by running the thing end to end in Chinese,
+which is worth remembering: the 42 tests written first all passed, because
+the test helper hand-wrote the frontmatter that the ordinary path failed to
+write. Decision 0015 records it.
 
 Two fixes landed before that. Tool call ids are now answered by one
 function, so the assistant `tool_calls` entry and the `tool_call_id` of its

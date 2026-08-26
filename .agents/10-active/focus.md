@@ -114,15 +114,27 @@ handler; the subcommand folds from fullwidth and takes a localized alias
 while its argument does not, which is decision 0014 one level down. The
 model reaches it through tools rather than a prompt index, because a wiki
 grows without bound and `chat-knowledge.el`'s arrangement would put that
-growth in the fixed region of the context. Six defects came out with it,
-two of them silent data loss: frontmatter was matched with `.` and so
-never parsed across lines, losing every title and date to a filename
-fallback, and CJK titles were slugified by deleting non-ASCII, which made
-them all collide on the empty string. Loading the file also wrote to disk
-whenever a `wiki` directory sat beside `default-directory` — which, in the
-test runner, is this repository. Decision 0015 records it.
+growth in the fixed region of the context. Ten defects came out with it,
+most of them silent: frontmatter was matched with `.` and so never parsed
+across lines, losing every title and date to a filename fallback; CJK
+titles were slugified by deleting non-ASCII, which collided them all on
+the empty string; the wikilink pattern used `[^\]]`, where a backslash is
+not an escape, so link extraction returned nothing every time it ran and
+the whole linking half of the wiki — backlinks, orphans, broken links —
+had never worked; and `create-page` wrote caller-supplied bodies without
+frontmatter, so every page the model writes arrived untitled. Loading the
+file also wrote to disk whenever a `wiki` directory sat beside
+`default-directory`, which in the test runner is this repository. Lint is
+now one scan rather than quadratic in reads, and the five `M-x` wrappers
+that duplicated subcommands are gone.
 
-Canonical suite: 931 tests passing.
+The four found last were found by running it end to end in Chinese, not by
+the 42 tests written first — those passed because the test helper
+hand-wrote the frontmatter that the real path failed to write. A helper
+that constructs valid input by hand tests the reader and not the writer.
+Decision 0015 records it.
+
+Canonical suite: 945 tests passing.
 
 ## Next Stage
 

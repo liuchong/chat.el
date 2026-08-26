@@ -127,7 +127,55 @@ Dates recorded before this are still wrong on disk wherever a page was
 written and read back: the parse fix stops the loss, it cannot recover
 what already fell back to a filename.
 
-What is still not done: `chat-wiki-query` and the `*Wiki Query Result*`
-buffer remain from the interactive path and overlap `/wiki search`;
-`chat-wiki-lint` is O(pages²) full-text reads, which is fine at the size
-a wiki reaches by hand and not at the size a model can write it to.
+One capability, one path. `chat-wiki-query` and its `*Wiki Query Result*`
+buffer are deleted rather than left beside `/wiki search`, and so are
+`chat-wiki-query-interactive`, `chat-wiki-lint-interactive`,
+`chat-wiki-ingest-file` and `chat-wiki-create-page-interactive` — every
+one of them a wrapper with no caller but `M-x`, duplicating a subcommand.
+`chat-wiki-show-backlinks` stays, because it acts on the page in the
+current buffer and has no equivalent on the chat surface.
+
+Lint is one scan. `chat-wiki--scan` reads each page once and returns its
+links with it; the three checks then run off two hash tables. It was three
+walks of the wiki plus, inside the orphan check, another full walk per
+page. A test counts the reads, so the shape cannot regress quietly.
+
+Backlinks are matched as slugs, which is how a link is resolved
+everywhere else. Searching for the literal `[[Title]]` meant the lint and
+the page lookup disagreed about what a page is called, and a page linked
+by its slug read as unlinked.
+
+Frontmatter is written by `chat-wiki-create-page`, for every page, at the
+one door they all go through. It used to write caller-supplied content
+verbatim and add frontmatter only to pages it generated from a template —
+so a page created with a body, which is every page the model writes and
+every ingest, arrived with no title and no type. The rule was implemented
+once in the `wiki_write` tool, which is the wrong place: it covered the
+model and not the module.
+
+Four more latent defects surfaced while testing the above, and the first
+of them was the largest.
+
+The wikilink pattern used `[^\]]` as its character alternative. A
+backslash is not an escape inside one in an Emacs regexp, so it read as
+"any character except backslash, followed by a literal bracket" and
+matched no link that anyone would write. Extraction returned nothing,
+always. Every backlink, orphan and broken-link report was therefore empty
+— the linking half of a wiki, which is most of the point of one, had never
+worked. It hid because the failure was silence: an empty issue list reads
+as a clean wiki.
+
+`chat-wiki-read-page` ran `string-match` for a heading and then called
+`match-string` whether or not it matched. A failed `string-match` leaves
+the previous match's data in place, so the title came back as a slice of
+the body at offsets belonging to an unrelated string — prose fragments
+where a title belongs, and a different one each time depending on what had
+matched last.
+
+Emptiness was measured in characters, which is not a comparable amount of
+writing across scripts. A CJK character carries roughly what a short word
+does, so forty characters is a sentence in English and a paragraph in
+Chinese, and a Chinese page had to say two or three times as much as an
+English one to stop being reported empty. It is now counted in the units
+`chat-wiki--tokenize` already produces: words for alphabetic scripts,
+characters for CJK.

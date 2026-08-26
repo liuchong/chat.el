@@ -273,6 +273,26 @@ each delta rather than redrawing the whole reply.")
    (should-not (seq-find (lambda (i) (eq (plist-get i :type) 'empty))
                          (chat-wiki-lint)))))
 
+(ert-deftest chat-wiki-a-cjk-page-of-the-same-substance-is-not-called-empty ()
+  "The same amount of writing counts the same in either script.
+
+Emptiness was measured in characters, and a CJK character carries roughly
+what a short word does, so the threshold that read as one sentence in
+English read as a paragraph in Chinese.  A perfectly ordinary Chinese page
+was reported as having headings and no content."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "上下文预算"
+                    "给模型多少上下文,是要算的。这一页讲怎么算,以及为什么要算。")
+   (should-not (seq-find (lambda (i) (eq (plist-get i :type) 'empty))
+                         (chat-wiki-lint)))))
+
+(ert-deftest chat-wiki-a-one-line-cjk-stub-is-still-called-empty ()
+  "Script fairness is not the same as accepting anything."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "预算" "待补。")
+   (should (seq-find (lambda (i) (eq (plist-get i :type) 'empty))
+                     (chat-wiki-lint)))))
+
 (ert-deftest chat-wiki-a-page-may-discuss-todo-without-being-a-stub ()
   "The word is not the condition.
 
@@ -294,6 +314,154 @@ dangling by construction: lint reported them on a wiki nobody had touched."
    (chat-wiki-create-page 'sources "Some Article")
    (should-not (seq-find (lambda (i) (eq (plist-get i :type) 'broken-link))
                          (chat-wiki-lint)))))
+
+;; ------------------------------------------------------------------
+;; A page cannot reach disk untitled
+;; ------------------------------------------------------------------
+;;
+;; Note that `test-wiki--page' above writes its own frontmatter, which is
+;; how the module's first 42 tests all passed while the ordinary path --
+;; hand a title and a body to `chat-wiki-create-page' -- wrote no
+;; frontmatter at all.  These go through that path.
+
+(ert-deftest chat-wiki-a-page-created-from-a-body-still-has-a-title ()
+  "Frontmatter is the writer's job, not the caller's.
+
+`chat-wiki-create-page' used to write caller-supplied content verbatim and
+only add frontmatter to pages it built from a template, so every page
+created with a body -- every page the model writes, every ingest -- landed
+with no title and no type."
+  (test-wiki--with-store
+   (let ((page (chat-wiki-read-page
+                (chat-wiki-create-page 'concepts "Context Budget"
+                                       "Prose about how much to allocate."))))
+     (should (equal (plist-get page :title) "Context Budget"))
+     (should (equal (cdr (assoc 'type (plist-get page :frontmatter)))
+                    "concepts")))))
+
+(ert-deftest chat-wiki-a-cjk-title-survives-the-round-trip ()
+  "Written, slugified into a filename, read back, still itself."
+  (test-wiki--with-store
+   (let ((page (chat-wiki-read-page
+                (chat-wiki-create-page 'concepts "上下文预算"
+                                       "给模型多少上下文,是要算的。"))))
+     (should (equal (plist-get page :title) "上下文预算")))))
+
+(ert-deftest chat-wiki-frontmatter-already-there-is-not-doubled ()
+  "Content that brings its own frontmatter keeps it."
+  (test-wiki--with-store
+   (let* ((path (chat-wiki-create-page
+                 'concepts "Streaming"
+                 "---\ntitle: Streaming Output\ntype: concepts\n---\n\nProse.\n"))
+          (page (chat-wiki-read-page path)))
+     (should (equal (plist-get page :title) "Streaming Output"))
+     (should-not (string-match-p "^---" (plist-get page :body))))))
+
+(ert-deftest chat-wiki-a-page-with-no-frontmatter-falls-back-to-its-filename ()
+  "The fallback returns a filename, not a slice of the page.
+
+`chat-wiki-read-page' ran `string-match' for a heading and then called
+`match-string' regardless of whether it matched.  A failed `string-match'
+leaves the previous match's data in place, so the title came back as a
+slice of the body at offsets belonging to some unrelated string -- prose
+fragments where a title should be, and never the same one twice."
+  (test-wiki--with-store
+   (let ((path (expand-file-name "concepts/loose.md" chat-wiki-root)))
+     (make-directory (file-name-directory path) t)
+     (with-temp-file path (insert "no frontmatter and no heading here\n"))
+     ;; Leave match data behind, the way any earlier regexp call would.
+     (string-match "\\(xyzzy\\)" "xyzzy")
+     (should (equal (plist-get (chat-wiki-read-page path) :title)
+                    "loose")))))
+
+;; ------------------------------------------------------------------
+;; Links and the graph
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-wiki-a-wikilink-is-found-at-all ()
+  "The base case, which did not hold.
+
+The character alternative was written `[^\\]]', and a backslash is not an
+escape inside one in an Emacs regexp, so the pattern read as \"any
+character except backslash followed by a literal bracket\" and matched no
+link anyone would write.  Extraction returned nothing every time, which
+silently emptied backlinks, orphan reports and broken-link reports."
+  (should (equal (chat-wiki--extract-wikilinks
+                  "See [[Context Budget]] and [[Streaming]].")
+                 '("Context Budget" "Streaming"))))
+
+(ert-deftest chat-wiki-a-link-by-slug-counts-as-a-backlink ()
+  "The link and the lookup agree on what a page is called.
+
+They used to disagree: backlinks searched for the literal `[[Title]]'
+while resolving a page went through the slug, so a page linked by its
+slug read as unlinked."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "Context Budget" "Prose about allocation.")
+   (test-wiki--page 'concepts "Streaming" "See [[context-budget]] for more.")
+   (should (= 1 (length (chat-wiki--find-backlinks "Context Budget"))))))
+
+(ert-deftest chat-wiki-a-link-with-an-anchor-still-counts ()
+  "An anchor names a place in the page, not a different page."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "Context Budget" "Prose about allocation.")
+   (test-wiki--page 'concepts "Streaming" "See [[Context Budget#limits]].")
+   (should (= 1 (length (chat-wiki--find-backlinks "Context Budget"))))))
+
+(ert-deftest chat-wiki-a-linked-page-is-not-an-orphan ()
+  "Something points at it, so it is reachable."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "Context Budget" "Prose about allocation.")
+   (test-wiki--page 'concepts "Streaming" "See [[Context Budget]] for more.")
+   (let ((orphans (seq-filter (lambda (i) (eq (plist-get i :type) 'orphan))
+                              (chat-wiki-lint))))
+     (should-not (seq-find (lambda (i)
+                             (equal (plist-get (plist-get i :page) :title)
+                                    "Context Budget"))
+                           orphans)))))
+
+(ert-deftest chat-wiki-an-unlinked-page-is-an-orphan ()
+  "Nothing points at it, which is the thing worth reporting."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "Context Budget" "Prose about allocation.")
+   (should (seq-find (lambda (i) (eq (plist-get i :type) 'orphan))
+                     (chat-wiki-lint)))))
+
+(ert-deftest chat-wiki-a-source-is-not-expected-to-be-linked ()
+  "Sources are entry points, so having no backlinks is normal for them."
+  (test-wiki--with-store
+   (test-wiki--page 'sources "Some Article" "Prose enough to count as a page.")
+   (should-not (seq-find (lambda (i) (eq (plist-get i :type) 'orphan))
+                         (chat-wiki-lint)))))
+
+(ert-deftest chat-wiki-a-link-to-nothing-is-reported-broken ()
+  "A link is a promise that a page exists."
+  (test-wiki--with-store
+   (test-wiki--page 'concepts "Streaming" "See [[No Such Page]] for more.")
+   (let ((broken (seq-filter (lambda (i)
+                               (eq (plist-get i :type) 'broken-link))
+                             (chat-wiki-lint))))
+     (should (= (length broken) 1))
+     (should (equal (plist-get (car broken) :link) "No Such Page")))))
+
+(ert-deftest chat-wiki-lint-reads-each-page-once ()
+  "One scan, not one per check.
+
+The three checks each walked the wiki, and the orphan check called a
+function that walked it again per page, so linting was quadratic in
+full-text reads.  This is the property that stops it coming back."
+  (test-wiki--with-store
+   (dolist (name '("One" "Two" "Three"))
+     (test-wiki--page 'concepts name "Prose enough to count as a page."))
+   (let ((reads 0)
+         (real (symbol-function 'insert-file-contents)))
+     (cl-letf (((symbol-function 'insert-file-contents)
+                (lambda (path &rest args)
+                  (when (string-suffix-p ".md" path)
+                    (setq reads (1+ reads)))
+                  (apply real path args))))
+       (chat-wiki-lint))
+     (should (= reads 3)))))
 
 ;; ------------------------------------------------------------------
 ;; The command surface

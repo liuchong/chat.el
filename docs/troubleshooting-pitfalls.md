@@ -1543,4 +1543,89 @@ rather than search for words that legitimately appear in the subject
 matter. When one part of a module generates what another part judges, test
 the pair together.
 
+### A Backslash Inside A Character Alternative
+
+**Problem**: no wiki page ever had a backlink, no link was ever reported
+broken, and no page was ever reported an orphan. The feature reported a
+clean wiki because it found nothing at all.
+
+**Cause**: the pattern for `[[Like This]]` was written
+`"\\[\\[\\([^\\]]+\\)\\]\\]"`. A backslash is not an escape inside a
+character alternative in an Emacs regexp, so `[^\]]` is not "not a
+bracket" — it is "not a backslash", closed by the next bracket, followed
+by a literal bracket. It matched no link that anyone would write. The
+correct spelling puts the bracket first: `[^]]`.
+
+**Solution**: fix the class, and note the failure mode rather than the
+typo. Every symptom was an empty result, and an empty result from a
+checker is indistinguishable from a clean bill of health. When a function
+returns a list of problems, test that it finds a planted one — a test that
+only asserts "no issues" passes just as well when the search is broken.
+
+### match-string After A string-match That Failed
+
+**Problem**: a page with no frontmatter got a title that was a fragment of
+its own prose — `及为什么要`, five characters lifted out of the middle of a
+sentence — instead of falling back to its filename.
+
+**Cause**: the fallback was
+`(or fm-title (progn (string-match "^# \\(.+\\)$" body) (match-string 1 body)) filename)`.
+A failed `string-match` does not clear the match data, so `match-string`
+returned a slice of `body` at offsets belonging to whatever string matched
+last — here a line of YAML from the frontmatter parser.
+
+**Solution**: `(and (string-match ...) (match-string ...))`. In Elisp,
+match data is global and outlives the call that set it; never read it
+without checking that the search succeeded. The symptom is distinctive:
+a result of the right length taken from the wrong place, changing depending
+on what ran before.
+
+### The Rule Enforced At The Caller Instead Of The Door
+
+**Problem**: pages created by the model had titles; pages created by any
+other caller of `chat-wiki-create-page` had none, and read back as their
+filenames.
+
+**Cause**: `create-page` wrote caller-supplied content verbatim, adding
+frontmatter only to pages it generated from a template. The "every page
+has frontmatter" rule was implemented in the `wiki_write` tool — one
+caller — so it held for the model and for nothing else.
+
+**Solution**: put the invariant at the single point every page passes
+through, and delete the caller's copy. When a rule is written at a call
+site, ask what the other call sites do; if the answer is "violate it", the
+rule is in the wrong place.
+
+### Counting Characters Across Scripts
+
+**Problem**: lint reported ordinary, fully written Chinese pages as having
+"headings but no content".
+
+**Cause**: the threshold was 40 characters of prose. A CJK character
+carries roughly what a short word does, so 40 characters is a sentence in
+English and a paragraph in Chinese — a Chinese page had to say two or three
+times as much as an English one to pass.
+
+**Solution**: count in units that mean the same thing in both — words for
+alphabetic scripts, characters for CJK, which is what the tokenizer
+already produced for search. A character count is not a length measure
+when more than one script is in play.
+
+### One Capability, Two Paths, And Only One Maintained
+
+**Problem**: a module had `chat-wiki-query` with its own result buffer
+alongside `/wiki search`, plus four `-interactive` wrappers whose only
+caller was `M-x`. The two search paths formatted differently, and only one
+of them got the fix when matching changed.
+
+**Cause**: commands were added next to the functions they wrapped instead
+of replacing them, so each capability accumulated an entry point per era
+of the module.
+
+**Solution**: delete the duplicate rather than keeping it for
+compatibility nobody asked for. A wrapper whose only caller is `M-x`, and
+whose behaviour a command already covers, is a second implementation to
+keep in step. Check callers before assuming a public-looking function has
+any.
+
 Last updated: 2026-08-26

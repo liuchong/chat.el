@@ -275,8 +275,15 @@ page look like a written one."
 ;; ------------------------------------------------------------------
 
 (defun chat-wiki--wikilink-regexp ()
-  "Return regexp pattern for WikiLinks [[Like This]]."
-  "\\[\\[\\([^\\]]+\\)\\]\\]")
+  "Return regexp pattern for WikiLinks [[Like This]].
+
+The class is `[^]]', not `[^\\]]'.  A backslash is not an escape inside a
+character alternative in an Emacs regexp, so the second form reads as
+\"any character except backslash\" followed by a literal `]' -- which
+matched no wikilink that has ever been written.  Link extraction
+therefore always returned nothing, and with it every backlink, every
+orphan report and every broken-link report."
+  "\\[\\[\\([^]]+\\)\\]\\]")
 
 (defun chat-wiki--extract-wikilinks (content)
   "Extract all WikiLinks from CONTENT.
@@ -291,31 +298,49 @@ Returns list of link targets."
     (delete-dups (nreverse links))))
 
 (defun chat-wiki--find-backlinks (target &optional type)
-  "Find all pages linking to TARGET.
-If TYPE is specified, only search that page type directory.
-Returns list of file paths."
-  (let ((target-pattern (format "[[%s]]" target))
-        (dirs (if type
-                  (list (expand-file-name
-                         (cdr (assoc type chat-wiki--page-types))
-                         chat-wiki-root))
-                (mapcar (lambda (p) (expand-file-name (cdr p) chat-wiki-root))
-                        chat-wiki--page-types)))
+  "Return the paths of pages linking to TARGET.
+If TYPE is given, only pages of that type.
+
+Compared as slugs, so `[[Context Budget]]' and `[[context-budget]]' both
+count and an anchor does not stop the match.  This searched for the
+literal text `[[TARGET]]' before, which meant the lint that used it
+disagreed with the page lookup that resolves the same link -- one matched
+the title as written and the other the slug."
+  (let ((wanted (chat-wiki--slugify target))
         (backlinks nil))
-    (dolist (dir dirs)
-      (when (file-directory-p dir)
-        (dolist (file (directory-files dir t "\\.md$"))
-          (when (and (file-readable-p file)
-                     (not (file-directory-p file)))
-            (with-temp-buffer
-              (insert-file-contents file)
-              (when (search-forward target-pattern nil t)
-                (push file backlinks)))))))
-    (delete-dups (nreverse backlinks))))
+    (dolist (page (chat-wiki--scan))
+      (when (or (null type) (eq (plist-get page :type) type))
+        (when (seq-find (lambda (link)
+                          (equal (chat-wiki--link-target link) wanted))
+                        (plist-get page :links))
+          (push (plist-get page :path) backlinks))))
+    (nreverse backlinks)))
 
 ;; ------------------------------------------------------------------
 ;; Page Management
 ;; ------------------------------------------------------------------
+
+(defun chat-wiki--ensure-frontmatter (content type name)
+  "Return CONTENT carrying frontmatter, adding it when it has none.
+
+Every page is written through `chat-wiki-create-page', so putting the rule
+here is what stops a page reaching disk without a title and a type.
+Caller-supplied content used to be written verbatim, with frontmatter only
+on pages generated from a template -- so every page created with a body,
+which is every page the model writes and every ingest, had none.
+`chat-wiki-read-page' then had nothing to read a title from, the index
+listed slugs where titles belong, and search matched no title at all."
+  (if (string-prefix-p "---" (string-trim-left content))
+      content
+    (concat (chat-wiki--write-frontmatter
+             `((title . ,name)
+               (type . ,(symbol-name type))
+               (created . ,(chat-wiki--today-string))))
+            (if (string-prefix-p "#" (string-trim-left content))
+                ""
+              (format "# %s\n\n" name))
+            content
+            (if (string-suffix-p "\n" content) "" "\n"))))
 
 (defun chat-wiki-create-page (type name &optional content)
   "Create a new wiki page of TYPE with NAME and optional CONTENT.
@@ -334,13 +359,14 @@ Returns the file path of the created page."
     (when (file-exists-p filepath)
       (error "Page already exists: %s" filepath))
     (with-temp-file filepath
-      (insert (or content
-                  (pcase type
-                    ('sources (chat-wiki--source-template
-                               name (chat-wiki--today-string) ""))
-                    ('entities (chat-wiki--entity-template name "general"))
-                    ('concepts (chat-wiki--concept-template name))
-                    (_ (format "# %s\n\n" name))))))
+      (insert (if content
+                  (chat-wiki--ensure-frontmatter content type name)
+                (pcase type
+                  ('sources (chat-wiki--source-template
+                             name (chat-wiki--today-string) ""))
+                  ('entities (chat-wiki--entity-template name "general"))
+                  ('concepts (chat-wiki--concept-template name))
+                  (_ (format "# %s\n\n" name))))))
     (chat-wiki-log-append 'create (format "%s/%s" (cdr (assoc type chat-wiki--page-types)) filename))
     filepath))
 
@@ -355,10 +381,14 @@ Returns a plist with :frontmatter, :body, :title, and :path."
          (parsed (chat-wiki--parse-frontmatter content))
          (frontmatter (car parsed))
          (body (cdr parsed))
+         ;; `and', not `progn': a failed `string-match' leaves the match
+         ;; data from whatever matched last, so calling `match-string'
+         ;; regardless returned a slice of BODY at offsets belonging to an
+         ;; unrelated string.  That is how a page with no frontmatter got a
+         ;; title like a fragment of its own prose instead of the filename.
          (title (or (cdr (assoc 'title frontmatter))
-                    (progn
-                      (string-match "^# \\(.+\\)$" body)
-                      (match-string 1 body))
+                    (and (string-match "^# \\(.+\\)$" body)
+                         (match-string 1 body))
                     (file-name-base filepath))))
     `(:frontmatter ,frontmatter
                    :body ,body
@@ -412,21 +442,6 @@ Returns list of plists with :title, :path, :type, and :date."
                   (string> (or (plist-get a :date) "")
                            (or (plist-get b :date) ""))))))
 
-(defun chat-wiki-page-exists-p (name &optional type)
-  "Check if page with NAME exists.
-If TYPE is specified, only check that type."
-  (let ((slug (chat-wiki--slugify name)))
-    (catch 'found
-      (dolist (type-pair (if type
-                             (list (cons type (cdr (assoc type chat-wiki--page-types))))
-                           chat-wiki--page-types))
-        (let ((dir (expand-file-name (cdr type-pair) chat-wiki-root)))
-          (when (file-directory-p dir)
-            (dolist (file (directory-files dir nil "\\.md$"))
-              (when (or (string= (file-name-base file) slug)
-                        (string= file (format "%s.md" slug)))
-                (throw 'found t))))))
-      nil)))
 
 ;; ------------------------------------------------------------------
 ;; Page Templates
@@ -680,104 +695,123 @@ Returns the path to the created source page."
       (message "Ingested: %s -> %s" source-path page-path)
       page-path)))
 
-(defun chat-wiki-query (question)
-  "Query the wiki with QUESTION, return synthesized answer.
-This is a basic implementation - returns relevant pages."
-  (interactive "sQuestion: ")
-  (let* ((matches (chat-wiki-index-search question))
-         (relevant-pages (seq-take matches 5)))
-    (if (null relevant-pages)
-        (progn
-          (message "No relevant pages found for: %s" question)
-          nil)
-      ;; Log the query
-      (chat-wiki-log-append
-       'query
-       (format "%s (found %d pages)" question (length relevant-pages)))
-      ;; Return relevant page info
-      (let ((result `(:question ,question
-                                :pages ,relevant-pages
-                                :summary ,(mapconcat
-                                           (lambda (p)
-                                             (format "- %s" (plist-get p :title)))
-                                           relevant-pages
-                                           "\n"))))
-        (when (called-interactively-p 'interactive)
-          (with-current-buffer (get-buffer-create "*Wiki Query Result*")
-            (erase-buffer)
-            (insert (format "Query: %s\n\n" question))
-            (insert "Relevant pages:\n")
-            (dolist (page relevant-pages)
-              (insert (format "\n• %s (%s)\n  %s\n"
-                              (plist-get page :title)
-                              (symbol-name (plist-get page :type))
-                              (plist-get page :path))
-                      (when (plist-get page :date)
-                        (format "  Date: %s\n" (plist-get page :date)))))
-            (goto-char (point-min))
-            (pop-to-buffer (current-buffer))))
-        result))))
 
-(defcustom chat-wiki-prose-minimum 40
-  "How many characters of non-heading text make a page more than a skeleton."
+(defcustom chat-wiki-prose-minimum 15
+  "How many words or CJK characters make a page more than a skeleton."
   :type 'integer
   :group 'chat-wiki)
 
 (defun chat-wiki--page-has-prose-p (body)
   "Return non-nil when BODY has content and not only headings.
 
-Measured by what is left once headings, list markers and blank lines are
-removed.  The test used to be a search for the words TODO, FIXME, stub or
+Measured over what is left once headings, list markers and blank lines are
+removed, counted in the same units `chat-wiki--tokenize' uses: words for
+alphabetic scripts, characters for CJK.
+
+Counted in characters before, which is not a comparable amount of writing
+across scripts -- a CJK character carries roughly what a short word does,
+so forty characters is a sentence in English and a paragraph in Chinese.
+A page written in Chinese had to say two or three times as much as an
+English one to stop being reported empty.
+
+The check before that searched for the words TODO, FIXME, stub and
 placeholder, which flagged any page that discussed them -- a wiki about
 software being exactly where those words legitimately appear."
   (and body
        (let ((prose (replace-regexp-in-string
                      "^[ \t]*[-*+][ \t]*$" ""
                      (replace-regexp-in-string "^#+.*$" "" body))))
-         (>= (length (string-trim prose)) chat-wiki-prose-minimum))))
+         (>= (length (chat-wiki--tokenize prose))
+             chat-wiki-prose-minimum))))
+
+(defun chat-wiki--link-target (link)
+  "Return the page LINK points at, as a slug, ignoring any anchor."
+  (chat-wiki--slugify (car (split-string link "#"))))
+
+(defun chat-wiki--scan ()
+  "Read every page once and return what the checks need.
+
+Each element is a plist with :title, :path, :type, :body and :links.
+
+One read per page, rather than one per page per check.  The three checks
+each used to walk the whole wiki -- and the orphan check called
+`chat-wiki--find-backlinks', which itself reads every file -- so linting
+cost O(pages squared) full-text reads.  Fine for a wiki built by hand,
+not for one a model can write to in a loop."
+  (let ((pages nil))
+    (dolist (type-pair chat-wiki--page-types)
+      (let ((dir (expand-file-name (cdr type-pair) chat-wiki-root)))
+        (when (file-directory-p dir)
+          (dolist (file (directory-files dir t "\\.md$"))
+            (when (file-readable-p file)
+              (condition-case nil
+                  (let* ((page (chat-wiki-read-page file))
+                         (body (or (plist-get page :body) "")))
+                    (push (list :title (plist-get page :title)
+                                :path file
+                                :type (car type-pair)
+                                :body body
+                                :links (chat-wiki--extract-wikilinks body))
+                          pages))
+                (error nil)))))))
+    (nreverse pages)))
+
+(defun chat-wiki--page-names (page)
+  "Return the slugs PAGE answers to.
+
+Its title, and its filename, which for a source is a date followed by the
+slug and so is not the same string."
+  (delete-dups
+   (list (chat-wiki--slugify (or (plist-get page :title) ""))
+         (file-name-base (plist-get page :path)))))
+
+(defun chat-wiki--identity (page)
+  "Return PAGE without its body, for reporting."
+  (list :title (plist-get page :title)
+        :path (plist-get page :path)
+        :type (plist-get page :type)))
 
 (defun chat-wiki-lint ()
   "Run wiki health check, report issues.
 Returns list of issues found."
   (interactive)
-  (let ((issues nil)
-        (pages (chat-wiki-list-pages)))
-    ;; Check for orphan pages (no backlinks)
+  (let* ((pages (chat-wiki--scan))
+         (known (make-hash-table :test 'equal))
+         (linked (make-hash-table :test 'equal))
+         (issues nil))
+    ;; Two indexes over the one scan: what exists, and what is pointed at.
     (dolist (page pages)
-      (let* ((title (plist-get page :title))
-             (backlinks (chat-wiki--find-backlinks title)))
-        (when (and (null backlinks)
-                   (not (eq (plist-get page :type) 'sources)))
+      (dolist (name (chat-wiki--page-names page))
+        (puthash name page known))
+      (dolist (link (plist-get page :links))
+        (puthash (chat-wiki--link-target link) t linked)))
+    (dolist (page pages)
+      (let ((identity (chat-wiki--identity page))
+            (title (or (plist-get page :title) "")))
+        ;; Orphans: nothing links here.  Sources are entry points, so they
+        ;; are not expected to have anything pointing at them.
+        (unless (or (eq (plist-get page :type) 'sources)
+                    (seq-find (lambda (name) (gethash name linked))
+                              (chat-wiki--page-names page)))
           (push `(:type orphan
-                         :page ,page
-                         :message ,(format "%s has no backlinks"
-                                           title))
-                issues))))
-    ;; Check for broken WikiLinks
-    (dolist (page pages)
-      (let* ((content (plist-get (chat-wiki-read-page (plist-get page :path)) :body))
-             (links (chat-wiki--extract-wikilinks content)))
-        (dolist (link links)
-          (unless (or (chat-wiki-page-exists-p link)
-                      ;; Allow links with anchors
-                      (and (string-match-p "#" link)
-                           (chat-wiki-page-exists-p
-                            (car (split-string link "#")))))
+                        :page ,identity
+                        :message ,(format "%s has no backlinks" title))
+                issues))
+        ;; Broken links: pointing at a page that is not there.
+        (dolist (link (plist-get page :links))
+          (unless (gethash (chat-wiki--link-target link) known)
             (push `(:type broken-link
-                           :page ,page
-                           :link ,link
-                           :message ,(format "Broken link [[%s]] in %s"
-                                             link
-                                             (plist-get page :title)))
-                  issues)))))
-    ;; Check for empty pages
-    (dolist (page pages)
-      (let ((body (plist-get (chat-wiki-read-page (plist-get page :path)) :body)))
-        (unless (chat-wiki--page-has-prose-p body)
+                          :page ,identity
+                          :link ,link
+                          :message ,(format "Broken link [[%s]] in %s"
+                                            link title))
+                  issues)))
+        ;; Skeletons: headings and nothing under them.
+        (unless (chat-wiki--page-has-prose-p (plist-get page :body))
           (push `(:type empty
-                        :page ,page
+                        :page ,identity
                         :message ,(format "%s has headings but no content"
-                                          (plist-get page :title)))
+                                          title))
                 issues))))
     ;; Remove duplicates and sort
     (setq issues (delete-dups issues))
@@ -811,33 +845,8 @@ Returns list of issues found."
 ;; Interactive Commands
 ;; ------------------------------------------------------------------
 
-;;;###autoload
-(defun chat-wiki-ingest-file (source-path title)
-  "Interactively ingest SOURCE-PATH as a wiki source with TITLE."
-  (interactive
-   (let ((file (read-file-name "Source file to ingest: ")))
-     (list file
-           (read-string "Title: "
-                        (file-name-base file)))))
-  (chat-wiki-ingest source-path title)
-  (when (y-or-n-p "Open the new page? ")
-    (let* ((slug (chat-wiki--slugify title))
-           (filepath (expand-file-name
-                      (format "%s-%s.md" (chat-wiki--today-string) slug)
-                      (expand-file-name "sources" chat-wiki-root))))
-      (find-file filepath))))
 
-;;;###autoload
-(defun chat-wiki-query-interactive (question)
-  "Interactively query the wiki with QUESTION."
-  (interactive "sWiki query: ")
-  (chat-wiki-query question))
 
-;;;###autoload
-(defun chat-wiki-lint-interactive ()
-  "Interactively run wiki health check."
-  (interactive)
-  (chat-wiki-lint))
 
 ;;;###autoload
 (defun chat-wiki-browse-index ()
@@ -855,19 +864,6 @@ Returns list of issues found."
       (chat-wiki-log-append 'init "Log created"))
     (find-file log-path)))
 
-;;;###autoload
-(defun chat-wiki-create-page-interactive (type name)
-  "Interactively create a new wiki page of TYPE with NAME."
-  (interactive
-   (list (intern
-          (completing-read "Page type: "
-                           '("entities" "concepts" "comparisons" "synthesis")
-                           nil t))
-         (read-string "Page name: ")))
-  (let ((filepath (chat-wiki-create-page type name)))
-    (message "Created: %s" filepath)
-    (when (y-or-n-p "Open the new page? ")
-      (find-file filepath))))
 
 ;;;###autoload
 (defun chat-wiki-find-page ()
@@ -1236,18 +1232,9 @@ ten pages would pay for it ten times.  `/wiki index' regenerates it."
                 (mapconcat (lambda (p) (symbol-name (car p)))
                            chat-wiki--page-types ", ")))
        (t
-        ;; Given a title and a body, not a file.  Without frontmatter the
-        ;; page has no title but its filename, so a wiki written through
-        ;; this tool would list slugs where it should list titles.
-        (let* ((page (if (string-prefix-p "---" (string-trim-left content))
-                         content
-                       (concat (chat-wiki--write-frontmatter
-                                `((title . ,name)
-                                  (type . ,(symbol-name kind))
-                                  (created . ,(chat-wiki--today-string))))
-                               (format "# %s\n\n" name)
-                               content "\n")))
-               (path (chat-wiki-create-page kind name page)))
+        ;; Given a title and a body, not a file.  `chat-wiki-create-page'
+        ;; supplies the frontmatter, so the model does not have to.
+        (let ((path (chat-wiki-create-page kind name content)))
           (format "Created %s."
                   (file-relative-name path chat-wiki-root)))))))))
 
