@@ -2054,4 +2054,44 @@ filled the threshold *during* a reply, and the collection then landed on
 whoever allocated next. Fixing an allocator and fixing a stall are
 different claims, and the measurement has to say which one it supports.
 
+### Printing An Event That Carries The Whole World
+
+**Problem**: a 119MB log, 106.6MB of which -- 90% -- was 77 copies of the
+same conversation, 1.4MB each.
+
+**Cause**: a `cond` clause added to stop agent events being dropped
+silently, doing the reasonable thing and printing what it dropped:
+
+```elisp
+(chat-log "[UI] Unhandled agent event: %s %S" type event)
+```
+
+`chat-agent--emit` puts `:run` on every event, and the run state holds the
+session, which holds every message and every tool result. So `%S` on one
+event printed the entire conversation. Seven event types reached that
+clause, several times per turn.
+
+The disk was the smaller half. That 1.4MB string is built by `format` in
+the event callback, while a reply is streaming -- garbage on the same
+order as everything else measured that night, on the same path.
+
+**Solution**: name what an event carries instead of printing it. A dropped
+event needs its type and its keys to be acted on; the payload is in the
+session file already.
+
+```elisp
+(chat-log "[UI] Unhandled agent event: %s (step %s, carries %s)"
+          type (plist-get event :step)
+          (chat-ui--event-payload-keys event))
+```
+
+**General rule**: `%S` on anything that reaches a struct holding a session,
+a run, a buffer or a process is unbounded by construction, and a log line
+on a hot path is work. Measure a log's composition before assuming its
+size came from volume of lines.
+
+**Measuring it**: the dumps contain newlines, so counting matching *lines*
+reported 3KB each and 0% of the log. The units have to be the record, not
+the line -- bytes from the marker to the next timestamp.
+
 Last updated: 2026-08-27
