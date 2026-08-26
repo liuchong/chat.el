@@ -10,6 +10,15 @@
 
 Typed commands carry user trust, and punctuation folding stays in syntax positions
 
+## Status note
+
+The trust half stands. The folding half is superseded by decision 0014:
+the rule is a Unicode range rather than a table of punctuation, it covers
+letters and digits, and the boundary is drawn by which strings chat.el
+interprets rather than by which positions look like syntax. The consequence
+recorded below about extending the table is withdrawn — following it is
+what left `/ｈｅｌｐ` unrecognized.
+
 ## Context
 
 Chat input grew a command layer covering shell execution, a session
@@ -58,8 +67,11 @@ payloads: a shell body or a question that legitimately contains `，` or
 - Tooling safety guidance that forbids shell-string execution continues to
   apply to the tool path, which is what it was written for. The typed path
   documents its own boundary instead of quietly widening the tool path.
-- Fullwidth acceptance can be extended by adding a pair to the folding
-  table, without revisiting how arguments are handled.
+- ~~Fullwidth acceptance can be extended by adding a pair to the folding
+  table, without revisiting how arguments are handled.~~ Withdrawn. See
+  decision 0014: the table was a list of instances where the rule is a
+  range, and "add a pair when someone reports one" is how the letters were
+  missed for months.
 - Because the working directory is session state, file tools reached
   through `./` in `chat-files-allowed-directories` follow the user's
   choice. The allowed directory list is deliberately not widened by a

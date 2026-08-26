@@ -242,24 +242,29 @@ either width, in any combination:
 `！ls`, `！！`, `？why`, `＼literal` and a name separated by an ideographic
 space all work the same way.
 
-Folding covers the positions the program reads as syntax or as a name:
+What gets folded is decided by ownership: a string is folded when chat.el
+is the thing that interprets it. In `！ls`, the `！` is a chat.el command —
+it is shorthand for `/cmd` — so it folds. The `ls` after it is that
+command's argument, the content handed to whatever executes it, so it does
+not.
 
-| Position | Folded | Why |
+| Position | Folded | Whose is it |
 | --- | --- | --- |
-| Prefix, slash command name, separator | yes | syntax |
-| `/auto`, `/drop`, `/model`, `/help` argument | yes | read as a name or keyword |
-| `/cd` argument | `／` and `～` only | a directory name may contain the rest |
-| Shell body, prompt, queued note, literal | no | data |
+| Prefix, slash command name, separator | yes | chat.el's syntax |
+| `/auto`, `/drop`, `/model`, `/help` argument | yes | names a chat.el command, keyword, model or topic |
+| `/cd` argument | `／` and `～` only | separator and home are syntax; the rest is a name on disk |
+| Shell body, prompt, queued note, literal | no | on its way out |
 
-Everything else is passed on as typed, so `!echo "你好，世界"` reaches the
-shell unchanged and `/queue 搜索 ＡＢＣ` sends the characters you meant. A
-command named in Chinese is untouched: the fold covers one Unicode block,
-and ideographs are outside it, so `/发送` and `/自动` are unaffected.
+So `!echo "你好，世界"` reaches the shell unchanged and `/queue 搜索 ＡＢＣ`
+sends the characters you meant. A command named in Chinese is untouched
+too: the fold covers one Unicode block and ideographs are outside it, so
+`/发送` and `/自动` are unaffected.
 
-One consequence of the last row: a shell body typed entirely in fullwidth
-mode, `！ｌｓ`, reaches the shell as `ｌｓ` and fails there. That is
-deliberate — folding it would rewrite a search for fullwidth text — but it
-does mean the shell reports the confusion rather than absorbing it.
+One consequence: a shell body typed entirely in fullwidth mode, `！ｌｓ`,
+reaches the shell as `ｌｓ` and fails there, naming the word it could not
+run. That is the rule working rather than a gap in it — folding it would
+rewrite a search for fullwidth text — and the error comes from the executor,
+which is the honest place for it.
 
 ## Tool Model
 

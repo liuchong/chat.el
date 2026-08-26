@@ -88,7 +88,18 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 861 tests passing.
+Canonical suite: 886 tests passing.
+
+Two fixes landed after that. Tool call ids are now answered by one
+function, so the assistant `tool_calls` entry and the `tool_call_id` of its
+result cannot disagree; two fallbacks that did disagree made any session
+with an id-less turn unsendable. And the session loader no longer wraps
+`parse-time-string` in `decode-time`, which had been dating every reopened
+message to 1970 and writing it back. Dates already on disk are lost.
+Decision 0014 records the third: fullwidth normalization is a Unicode
+range rather than a punctuation table, and its boundary is ownership --
+chat.el folds what it interprets and leaves what it forwards, so `！` folds
+and the `ls` after it does not.
 
 The input command layer completed earlier. Chat input parses into commands
 through `lisp/core/chat-command.el`, covering shell execution, history
@@ -159,6 +170,7 @@ surface advertises only relevant scoped tools.
 - `../20-reference/decisions/0013-naming-the-commands.md`
 - `../20-reference/decisions/0012-input-surface-and-language.md`
 - `../20-reference/decisions/0011-auto-and-the-command-table.md`
+- `../20-reference/decisions/0014-whose-command-is-it.md`
 - `../20-reference/decisions/0010-rendering-the-transcript.md`
 - `../20-reference/decisions/0009-one-chat-surface.md`
 - `../20-reference/decisions/0008-self-knowledge-and-shared-storage.md`

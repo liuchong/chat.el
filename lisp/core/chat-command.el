@@ -3,16 +3,25 @@
 ;;; Commentary:
 ;; Parses a line of chat input into a command description.  Input methods
 ;; that produce fullwidth characters must reach the same commands as
-;; ASCII, so fullwidth forms are accepted wherever command syntax appears
-;; -- letters and digits as well as punctuation, because an input method
-;; left in fullwidth mode turns a typed `/help' into `／ｈｅｌｐ' and the
-;; name is as affected as the slash.
+;; ASCII, so fullwidth forms are folded -- letters and digits as well as
+;; punctuation, because an input method left in fullwidth mode turns a
+;; typed `/help' into `／ｈｅｌｐ' and the name is as affected as the slash.
 ;;
-;; Folding is limited to syntax positions: the leading prefix, the slash
-;; command name, and the whitespace that separates a name from its
-;; argument.  Shell bodies, AI prompts, literal text and command
-;; arguments keep their original characters, so a shell command that
-;; contains real CJK punctuation still runs as typed.
+;; What gets folded is decided by ownership, not by appearance: a string is
+;; folded when this program is the thing that interprets it.  The prefix,
+;; the command name and the separator are ours.  A shell body is not: `！'
+;; is our command -- it is shorthand for `/cmd' -- but the `ls' after it is
+;; that command's argument, the content handed to whatever executes it, and
+;; we have no more authority to rewrite it than we have to interpret it.
+;; The same goes for a prompt, a queued note and literal text.
+;;
+;; That leaves the arguments we do read: the command name after `/auto', the
+;; keyword after `/drop', a model id, a help topic.  Those never leave the
+;; program, so they are folded -- by their handlers, through
+;; `chat-command-fold-name', because the parser cannot tell them from the
+;; prompt sitting in the same position one command along.
+;;
+;; See decision 0014.
 
 ;;; Code:
 
@@ -53,8 +62,10 @@ Trims the ideographic space as well as ASCII whitespace."
   (or (chat-command--fullwidth-ascii char) char))
 
 (defun chat-command-fold-syntax (text)
-  "Return TEXT with fullwidth punctuation folded to ASCII.
-Only call this on text the parser owns, never on a shell body or prompt."
+  "Return TEXT with fullwidth forms folded to ASCII.
+Only call this on text this program interprets, never on a shell body or a
+prompt: those are content on their way out, and folding them would rewrite
+what was meant."
   (apply #'string (mapcar #'chat-command-fold-char (string-to-list (or text "")))))
 
 (defun chat-command-fold-name (text)
@@ -62,10 +73,13 @@ Only call this on text the parser owns, never on a shell body or prompt."
 
 For the arguments a command interprets rather than passes on: the command
 name after `/auto', the keyword after `/drop', a model id, a help topic.
-The parser cannot fold these itself, because the same position in another
-command holds a shell body or a prompt, where a fullwidth character may be
-exactly what was meant.  So the parser folds syntax and a handler folds an
-argument it is going to compare against a fixed name.
+These belong to this program's own vocabulary even though they sit in an
+argument position, so they fold.
+
+The parser cannot do it, because the same position in the next command
+holds a shell body or a prompt, and there a fullwidth character may be
+exactly what was meant.  Hence the division: the parser folds syntax, and
+a handler folds an argument it is going to compare against a fixed name.
 
 Case is left alone; callers that match case-insensitively already
 `downcase' on top of this."
