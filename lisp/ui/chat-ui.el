@@ -1028,6 +1028,24 @@ segment in flight."
                                   'face 'chat-transcript-thinking)))
             (insert "\n")))))))
 
+(defmacro chat-ui--rewriting-region (start end &rest body)
+  "Run BODY, which deletes the region from START to END and rewrites it.
+
+Point is kept where it was, except when it was inside that region: there
+is nowhere to put it back, because where it was no longer exists.  The
+marker `save-excursion' keeps collapses to the start of the deletion and
+re-insertion leaves it there, so the cursor lands at the top of whatever
+was redrawn -- which is what put it at the first line of the conversation,
+from the bottom of a long reply, every time a step was recorded.  Point
+that was inside follows to the end of the rewrite instead, which is where
+the reader was looking."
+  (declare (indent 2))
+  (let ((inside (make-symbol "inside")))
+    `(let ((,inside (and (>= (point) ,start) (<= (point) ,end))))
+       (save-excursion ,@body)
+       (when ,inside
+         (goto-char chat-ui--messages-end)))))
+
 (defun chat-ui--render-live-region ()
   "Redraw the in-flight tail of the current turn.
 
@@ -1055,7 +1073,7 @@ prose, and the fence that would have closed it is never reconsidered."
                              (marker-position chat-ui--live-start))
                           (string-prefix-p previous content)))
            (cut (and append-p (chat-ui--fence-safe-prefix-length previous))))
-      (save-excursion
+      (chat-ui--rewriting-region chat-ui--live-start chat-ui--messages-end
         (if append-p
             (progn
               (goto-char (+ body cut))
@@ -1090,7 +1108,8 @@ all produce the same screen."
              chat-ui--conversation-start
              chat-ui--messages-end)
     (let ((inhibit-read-only t))
-      (save-excursion
+      (chat-ui--rewriting-region chat-ui--conversation-start
+          chat-ui--messages-end
         (goto-char chat-ui--conversation-start)
         (delete-region chat-ui--conversation-start chat-ui--messages-end)
         (chat-ui--render-messages (chat-session-messages chat--current-session))
@@ -2360,6 +2379,18 @@ it declares one."
         (min chat-ui-max-output-tokens provider-limit)
       chat-ui-max-output-tokens)))
 
+(defun chat-ui--event-payload-keys (event)
+  "Name what EVENT carries beyond what every event carries.
+
+Named rather than printed.  `chat-agent--emit' puts `:run' on every
+event, and the run holds the whole session, so `%S' on one dropped event
+wrote the entire conversation to the log -- several times per turn, since
+seven event types reach the clause that reports them."
+  (let ((keys (cl-loop for (key _value) on event by #'cddr
+                       unless (memq key '(:type :step :run))
+                       collect (substring (symbol-name key) 1))))
+    (if keys (mapconcat #'identity keys " ") "nothing")))
+
 (defun chat-ui--make-agent-event-handler (session msg-id ui-buffer content-start request-id)
   "Return an agent event handler rendering into UI-BUFFER.
 SESSION, MSG-ID, CONTENT-START, and REQUEST-ID identify the pending
@@ -2487,7 +2518,10 @@ assistant response being filled in."
          ;; the rest without a word -- which is how a minute of reasoning
          ;; went missing and looked like a hung screen rather than a bug.
          (t
-          (chat-log "[UI] Unhandled agent event: %s %S" type event)))))))
+          (chat-log "[UI] Unhandled agent event: %s (step %s, carries %s)"
+                    type
+                    (plist-get event :step)
+                    (chat-ui--event-payload-keys event))))))))
 
 (defun chat-ui--start-agent-run (transport)
   "Start an agent run for the current session through TRANSPORT."

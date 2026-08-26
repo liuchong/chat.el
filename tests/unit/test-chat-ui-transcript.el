@@ -451,5 +451,61 @@ has to be drawn however much of it arrives at once."
            (should (string-match-p (format "Paragraph %d\\." index) visible))
            (should (string-match-p (format "(marker %d)" index) visible))))))))
 
+;; ------------------------------------------------------------------
+;; Where the cursor is left
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-ui-transcript-a-redraw-does-not-throw-point-to-the-top ()
+  "Reported from a long reply: the cursor jumped to the conversation's
+first line the moment a step was recorded.
+
+Following the output leaves point at the end of the live tail, which is
+inside the region a redraw deletes. The marker `save-excursion' keeps
+collapses to the start of the deletion, and re-insertion leaves it there,
+so the cursor came back at the top of everything that had just been
+drawn."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Point Session" 'kimi)))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "u-1" :role :user :content "A question"
+                         :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-ui--render-response-state (current-buffer) chat-ui--live-start
+                                       "a reply being streamed" nil)
+       ;; Where following the output puts it.
+       (goto-char chat-ui--messages-end)
+       (chat-session-add-message
+        session
+        (make-chat-message :id "a-1" :role :assistant
+                           :content "a reply being streamed"
+                           :timestamp (current-time)))
+       (setq chat-ui--live-response-content "")
+       (chat-ui--redraw-conversation)
+       (should (= (point) (marker-position chat-ui--messages-end)))
+       (should (> (point) (marker-position chat-ui--conversation-start)))))))
+
+(ert-deftest chat-ui-transcript-a-redraw-leaves-a-typing-cursor-alone ()
+  "Point outside the redrawn region stays exactly where it was, which is
+the reason the region is bounded in the first place."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Typing Session" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (goto-char (point-max))
+       (chat-session-add-message
+        session
+        (make-chat-message :id "u-1" :role :user :content "Typed while busy"
+                           :timestamp (current-time)))
+       (chat-ui--redraw-conversation)
+       ;; The conversation above grew, so the input moved; the cursor
+       ;; moved with it rather than being left behind in the transcript.
+       (should (= (point) (point-max)))))))
+
 (provide 'test-chat-ui-transcript)
 ;;; test-chat-ui-transcript.el ends here

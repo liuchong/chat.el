@@ -134,6 +134,20 @@ The chunk event names its two the other way round, `:content' and
     (chat-ui--insert-live-reasoning)
     (should (string-empty-p (buffer-string)))))
 
+(ert-deftest chat-ui-an-unhandled-event-is-named-and-not-printed ()
+  "The clause that reports a dropped event printed the whole session.
+
+`chat-agent--emit' puts `:run' on every event and the run holds the
+session, so one `%S' wrote the entire conversation -- and seven event
+types reach this clause, several times per turn."
+  (should (equal (chat-ui--event-payload-keys
+                  (list :type 'turn-start :step 2 :run 'the-whole-session
+                        :messages '(a b) :model 'kimi))
+                 "messages model"))
+  (should (equal (chat-ui--event-payload-keys
+                  (list :type 'agent-start :step 0 :run 'the-whole-session))
+                 "nothing")))
+
 (ert-deftest chat-ui-streaming-is-on-by-default ()
   "Off meant the whole reply landed in one callback at the end."
   (should (eq (default-value 'chat-ui-use-streaming) t))
