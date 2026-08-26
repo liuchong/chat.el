@@ -17,6 +17,7 @@
 (require 'chat-i18n)
 (require 'chat-command)
 (require 'chat-input-history)
+(require 'chat-shell-builtins)
 ;; Owned by `chat.el', which loads after this file.
 (defvar chat-commands-help)
 (defvar chat-auto-save-sessions)
@@ -431,8 +432,19 @@ started on.  A session without code capability has no focus to move."
    chat-ui--current-request-id
    chat-ui--request-tool-events))
 
-(defcustom chat-ui-auto-path-completion t
-  "Whether typing a path-like token in the input offers completion."
+(defcustom chat-ui-auto-path-completion nil
+  "Whether typing a path-like token in the input offers completion.
+
+Off, because a popup that arrives uninvited costs more than it saves. A
+completion UI that is open takes RET for itself, so the key that sends a
+message becomes the key that picks a candidate and the message needs a
+second RET; and the popup window moves the buffer under the reader while
+they are still typing.
+
+A terminal completes on TAB and never before, and TAB is bound to
+`completion-at-point' here, which fills in the common prefix on the first
+press and lists the candidates on the second -- what a shell does. Set
+this if you want the popup back."
   :type 'boolean
   :group 'chat-ui)
 
@@ -2570,12 +2582,14 @@ restrictions as the model."
 (defun chat-ui--handle-shell-command (command)
   "Run COMMAND and report the result in the chat buffer.
 
-A lone `cd' is handled here instead of in the shell, because a subprocess
-cannot change the directory this session works in."
+The builtins that change this session are handled here rather than in the
+shell, because a subprocess cannot move its parent's working directory or
+set its parent's environment: run there, they would succeed and change
+nothing that outlives them.  Everything else goes to a real shell."
   (let* ((trimmed (string-trim command))
-         (directory (chat-ui--directory-command-target trimmed)))
-    (if directory
-        (chat-ui--change-directory directory)
+         (builtin (chat-shell-builtins-parse trimmed)))
+    (if builtin
+        (chat-ui--handle-shell-builtin builtin)
       (setq chat-ui--last-shell-command trimmed)
       (chat-ui--insert-shell-echo trimmed)
       (let ((output (chat-ui--execute-shell-safe trimmed)))
@@ -2678,30 +2692,80 @@ have."
   "Return the directory a lone `cd' COMMAND asks for, or nil.
 
 A compound command returns nil so that it reaches the shell, where its
-own `cd' applies to that subprocess only.  A bare `cd' means home, as it
-does in a shell."
-  (when (string-match "\\`cd\\(?:[ \t]+\\(.*\\)\\)?\\'" command)
-    (let ((target (string-trim (or (match-string 1 command) ""))))
-      (unless (string-match-p "[;&|<>`$]" target)
-        (if (string-empty-p target) "~" target)))))
+own `cd' applies to that subprocess only.  A bare `cd' means home and `-'
+means the directory before this one, as they do in a shell."
+  (let ((parsed (chat-shell-builtins-parse command)))
+    (when (eq (plist-get parsed :builtin) 'cd)
+      (chat-shell-builtins-resolve-directory (plist-get parsed :arg)))))
 
-(defun chat-ui--change-directory (directory)
-  "Point this session at DIRECTORY.
+(defun chat-ui--change-directory (directory &optional quiet)
+  "Point this session at DIRECTORY, reporting it unless QUIET.
 
 Records it on the session so it outlives the buffer, and sets the buffer
 default so typed shell commands and the tools the agent runs share one
-working directory."
-  (let* ((requested (chat-command-fold-path (string-trim directory)))
-         (expanded (expand-file-name requested)))
-    (if (not (file-directory-p expanded))
-        (chat-ui--insert-system-message
-         (chat-i18n 'directory-missing "❌ Directory not found: %s" requested))
-      (setq default-directory (file-name-as-directory expanded))
-      (when chat--current-session
-        (chat-session-set-working-directory chat--current-session
-                                            default-directory))
-      (chat-ui--insert-system-message
-       (chat-i18n 'directory-changed "📁 Changed directory to: %s" default-directory)))))
+working directory.  Returns non-nil when the directory changed.
+
+DIRECTORY may be a cons of `error' and a reason, which is how `cd -'
+reports that there is nowhere to go back to yet."
+  (if (eq (car-safe directory) 'error)
+      (progn (chat-ui--insert-system-message (cdr directory)) nil)
+    (let* ((requested (chat-command-fold-path (string-trim directory)))
+           (expanded (expand-file-name requested)))
+      (if (not (file-directory-p expanded))
+          (progn
+            (chat-ui--insert-system-message
+             (chat-i18n 'directory-missing "❌ Directory not found: %s" requested))
+            nil)
+        ;; Recorded before the move, so `cd -' has somewhere to return to.
+        (chat-shell-builtins-record-departure default-directory)
+        (setq default-directory (file-name-as-directory expanded))
+        (when chat--current-session
+          (chat-session-set-working-directory chat--current-session
+                                              default-directory))
+        (unless quiet
+          (chat-ui--insert-system-message
+           (chat-i18n 'directory-changed "📁 Changed directory to: %s"
+                      default-directory)))
+        t))))
+
+(defun chat-ui--handle-shell-builtin (parsed)
+  "Act on PARSED, a builtin described by `chat-shell-builtins-parse'."
+  (pcase (plist-get parsed :builtin)
+    ('cd
+     (chat-ui--change-directory
+      (chat-shell-builtins-resolve-directory (plist-get parsed :arg))))
+    ('pushd
+     (let ((here default-directory)
+           (target (plist-get parsed :arg)))
+       (when (chat-ui--change-directory
+              (chat-shell-builtins-resolve-directory target) t)
+         (chat-shell-builtins-push-directory here)
+         (chat-ui--insert-system-message
+          (chat-shell-builtins-directory-stack-report default-directory)))))
+    ('popd
+     (let ((target (chat-shell-builtins-pop-directory)))
+       (if (not target)
+           (chat-ui--insert-system-message
+            (chat-i18n 'shell-empty-directory-stack "popd: directory stack empty"))
+         (when (chat-ui--change-directory target t)
+           (chat-ui--insert-system-message
+            (chat-shell-builtins-directory-stack-report default-directory))))))
+    ('dirs
+     (chat-ui--insert-system-message
+      (chat-shell-builtins-directory-stack-report default-directory)))
+    ('export
+     (let ((assignment (chat-shell-builtins-parse-assignment
+                        (plist-get parsed :arg))))
+       (if (not assignment)
+           (chat-ui--insert-system-message
+            (chat-i18n 'shell-bad-assignment "export: not a valid name"))
+         (chat-shell-builtins-set-variable (car assignment) (cdr assignment))
+         (chat-ui--insert-system-message
+          (format "%s=%s" (car assignment) (cdr assignment))))))
+    ('unset
+     (chat-shell-builtins-unset-variable (plist-get parsed :arg))
+     (chat-ui--insert-system-message
+      (chat-i18n 'shell-unset "unset %s" (plist-get parsed :arg))))))
 
 (defun chat-ui--repeat-shell-command ()
   "Run the shell command this buffer ran most recently."
@@ -2711,7 +2775,18 @@ working directory."
      (chat-i18n 'shell-nothing-to-repeat "⚠️ No shell command to repeat yet"))))
 
 (defun chat-ui--execute-shell-safe (command)
-  "Run COMMAND for the chat buffer and return its output."
+  "Run COMMAND for the chat buffer and return its output.
+
+Runs with whatever this buffer has exported, so a variable set on one line
+is there on the next.  Every command is its own subshell, so without this
+an `export' would reach only the process that performed it: the variable
+would appear to be set and then not be, which is worse than declining to
+set it."
+  (let ((process-environment (chat-shell-builtins-process-environment)))
+    (chat-ui--execute-shell-safe-1 command)))
+
+(defun chat-ui--execute-shell-safe-1 (command)
+  "Run COMMAND and return its output."
   (condition-case err
       (cond
        ((and chat-ui-shell-unrestricted

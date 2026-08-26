@@ -651,9 +651,14 @@ from wherever the buffer happens to sit."
          (should (member "docs/guide.md" candidates)))))))
 
 (ert-deftest chat-ui-auto-path-completion-only-triggers-for-path-like-input ()
-  "Typing an ordinary word does not open a file completion popup."
+  "Typing an ordinary word does not open a file completion popup.
+
+Only reachable when the option is on, which it is not by default; bound
+here because the narrowing to path-like tokens still has to hold for
+anyone who turns it back on."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
+          (chat-ui-auto-path-completion t)
           (session (chat-session-create "Auto Path Session" 'kimi))
           path-triggered
           plain-triggered)
@@ -875,6 +880,97 @@ both arrive from the same place."
   (should-not (chat-ui--directory-command-target "cd /tmp && ls"))
   (should-not (chat-ui--directory-command-target "cd /tmp; ls"))
   (should-not (chat-ui--directory-command-target "cdate")))
+
+(ert-deftest chat-ui-cd-dash-goes-back-and-then-forward-again ()
+  "Two `cd -' in a row return to where each started, as in a shell.
+
+`-' used to be expanded as a path, so it named a directory called `-'
+under the current one and the command reported it missing."
+  (chat-test-with-temp-dir
+   (let ((first (file-name-as-directory (expand-file-name "one")))
+         (second (file-name-as-directory (expand-file-name "two")))
+         (messages nil))
+     (make-directory first t)
+     (make-directory second t)
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message)
+                  (lambda (text) (push text messages))))
+         (setq default-directory first)
+         (chat-ui--handle-shell-command (format "cd %s" second))
+         (should (equal second default-directory))
+         (chat-ui--handle-shell-command "cd -")
+         (should (equal first default-directory))
+         (chat-ui--handle-shell-command "cd -")
+         (should (equal second default-directory)))))))
+
+(ert-deftest chat-ui-cd-dash-with-no-history-reports-instead-of-moving ()
+  "And leaves the working directory alone."
+  (chat-test-with-temp-dir
+   (let ((here (file-name-as-directory (expand-file-name ".")))
+         (messages nil))
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message)
+                  (lambda (text) (push text messages))))
+         (setq default-directory here)
+         (setq chat-shell-previous-directory nil)
+         (chat-ui--handle-shell-command "cd -")
+         (should (equal here default-directory))
+         (should (string-match-p "OLDPWD\\|上一个" (car messages))))))))
+
+(ert-deftest chat-ui-pushd-and-popd-walk-the-directory-stack ()
+  "`pushd' remembers where it left and `popd' returns there."
+  (chat-test-with-temp-dir
+   (let ((first (file-name-as-directory (expand-file-name "one")))
+         (second (file-name-as-directory (expand-file-name "two")))
+         (messages nil))
+     (make-directory first t)
+     (make-directory second t)
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message)
+                  (lambda (text) (push text messages))))
+         (setq default-directory first)
+         (setq chat-shell-directory-stack nil)
+         (chat-ui--handle-shell-command (format "pushd %s" second))
+         (should (equal second default-directory))
+         (chat-ui--handle-shell-command "popd")
+         (should (equal first default-directory))
+         (chat-ui--handle-shell-command "popd")
+         (should (equal first default-directory))
+         (should (string-match-p "popd\\|目录栈" (car messages))))))))
+
+(ert-deftest chat-ui-an-exported-variable-is-there-on-the-next-line ()
+  "`export' is interpreted here, so it outlives the command that set it.
+
+Sent to the shell it would set the variable in that one subshell and be
+gone by the next command."
+  (chat-test-with-temp-dir
+   (let ((seen nil)
+         (messages nil))
+     (with-temp-buffer
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message)
+                  (lambda (text) (push text messages)))
+                 ((symbol-function 'chat-ui--insert-shell-echo) #'ignore)
+                 ((symbol-function 'chat-ui--insert-shell-output) #'ignore)
+                 ((symbol-function 'chat-ui--execute-shell-safe-1)
+                  (lambda (_command)
+                    (setq seen (getenv "CHAT_TEST_EXPORTED"))
+                    "")))
+         (setq chat-shell-environment nil)
+         (chat-ui--handle-shell-command "export CHAT_TEST_EXPORTED=yes")
+         (chat-ui--handle-shell-command "printenv CHAT_TEST_EXPORTED")
+         (should (equal "yes" seen))
+         (chat-ui--handle-shell-command "unset CHAT_TEST_EXPORTED")
+         (chat-ui--handle-shell-command "printenv CHAT_TEST_EXPORTED")
+         (should-not seen))))))
+
+(ert-deftest chat-ui-completion-does-not-arrive-uninvited ()
+  "Auto completion is off, so RET sends and the buffer does not shift.
+
+A completion UI that is open takes RET for itself, so the key that sends
+becomes the key that picks a candidate.  TAB is still bound to
+`completion-at-point', which is where a terminal puts it."
+  (should-not chat-ui-auto-path-completion)
+  (should (eq (lookup-key chat-mode-map (kbd "TAB")) 'completion-at-point)))
 
 (ert-deftest chat-ui-repeat-shell-command-reruns-the-last-one ()
   "A doubled bang reruns the previous command and reports when there is none."

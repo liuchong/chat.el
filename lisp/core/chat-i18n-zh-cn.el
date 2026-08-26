@@ -230,6 +230,10 @@ Wiki（/wiki <子命令>）：
    (no-output . "（无输出）")
    (directory-changed . "📁 工作目录已切换到：%s")
    (directory-missing . "❌ 找不到目录：%s")
+   (shell-no-previous-directory . "cd：还没有上一个目录")
+   (shell-empty-directory-stack . "popd：目录栈是空的")
+   (shell-bad-assignment . "export：变量名不合法")
+   (shell-unset . "已取消 %s")
 
    ;; Sending.
    (empty-message . "不能发送空消息")
