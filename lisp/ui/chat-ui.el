@@ -1205,15 +1205,30 @@ where some of it is."
            (bounds (chat-ui--input-prompt-bounds))
            (drawn (and bounds (buffer-substring (car bounds) (cdr bounds)))))
       (unless (equal-including-properties drawn wanted)
-        (save-excursion
-          (let ((inhibit-read-only t)
-                (start (or (car bounds)
-                           (marker-position chat-ui--input-overlay))))
+        (let* ((inhibit-read-only t)
+               (start (or (car bounds)
+                          (marker-position chat-ui--input-overlay)))
+               ;; How far into the input point sat, or nil when it sat
+               ;; above the input and is none of this function's business.
+               ;;
+               ;; `save-excursion' cannot answer this.  It restores point
+               ;; through a marker, and a marker at the start of a region
+               ;; that is deleted and rewritten comes back on the far side
+               ;; of the new text -- so the cursor landed in front of the
+               ;; prompt every time a command claimed or released plain
+               ;; input, and what was typed next went in front of it too.
+               (offset (and (chat-ui--point-in-input-p)
+                            (- (point)
+                               (marker-position chat-ui--input-overlay)))))
+          (save-excursion
             (when bounds
               (delete-region (car bounds) (cdr bounds)))
             (goto-char start)
             (insert wanted)
-            (set-marker chat-ui--input-overlay (point))))))))
+            (set-marker chat-ui--input-overlay (point)))
+          (when offset
+            (goto-char (+ (marker-position chat-ui--input-overlay)
+                          offset))))))))
 
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
@@ -2348,6 +2363,20 @@ assistant response being filled in."
     (setq chat-ui--live-reasoning-content "")
     (setq chat-ui--live-trailers nil)
     (setq chat-ui--last-render nil)
+    ;; Drawn and painted here, before the transport is prepared, because
+    ;; nothing had put a frame on screen between RET and the request going
+    ;; out: the question was in the buffer but unpainted, and the live line
+    ;; waited on a refresh timer a second away.  What the reader saw was
+    ;; their question and the waiting state arriving together once the
+    ;; request was already on the wire, which reads as the send having
+    ;; waited for it.
+    ;;
+    ;; A paint rather than a deferral because the preparation was measured
+    ;; at about 17ms on a thirty-message session -- moving that off the
+    ;; command loop would buy nothing and cost the synchronous contract the
+    ;; rest of the send path is written against.
+    (chat-ui--render-live-region)
+    (redisplay)
     (let* ((messages-with-tools (chat-ui--prepare-messages-with-tools messages))
            (messages-final
             (chat-context-prepare-messages

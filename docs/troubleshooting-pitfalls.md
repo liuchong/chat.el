@@ -1742,4 +1742,40 @@ recovery is for.
 **Solution**: mark it with its own text property and find it by that. A
 recovery path tested only against undamaged input is untested.
 
+### `save-excursion` Restores Point On The Wrong Side Of A Rewrite
+
+**Problem**: every time a command claimed or released plain input, the
+cursor ended up in front of the prompt instead of after it, and what was
+typed next went in front of it too.
+
+**Cause**: `save-excursion` restores point through a marker. A marker at
+the start of a region that is deleted and then rewritten does not know
+which side of the new text it belongs on, and comes back before it. The
+prompt is exactly that region, and point sits exactly at its start.
+
+**Solution**: for point inside an area being rewritten, record the offset
+into the area and restore it by arithmetic. `save-excursion` is for point
+somewhere the edit does not reach.
+
+### No Paint Between The Keystroke And The Work
+
+**Problem**: sending felt like it waited for the request to be
+established: the question appeared at the same moment the answer started
+arriving, not when it was typed.
+
+**Cause**: nothing painted a frame between the two. The question was in
+the buffer and the input was cleared, but a command's buffer changes do
+not reach the screen until the command returns, and the command went on
+to prepare and start the request. The live waiting line was worse: it was
+drawn by a refresh timer a second out, so the first second had no
+indicator at all.
+
+**Solution**: draw the waiting state at the point the request is created,
+not on the next tick, and `redisplay` once before the work. Measure
+before reaching for anything heavier -- the preparation here was about
+17ms on a thirty-message session, so moving it off the command loop would
+have bought nothing and cost the synchronous contract the send path is
+written against. The complaint was never about the 17ms; it was about
+the frame that was never drawn.
+
 Last updated: 2026-08-26

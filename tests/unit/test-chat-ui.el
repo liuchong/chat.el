@@ -1442,6 +1442,66 @@ same thing any unrecognized slash does."
     (chat-ui--clear-input (marker-position chat-ui--input-overlay) (point-max))
     (should (equal "" (chat-ui--input-text)))))
 
+(ert-deftest chat-ui-typing-after-the-prompt-does-not-take-its-colour ()
+  "The prompt is coloured to stand out; input wearing that colour undoes it."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (goto-char (point-max))
+    (insert-and-inherit "echo hi")
+    (should-not (get-text-property (marker-position chat-ui--input-overlay)
+                                  'face))))
+
+(ert-deftest chat-ui-the-prompt-cannot-be-deleted-from-in-front-of-it ()
+  "Walking to it with the arrow keys and pressing delete is the other way in."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (goto-char (marker-position chat-ui--input-overlay))
+    (backward-char 3)
+    (should-error (delete-char 1) :type 'text-read-only)
+    (should-error (kill-line) :type 'text-read-only)
+    (should (equal "cmd> "
+                   (buffer-substring-no-properties
+                    (line-beginning-position)
+                    (marker-position chat-ui--input-overlay))))))
+
+(ert-deftest chat-ui-claiming-the-line-leaves-the-cursor-after-the-prompt ()
+  "`/cmd ls' widens the prompt under the cursor, which must not overtake it."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-max))
+    (chat-ui--dispatch-command (chat-command-parse "/cmd ls"))
+    (should (= (point) (marker-position chat-ui--input-overlay)))
+    ;; And what is typed next lands in the input, not in front of the prompt.
+    (insert-and-inherit "x")
+    (should (equal "x" (chat-ui--input-text)))))
+
+(ert-deftest chat-ui-releasing-the-line-leaves-the-cursor-after-the-prompt ()
+  "The prompt narrows on the way back out, and the cursor followed it out."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "!ls"))
+    (goto-char (point-max))
+    (chat-ui--dispatch-command (chat-command-parse "/send hello"))
+    (should (= (point) (marker-position chat-ui--input-overlay)))))
+
+(ert-deftest chat-ui-a-redrawn-prompt-keeps-the-cursor-where-it-was-typing ()
+  "Point mid-word must stay mid-word, not jump to either end of the input."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-max))
+    (insert "half a thought")
+    (backward-char 7)
+    (let ((offset (- (point) (marker-position chat-ui--input-overlay))))
+      (chat-ui--set-default-command "cmd")
+      (chat-ui--render-input-prompt)
+      (should (= offset (- (point) (marker-position chat-ui--input-overlay)))))))
+
+(ert-deftest chat-ui-a-reader-above-the-input-is-not-pulled-down-to-it ()
+  "Redrawing the prompt must not move a cursor that was not in the input."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-min))
+    (let ((where (point)))
+      (chat-ui--set-default-command "cmd")
+      (chat-ui--render-input-prompt)
+      (should (= where (point))))))
+
 (ert-deftest chat-ui-a-lost-prompt-comes-back-on-the-next-send ()
   "A prompt that goes missing used to stay missing for the life of the buffer.
 
@@ -1726,6 +1786,38 @@ one that reads slightly less faithfully on all of them."
          (should (eq (plist-get captured-config :transport) 'stream))
          (should (plist-get captured-config :on-event))
          (should (eq (plist-get captured-config :session) session)))))))
+
+(ert-deftest chat-ui-the-waiting-state-is-drawn-before-the-transport ()
+  "The reader has to see something between RET and the request going out.
+
+Nothing painted a frame there: the question was in the buffer unpainted
+and the live line waited on a refresh timer a second away, so both
+arrived together once the request was already on the wire -- which reads
+as the send having waited for it."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Waiting" 'kimi))
+          (drawn-before-preparing nil))
+     (chat-session-add-message
+      session
+      (make-chat-message :id "user-1" :role :user :content "Hello"
+                         :timestamp (current-time)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf* ((prepare (symbol-function 'chat-ui--prepare-messages-with-tools))
+                  ((symbol-function 'chat-ui--prepare-messages-with-tools)
+                   (lambda (messages)
+                     (setq drawn-before-preparing
+                           (buffer-substring-no-properties (point-min) (point-max)))
+                     (funcall prepare messages)))
+                  ((symbol-function 'chat-agent-start) (lambda (_config) nil)))
+         (chat-ui--get-response-streaming))
+       ;; The question and a waiting line naming the transport, both on
+       ;; screen before any of the request work has been done.
+       (should (string-match-p "You:\nHello" drawn-before-preparing))
+       (should (string-match-p "Preparing stream request"
+                               drawn-before-preparing))))))
 
 (ert-deftest chat-ui-get-response-sync-uses-sync-transport ()
   "Test non streaming UI requests go through the agent sync transport."
