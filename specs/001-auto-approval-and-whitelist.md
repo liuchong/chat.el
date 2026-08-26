@@ -1,5 +1,12 @@
 # 001: Auto-Approval Mode and Command Whitelist Spec
 
+> **本 spec 的审批部分已由 spec 012 取代。** 012 把这里的多个开关收成一个具名模式
+> （`manual` / `auto` / `dangerous`），并把白名单拆成来源分明的四份记录。以下两处在
+> 实现中并未成立，不要照着做：§1.3 说的"默认 shell_execute 不纳入自动同意范围"被
+> session 级 auto-approve 短路（见 012 的现状分析），§3.1 的决策顺序与代码不一致。
+> §2.2 说的"复杂命令整体匹配"对白名单仍然成立，但 spec 011 之后 `shell_execute`
+> 本身不再接受 `&&` 一类的串联，需要拆成多次调用。
+
 ## Overview
 
 为 chat.el 增加两个安全相关的功能：
