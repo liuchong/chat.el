@@ -8,7 +8,7 @@
 
 ## Current Phase
 
-M0, M1 and M2 of the Agent Runtime roadmap are complete (2026-08-28). Decision
+M0 through M3 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes five versioned contracts: lifecycle events, durable tasks, model
 capabilities, typed content and agent profiles. Spec 014 orders their delivery
 through M8 so later features depend on contracts rather than provider, UI or
@@ -30,10 +30,17 @@ deltas, usage and terminal outcomes. Application callers use that runtime or a
 compatibility projection over it; reasoning required for a tool continuation is
 replayed only for an explicitly capable model.
 
-The next implementation stage is M3: define versioned extension declarations,
-lazy skills and resolved agent profiles. Profiles compose over the same loop,
-must be inspectable before dispatch and cannot silently widen tool or approval
-authority.
+Decision 0021 adds the M3 extension contracts. Named hooks wrap the unified M1
+event bus, declarative skill and profile manifests load lazily behind an
+explicit project trust boundary, and custom agents resolve through the same
+runtime loop. Tool authority can only narrow, approval can only tighten and
+known model conflicts fail before dispatch. The selected profile remains
+session state while each run records a bounded resolved snapshot without
+rewriting earlier messages.
+
+The next implementation stage is M4: unify foreground work, background
+commands, workflows and subagents under one durable, parallel and cancellable
+task contract.
 
 There is one chat surface (2026-08-26). Code capability is a property of
 a session rather than a second display: `chat-code-mode` is gone, and a
@@ -115,7 +122,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1405 tests passing.
+Canonical suite: 1430 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark

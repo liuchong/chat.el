@@ -21,7 +21,7 @@
   "Files that emit agent events.")
 
 (defconst test-chat-ui--events-without-a-branch
-  '(agent-start turn-start context-transformed steering
+  '(agent-start profile-resolved turn-start context-transformed steering
                 prepared-next-turn stream-result tool-batch-start
                 tool-batch-end turn-ended turn-failed truncated error)
   "Emitted events the UI handler deliberately leaves to the catch-all.

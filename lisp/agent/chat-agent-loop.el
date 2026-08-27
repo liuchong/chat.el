@@ -263,16 +263,16 @@ on screen, where the marker would be noise.  It belongs on the wire only."
                     (chat-model-capabilities-resolve
                      (chat-agent-run-state-model run)
                      (or (plist-get base :model)
-                         (and (chat-agent-run-state-session run)
+                         (and (chat-agent-run-execution-session run)
                               (chat-session-model-name
-                               (chat-agent-run-state-session run)))
+                               (chat-agent-run-execution-session run)))
                          (plist-get
                           (chat-llm-get-provider-config
                            (chat-agent-run-state-model run))
                           :model))))))
                  (fboundp 'chat-tool-caller-provider-tools))
         (let* ((chat-tool-caller-current-session
-                (chat-agent-run-state-session run))
+                (chat-agent-run-execution-session run))
                (tools (chat-tool-caller-provider-tools)))
           (when tools
             (setq base (plist-put base :tools tools))))))
@@ -638,7 +638,7 @@ need approval carry exclusive accesses and therefore remain serialized."
            (let ((handle
                   (chat-tool-caller-execute-async
                    call
-                   (chat-agent-run-state-session run)
+                   (chat-agent-run-execution-session run)
                    (lambda (event)
                      (let ((indexed (copy-tree event)))
                        (setq indexed
@@ -811,7 +811,7 @@ TRUNCATED is non-nil when tool calls were refused for length."
        run result
        (chat-tool-caller-process-response-data
         content
-        (chat-agent-run-state-session run)
+        (chat-agent-run-execution-session run)
         (lambda (event)
           (chat-agent--emit run 'tool-event :event event)))
        nil)))))

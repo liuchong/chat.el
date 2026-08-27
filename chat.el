@@ -96,6 +96,8 @@ Returns the list of files that were loaded."
 (require 'chat-session)
 (require 'chat-session-wire)
 (require 'chat-event)
+(require 'chat-extension-trust)
+(require 'chat-runtime-hook)
 (require 'chat-session-index)
 (chat-session-index-install)
 (require 'chat-session-tree)
@@ -129,6 +131,10 @@ Returns the list of files that were loaded."
 (require 'chat-llm-gemini)
 (require 'chat-llm-ark)
 (require 'chat-model-runtime)
+
+;; Load declarative agent extensions before built-in profiles.
+(require 'chat-skill)
+(require 'chat-agent-profile)
 
 ;; Load tool modules.
 (require 'chat-command-gate)

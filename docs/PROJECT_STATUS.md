@@ -11,12 +11,14 @@ Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/too
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
-The Agent Runtime roadmap is active. M0, M1 and M2 are complete: a versioned
+The Agent Runtime roadmap is active. M0 through M3 are complete: a versioned
 lifecycle event contract now unifies runtime hooks and session-scoped audit for
 turns, prompts, tools, permissions, compaction, background tasks and child
 agents. Model capabilities now resolve from explicit versioned facts, and
-streaming and asynchronous requests share one normalized event stream. The next
-stage is hooks, skills and custom agent profiles.
+streaming and asynchronous requests share one normalized event stream. Named
+runtime hooks, lazy skills and resolved agent profiles now extend the same loop
+behind explicit trust and non-widening authority rules. The next stage unifies
+foreground, background, workflow and delegated work as durable tasks.
 
 ## Implemented Areas
 
@@ -105,6 +107,18 @@ stage is hooks, skills and custom agent profiles.
 - dependency retry when pending services become available
 - owned service, tool, and hook tracking
 - reverse-order rollback when a plugin stops or setup fails
+- plugin-owned named runtime hooks backed by the unified lifecycle event bus
+
+### Agent Extensions
+
+- versioned blocker and observer declarations with deterministic ordering
+- explicit trust boundary for project-local hooks, skills and profiles
+- lazy declarative skill discovery with provenance and schema validation
+- ordered profile inheritance with cycle and conflict diagnostics
+- pre-dispatch model capability validation for resolved profiles and skills
+- non-widening tool overlays, monotonic approval and bounded execution limits
+- session-level profile selection and audited reproducibility snapshots
+- code, office, daily, review and all-tools built-in profiles
 
 ### Work Orchestration
 
@@ -128,7 +142,8 @@ stage is hooks, skills and custom agent profiles.
 
 ### Capability Packs
 
-- code, office, and daily session profiles backed by provider-visible tool overlays
+- code, office, daily, review and combined session profiles backed by
+  provider-visible tool overlays
 - programming tools for read-only status, Flymake diagnostics, native
   completion-at-point, web documentation, and compile/test background tasks
 - office tools for Org agenda/capture/TODO/scheduling, Dired-style
@@ -141,8 +156,8 @@ stage is hooks, skills and custom agent profiles.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1405 regression tests discovered
-- 1405 passing
+- 1430 regression tests discovered
+- 1430 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

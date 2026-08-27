@@ -213,6 +213,12 @@ then the wrong date was written back over the right one."
        (should (chat-session-tool-enabled-p loaded 'safe-tool))
        (should-not (chat-session-tool-enabled-p loaded 'danger-tool))))))
 
+(ert-deftest chat-session-explicit-empty-tool-list-disables-every-tool ()
+  "An explicit empty allowlist means no tools, not an absent allowlist."
+  (let ((session (make-chat-session
+                  :id "no-tools" :tool-config '(:enabled-tools nil))))
+    (should-not (chat-session-tool-enabled-p session 'anything))))
+
 (ert-deftest chat-session-save-and-load-preserves-tree-and-summary-data ()
   "Test session tree metadata, message branch fields, and summaries persist."
   (chat-test-with-temp-dir

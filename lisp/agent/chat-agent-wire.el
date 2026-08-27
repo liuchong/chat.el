@@ -24,12 +24,15 @@
 
 (require 'cl-lib)
 (require 'chat-event)
+(require 'chat-agent-profile)
 
 (declare-function chat-agent-run-state-session "chat-agent-types" (run))
 (declare-function chat-agent-run-state-model "chat-agent-types" (run))
 (declare-function chat-agent-run-state-transport "chat-agent-types" (run))
 (declare-function chat-agent-run-state-max-steps "chat-agent-types" (run))
 (declare-function chat-agent-run-state-messages "chat-agent-types" (run))
+(declare-function chat-agent-run-state-profile "chat-agent-types" (run))
+(declare-function chat-agent-run-execution-session "chat-agent-types" (run))
 (declare-function chat-session-id "chat-session" (session))
 (declare-function chat-session-p "chat-session" (object))
 (declare-function chat-message-p "chat-session" (object))
@@ -107,6 +110,10 @@ a run that worked into a run that failed while being watched."
                (cons 'max_steps (chat-agent-run-state-max-steps run))
                (cons 'message_count
                      (length (chat-agent-run-state-messages run))))))
+      ('profile-resolved
+       (chat-agent-profile-snapshot
+        (plist-get event :profile)
+        (and run (chat-agent-run-execution-session run))))
       ('context-transformed
        (list (cons 'message_count (plist-get event :message-count))))
       ;; The turn's start time, which is what makes the delay before the

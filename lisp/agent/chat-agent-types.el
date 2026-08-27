@@ -11,7 +11,8 @@
 ;;
 ;; Event types delivered through :on-event:
 ;;
-;;   agent-start  context-transformed  turn-start  turn-ended  turn-failed
+;;   agent-start  profile-resolved  context-transformed
+;;   turn-start  turn-ended  turn-failed
 ;;   stream-chunk
 ;;   stream-reasoning  stream-result  model-tool-call-delta  model-usage
 ;;   tool-batch-start  tool-event  tool-batch-end
@@ -40,7 +41,8 @@
 (cl-defstruct (chat-agent-run-state
                (:constructor chat-agent--run-create)
                (:copier nil))
-  model messages session transport on-event should-stop-fn steering-fn
+  model messages session execution-session profile transport
+  on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options
   ;; What a single input is worth, kept apart from `max-steps' so that a
@@ -63,6 +65,11 @@
   (queue-mode 'fifo)
   (cancel-functions nil)
   (native-tools t))
+
+(defun chat-agent-run-execution-session (run)
+  "Return RUN's transient policy session, or its original session."
+  (or (chat-agent-run-state-execution-session run)
+      (chat-agent-run-state-session run)))
 
 (defun chat-agent-tool-call-id (call &optional _index)
   "Return the id of CALL, minting one when it arrived without.

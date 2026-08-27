@@ -21,6 +21,7 @@
 (require 'subr-x)
 (require 'url)
 (require 'chat-files)
+(require 'chat-agent-profile)
 (require 'chat-session)
 (require 'chat-tool-forge)
 (require 'chat-work)
@@ -67,12 +68,40 @@
     daily_mail_draft_delete)
   "Tools exposed by the daily profile.")
 
+(defconst chat-capability-review-tools
+  '(programming_git_status
+    programming_flymake_diagnostics
+    programming_completion_at_point
+    files_read files_read_lines files_list files_grep open_file
+    emacs_buffers emacs_read_buffer emacs_imenu emacs_xref emacs_project)
+  "Read-only tools exposed by the review profile.")
+
+(defun chat-capability-register-profiles ()
+  "Register the built-in capability packs as agent profiles."
+  (dolist (entry
+           `((code ,chat-capability-programming-tools)
+             (office ,chat-capability-office-tools)
+             (daily ,chat-capability-daily-tools)
+             (review ,chat-capability-review-tools)))
+    (chat-agent-profile-register
+     (chat-agent-profile-create
+      :id (car entry)
+      :revision "1"
+      :tools (cadr entry)
+      :tools-specified-p t
+      :source 'builtin)))
+  (chat-agent-profile-register
+   (chat-agent-profile-create
+    :id 'all :revision "1" :source 'builtin))
+  t)
+
 (defun chat-capability-profile-tools (profile)
   "Return tools for PROFILE."
   (pcase profile
     ('code chat-capability-programming-tools)
     ('office chat-capability-office-tools)
     ('daily chat-capability-daily-tools)
+    ('review chat-capability-review-tools)
     ('all nil)
     (_ (error "Unknown capability profile: %s" profile))))
 
@@ -85,6 +114,8 @@
          (list :profile profile :enabled-tools tools)
        (list :profile profile)))
     session))
+
+(chat-capability-register-profiles)
 
 (defun chat-capability--current-session ()
   "Return the current chat session for interactive profile commands."

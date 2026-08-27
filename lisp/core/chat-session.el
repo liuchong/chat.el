@@ -952,7 +952,7 @@ what that session may do."
   (let* ((config (and session (chat-session-tool-config session)))
          (enabled (plist-get config :enabled-tools))
          (disabled (plist-get config :disabled-tools)))
-    (and (or (null enabled)
+    (and (or (not (plist-member config :enabled-tools))
              (memq tool-id enabled))
          (not (memq tool-id disabled)))))
 

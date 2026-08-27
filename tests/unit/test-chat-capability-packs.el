@@ -14,6 +14,14 @@
     (should (eq (plist-get (chat-session-tool-config session) :profile)
                 'daily))))
 
+(ert-deftest chat-capability-all-profile-keeps-tools-unrestricted ()
+  "The all profile omits the allowlist instead of declaring an empty one."
+  (let ((session (make-chat-session :id "all-profile")))
+    (chat-capability-apply-profile session 'all)
+    (should-not (plist-member (chat-session-tool-config session)
+                              :enabled-tools))
+    (should (chat-session-tool-enabled-p session 'any-tool))))
+
 (ert-deftest chat-capability-office-tools-read_and_mutate_allowed_roots ()
   "Test office tools read Org headings and mutate allowed directories."
   (chat-test-with-temp-dir

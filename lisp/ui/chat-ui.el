@@ -2938,6 +2938,9 @@ assistant response being filled in."
              (list :model model
                    :messages messages-with-tools
                    :session session
+                   :profile (plist-get (chat-session-tool-config session)
+                                       :profile)
+                   :project-root (chat-ui--path-completion-root)
                    :transport transport
                    :max-steps chat-ui-tool-loop-max-steps
                    :transform-context-fn

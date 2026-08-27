@@ -68,10 +68,21 @@
   "Return a fresh sub-agent id."
   (chat-session-new-message-id "subagent"))
 
-(defun chat-subagent--ensure-depth (depth)
-  "Signal when DEPTH exceeds `chat-subagent-max-depth'."
-  (when (> depth chat-subagent-max-depth)
-    (error "Sub-agent depth limit exceeded: %s" depth)))
+(defun chat-subagent--max-depth (&optional session)
+  "Return the effective nested-agent depth limit for SESSION."
+  (let ((profile-limit
+         (and session
+              (plist-get (chat-session-tool-config session)
+                         :subagent-max-depth))))
+    (if (and (integerp profile-limit) (> profile-limit 0))
+        (min chat-subagent-max-depth profile-limit)
+      chat-subagent-max-depth)))
+
+(defun chat-subagent--ensure-depth (depth &optional session)
+  "Signal when DEPTH exceeds the effective limit for SESSION."
+  (let ((limit (chat-subagent--max-depth session)))
+    (when (> depth limit)
+      (error "Sub-agent depth limit exceeded: %s > %s" depth limit))))
 
 (defun chat-subagent--timestamp ()
   "Return a stable timestamp string."
@@ -138,7 +149,7 @@ RUNNER is a function called with the child session and must return a
 summary string or alist.  This helper provides isolated child-session
 state without dumping child transcripts into the parent."
   (let ((depth (or depth 0)))
-    (chat-subagent--ensure-depth depth)
+    (chat-subagent--ensure-depth depth parent-session)
     (let* ((child-session
             (chat-subagent--child-session
              name messages parent-session depth))
@@ -174,7 +185,7 @@ state without dumping child transcripts into the parent."
     (name prompt parent-session success error-callback &optional budget)
   "Start nested agent NAME for PROMPT and report through callbacks."
   (let* ((depth (1+ (chat-subagent--session-depth parent-session)))
-         (_ (chat-subagent--ensure-depth depth))
+         (_ (chat-subagent--ensure-depth depth parent-session))
          (message
           (make-chat-message
            :id (chat-session-new-message-id "subagent-user")
@@ -254,7 +265,7 @@ state without dumping child transcripts into the parent."
 INPUT-JSONL is written to the subprocess stdin when non-nil.  Output is
 captured in LOG-FILE."
   (let ((depth (or depth 0)))
-    (chat-subagent--ensure-depth depth)
+    (chat-subagent--ensure-depth depth parent-session)
     (make-directory (file-name-directory log-file) t)
     (let* ((subagent (make-chat-subagent
                       :id (or id (chat-subagent--id))

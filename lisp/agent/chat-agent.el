@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'chat-agent-types)
 (require 'chat-agent-loop)
+(require 'chat-agent-profile)
 (require 'chat-llm)
 
 (defun chat-agent-active-p (run)
@@ -34,6 +35,8 @@ CONFIG is a plist with these keys:
   :model           provider symbol (required)
   :messages        initial list of chat-message structs (required)
   :session         session passed to tool execution
+  :profile         optional agent profile id
+  :project-root    root used for trusted project extension discovery
   :transport       `sync' (default) or `stream'
   :on-event        event callback (lambda (event))
   :should-stop-fn  optional stop predicate (lambda (run processed))
@@ -58,10 +61,13 @@ Events are delivered synchronously through :on-event.  The final
 `agent-end' event carries :status one of `completed', `stopped',
 `error', or `cancelled', plus accumulated :content, :tool-calls,
 :tool-results, :tool-events, :raw-request, :raw-response, and :steps."
+  (setq config (chat-agent-profile-prepare-config config))
   (let ((run (chat-agent--run-create
               :model (plist-get config :model)
               :messages (plist-get config :messages)
               :session (plist-get config :session)
+              :execution-session (plist-get config :execution-session)
+              :profile (plist-get config :profile-resolved)
               :transport (or (plist-get config :transport) 'sync)
               :on-event (plist-get config :on-event)
               :should-stop-fn (plist-get config :should-stop-fn)
@@ -81,6 +87,9 @@ Events are delivered synchronously through :on-event.  The final
                                 (plist-get config :native-tools)
                               chat-agent-native-tools))))
     (chat-agent--emit run 'agent-start)
+    (when (chat-agent-run-state-profile run)
+      (chat-agent--emit run 'profile-resolved
+                        :profile (chat-agent-run-state-profile run)))
     (chat-agent--turn run)
     run))
 

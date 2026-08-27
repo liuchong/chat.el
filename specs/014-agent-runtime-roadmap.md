@@ -156,6 +156,8 @@ Acceptance:
 - resolved instructions and overlays are inspectable and reproducible;
 - changing a profile never rewrites earlier session history.
 
+Status: complete.
+
 ### M4: Unified Tasks And Subagents
 
 Goal: represent foreground work, background commands, workflows and delegated
@@ -300,8 +302,10 @@ Every phase must preserve:
 
 ## Current Baseline
 
-M0, M1 and M2 are complete. The canonical suite passes 1405/1405. Model
-capabilities now resolve from explicit facts and every application request path
-projects into one versioned transport event vocabulary. The next implementation
-stage is M3: compose hooks, lazy skills and custom agent profiles without
-forking the runtime or widening permissions implicitly.
+M0 through M3 are complete. Named runtime hooks use the unified lifecycle bus,
+skills are discovered without eager body loading, and agent profiles resolve
+model requirements, instructions, tools, approval and limits before dispatch.
+Project extensions require explicit trust, effective authority cannot widen,
+and each run records a bounded profile snapshot without rewriting history. The
+next implementation stage is M4: one durable task contract for foreground,
+background, workflow and delegated work.

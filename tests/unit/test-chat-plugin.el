@@ -123,6 +123,38 @@
     (run-hooks 'chat-plugin-post-turn-functions)
     (should-not called)))
 
+(ert-deftest chat-plugin-rolls-back-owned-runtime-hooks ()
+  "Plugins use the lifecycle declaration API without leaking registrations."
+  (let ((chat-plugin--registry (make-hash-table :test 'eq))
+        (chat-plugin--services (make-hash-table :test 'eq))
+        (chat-plugin--started nil)
+        (chat-runtime-hook--registry (make-hash-table :test 'eq))
+        (chat-runtime-hook--observer-wrappers nil)
+        (chat-runtime-hook--blocker-wrappers nil)
+        (chat-event-observer-functions nil)
+        (chat-event-blocker-functions nil)
+        called)
+    (unwind-protect
+        (progn
+          (chat-plugin-define
+           'runtime-owner
+           :setup
+           (lambda (_ctx)
+             (chat-plugin-register-runtime-hook
+              (chat-runtime-hook-create
+               :id 'plugin-observer :phase 'observer
+               :events '(turn-start)
+               :handler (lambda (_event) (setq called t))))))
+          (should (chat-plugin-start 'runtime-owner))
+          (chat-event-publish (chat-event-create :type 'turn-start))
+          (should called)
+          (should (eq (chat-runtime-hook-owner
+                       (chat-runtime-hook-get 'plugin-observer))
+                      'runtime-owner))
+          (chat-plugin-stop 'runtime-owner)
+          (should-not (chat-runtime-hook-get 'plugin-observer)))
+      (chat-runtime-hook-unregister 'plugin-observer))))
+
 (ert-deftest chat-plugin-rolls-back-mixed-resources-chronologically ()
   "Test rollback restores values replaced across resource types."
   (let* ((chat-plugin--registry (make-hash-table :test 'eq))

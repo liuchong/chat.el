@@ -24,6 +24,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'chat-log)
+(require 'chat-runtime-hook)
 (require 'chat-tool-forge)
 
 (defgroup chat-plugin nil
@@ -181,9 +182,29 @@ Disabled by default because those files run as Lisp."
               (chat-plugin-owned-resources plugin))))
     function))
 
+(defun chat-plugin-register-runtime-hook (declaration)
+  "Register runtime hook DECLARATION with plugin ownership and rollback."
+  (unless (chat-runtime-hook-p declaration)
+    (error "Not a runtime hook declaration: %S" declaration))
+  (when (and chat-plugin--current-owner
+             (null (chat-runtime-hook-owner declaration)))
+    (setf (chat-runtime-hook-owner declaration) chat-plugin--current-owner))
+  (let* ((id (chat-runtime-hook-id declaration))
+         (previous (chat-runtime-hook-get id))
+         (registered (chat-runtime-hook-register declaration)))
+    (when-let* ((plugin (and chat-plugin--current-owner
+                             (chat-plugin-get chat-plugin--current-owner))))
+      (push (list :type 'runtime-hook :id id :previous previous)
+            (chat-plugin-owned-resources plugin)))
+    registered))
+
 (defun chat-plugin--rollback-resource (resource)
   "Rollback one owned RESOURCE."
   (pcase (plist-get resource :type)
+    ('runtime-hook
+     (if-let* ((previous (plist-get resource :previous)))
+         (chat-runtime-hook-register previous)
+       (chat-runtime-hook-unregister (plist-get resource :id))))
     ('hook
      (remove-hook (plist-get resource :hook)
                   (plist-get resource :function)))
