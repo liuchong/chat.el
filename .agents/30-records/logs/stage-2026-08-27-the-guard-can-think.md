@@ -46,4 +46,6 @@ Regression tests cover the portable request option and the case where the
 current buffer and the judged session belong to different project roots.
 
 Validation: 90 focused guard and tool-caller tests passed, followed by the
-canonical suite at 1345/1345.
+canonical suite at 1345/1345. A live request through chat.el's own DeepSeek
+provider path returned an `allow` verdict at high confidence with a matched
+rule, and the local guard validation accepted it.
