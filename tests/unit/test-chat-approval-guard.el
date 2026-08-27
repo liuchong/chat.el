@@ -20,6 +20,7 @@
 (require 'chat-approval)
 (require 'chat-approval-guard)
 (require 'chat-command-gate)
+(require 'chat-code)
 (require 'chat-files)
 (require 'chat-tool-forge)
 (require 'chat-tool-caller)
@@ -204,7 +205,7 @@ made `git -C /tmp push --force' look like a call to `/tmp'."
   "The project root is a sentinel too, and it is not a fixed path."
   (chat-test-with-temp-dir
    (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
-              (lambda () temp-dir)))
+              (lambda (&optional _session) temp-dir)))
      (let ((env (test-chat-guard-env)))
        (should (chat-approval-guard-never-allow-p
                 'shell_execute
@@ -299,6 +300,25 @@ that could never run, and report the refusal from the wrong layer."
      (should (string-match-p "approval mode" payload))
      (should (string-match-p "sub-agent depth" payload))
      (should (string-match-p "writes are confined to" payload)))))
+
+(ert-deftest chat-approval-guard-environment-uses-the-given-session ()
+  "The guard must not borrow the project root from the current buffer."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-auto-save nil)
+          (ambient-root (expand-file-name "ambient" temp-dir))
+          (given-root (expand-file-name "given" temp-dir))
+          (ambient (chat-code-session-create "Ambient" ambient-root nil))
+          (given (chat-code-session-create "Given" given-root nil)))
+     (make-directory ambient-root t)
+     (make-directory given-root t)
+     (with-temp-buffer
+       (setq-local chat--current-session ambient)
+       (let ((env (test-chat-guard-env given)))
+         (should (equal (plist-get env :project-root)
+                        (file-name-as-directory given-root)))
+         (should (equal (plist-get env :directory)
+                        (file-name-as-directory given-root)))
+         (should (plist-get env :directory-inside-project)))))))
 
 (ert-deftest chat-approval-guard-the-payload-resolves-paths-both-ways ()
   "A relative path has to appear as written and as it lands.
@@ -814,7 +834,7 @@ would produce."
            (project (expand-file-name "project" temp-dir)))
       (make-directory project t)
       (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
-                 (lambda () project)))
+                 (lambda (&optional _session) project)))
         (dolist (case
                  (list
                   ;; A write outside the boundary.

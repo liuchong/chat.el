@@ -513,6 +513,9 @@ in the same variable and the check has to be the capability itself."
        (setq-local chat--current-session
                    (chat-code-session-create "Code" project-root nil))
        (should (equal (chat-tool-caller--code-project-root) project-root))
+       (should (equal (chat-tool-caller--code-project-root
+                       chat--current-session)
+                      project-root))
        (should (member project-root
                        (chat-tool-caller--allowed-directories)))))))
 

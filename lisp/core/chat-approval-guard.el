@@ -74,7 +74,7 @@
 (declare-function chat-command-gate-segments "chat-command-gate" (command))
 (declare-function chat-command-gate-split "chat-command-gate" (command))
 (declare-function chat-tool-caller--execution-directory "chat-tool-caller" (&optional session))
-(declare-function chat-tool-caller--code-project-root "chat-tool-caller" ())
+(declare-function chat-tool-caller--code-project-root "chat-tool-caller" (&optional session))
 
 (defvar chat-files-allowed-directories)
 (defvar chat-approval-grants-file)
@@ -878,7 +878,7 @@ absent -- see `chat-approval-guard--payload'."
                      (expand-file-name (or directory default-directory))))
          (project-root (condition-case nil
                            (and (fboundp 'chat-tool-caller--code-project-root)
-                                (chat-tool-caller--code-project-root))
+                                (chat-tool-caller--code-project-root session))
                          (error nil))))
     (list :directory directory
           :project-root (and project-root

@@ -398,7 +398,16 @@ back to the rules, since shadow meaning one thing there and another under
 samples come only from people who turn it on. Decision 0016 records the
 lot.
 
-Canonical suite: 1344 tests passing.
+The guard's structured request is now portable across thinking providers.
+It offers the verdict tool with `tool_choice: auto`; the parser, confidence
+check and fail-closed path enforce structure instead of relying on a forced
+call that some providers reject. Its environment also follows the session
+being judged for both working directory and project root, rather than
+borrowing the root from whichever chat buffer happens to be current. The
+credential-dependent check and rationale are recorded in
+`stage-2026-08-27-the-guard-can-think.md`.
+
+Canonical suite: 1345 tests passing.
 
 ## Next Stage
 

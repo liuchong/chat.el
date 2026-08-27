@@ -757,17 +757,22 @@ enumerated values."
               ". Start a session from the project root with `chat-code-start', or give this one code capability with `chat-code-from-chat', before searching the repository")
     error-message))
 
-(defun chat-tool-caller--code-project-root ()
-  "Return the project root of the current session, when it has one.
+(defun chat-tool-caller--code-project-root (&optional session)
+  "Return the project root of SESSION, when it has one.
 
 Code capability is a property of a session, so the root is read from the
-session in this buffer rather than from a variable that only a code
-buffer used to bind."
-  (when (and (bound-and-true-p chat--current-session)
-             (fboundp 'chat-code-session-p)
-             (chat-code-session-p chat--current-session)
-             (fboundp 'chat-code-session-project-root))
-    (chat-code-session-project-root chat--current-session)))
+explicit SESSION first, then the current tool execution or buffer session.
+This order matters for callbacks running while another chat buffer is
+current."
+  (let ((session (or session
+                     chat-tool-caller-current-session
+                     (and (boundp 'chat--current-session)
+                          chat--current-session))))
+    (when (and session
+               (fboundp 'chat-code-session-p)
+               (chat-code-session-p session)
+               (fboundp 'chat-code-session-project-root))
+      (chat-code-session-project-root session))))
 
 (defun chat-tool-caller--allowed-directories ()
   "Return effective file roots for the current tool execution."
@@ -790,7 +795,7 @@ SESSION is passed in rather than read from
 calls this function and so is not yet visible here."
   (or (chat-session-working-directory
        (or session chat-tool-caller-current-session))
-      (chat-tool-caller--code-project-root)
+      (chat-tool-caller--code-project-root session)
       default-directory))
 
 (defun chat-tool-caller-call-tool (call)
