@@ -23,7 +23,7 @@
 (defconst test-chat-ui--events-without-a-branch
   '(agent-start turn-start context-transformed steering
                 prepared-next-turn stream-result tool-batch-start
-                tool-batch-end truncated error)
+                tool-batch-end turn-ended turn-failed truncated error)
   "Emitted events the UI handler deliberately leaves to the catch-all.
 
 Listed one by one on purpose.  Adding an event to the agent and forgetting

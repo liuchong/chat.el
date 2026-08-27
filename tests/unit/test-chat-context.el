@@ -121,6 +121,66 @@
                                (cdr (assoc 'metadata stored))))
                    "llm"))))
 
+(ert-deftest chat-context-pre-compact-policy-can-refuse-with-an-audit-record ()
+  "A refused compaction leaves history unchanged and records why."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-wire--sequences (make-hash-table :test 'equal))
+          (chat-session-wire--sizes (make-hash-table :test 'equal))
+          (chat-session-wire-enabled t)
+          (chat-event-blocking-types '(pre-compact))
+          (chat-event-failure-policies '((pre-compact . fail-closed)))
+          (chat-event-blocker-functions
+           (list (lambda (_event)
+                   '(:decision block :reason "keep full history"))))
+          (session (make-chat-session :id "compact-blocked" :model-id 'kimi))
+          (messages
+           (cl-loop for index from 1 to 8
+                    collect
+                    (make-chat-message
+                     :id (format "blocked-%d" index)
+                     :role (if (cl-oddp index) :user :assistant)
+                     :content (make-string 180 ?x)))))
+     (setf (chat-session-messages session) messages)
+     (should-not (chat-context-compact-session session 100))
+     (should-not (chat-session-summaries session))
+     (let* ((records (chat-session-wire-read "compact-blocked"))
+            (pre (seq-find
+                  (lambda (record)
+                    (equal (alist-get 'kind record) "pre-compact"))
+                  records)))
+       (should pre)
+       (should (equal "block" (alist-get 'event_decision pre)))
+       (should (equal "keep full history" (alist-get 'event_reason pre)))
+       (should-not
+        (seq-find (lambda (record)
+                    (equal (alist-get 'kind record) "post-compact"))
+                  records))))))
+
+(ert-deftest chat-context-llm-compaction-refusal-never-dispatches ()
+  "A pre-compact refusal reports through the callback before transport."
+  (let* ((chat-event-blocking-types '(pre-compact))
+         (chat-event-failure-policies '((pre-compact . fail-closed)))
+         (chat-event-blocker-functions
+          (list (lambda (_event)
+                  '(:decision block :reason "summary disabled"))))
+         (session (make-chat-session :id "llm-blocked" :model-id 'kimi))
+         (messages
+          (cl-loop for index from 1 to 8
+                   collect
+                   (make-chat-message
+                    :id (format "llm-blocked-%d" index)
+                    :role (if (cl-oddp index) :user :assistant)
+                    :content (make-string 180 ?x))))
+         error)
+    (setf (chat-session-messages session) messages)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (lambda (&rest _args)
+                 (ert-fail "blocked compaction must not dispatch"))))
+      (chat-context-compact-session-with-llm
+       session #'ignore (lambda (message) (setq error message)) 100))
+    (should (string-match-p "summary disabled" error))))
+
 (ert-deftest chat-context-a-tool-result-is-counted-as-it-is-sent ()
   "The estimate was taken from the snippet a summary would show.
 

@@ -34,6 +34,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'chat-command-gate)
+(require 'chat-event)
 (require 'chat-session)
 (require 'chat-tool-caller)
 (require 'chat-tool-forge)
@@ -49,6 +50,9 @@
   "Directory where background task state and logs are stored."
   :type 'directory
   :group 'chat-work)
+
+(defconst chat-work-task-schema-version 1
+  "Version of the persisted background task document.")
 
 (defcustom chat-work-task-output-max-chars 20000
   "Maximum background task output returned from one tool call."
@@ -89,6 +93,7 @@ something is missing, so the gap says how to close itself."
 
 (cl-defstruct chat-work-task
   id
+  session-id
   command
   directory
   status
@@ -121,6 +126,28 @@ something is missing, so the gap says how to close itself."
   "Return the current timestamp string."
   (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time)))
 
+(defun chat-work--event-payload (task)
+  "Return bounded lifecycle facts for TASK."
+  (delq nil
+        (list
+         (cons 'status (format "%s" (chat-work-task-status task)))
+         (cons 'command
+               (truncate-string-to-width
+                (or (chat-work-task-command task) "") 500 nil nil t))
+         (cons 'directory (chat-work-task-directory task))
+         (when (chat-work-task-exit-code task)
+           (cons 'exit_code (chat-work-task-exit-code task))))))
+
+(defun chat-work--emit-task-event (type task)
+  "Publish lifecycle TYPE for TASK."
+  (chat-event-emit
+   type
+   :session-id (chat-work-task-session-id task)
+   :task-id (chat-work-task-id task)
+   :source 'work
+   :subject task
+   :payload (chat-work--event-payload task)))
+
 (defun chat-work--notify-task-finished (task)
   "Notify the user that TASK reached a terminal state."
   (run-hook-with-args 'chat-work-task-finished-hook task)
@@ -139,6 +166,7 @@ something is missing, so the gap says how to close itself."
 (defun chat-work--task-to-json (task)
   "Convert TASK to JSON-friendly data."
   `((id . ,(chat-work-task-id task))
+    (sessionId . ,(chat-work-task-session-id task))
     (command . ,(chat-work-task-command task))
     (directory . ,(chat-work-task-directory task))
     (status . ,(symbol-name (chat-work-task-status task)))
@@ -151,6 +179,7 @@ something is missing, so the gap says how to close itself."
   "Convert DATA to a task struct."
   (make-chat-work-task
    :id (cdr (assoc 'id data))
+   :session-id (cdr (assoc 'sessionId data))
    :command (cdr (assoc 'command data))
    :directory (cdr (assoc 'directory data))
    :status (intern (or (cdr (assoc 'status data)) "unknown"))
@@ -167,7 +196,10 @@ something is missing, so the gap says how to close itself."
                (push (chat-work--task-to-json task) tasks))
              chat-work--tasks)
     (with-temp-file (chat-work--state-file)
-      (insert (json-encode `((tasks . ,(vconcat (nreverse tasks)))))))))
+      (insert
+       (json-encode
+        `((schemaVersion . ,chat-work-task-schema-version)
+          (tasks . ,(vconcat (nreverse tasks)))))))))
 
 (defun chat-work-load-tasks ()
   "Load background task state and mark stale running tasks interrupted."
@@ -181,7 +213,10 @@ something is missing, so the gap says how to close itself."
                          (insert-file-contents file)
                          (json-read-from-string (buffer-string)))
                      (error nil)))
+             (version (or (cdr (assoc 'schemaVersion data)) 0))
              (tasks (cdr (assoc 'tasks data))))
+        (when (> version chat-work-task-schema-version)
+          (error "Unsupported background task schema version: %s" version))
         (dolist (entry tasks)
           (let ((task (chat-work--task-from-json entry)))
             (when (eq (chat-work-task-status task) 'running)
@@ -227,7 +262,9 @@ anything."
     (when-let* ((refusal (chat-work-task-refusal command)))
       (error "%s" (chat-work--task-refusal-message refusal command))))
   (chat-work--ensure-directory)
-  (let* ((id (chat-work--task-id))
+  (let* ((session (chat-work--current-session))
+         (session-id (and session (chat-session-id session)))
+         (id (chat-work--task-id))
          (default-directory (file-name-as-directory
                              (or directory default-directory)))
          (log-file (expand-file-name (concat id ".log") chat-work-directory))
@@ -236,6 +273,7 @@ anything."
          (process-environment (chat-command-gate-environment))
          (task (make-chat-work-task
                 :id id
+                :session-id session-id
                 :command command
                 :directory default-directory
                 :status 'running
@@ -271,10 +309,12 @@ anything."
                                  (chat-work-task-ended-at task)
                                  (chat-work--timestamp))
                            (chat-work-save-tasks)
+                           (chat-work--emit-task-event 'task-ended task)
                            (chat-work--notify-task-finished task))))))
     (setf (chat-work-task-process task) process)
     (puthash id task chat-work--tasks)
     (chat-work-save-tasks)
+    (chat-work--emit-task-event 'task-started task)
     (chat-work-task-summary task)))
 
 (defun chat-work-task-summary (task)
@@ -320,6 +360,7 @@ anything."
       (when (process-live-p proc)
         (delete-process proc)))
     (chat-work-save-tasks)
+    (chat-work--emit-task-event 'task-ended task)
     (chat-work--notify-task-finished task)
     (chat-work-task-summary task)))
 

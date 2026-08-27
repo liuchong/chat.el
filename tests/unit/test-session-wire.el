@@ -240,10 +240,18 @@ answer it."
                            (chat-session-id session)))))
        (should (member "agent-start" kinds))
        (should (member "turn-start" kinds))
+       (should (member "turn-ended" kinds))
        (should (member "tool-event" kinds))
        (should (member "agent-end" kinds))
        ;; Two turns, because the tool result had to go back.
-       (should (= 2 (cl-count "turn-start" kinds :test #'equal))))
+       (should (= 2 (cl-count "turn-start" kinds :test #'equal)))
+       (should (= 2 (cl-count "turn-ended" kinds :test #'equal)))
+       (should-not (member "turn-failed" kinds)))
+     (dolist (record (chat-session-wire-read (chat-session-id session)))
+       (when (member (alist-get 'kind record) '("turn-start" "turn-ended"))
+         (should (equal chat-event-schema-version
+                        (alist-get 'event_schema_version record)))
+         (should (equal "agent" (alist-get 'source record)))))
      ;; And nothing in it is anywhere near the size of a conversation.
      (let ((size (file-attribute-size
                   (file-attributes (chat-session-wire-file
@@ -269,6 +277,54 @@ answer it."
                                  (chat-session-id session))))))
        (should turns)
        (should (cl-every #'integerp turns))))))
+
+(ert-deftest chat-wire-a-failed-turn-closes-once-with-its-reason ()
+  "A transport failure leaves one terminal turn record before agent end."
+  (chat-test-with-wire
+   (let* ((session (chat-session-create "failed turn"))
+          (chat-agent-event-functions (list #'chat-agent-wire-observe)))
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (lambda (_model _messages _success error _options)
+                  (funcall error "transport unavailable")
+                  'stub-handle)))
+       (chat-agent-start
+        (list :model 'kimi
+              :session session
+              :messages (list (chat-agent-test--user-message)))))
+     (let* ((records (chat-session-wire-read (chat-session-id session)))
+            (failed (seq-filter
+                     (lambda (record)
+                       (equal (alist-get 'kind record) "turn-failed"))
+                     records)))
+       (should (= 1 (length failed)))
+       (should (equal "transport unavailable"
+                      (alist-get 'reason (alist-get 'payload (car failed)))))
+       (should (< (alist-get 'seq (car failed))
+                  (alist-get 'seq (car (last records)))))))))
+
+(ert-deftest chat-wire-a-cancelled-turn-closes-once ()
+  "Cancelling an active request writes one terminal turn before agent end."
+  (chat-test-with-wire
+   (let* ((session (chat-session-create "cancelled turn"))
+          (chat-agent-event-functions (list #'chat-agent-wire-observe))
+          run)
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (lambda (&rest _args) 'stub-handle)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi
+                    :session session
+                    :messages (list (chat-agent-test--user-message))))))
+     (should (chat-agent-cancel run))
+     (let* ((records (chat-session-wire-read (chat-session-id session)))
+            (ended (seq-filter
+                    (lambda (record)
+                      (equal (alist-get 'kind record) "turn-ended"))
+                    records)))
+       (should (= 1 (length ended)))
+       (should (equal "cancelled"
+                      (alist-get 'status (alist-get 'payload (car ended)))))
+       (should (equal "agent-end" (alist-get 'kind (car (last records)))))))))
 
 (provide 'test-session-wire)
 ;;; test-session-wire.el ends here

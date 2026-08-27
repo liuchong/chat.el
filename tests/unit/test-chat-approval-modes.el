@@ -164,6 +164,85 @@ mode it behaved as."
      (should-error (chat-files-write "/etc/chat-el-should-not-write" "nope"))
      (should-not (file-exists-p "/etc/chat-el-should-not-write")))))
 
+(ert-deftest chat-approval-records-request-and-effective-resolution ()
+  "Permission audit records bracket one decision and name its consent."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-wire--sequences (make-hash-table :test 'equal))
+          (chat-session-wire--sizes (make-hash-table :test 'equal))
+          (chat-session-wire-enabled t)
+          (chat-approval-mode 'dangerous)
+          (session (make-chat-session :id "permission-wire" :name "Wire"))
+          (call '(:id "call-1" :name "publish_thing" :arguments nil)))
+     (should
+      (eq 'dangerous
+          (chat-approval-authorize
+           (test-chat-approval-tool 'publish_thing '(outbound))
+           call session)))
+     (let* ((records (chat-session-wire-read "permission-wire"))
+            (requested (seq-find
+                        (lambda (record)
+                          (equal (alist-get 'kind record)
+                                 "permission-requested"))
+                        records))
+            (resolved (seq-find
+                       (lambda (record)
+                         (equal (alist-get 'kind record)
+                                "permission-resolved"))
+                       records)))
+       (should requested)
+       (should resolved)
+       (should (< (alist-get 'seq requested) (alist-get 'seq resolved)))
+       (should (equal "call-1" (alist-get 'task_id requested)))
+       (should (equal "dangerous"
+                      (alist-get 'consent (alist-get 'payload resolved))))
+       (should (equal "dangerous-mode"
+                      (alist-get 'decision
+                                 (alist-get 'payload resolved))))))))
+
+(ert-deftest chat-approval-guard-review-shares-the-permission-task-id ()
+  "One call ID joins the model review to the effective permission result."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-wire--sequences (make-hash-table :test 'equal))
+          (chat-session-wire--sizes (make-hash-table :test 'equal))
+          (chat-session-wire-enabled t)
+          (chat-approval-mode 'guarded)
+          (chat-approval-guard-shadow nil)
+          (chat-approval-guard-provider 'test-provider)
+          (chat-approval-required-tools '(publish_thing))
+          (session (make-chat-session :id "guard-permission-wire" :name "Wire"))
+          (call '(:id "call-guard-1" :name "publish_thing" :arguments nil))
+          (consent nil))
+     (cl-letf (((symbol-function 'chat-approval-guard-request)
+                (lambda (_tool _call _session callback)
+                  (funcall callback
+                           (chat-approval-guard-verdict-create
+                            :decision 'allow
+                            :matched-rule "ALLOW: publish approved artifacts."
+                            :reason "matches the explicit publish rule"
+                            :confidence 'high
+                            :model "judge-model")))))
+       (chat-approval-authorize-async
+        (test-chat-approval-tool 'publish_thing '(outbound))
+        call session nil
+        (lambda (answer _reason) (setq consent answer)))
+       (should (eq 'guard consent)))
+     (let* ((records (chat-session-wire-read "guard-permission-wire"))
+            (kinds '("permission-requested"
+                     "approval-guard-review"
+                     "permission-resolved"))
+            (audit (seq-filter
+                    (lambda (record)
+                      (member (alist-get 'kind record) kinds))
+                    records)))
+       (should (= 3 (length audit)))
+       (should (equal kinds (mapcar (lambda (record)
+                                      (alist-get 'kind record))
+                                    audit)))
+       (dolist (record audit)
+         (should (equal "call-guard-1" (alist-get 'task_id record))))))))
+
 (ert-deftest chat-approval-guarded-without-a-guard-follows-the-gate-and-never-asks ()
   "With no guard configured the fallback rules decide, and they never ask.
 

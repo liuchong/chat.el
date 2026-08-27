@@ -28,6 +28,7 @@
 (declare-function chat-wiki-dispatch "chat-wiki" (arg))
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
+(require 'chat-event)
 (require 'chat-transcript)
 (require 'chat-markdown)
 (require 'chat-llm)
@@ -1800,25 +1801,55 @@ two settings nobody can talk about."
         (funcall handler text)
       (chat-ui--send-user-message text))))
 
+(defun chat-ui--prompt-event (type message &optional queue-length mode)
+  "Return lifecycle TYPE for MESSAGE with QUEUE-LENGTH and MODE facts."
+  (chat-event-create
+   :type type
+   :session-id (and chat--current-session
+                    (chat-session-id chat--current-session))
+   :source 'ui
+   :payload
+   (delq nil
+         (list
+          (when (chat-message-p message)
+            (cons 'message_id (chat-message-id message)))
+          (cons 'chars
+                (length (if (chat-message-p message)
+                            (or (chat-message-content message) "")
+                          (or message ""))))
+          (when queue-length (cons 'queue_length queue-length))
+          (when mode (cons 'mode (format "%s" mode)))))
+   :subject message))
+
 (defun chat-ui--send-user-message (content)
   "Record CONTENT as a user message and ask the model to respond."
   (if (string-empty-p content)
       (message "%s" (chat-i18n 'empty-message "Cannot send empty message"))
     (if (chat-tool-forge-ai--tool-request-p content)
         (chat-ui--handle-tool-creation content)
-      (let ((user-msg (chat-ui--stamp-user-message
-                       (make-chat-message
-                        :id (chat-session-new-message-id)
-                        :role :user
-                        :content content
-                        :timestamp (current-time)))))
-        (chat-session-add-message chat--current-session user-msg)
-        (chat-ui--clock "record")
-        ;; Drawn from the record rather than inserted directly, so the
-        ;; live boundary lands after this message instead of before it.
-        (chat-ui--redraw-conversation)
-        (chat-ui--clock "redraw")
-        (chat-ui--get-response)))))
+      (let* ((user-msg (chat-ui--stamp-user-message
+                        (make-chat-message
+                         :id (chat-session-new-message-id)
+                         :role :user
+                         :content content
+                         :timestamp (current-time))))
+             (event (chat-ui--prompt-event
+                     'user-prompt-submitted user-msg))
+             (outcome (chat-event-publish event))
+             (user-msg (chat-event-subject event)))
+        (if (not (and (chat-event-allowed-p outcome)
+                      (chat-message-p user-msg)))
+            (message
+             (chat-i18n 'message-blocked "Message blocked: %s")
+             (or (plist-get outcome :reason)
+                 "runtime policy returned an invalid message"))
+          (chat-session-add-message chat--current-session user-msg)
+          (chat-ui--clock "record")
+          ;; Drawn from the record rather than inserted directly, so the
+          ;; live boundary lands after this message instead of before it.
+          (chat-ui--redraw-conversation)
+          (chat-ui--clock "redraw")
+          (chat-ui--get-response))))))
 
 (defun chat-ui--stamp-user-message (message)
   "Number MESSAGE with the turn it opens.
@@ -1833,16 +1864,26 @@ is what lets the display group them instead of guessing from position."
 
 (defun chat-ui--steer-active-agent (content)
   "Queue CONTENT for the response that is already running."
-  (let ((user-msg (make-chat-message
-                   :id (chat-session-new-message-id)
-                   :role :user
-                   :content content
-                   :timestamp (current-time))))
-    (chat-session-add-message chat--current-session user-msg)
-    (chat-ui--redraw-conversation)
-    (chat-agent-steer chat-ui--active-agent-run user-msg)
-    (message "%s" (chat-i18n 'message-queued
-                          "Message queued for the active response."))))
+  (let* ((user-msg (make-chat-message
+                    :id (chat-session-new-message-id)
+                    :role :user
+                    :content content
+                    :timestamp (current-time)))
+         (event (chat-ui--prompt-event
+                 'user-prompt-submitted user-msg nil 'steering))
+         (outcome (chat-event-publish event))
+         (user-msg (chat-event-subject event)))
+    (if (not (and (chat-event-allowed-p outcome)
+                  (chat-message-p user-msg)))
+        (message
+         (chat-i18n 'message-blocked "Message blocked: %s")
+         (or (plist-get outcome :reason)
+             "runtime policy returned an invalid message"))
+      (chat-session-add-message chat--current-session user-msg)
+      (chat-ui--redraw-conversation)
+      (chat-agent-steer chat-ui--active-agent-run user-msg)
+      (message "%s" (chat-i18n 'message-queued
+                            "Message queued for the active response.")))))
 
 ;;; The queue: several notes, one turn
 ;;
@@ -1895,6 +1936,9 @@ only one, because numbering a list of one is noise."
         (chat-ui--report-queue)
       (let ((entries (append (chat-ui--queue-entries) (list note))))
         (chat-ui--set-queue entries)
+        (chat-event-publish
+         (chat-ui--prompt-event
+          'user-prompt-queued note (length entries) 'session))
         (chat-ui--insert-system-message
          (chat-i18n 'queue-added
                     "Queued %d: %s  (/flush to send, /queue to review)"
@@ -2049,6 +2093,9 @@ nothing to insert into, wait for, or interrupt."
 (defun chat-ui--queue-send (content)
   "Hold CONTENT until the current run finishes, then send it on its own."
   (setq chat-ui--queued-sends (append chat-ui--queued-sends (list content)))
+  (chat-event-publish
+   (chat-ui--prompt-event
+    'user-prompt-queued content (length chat-ui--queued-sends) 'run))
   (message (chat-i18n 'send-queued-count
                       "Queued until this response finishes (%d waiting).")
            (length chat-ui--queued-sends)))

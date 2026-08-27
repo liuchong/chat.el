@@ -23,6 +23,7 @@
 (require 'chat-session)
 (require 'chat-transcript)
 (require 'chat-context-budget)
+(require 'chat-event)
 (require 'chat-tool-caller)
 (require 'chat-llm)
 (require 'chat-stream)
@@ -88,6 +89,7 @@ watching a run must not be able to change what the run does.")
     (chat-log-timing-mark "steer")
     (chat-agent--transform-context run)
     (chat-log-timing-mark "transform")
+    (setf (chat-agent-run-state-turn-open run) t)
     (chat-agent--emit run 'turn-start)
     (chat-agent--dispatch run))))
 
@@ -168,6 +170,7 @@ on screen, where the marker would be noise.  It belongs on the wire only."
 (defun chat-agent--finish (run status reason)
   "Finish RUN once with STATUS and REASON and emit the final event."
   (unless (chat-agent-run-state-done run)
+    (chat-agent--close-turn run status reason)
     (setf (chat-agent-run-state-done run) t
           (chat-agent-run-state-status run) status
           (chat-agent-run-state-reason run) reason)
@@ -182,6 +185,51 @@ on screen, where the marker would be noise.  It belongs on the wire only."
      :raw-request (chat-agent-run-state-raw-request run)
      :raw-response (chat-agent-run-state-raw-response run)
      :steps (chat-agent-run-state-step run))))
+
+(defun chat-agent--close-turn (run status &optional reason)
+  "Close RUN's current turn once with STATUS and REASON."
+  (when (chat-agent-run-state-turn-open run)
+    (setf (chat-agent-run-state-turn-open run) nil)
+    (if (eq status 'error)
+        (chat-agent--emit run 'turn-failed
+                          :status status
+                          :reason reason)
+      (chat-agent--emit run 'turn-ended
+                        :status status
+                        :reason reason))))
+
+(defun chat-agent--event-session-id (run)
+  "Return RUN's session id, or nil."
+  (when-let* ((session (chat-agent-run-state-session run)))
+    (chat-session-id session)))
+
+(defun chat-agent--tool-event-payload (call &optional result)
+  "Return bounded lifecycle facts for CALL and optional RESULT."
+  (let ((arguments (plist-get call :arguments)))
+    (delq nil
+          (list
+           (cons 'tool (format "%s" (plist-get call :name)))
+           (when-let* ((id (plist-get call :id)))
+             (cons 'tool_call_id id))
+           (cons 'argument_count (if (listp arguments)
+                                     (length arguments)
+                                   (if arguments 1 0)))
+           (when (stringp result)
+             (cons 'result_chars (length result)))))))
+
+(defun chat-agent--publish-tool-event (run type call &optional result)
+  "Publish lifecycle TYPE for CALL in RUN with optional RESULT."
+  (let ((event
+         (chat-event-create
+          :type type
+          :session-id (chat-agent--event-session-id run)
+          :turn-id (chat-agent-run-state-turn run)
+          :task-id (plist-get call :id)
+          :source 'tool
+          :payload (chat-agent--tool-event-payload call result)
+          :subject call
+          :context (list (cons 'step (chat-agent-run-state-step run))))))
+    (cons event (chat-event-publish event))))
 
 (defun chat-agent--prepare-next-turn (run processed)
   "Let RUN append messages before a continued turn after PROCESSED."
@@ -551,6 +599,7 @@ need approval carry exclusive accesses and therefore remain serialized."
          (aset results index result)
          (remhash index running)
          (cl-incf finished)
+         (chat-agent--publish-tool-event run 'post-tool call result)
          (chat-agent--hook-all
           'chat-plugin-after-tool-call-functions run call result))
        (cond
@@ -562,19 +611,31 @@ need approval carry exclusive accesses and therefore remain serialized."
         ((not pumping)
          (funcall pump-fn))))
      launch-fn
-     (lambda (entry accesses)
+     (lambda (entry)
        (let* ((index (car entry))
               (call (cdr entry))
               (display-index (1+ index))
+              (lifecycle (chat-agent--publish-tool-event
+                          run 'pre-tool call))
+              (lifecycle-event (car lifecycle))
+              (lifecycle-outcome (cdr lifecycle))
+              (call (chat-event-subject lifecycle-event))
+              (accesses (chat-tool-caller-call-resource-accesses call))
               (blocked (chat-agent--hook-until
                         'chat-plugin-before-tool-call-functions
                         run call)))
          (puthash index (list :call call :accesses accesses :handle nil)
                   running)
-         (if (and (listp blocked) (plist-get blocked :block))
-             (funcall complete-fn index call
-                      (or (plist-get blocked :reason)
-                          "Tool execution was blocked"))
+         (cond
+          ((not (chat-event-allowed-p lifecycle-outcome))
+           (funcall complete-fn index call
+                    (or (plist-get lifecycle-outcome :reason)
+                        "Tool execution was blocked by runtime policy")))
+          ((and (listp blocked) (plist-get blocked :block))
+           (funcall complete-fn index call
+                    (or (plist-get blocked :reason)
+                        "Tool execution was blocked")))
+          (t
            (let ((handle
                   (chat-tool-caller-execute-async
                    call
@@ -589,7 +650,7 @@ need approval carry exclusive accesses and therefore remain serialized."
                    (lambda (result)
                      (funcall complete-fn index call result)))))
              (when-let ((job (gethash index running)))
-               (puthash index (plist-put job :handle handle) running))))))
+               (puthash index (plist-put job :handle handle) running)))))))
      pump-fn
      (lambda ()
        (unless (or reported cancelled)
@@ -609,7 +670,7 @@ need approval carry exclusive accesses and therefore remain serialized."
                                (setq rest (cdr rest))
                              (setq pending (delq entry pending)
                                    launched t)
-                             (funcall launch-fn entry accesses))))
+                             (funcall launch-fn entry))))
                        launched)))
                (when (and (null pending)
                           (zerop (hash-table-count running))
@@ -677,6 +738,7 @@ TRUNCATED is non-nil when tool calls were refused for length."
         (append (chat-agent-run-state-tool-events run)
                 (plist-get processed :tool-events)))
   (chat-agent--emit run 'response :processed processed)
+  (chat-agent--close-turn run 'completed)
   (chat-agent--hook-all 'chat-plugin-post-turn-functions run processed)
   (chat-agent--prepare-next-turn run processed)
   (cond

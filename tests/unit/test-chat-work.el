@@ -8,8 +8,14 @@
   "Test background tasks run asynchronously and keep bounded output."
   (chat-test-with-temp-dir
    (let ((chat-work-directory temp-dir)
+         (chat-session-directory temp-dir)
+         (chat-session-wire--sequences (make-hash-table :test 'equal))
+         (chat-session-wire--sizes (make-hash-table :test 'equal))
+         (chat-session-wire-enabled t)
          (chat-work--tasks (make-hash-table :test 'equal))
          (chat-work-notify-task-completion nil)
+         (chat-tool-caller-current-session
+          (make-chat-session :id "work-wire" :name "Work wire"))
          finished)
      (let ((chat-work-task-finished-hook
             (list (lambda (task)
@@ -24,7 +30,19 @@
          (should (equal finished id))
          (should (string= (chat-work-task-output id) "hello"))
          (should (file-exists-p
-                  (expand-file-name "tasks.json" temp-dir))))))))
+                  (expand-file-name "tasks.json" temp-dir)))
+         (with-temp-buffer
+           (insert-file-contents (expand-file-name "tasks.json" temp-dir))
+           (let ((data (json-read-from-string (buffer-string))))
+             (should (= chat-work-task-schema-version
+                        (cdr (assoc 'schemaVersion data))))))
+         (let* ((records (chat-session-wire-read "work-wire"))
+                (kinds (mapcar (lambda (record) (alist-get 'kind record))
+                               records)))
+           (should (equal kinds '("task-started" "task-ended")))
+           (should (cl-every
+                    (lambda (record) (equal id (alist-get 'task_id record)))
+                    records))))))))
 
 (ert-deftest chat-work-background-task-stop-cancels-process ()
   "Test background task stop marks a running process cancelled."
@@ -43,6 +61,21 @@
          (chat-work-task-stop id)
          (should (eq (chat-work-task-status task) 'cancelled))
          (should (equal finished id)))))))
+
+(ert-deftest chat-work-refuses-unknown-newer-task-schema ()
+  "A newer task document stays untouched instead of being misread."
+  (chat-test-with-temp-dir
+   (let ((chat-work-directory temp-dir)
+         (chat-work--tasks (make-hash-table :test 'equal))
+         (file (expand-file-name "tasks.json" temp-dir)))
+     (with-temp-file file
+       (insert "{\"schemaVersion\":999,\"tasks\":[]}"))
+     (should-error (chat-work-load-tasks)
+                   :type 'error)
+     (with-temp-buffer
+       (insert-file-contents file)
+       (should (string-match-p "\"schemaVersion\":999"
+                               (buffer-string)))))))
 
 (ert-deftest chat-work-session-records-persist-in-session-metadata ()
   "Test plan, TODO, and goal records are session-local and durable."

@@ -692,7 +692,7 @@ wrong one, so it is kept; a whole file's contents is not."
       verdict 'files_write
       '(("path" . "/tmp/secret-name")
         ("content" . "this full content must not enter the session log"))
-      'guarded session)
+      'guarded session "call-guard-review")
      (let* ((records (chat-session-wire-read
                       "guard-review" '(approval-guard-review)))
             (record (car records))
@@ -701,6 +701,7 @@ wrong one, so it is kept; a whole file's contents is not."
        (should (= (length records) 1))
        (should (equal (alist-get 'kind record) "approval-guard-review"))
        (should (equal (alist-get 'session_id record) "guard-review"))
+       (should (equal (alist-get 'task_id record) "call-guard-review"))
        (should (equal (alist-get 'source payload) "model"))
        (should (equal (alist-get 'decision payload) "deny"))
        (should (equal (alist-get 'reason payload) "outside project"))

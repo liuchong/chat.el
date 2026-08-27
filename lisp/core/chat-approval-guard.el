@@ -49,7 +49,7 @@
 ;; a state the design already has a name for, and it is the same state as a
 ;; guard with no provider configured.
 (require 'chat-approval)
-(require 'chat-session-wire)
+(require 'chat-event)
 ;; A hard dependency, not an optional one.  The floor works by taking a
 ;; command apart, and with no parser available every predicate in it
 ;; returns nil -- which is to say the floor silently becomes decoration
@@ -581,13 +581,14 @@ because one `files_write' of a large file would otherwise be the log."
             (chat-session-wire-read session-id '(approval-guard-review)))))
 
 (defun chat-approval-guard-log-verdict
-    (verdict tool-id arguments mode &optional session)
+    (verdict tool-id arguments mode &optional session task-id)
   "Record VERDICT about TOOL-ID with ARGUMENTS, reached under MODE.
 
 Whether the verdict decided anything is read off the verdict itself: a
 shadow one did not, and one that is not shadow is the guard ruling under
 `guarded'.  When SESSION is present, also append a durable, bounded review
-record to its event stream.  Returns the sample."
+record to its event stream.  TASK-ID correlates that record with the tool
+call and its permission lifecycle.  Returns the sample."
   (when (chat-approval-guard-verdict-p verdict)
     (let* ((shadow (and (chat-approval-guard-verdict-shadow verdict) t))
            (sample
@@ -635,9 +636,12 @@ record to its event stream.  Returns the sample."
       (when-let ((session-id (and session
                                   (fboundp 'chat-session-id)
                                   (chat-session-id session))))
-        (chat-session-wire-record
-         session-id 'approval-guard-review
-         (chat-approval-guard--wire-payload sample)))
+        (chat-event-emit
+         'approval-guard-review
+         :session-id session-id
+         :task-id task-id
+         :source 'approval-guard
+         :payload (chat-approval-guard--wire-payload sample)))
       sample)))
 
 (defun chat-approval-guard--sample-json (sample)

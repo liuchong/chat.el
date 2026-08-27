@@ -4,9 +4,28 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, kernel, plugin, sessions, work, mcp, subagents, capabilities
+- Tags: current, phase, runtime, events, tasks, capabilities, content, profiles
 
 ## Current Phase
+
+M0 and M1 of the Agent Runtime roadmap are complete (2026-08-28). Decision
+0019 fixes five versioned contracts: lifecycle events, durable tasks, model
+capabilities, typed content and agent profiles. Spec 014 orders their delivery
+through M8 so later features depend on contracts rather than provider, UI or
+process internals.
+
+`lisp/core/chat-event.el` is the first contract. It separates synchronous
+blockers from post-persistence observers, records handler outcomes in the
+existing session wire, keeps live subjects out of persistence and prevents
+producer context from forging runtime-owned audit fields. Session, turn,
+prompt, tool, permission, background task, child-agent and compaction paths
+emit through it. Security boundary failures close; notification failures stay
+auditable and continue.
+
+The next implementation stage is M2: define model capabilities and normalize
+the streaming, asynchronous and compatibility request paths into one event
+stream. One provider path migrates end to end first; lifecycle records remain
+the behavioral oracle while the adapter set expands.
 
 There is one chat surface (2026-08-26). Code capability is a property of
 a session rather than a second display: `chat-code-mode` is gone, and a
@@ -88,7 +107,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1084 tests passing.
+Canonical suite: 1387 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark

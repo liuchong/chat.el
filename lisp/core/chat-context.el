@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'chat-session)
+(require 'chat-event)
 (require 'json)
 (require 'subr-x)
 
@@ -234,28 +235,61 @@ this is a cheap head rather than a promise."
     ;; Recorded as an event because compaction is the one thing that makes
     ;; a session's history disagree with what the model was shown, and a
     ;; reader comparing the two needs to know where the disagreement began.
-    (when (fboundp 'chat-session-wire-record)
-      (funcall 'chat-session-wire-record
-               (chat-session-id session) 'compaction
-               (list (cons 'kind kind)
-                     (cons 'through_message_id (chat-message-id through))
-                     (cons 'message_count (1+ cut))
-                     (cons 'summary_chars (length summary)))))
+    (let ((payload
+           (list (cons 'kind kind)
+                 (cons 'through_message_id (chat-message-id through))
+                 (cons 'message_count (1+ cut))
+                 (cons 'summary_chars (length summary)))))
+      ;; Keep the established record kind for existing readers, and add the
+      ;; canonical lifecycle edge for hooks and traces.
+      (chat-event-emit
+       'compaction
+       :session-id (chat-session-id session)
+       :source 'context
+       :payload payload)
+      (chat-event-emit
+       'post-compact
+       :session-id (chat-session-id session)
+       :source 'context
+       :payload payload))
     entry))
+
+(defun chat-context--pre-compact (session plan kind)
+  "Publish the blockable lifecycle event for SESSION, PLAN and KIND."
+  (let ((event
+         (chat-event-create
+          :type 'pre-compact
+          :session-id (chat-session-id session)
+          :source 'context
+          :subject plan
+          :payload
+          (list
+           (cons 'kind kind)
+           (cons 'message_count (length (plist-get plan :messages)))
+           (cons 'estimated_tokens
+                 (chat-context-total-tokens
+                  (plist-get plan :messages)))))))
+    (cons event (chat-event-publish event))))
 
 (defun chat-context-compact-session (session max-tokens &optional summary kind)
   "Compact one safe prefix of SESSION for MAX-TOKENS.
 When SUMMARY is nil, use the deterministic fallback. KIND labels the
 durable record and defaults to \"automatic\"."
   (when-let ((plan (chat-context--compaction-plan session max-tokens)))
-    (chat-context--persist-compaction
-     session
-     plan
-     (or summary
-         (chat-context--durable-summary-text
-          (plist-get plan :previous)
-          (plist-get plan :messages)))
-     (or kind "automatic"))))
+    (let* ((kind (or kind "automatic"))
+           (lifecycle (chat-context--pre-compact session plan kind))
+           (event (car lifecycle))
+           (outcome (cdr lifecycle))
+           (plan (chat-event-subject event)))
+      (when (and (chat-event-allowed-p outcome) (listp plan))
+        (chat-context--persist-compaction
+         session
+         plan
+         (or summary
+             (chat-context--durable-summary-text
+              (plist-get plan :previous)
+              (plist-get plan :messages)))
+         kind)))))
 
 (defun chat-context--apply-session-summary (messages session)
   "Replace the covered prefix of MESSAGES with SESSION's latest summary."
@@ -292,36 +326,47 @@ ERROR-CALLBACK receives transport errors."
          (plan (chat-context--compaction-plan session max)))
     (unless plan
       (error "No safe session prefix is available for compaction"))
-    (require 'chat-llm)
-    (let* ((previous (plist-get plan :previous))
-           (source (chat-context--durable-summary-text
-                    previous (plist-get plan :messages)))
-           (messages
-            (list
-             (make-chat-message
-              :id (chat-session-new-message-id "compact-system")
-              :role :system
-              :content
-              "Summarize the conversation faithfully. Preserve decisions, constraints, unresolved tasks, and tool outcomes. Do not add facts."
-              :timestamp (current-time))
-             (make-chat-message
-              :id (chat-session-new-message-id "compact-user")
-              :role :user
-              :content source
-              :timestamp (current-time)))))
-      (chat-llm-request-async
-       (chat-session-model-id session)
-       messages
-       (lambda (result)
-         (let ((summary (string-trim (or (plist-get result :content) ""))))
-           (if (string-empty-p summary)
-               (funcall error-callback "Compaction returned an empty summary")
-             (funcall
-              callback
-              (chat-context--persist-compaction
-               session plan summary "llm")))))
-       error-callback
-       (list :temperature 0.1)))))
+    (let* ((lifecycle (chat-context--pre-compact session plan "llm"))
+           (event (car lifecycle))
+           (outcome (cdr lifecycle))
+           (plan (chat-event-subject event)))
+      (if (not (and (chat-event-allowed-p outcome) (listp plan)))
+          (funcall error-callback
+                   (format "Compaction blocked: %s"
+                           (or (plist-get outcome :reason)
+                               "runtime policy returned an invalid plan")))
+        (require 'chat-llm)
+        (let* ((previous (plist-get plan :previous))
+               (source (chat-context--durable-summary-text
+                        previous (plist-get plan :messages)))
+               (messages
+                (list
+                 (make-chat-message
+                  :id (chat-session-new-message-id "compact-system")
+                  :role :system
+                  :content
+                  "Summarize the conversation faithfully. Preserve decisions, constraints, unresolved tasks, and tool outcomes. Do not add facts."
+                  :timestamp (current-time))
+                 (make-chat-message
+                  :id (chat-session-new-message-id "compact-user")
+                  :role :user
+                  :content source
+                  :timestamp (current-time)))))
+          (chat-llm-request-async
+           (chat-session-model-id session)
+           messages
+           (lambda (result)
+             (let ((summary
+                    (string-trim (or (plist-get result :content) ""))))
+               (if (string-empty-p summary)
+                   (funcall error-callback
+                            "Compaction returned an empty summary")
+                 (funcall
+                  callback
+                  (chat-context--persist-compaction
+                   session plan summary "llm")))))
+           error-callback
+           (list :temperature 0.1)))))))
 
 ;;;###autoload
 (defun chat-context-compact-current-session ()

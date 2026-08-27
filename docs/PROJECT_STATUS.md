@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-08-24
+Last updated: 2026-08-28
 
 ## Summary
 
@@ -11,6 +11,10 @@ Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/too
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
+The Agent Runtime roadmap is active. M0 and M1 are complete: a versioned
+lifecycle event contract now unifies runtime hooks and session-scoped audit for
+turns, prompts, tools, permissions, compaction, background tasks and child
+agents. The next stage is model capability and transport normalization.
 
 ## Implemented Areas
 
@@ -65,8 +69,20 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Durable Sessions
 
 - same-directory atomic JSONL updates
+- session format version 1 plus transparent migration from the earlier
+  single-JSON format, covered by a compatibility fixture
 - parent/child branching without destructive history edits
 - explicit mark-failed, discard, and keep recovery for interrupted tool runs
+
+### Agent Runtime Events
+
+- versioned lifecycle identity, correlation, provenance and bounded payloads
+- ordered synchronous blockers with modify/refuse outcomes and timeout policy
+- isolated post-persistence observers that cannot fail the run
+- session-wire audit for turns, tools, permissions, compaction, tasks and
+  child agents
+- runtime-owned audit metadata protected from producer context spoofing
+- Guard review records routed through the same event pipeline
 
 ### Tool Forging
 
@@ -119,8 +135,8 @@ The repository now uses `.agents/` as the formal agent knowledge base, with lega
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 591 regression tests discovered
-- 591 passing
+- 1387 regression tests discovered
+- 1387 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

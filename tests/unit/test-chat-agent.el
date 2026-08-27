@@ -698,6 +698,82 @@ steps spent on the question left the correction two."
       (should (equal (mapcar #'car callbacks) '("one" "two")))
       (funcall (cdr (cadr callbacks)) "second"))))
 
+(ert-deftest chat-agent-pre-tool-policy-blocks-execution-and-returns-a-result ()
+  "A runtime refusal is fed back to the model without invoking the tool."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-event-blocking-types '(pre-tool))
+        (chat-event-blocker-functions
+         (list (lambda (event)
+                 (when (eq (chat-event-type event) 'pre-tool)
+                   '(:decision block :reason "test policy refused")))))
+        (exec-counter (list 0))
+        (calls (list nil))
+        run)
+    (chat-agent-test--register-demo-tool exec-counter)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list (list :content chat-agent-test--tool-call-json)
+                      '(:content "used another route"))
+                calls)))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :messages (list (chat-agent-test--user-message))))))
+    (should (= 0 (car exec-counter)))
+    (should (equal '("test policy refused")
+                   (chat-agent-run-state-tool-results run)))
+    (should (equal "used another route"
+                   (chat-agent-run-state-content run)))))
+
+(ert-deftest chat-agent-policy-modification-recomputes-resource-conflicts ()
+  "A modified call is scheduled by its new resources, not stale ones."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+        (chat-event-blocking-types '(pre-tool))
+        (chat-event-blocker-functions
+         (list
+          (lambda (event)
+            (let ((call (chat-event-subject event)))
+              (when (equal (plist-get call :id) "read-1")
+                (list :decision 'modify
+                      :subject
+                      (plist-put (copy-tree call) :arguments
+                                 '(("key" . "shared")))))))))
+        callbacks
+        (transport-calls (list nil)))
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'async-read :name "Async Read" :language 'elisp
+      :parameters '((:name "key" :type "string" :required t))
+      :effects '(read)
+      :resource-function
+      (lambda (call)
+        (list (list :resource
+                    (cdr (assoc "key" (plist-get call :arguments)))
+                    :mode 'write)))
+      :async-function
+      (lambda (argv success _error)
+        (setq callbacks (append callbacks (list (cons (car argv) success))))
+        #'ignore)
+      :is-active t :usage-count 0))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                (list
+                 (list :content ""
+                       :tool-calls
+                       '((:id "read-1" :name "async-read"
+                          :arguments (("key" . "one")))
+                         (:id "read-2" :name "async-read"
+                          :arguments (("key" . "shared")))))
+                 '(:content "done"))
+                transport-calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message)))))
+    (should (equal (mapcar #'car callbacks) '("shared")))
+    (funcall (cdr (car callbacks)) "first")
+    (should (equal (mapcar #'car callbacks) '("shared" "shared")))
+    (funcall (cdr (cadr callbacks)) "second")))
+
 (ert-deftest chat-agent-cancellation-propagates-to-async-tools ()
   "Test cancelling a run invokes every active async tool handle."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))

@@ -37,6 +37,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'chat-approval-grants)
+(require 'chat-event)
 
 ;; Forward declarations
 (declare-function chat-forged-tool-id "chat-tool-forge" (tool))
@@ -50,6 +51,7 @@
 (declare-function chat-session-approval-mode "chat-session" (session))
 (declare-function chat-session-set-approval-mode "chat-session" (session mode))
 (declare-function chat-session-name "chat-session" (session))
+(declare-function chat-session-id "chat-session" (session))
 (declare-function chat-files--resolved-path "chat-files" (path))
 (declare-function chat-files--tool-target-paths "chat-files" (tool-id arguments))
 (declare-function chat-command-gate-explain "chat-command-gate" (refusal))
@@ -85,7 +87,7 @@
                   "chat-approval-guard" (verdict reference kind))
 (declare-function chat-approval-guard-log-verdict
                   "chat-approval-guard"
-                  (verdict tool-id arguments mode &optional session))
+                  (verdict tool-id arguments mode &optional session task-id))
 (declare-function chat-approval-guard-verdict-mark-shadow
                   "chat-approval-guard" (verdict))
 (declare-function chat-approval-guard-remembered-refusal
@@ -630,6 +632,70 @@ would let them disagree and would make the mode decoration."
      (when command
        (list :command command)))))
 
+(defun chat-approval--lifecycle-payload
+    (tool-id arguments mode &optional consent reason decision-event)
+  "Return bounded approval facts for lifecycle persistence."
+  (let ((command (chat-approval--command-from-arguments arguments)))
+    (delq
+     nil
+     (list
+      (cons 'tool (symbol-name tool-id))
+      (cons 'mode (format "%s" mode))
+      (cons 'argument_count (if (listp arguments) (length arguments) 0))
+      (when command
+        (cons 'command (chat-approval--summarize-value command)))
+      (when-let* ((directory
+                   (chat-approval--directory-scope tool-id arguments)))
+        (cons 'directory directory))
+      (when consent (cons 'consent (format "%s" consent)))
+      (when decision-event
+        (cons 'decision
+              (format "%s" (plist-get decision-event :decision))))
+      (when decision-event
+        (cons 'approved
+              (if (plist-get decision-event :approved) t :json-false)))
+      (when (plist-get decision-event :matched-rule)
+        (cons 'matched_rule (plist-get decision-event :matched-rule)))
+      (when (plist-get decision-event :model)
+        (cons 'model (plist-get decision-event :model)))
+      (when (plist-get decision-event :degraded)
+        (cons 'degraded t))
+      (when-let* ((final-reason
+                   (or reason (plist-get decision-event :reason))))
+        (cons 'reason
+              (chat-approval--summarize-value final-reason)))))))
+
+(defun chat-approval--lifecycle-observer (observer state)
+  "Return an observer that captures the final approval event in STATE."
+  (lambda (event)
+    (when (eq (plist-get event :type) 'approval)
+      (setcar state event))
+    (chat-approval--notify observer event)))
+
+(defun chat-approval--emit-lifecycle-request
+    (tool-id arguments mode session call)
+  "Record one permission request for TOOL-ID and CALL."
+  (chat-event-emit
+   'permission-requested
+   :session-id (and session (chat-session-id session))
+   :task-id (plist-get call :id)
+   :source 'approval
+   :subject call
+   :payload (chat-approval--lifecycle-payload tool-id arguments mode)))
+
+(defun chat-approval--emit-lifecycle-resolution
+    (tool-id arguments mode session call consent reason decision-event)
+  "Record the effective permission result for TOOL-ID and CALL."
+  (chat-event-emit
+   'permission-resolved
+   :session-id (and session (chat-session-id session))
+   :task-id (plist-get call :id)
+   :source 'approval
+   :subject call
+   :payload
+   (chat-approval--lifecycle-payload
+    tool-id arguments mode consent reason decision-event)))
+
 (defun chat-approval--set-pending-decision (decision)
   "Set pending approval DECISION and exit the minibuffer when active."
   (unless chat-approval--pending-request
@@ -1083,7 +1149,7 @@ gate itself allows, and a call the floor refuses."
          (not (chat-approval--floor-refusal tool-id arguments session)))))
 
 (defun chat-approval--record-verdict
-    (verdict tool-id arguments mode reference session)
+    (verdict tool-id arguments mode reference session &optional task-id)
   "Log VERDICT about TOOL-ID with ARGUMENTS under MODE, against REFERENCE.
 
 REFERENCE is nil, or a cons of what actually decided and what sort of
@@ -1097,7 +1163,7 @@ to weigh it as one."
        verdict (car reference) (cdr reference)))
     (when (fboundp 'chat-approval-guard-log-verdict)
       (chat-approval-guard-log-verdict
-       verdict tool-id arguments mode session))))
+       verdict tool-id arguments mode session task-id))))
 
 (defun chat-approval--shadow-start (tool call session observer)
   "Begin a shadow verdict for CALL of TOOL and return a function to settle it.
@@ -1128,7 +1194,7 @@ forget and no mode has its own idea of what gets sampled."
                 (chat-approval-guard-verdict-mark-shadow verdict))
               (chat-approval--record-verdict
                verdict tool-id (plist-get call :arguments) mode
-               (cons reference reference-kind) session)
+               (cons reference reference-kind) session (plist-get call :id))
               (chat-approval--notify
                observer
                (append
@@ -1186,24 +1252,36 @@ to the rules the guard exists to replace.  Callers on the live path use
   (let* ((tool-id (chat-forged-tool-id tool))
          (arguments (plist-get call :arguments))
          (mode (chat-approval-effective-mode session))
-         (fast (chat-approval--fast-path tool call session observer)))
-    (cond
-     ((not (eq fast chat-approval--fell-through)) fast)
-     ((and (eq mode 'guarded) (chat-approval--guard-available-p session))
-      (chat-approval--notify
-       observer
-       (append (list :type 'approval
-                     :tool (symbol-name tool-id)
-                     :decision 'guard-unreachable
-                     :approved nil
-                     :reason (concat "this entry point cannot consult the "
+         (decision-state (list nil))
+         (observer (chat-approval--lifecycle-observer
+                    observer decision-state)))
+    (chat-approval--emit-lifecycle-request
+     tool-id arguments mode session call)
+    (let* ((fast (chat-approval--fast-path tool call session observer))
+           (consent
+            (cond
+             ((not (eq fast chat-approval--fell-through)) fast)
+             ((and (eq mode 'guarded)
+                   (chat-approval--guard-available-p session))
+              (chat-approval--notify
+               observer
+               (append (list :type 'approval
+                             :tool (symbol-name tool-id)
+                             :decision 'guard-unreachable
+                             :approved nil
+                             :reason
+                             (concat "this entry point cannot consult the "
                                      "guard; call it asynchronously"))
-               (chat-approval--event-context tool-id arguments)))
-      nil)
-     ((eq mode 'guarded)
-      (chat-approval--authorize-by-rules
-       tool tool-id arguments session observer))
-     (t (chat-approval--ask-a-person tool-id arguments session observer)))))
+                       (chat-approval--event-context tool-id arguments)))
+              nil)
+             ((eq mode 'guarded)
+              (chat-approval--authorize-by-rules
+               tool tool-id arguments session observer))
+             (t (chat-approval--ask-a-person
+                 tool-id arguments session observer)))))
+      (chat-approval--emit-lifecycle-resolution
+       tool-id arguments mode session call consent nil (car decision-state))
+      consent)))
 
 (defun chat-approval--guard-available-p (session)
   "Return non-nil when a guard verdict could be obtained for SESSION."
@@ -1224,7 +1302,22 @@ comes through here so that the guard covers all of it."
   (let* ((tool-id (chat-forged-tool-id tool))
          (arguments (plist-get call :arguments))
          (mode (chat-approval-effective-mode session))
-         (fast (chat-approval--fast-path tool call session observer)))
+         (decision-state (list nil))
+         (observer (chat-approval--lifecycle-observer
+                    observer decision-state))
+         (finished nil)
+         (finish
+          (lambda (consent reason)
+            (unless finished
+              (setq finished t)
+              (chat-approval--emit-lifecycle-resolution
+               tool-id arguments mode session call consent reason
+               (car decision-state))
+              (funcall callback consent reason))))
+         (fast nil))
+    (chat-approval--emit-lifecycle-request
+     tool-id arguments mode session call)
+    (setq fast (chat-approval--fast-path tool call session observer))
     (cond
      ;; `dangerous' is a decision about the mode rather than a step the
      ;; fast path took, and it is the one mode where a shadow run measures
@@ -1233,9 +1326,9 @@ comes through here so that the guard covers all of it."
      ((eq fast 'dangerous)
       (funcall (chat-approval--shadow-start tool call session observer)
                'dangerous 'none)
-      (funcall callback 'dangerous nil))
+      (funcall finish 'dangerous nil))
      ((not (eq fast chat-approval--fell-through))
-      (funcall callback fast nil))
+      (funcall finish fast nil))
      ;; Past this point the call is genuinely in question, which is exactly
      ;; the population a shadow run wants to sample: the same set in every
      ;; mode, because the steps above this are the same in every mode.
@@ -1253,14 +1346,14 @@ comes through here so that the guard covers all of it."
        tool tool-id arguments session observer
        (lambda (consent reason verdict)
          (chat-approval--record-verdict
-          verdict tool-id arguments mode nil session)
-         (funcall callback consent reason))))
+          verdict tool-id arguments mode nil session (plist-get call :id))
+         (funcall finish consent reason))))
      ((eq mode 'guarded)
       (let ((settle (chat-approval--shadow-start tool call session observer))
             (consent (chat-approval--authorize-by-rules
                       tool tool-id arguments session observer)))
         (funcall settle consent 'rules)
-        (funcall callback consent
+        (funcall finish consent
                  (unless consent
                    (if (chat-approval--shadow-p session)
                        (concat "the guard is running in shadow, so the "
@@ -1276,7 +1369,7 @@ comes through here so that the guard covers all of it."
             (consent (chat-approval--ask-a-person
                       tool-id arguments session observer)))
         (funcall settle consent 'human)
-        (funcall callback consent
+        (funcall finish consent
                  (unless consent
                    "the user declined this call")))))))
 

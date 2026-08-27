@@ -215,6 +215,27 @@
                       (chat-subagent-child-session subagent))
                      "parent"))))
 
+(ert-deftest chat-subagent-lifecycle-is-recorded-on-the-parent-session ()
+  "A child start and terminal outcome remain visible from its parent."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-wire--sequences (make-hash-table :test 'equal))
+          (chat-session-wire--sizes (make-hash-table :test 'equal))
+          (chat-session-wire-enabled t)
+          (parent (make-chat-session :id "subagent-wire" :name "Parent"
+                                     :model-id 'kimi))
+          (subagent
+           (chat-subagent-start-in-process
+            "Child" nil (lambda (_session) "done") parent 1))
+          (records (chat-session-wire-read "subagent-wire"))
+          (kinds (mapcar (lambda (record) (alist-get 'kind record)) records)))
+     (should (equal kinds '("subagent-started" "subagent-ended")))
+     (should
+      (cl-every
+       (lambda (record)
+         (equal (chat-subagent-id subagent) (alist-get 'task_id record)))
+       records)))))
+
 (ert-deftest chat-subagent-external-captures-output ()
   "Test external sub-agent backend captures subprocess output."
   (chat-test-with-temp-dir

@@ -23,7 +23,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'chat-session-wire)
+(require 'chat-event)
 
 (declare-function chat-agent-run-state-session "chat-agent-types" (run))
 (declare-function chat-agent-run-state-model "chat-agent-types" (run))
@@ -113,6 +113,16 @@ a run that worked into a run that failed while being watched."
       ;; first chunk a subtraction between two records rather than a
       ;; number someone has to remember to measure.
       ('turn-start nil)
+      ('turn-ended
+       (list (cons 'status (chat-agent-wire--name
+                            (plist-get event :status)))
+             (cons 'reason (chat-agent-wire--short
+                            (plist-get event :reason)))))
+      ('turn-failed
+       (list (cons 'status (chat-agent-wire--name
+                            (plist-get event :status)))
+             (cons 'reason (chat-agent-wire--short
+                            (plist-get event :reason)))))
       ('stream-chunk
        (list (cons 'delta_chars (chat-agent-wire--chars
                                  (plist-get event :text)))
@@ -177,21 +187,23 @@ a run that worked into a run that failed while being watched."
     (and (chat-session-p session) (chat-session-id session))))
 
 (defun chat-agent-wire-observe (event)
-  "Record EVENT in its session's event stream."
+  "Project agent EVENT and publish it through the runtime event bus."
   (when-let ((session-id (chat-agent-wire--session-id event)))
     (let ((payload (chat-agent-wire-payload event)))
       (unless (eq payload 'unprojected)
-        (chat-session-wire-record
-         session-id
-         (plist-get event :type)
-         ;; Nils dropped rather than written: a record saying a field was
-         ;; absent costs bytes on every event to say nothing.
-         (cl-remove-if (lambda (pair) (null (cdr pair))) payload)
-         (delq nil
-               (list (when-let ((turn (plist-get event :turn)))
-                       (cons 'turn_id turn))
-                     (when-let ((step (plist-get event :step)))
-                       (cons 'step step)))))))))
+        (chat-event-publish
+         (chat-event-create
+          :type (plist-get event :type)
+          :session-id session-id
+          :turn-id (plist-get event :turn)
+          :source 'agent
+          ;; Nils dropped rather than written: a record saying a field was
+          ;; absent costs bytes on every event to say nothing.
+          :payload (cl-remove-if (lambda (pair) (null (cdr pair))) payload)
+          :context
+          (delq nil
+                (list (when-let ((step (plist-get event :step)))
+                        (cons 'step step))))))))))
 
 ;;;###autoload
 (defun chat-agent-wire-install ()

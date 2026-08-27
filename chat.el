@@ -95,6 +95,7 @@ Returns the list of files that were loaded."
 (require 'chat-command)
 (require 'chat-session)
 (require 'chat-session-wire)
+(require 'chat-event)
 (require 'chat-session-index)
 (chat-session-index-install)
 (require 'chat-session-tree)
@@ -455,6 +456,39 @@ project's own instructions, a plain one reformatted code blocks
 incorrectly mid-stream -- so each fix only ever landed on one side."
   (chat--open-chat-session session))
 
+(defvar-local chat--session-event-open nil
+  "Session id whose open lifecycle event belongs to this buffer.")
+
+(defun chat--record-session-ended ()
+  "Record that this buffer no longer presents its current session."
+  (when (and chat--session-event-open chat--current-session)
+    (chat-event-emit
+     'session-ended
+     :session-id chat--session-event-open
+     :source 'ui
+     :subject chat--current-session
+     :payload
+     (list (cons 'reason "buffer-closed")
+           (cons 'name (chat-session-name chat--current-session))))
+    (setq chat--session-event-open nil)))
+
+(defun chat--record-session-started (session)
+  "Record that this buffer now presents SESSION."
+  (setq chat--session-event-open (chat-session-id session))
+  (chat-event-emit
+   'session-started
+   :session-id chat--session-event-open
+   :source 'ui
+   :subject session
+   :payload
+   (delq nil
+         (list (cons 'reason "buffer-opened")
+               (cons 'name (chat-session-name session))
+               (when-let* ((model (chat-session-model-id session)))
+                 (cons 'model (format "%s" model))))))
+  (add-hook 'kill-buffer-hook #'chat--record-session-ended nil t)
+  (add-hook 'change-major-mode-hook #'chat--record-session-ended nil t))
+
 (defun chat-prepare-session-buffer (session)
   "Apply the session-level setup every chat surface needs to SESSION.
 
@@ -462,6 +496,7 @@ Called from both surfaces so neither can drift out of the other's
 behaviour.  Everything here is a property of the session rather than of
 how it is drawn, which is why it does not belong in either display."
   (setq-local chat--current-session session)
+  (chat--record-session-started session)
   ;; Without this the buffer would inherit the directory of whatever
   ;; buffer happened to be current, discarding the directory this
   ;; session was pointed at.

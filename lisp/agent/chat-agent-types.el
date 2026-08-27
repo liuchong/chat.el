@@ -11,7 +11,8 @@
 ;;
 ;; Event types delivered through :on-event:
 ;;
-;;   agent-start  context-transformed  turn-start  stream-chunk
+;;   agent-start  context-transformed  turn-start  turn-ended  turn-failed
+;;   stream-chunk
 ;;   stream-reasoning  stream-result  tool-batch-start  tool-event  tool-batch-end
 ;;   message-appended  truncated  response  followup  steering
 ;;   prepared-next-turn  error  agent-end
@@ -52,6 +53,7 @@
   ;; steering adds a user message mid-run and counting them again would
   ;; report the later steps of one turn as belonging to the next.
   turn
+  turn-open
   content tool-events tool-calls tool-results
   raw-request raw-response
   handle cancelled done status reason

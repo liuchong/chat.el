@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
+(require 'chat-event)
 (require 'chat-session)
 (require 'chat-agent)
 (require 'chat-tool-forge)
@@ -76,6 +77,32 @@
   "Return a stable timestamp string."
   (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time)))
 
+(defun chat-subagent--event-payload (subagent)
+  "Return bounded lifecycle facts for SUBAGENT."
+  (delq nil
+        (list
+         (cons 'name (chat-subagent-name subagent))
+         (cons 'kind (format "%s" (chat-subagent-kind subagent)))
+         (cons 'status (format "%s" (chat-subagent-status subagent)))
+         (cons 'depth (chat-subagent-depth subagent))
+         (cons 'budget (chat-subagent-budget subagent))
+         (when-let* ((child (chat-subagent-child-session subagent)))
+           (cons 'child_session_id (chat-session-id child)))
+         (when (stringp (chat-subagent-summary subagent))
+           (cons 'summary_chars
+                 (length (chat-subagent-summary subagent)))))))
+
+(defun chat-subagent--emit-event (type subagent)
+  "Publish lifecycle TYPE for SUBAGENT."
+  (let ((parent (chat-subagent-parent-session subagent)))
+    (chat-event-emit
+     type
+     :session-id (and parent (chat-session-id parent))
+     :task-id (chat-subagent-id subagent)
+     :source 'subagent
+     :subject subagent
+     :payload (chat-subagent--event-payload subagent))))
+
 (defun chat-subagent--session-depth (session)
   "Return nesting depth recorded on SESSION."
   (or (and session
@@ -126,18 +153,21 @@ state without dumping child transcripts into the parent."
                       :child-session child-session
                       :started-at (chat-subagent--timestamp))))
       (puthash (chat-subagent-id subagent) subagent chat-subagent--registry)
+      (chat-subagent--emit-event 'subagent-started subagent)
       (condition-case err
           (let ((summary (funcall runner child-session)))
             (setf (chat-subagent-summary subagent) summary
                   (chat-subagent-status subagent) 'completed
                   (chat-subagent-ended-at subagent)
                   (chat-subagent--timestamp))
+            (chat-subagent--emit-event 'subagent-ended subagent)
             subagent)
         (error
          (setf (chat-subagent-summary subagent) (error-message-string err)
                (chat-subagent-status subagent) 'failed
                (chat-subagent-ended-at subagent)
                (chat-subagent--timestamp))
+         (chat-subagent--emit-event 'subagent-ended subagent)
          subagent)))))
 
 (defun chat-subagent-start-agent
@@ -167,6 +197,7 @@ state without dumping child transcripts into the parent."
            :started-at (chat-subagent--timestamp)))
          run)
     (puthash (chat-subagent-id subagent) subagent chat-subagent--registry)
+    (chat-subagent--emit-event 'subagent-started subagent)
     (chat-session-save child-session)
     (condition-case err
         (setq
@@ -193,6 +224,7 @@ state without dumping child transcripts into the parent."
                    (chat-subagent-summary subagent) content
                    (chat-subagent-ended-at subagent)
                    (chat-subagent--timestamp))
+             (chat-subagent--emit-event 'subagent-ended subagent)
              (if (memq status '(completed stopped))
                  (funcall success
                           `((id . ,(chat-subagent-id subagent))
@@ -208,6 +240,7 @@ state without dumping child transcripts into the parent."
                (chat-subagent-summary subagent) message
                (chat-subagent-ended-at subagent)
                (chat-subagent--timestamp))
+         (chat-subagent--emit-event 'subagent-ended subagent)
          (funcall error-callback message))))
     (setf (chat-subagent-run subagent) run)
     (list :cancel
@@ -216,7 +249,7 @@ state without dumping child transcripts into the parent."
               (chat-agent-cancel run))))))
 
 (defun chat-subagent-start-external (name command input-jsonl log-file
-                                          &optional depth budget)
+                                          &optional depth budget parent-session id)
   "Start external subprocess-agent NAME using COMMAND.
 INPUT-JSONL is written to the subprocess stdin when non-nil.  Output is
 captured in LOG-FILE."
@@ -224,12 +257,13 @@ captured in LOG-FILE."
     (chat-subagent--ensure-depth depth)
     (make-directory (file-name-directory log-file) t)
     (let* ((subagent (make-chat-subagent
-                      :id (chat-subagent--id)
+                      :id (or id (chat-subagent--id))
                       :kind 'external
                       :name name
                       :status 'running
                       :depth depth
                       :budget (or budget chat-subagent-default-budget)
+                      :parent-session parent-session
                       :log-file log-file
                       :started-at (chat-subagent--timestamp)))
            proc)
@@ -254,9 +288,12 @@ captured in LOG-FILE."
                                    (chat-subagent-summary subagent)
                                    (chat-subagent--external-summary log-file)
                                    (chat-subagent-ended-at subagent)
-                                   (chat-subagent--timestamp)))))))
+                                   (chat-subagent--timestamp))
+                             (chat-subagent--emit-event
+                              'subagent-ended subagent))))))
       (setf (chat-subagent-process subagent) proc)
       (puthash (chat-subagent-id subagent) subagent chat-subagent--registry)
+      (chat-subagent--emit-event 'subagent-started subagent)
       (when input-jsonl
         (process-send-string proc input-jsonl))
       (process-send-eof proc)
@@ -300,13 +337,10 @@ captured in LOG-FILE."
                       (prompt . ,prompt)
                       (budget . ,(or budget
                                      chat-subagent-default-budget))))
-                   "\n"))
-           (subagent
-            (chat-subagent-start-external
-             name command input log-file 0 budget)))
-      (remhash (chat-subagent-id subagent) chat-subagent--registry)
-      (setf (chat-subagent-id subagent) id)
-      (puthash id subagent chat-subagent--registry)
+                   "\n")))
+      (chat-subagent-start-external
+       name command input log-file 0 budget
+       chat-tool-caller-current-session id)
       (chat-subagent-describe id))))
 
 (defun chat-subagent-cancel (id)
@@ -322,6 +356,7 @@ captured in LOG-FILE."
     (when-let ((proc (chat-subagent-process subagent)))
       (when (process-live-p proc)
         (delete-process proc)))
+    (chat-subagent--emit-event 'subagent-ended subagent)
     subagent))
 
 (defun chat-subagent-describe (id)
