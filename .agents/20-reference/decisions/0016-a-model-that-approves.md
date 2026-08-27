@@ -78,6 +78,13 @@ and one changed character is a new question. An allowance that outlived its
 request would be a grant, and grants are something a person makes on
 purpose.
 
+**Exact entries and semantic rules are one policy.** High-frequency forms
+can be promoted into literal whole-command allow or deny entries; everything
+else still goes to the semantic guard. Deny wins on conflicting entries,
+variants do not inherit an exact allow, and the irreversible floor remains
+above both. This gives tuning a precise instrument without turning the
+policy into a command parser made of regular expressions.
+
 ## Alternatives
 
 **Let the executing model declare its own calls safe** (cline's shape).
@@ -121,9 +128,15 @@ people who turn it on, who may not represent ordinary use, and the way to
 accelerate that is to run `manual` plus shadow ourselves rather than to
 change the default and bill everyone for our tuning.
 
+Every live and shadow verdict is also an `approval-guard-review` record in
+the session event stream. It carries the bounded argument summary, source,
+decision, evidence, confidence, model, latency, reference and effective
+outcome. The in-memory list remains useful for immediate export, but is no
+longer the only copy of the review.
+
 ## Verification
 
-1344 tests. The two groups carrying the weight are the floor — every kind
+1350 tests. The two groups carrying the weight are the floor — every kind
 of refusal asserted to hold against a confident allow, since that is the
 shape a successful injection produces — and the request payload, because
 what is kept out of it cannot be restored by prompt wording once something

@@ -407,7 +407,15 @@ borrowing the root from whichever chat buffer happens to be current. The
 credential-dependent check and rationale are recorded in
 `stage-2026-08-27-the-guard-can-think.md`.
 
-Canonical suite: 1345 tests passing.
+Guard policy now has the deterministic tuning layer its design called for:
+literal whole-command allow and deny entries ahead of semantic judging,
+with deny winning and no prefix expansion. Tool arguments that try to
+instruct the adjudicator abstain locally. Every actual or shadow verdict is
+also durable as an `approval-guard-review` event in that session's bounded
+wire log, rather than existing only in Emacs memory until someone exports
+it.
+
+Canonical suite: 1350 tests passing.
 
 ## Next Stage
 

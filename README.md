@@ -461,11 +461,21 @@ denial costs an attempt rather than the task.
 | `chat-approval-guard-model` | nil | Remote model name, when it differs from the provider default |
 | `chat-approval-guard-timeout` | 20 | Seconds before a missing verdict becomes a refusal |
 | `chat-approval-guard-extra-rules` | nil | Policy rules of yours, added after the built-in ones |
+| `chat-approval-guard-allow-command-entries` | `("make test")` | Exact whole commands allowed without a model request |
+| `chat-approval-guard-deny-command-entries` | `("git push" "git reset --hard")` | Exact whole commands refused without a model request |
+| `chat-approval-guard-untrusted-instruction-markers` | built in | Narrow phrases in tool arguments that force a local abstention |
 | `chat-approval-guard-never-allow-extra` | nil | Predicates that tighten the floor; they cannot loosen it |
 
 Your rules are added as data and labelled as yours. They can add effects
 and boundaries; they cannot change the discipline above them, because a
 rule pasted from somewhere unknown is another way in.
+
+Exact entries and semantic rules form one policy. Deny entries win over
+allow entries, matching trims only outer whitespace, and there are no
+prefixes, globs or regular expressions. Thus an entry for `make test` says
+nothing about `make test ARGS=...`; an unlisted form goes to the semantic
+guard. The deterministic floor still runs first and no allow entry can
+weaken it.
 
 The status line names the mode, and shows `Guard Judging: TOOL` while a
 verdict is outstanding. Nothing blocks: you can keep typing.
@@ -501,6 +511,15 @@ Verdicts that decided are logged on the same terms as shadow ones; the
 difference is recorded, not the reason for recording. A reference is a
 comparison and not ground truth, which is why its kind is kept: a tired
 person's fortieth allow is a noisy label.
+
+Every review is also appended immediately to the session event stream as
+an `approval-guard-review` record under
+`~/.chat/sessions/wire/<session-id>.jsonl`. It includes the source
+(`entry` or `model`), decision, matched rule, reason, confidence, model,
+latency, shadow/reference fields and the effective outcome. Arguments are
+kept as bounded summaries rather than copied in full. Lisp callers can use
+`chat-approval-guard-session-reviews` to read just these records for a
+loaded session.
 
 With the defaults — `manual` and shadow off — no guard request is ever
 made. No extra model call, no added latency, no tool arguments leaving the

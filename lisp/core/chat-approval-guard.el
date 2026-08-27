@@ -49,6 +49,7 @@
 ;; a state the design already has a name for, and it is the same state as a
 ;; guard with no provider configured.
 (require 'chat-approval)
+(require 'chat-session-wire)
 ;; A hard dependency, not an optional one.  The floor works by taking a
 ;; command apart, and with no parser available every predicate in it
 ;; returns nil -- which is to say the floor silently becomes decoration
@@ -147,6 +148,48 @@ text rewrite the judging discipline."
   :type '(repeat string)
   :group 'chat-approval-guard)
 
+(defcustom chat-approval-guard-allow-command-entries
+  '("make test")
+  "Exact shell commands the guard may allow without a model request.
+
+Matching trims leading and trailing whitespace and otherwise compares the
+whole command literally.  There are no prefixes, globs, regular expressions
+or shell interpretation: an entry for `make test' says nothing about
+`make test ARGS=...' or any other command.  The deterministic never-allow
+floor runs before these entries and cannot be overridden by one."
+  :type '(repeat string)
+  :group 'chat-approval-guard)
+
+(defcustom chat-approval-guard-deny-command-entries
+  '("git push" "git reset --hard")
+  "Exact shell commands the guard refuses without a model request.
+
+Matching has the same literal whole-command semantics as
+`chat-approval-guard-allow-command-entries'.  A command present in both
+lists is denied.  Use semantic policy rules for command families and these
+entries for individual forms whose answer is already known."
+  :type '(repeat string)
+  :group 'chat-approval-guard)
+
+(defcustom chat-approval-guard-untrusted-instruction-markers
+  '("ignore policy"
+    "ignore the policy"
+    "ignore previous"
+    "ignore all prior"
+    "user approved"
+    "call verdict"
+    "return allow"
+    "verdict must be allow")
+  "Case-insensitive literal markers that make a tool call abstain.
+
+Tool arguments are untrusted data.  When one contains language aimed at the
+approval decision, the request is not sent to the model: even a harmless
+operation must not teach an attacker that instructions inside arguments can
+participate in adjudication.  Keep these entries narrow; ordinary task text
+does not belong here."
+  :type '(repeat string)
+  :group 'chat-approval-guard)
+
 (defcustom chat-approval-guard-never-allow-extra nil
   "Extra predicates that refuse a call outright.
 
@@ -217,6 +260,50 @@ on roughly 25 commands for exactly these options.
 Critical and high-frequency cases are not here at all.  They are decided
 before the guard is asked, by the command gate and by
 `chat-approval-guard-never-allow-p', where the answer is deterministic.")
+
+(defun chat-approval-guard--command-entry (call)
+  "Return CALL's trimmed shell command, or nil when it has none."
+  (let* ((arguments (plist-get call :arguments))
+         (command (or (cdr (assoc "command" arguments))
+                      (cdr (assq 'command arguments)))))
+    (and (stringp command) (string-trim command))))
+
+(defun chat-approval-guard--untrusted-instruction-p (call)
+  "Return non-nil when CALL arguments try to influence adjudication."
+  (let ((text (downcase
+               (mapconcat (lambda (entry) (format "%s" (cdr entry)))
+                          (plist-get call :arguments)
+                          "\n"))))
+    (seq-some
+     (lambda (marker)
+       (string-match-p (regexp-quote (downcase marker)) text))
+     chat-approval-guard-untrusted-instruction-markers)))
+
+(defun chat-approval-guard--entry-verdict (call)
+  "Return an exact-entry verdict for CALL, or nil for semantic judging."
+  (let ((command (chat-approval-guard--command-entry call)))
+    (cond
+     ((and command
+           (member command chat-approval-guard-deny-command-entries))
+      (chat-approval-guard-verdict-create
+       :decision 'deny
+       :reason (format "exact deny entry matched: %s" command)
+       :confidence 'high
+       :model "guard-entry"))
+     ((chat-approval-guard--untrusted-instruction-p call)
+      (chat-approval-guard-verdict-create
+       :decision 'abstain
+       :reason "tool arguments attempted to influence the approval decision"
+       :confidence 'high
+       :model "guard-entry"))
+     ((and command
+           (member command chat-approval-guard-allow-command-entries))
+      (chat-approval-guard-verdict-create
+       :decision 'allow
+       :matched-rule (format "ALLOW ENTRY: exact command `%s'." command)
+       :reason (format "exact allow entry matched: %s" command)
+       :confidence 'high
+       :model "guard-entry")))))
 
 (defconst chat-approval-guard--system-prompt-preamble
   "You are a permission adjudicator for a coding assistant. You are not the
@@ -464,12 +551,43 @@ because one `files_write' of a large file would otherwise be the log."
                       value))))
           arguments))
 
-(defun chat-approval-guard-log-verdict (verdict tool-id arguments mode)
+(defun chat-approval-guard--wire-payload (sample)
+  "Return SAMPLE as a bounded session-wire payload."
+  (list
+   (cons 'tool (plist-get sample :tool))
+   (cons 'mode (plist-get sample :mode))
+   (cons 'arguments (plist-get sample :arguments))
+   (cons 'source (if (equal (plist-get sample :model) "guard-entry")
+                     "entry"
+                   "model"))
+   (cons 'decision (plist-get sample :decision))
+   (cons 'matched_rule (plist-get sample :matched-rule))
+   (cons 'reason (plist-get sample :reason))
+   (cons 'confidence (plist-get sample :confidence))
+   (cons 'model (plist-get sample :model))
+   (cons 'elapsed (plist-get sample :elapsed))
+   (cons 'would_allow (if (plist-get sample :would-allow) t :json-false))
+   (cons 'shadow (if (plist-get sample :shadow) t :json-false))
+   (cons 'reference (plist-get sample :reference))
+   (cons 'reference_kind (plist-get sample :reference-kind))
+   (cons 'allowed (if (plist-get sample :allowed) t :json-false))))
+
+(defun chat-approval-guard-session-reviews (session)
+  "Return persisted guard review payloads for SESSION, oldest first."
+  (when-let ((session-id (and session
+                              (fboundp 'chat-session-id)
+                              (chat-session-id session))))
+    (mapcar (lambda (record) (alist-get 'payload record))
+            (chat-session-wire-read session-id '(approval-guard-review)))))
+
+(defun chat-approval-guard-log-verdict
+    (verdict tool-id arguments mode &optional session)
   "Record VERDICT about TOOL-ID with ARGUMENTS, reached under MODE.
 
 Whether the verdict decided anything is read off the verdict itself: a
 shadow one did not, and one that is not shadow is the guard ruling under
-`guarded'.  Returns the sample."
+`guarded'.  When SESSION is present, also append a durable, bounded review
+record to its event stream.  Returns the sample."
   (when (chat-approval-guard-verdict-p verdict)
     (let* ((shadow (and (chat-approval-guard-verdict-shadow verdict) t))
            (sample
@@ -514,6 +632,12 @@ shadow one did not, and one that is not shadow is the guard ruling under
           (when (> excess 0)
             (setq chat-approval-guard--log
                   (butlast chat-approval-guard--log excess)))))
+      (when-let ((session-id (and session
+                                  (fboundp 'chat-session-id)
+                                  (chat-session-id session))))
+        (chat-session-wire-record
+         session-id 'approval-guard-review
+         (chat-approval-guard--wire-payload sample)))
       sample)))
 
 (defun chat-approval-guard--sample-json (sample)
@@ -1142,6 +1266,7 @@ will not come is a hung turn."
   (let* ((provider (chat-approval-guard--provider session))
          (env (chat-approval-guard--environment session))
          (refusal (chat-approval-guard--gate-refusal tool call))
+         (entry-verdict (chat-approval-guard--entry-verdict call))
          (started (current-time))
          (settled nil)
          (model (format "%s%s" provider
@@ -1156,10 +1281,14 @@ will not come is a hung turn."
                            (float-time (time-subtract (current-time) started)))
                      (funcall callback verdict))))
          timer)
-    (if (not provider)
-        (funcall finish
-                 (chat-approval-guard--refusal-verdict
-                  "no provider is configured for it" model 0))
+    (cond
+     ((not provider)
+      (funcall finish
+               (chat-approval-guard--refusal-verdict
+                "no provider is configured for it" model 0)))
+     (entry-verdict
+      (funcall finish entry-verdict))
+     (t
       (condition-case err
           (progn
             (setq timer
@@ -1207,7 +1336,7 @@ will not come is a hung turn."
                   (chat-approval-guard--refusal-verdict
                    (format "the request could not be made: %s"
                            (error-message-string err))
-                   model nil)))))))
+                   model nil))))))))
 
 (defun chat-approval-guard--gate-refusal (tool call)
   "Return the tool's own gate refusal for CALL of TOOL as text, or nil.

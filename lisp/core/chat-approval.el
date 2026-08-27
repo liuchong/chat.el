@@ -84,7 +84,8 @@
 (declare-function chat-approval-guard-verdict-note-reference
                   "chat-approval-guard" (verdict reference kind))
 (declare-function chat-approval-guard-log-verdict
-                  "chat-approval-guard" (verdict tool-id arguments mode))
+                  "chat-approval-guard"
+                  (verdict tool-id arguments mode &optional session))
 (declare-function chat-approval-guard-verdict-mark-shadow
                   "chat-approval-guard" (verdict))
 (declare-function chat-approval-guard-remembered-refusal
@@ -1081,7 +1082,8 @@ gate itself allows, and a call the floor refuses."
          (not (chat-approval--gate-allows-p tool call session))
          (not (chat-approval--floor-refusal tool-id arguments session)))))
 
-(defun chat-approval--record-verdict (verdict tool-id arguments mode reference)
+(defun chat-approval--record-verdict
+    (verdict tool-id arguments mode reference session)
   "Log VERDICT about TOOL-ID with ARGUMENTS under MODE, against REFERENCE.
 
 REFERENCE is nil, or a cons of what actually decided and what sort of
@@ -1094,7 +1096,8 @@ to weigh it as one."
       (chat-approval-guard-verdict-note-reference
        verdict (car reference) (cdr reference)))
     (when (fboundp 'chat-approval-guard-log-verdict)
-      (chat-approval-guard-log-verdict verdict tool-id arguments mode))))
+      (chat-approval-guard-log-verdict
+       verdict tool-id arguments mode session))))
 
 (defun chat-approval--shadow-start (tool call session observer)
   "Begin a shadow verdict for CALL of TOOL and return a function to settle it.
@@ -1125,7 +1128,7 @@ forget and no mode has its own idea of what gets sampled."
                 (chat-approval-guard-verdict-mark-shadow verdict))
               (chat-approval--record-verdict
                verdict tool-id (plist-get call :arguments) mode
-               (cons reference reference-kind))
+               (cons reference reference-kind) session)
               (chat-approval--notify
                observer
                (append
@@ -1249,7 +1252,8 @@ comes through here so that the guard covers all of it."
       (chat-approval--authorize-by-guard
        tool tool-id arguments session observer
        (lambda (consent reason verdict)
-         (chat-approval--record-verdict verdict tool-id arguments mode nil)
+         (chat-approval--record-verdict
+          verdict tool-id arguments mode nil session)
          (funcall callback consent reason))))
      ((eq mode 'guarded)
       (let ((settle (chat-approval--shadow-start tool call session observer))

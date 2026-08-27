@@ -527,7 +527,8 @@ goose 是"会话模型优先,否则全局"(`resolve_model_config`),没有专用�
 
 - 状态栏显示当前模式;`guarded` 下 guard 请求在途时显示一个在途指示,不阻塞输入。
 - 每次裁决落 session 事件日志(spec 009):模式、工具、`decision`、`matched-rule`、
-  `reason`、`confidence`、用的哪个模型、耗时。
+  `reason`、`confidence`、来源(精确条目或模型)、用的哪个模型、耗时、是否影子、最终
+  是否执行。事件类型固定为 `approval-guard-review`,参数只保留有界摘要。
 - 裁决结果在 transcript 里可见,放行也要可见。一个事后无法复核的审批者比没有更糟。
 - guard 的那次请求**不是**会话里的一个 turn:不进对话历史,不计入上下文预算,不在
   transcript 里显示为一次问答,只以事件形式出现。这是第 3 点要求的"中立独立请求"在
@@ -588,10 +589,12 @@ guard 就给不出 `matched-rule`,而那一格必填是第 5 条的地基;规则
 就退回"没命中拒绝规则",正是 Gatekeeper 说的不可接受形态。
 
 **A 层:逐条枚举,确定性,在代码里。** 关键的、高频的、后果重的,直接列出来,不问
-guard。这一层不需要新造——它就是已有的命令闸门(spec 011)加第 10 条的 never-allow
-谓词。闸门放行的走快路(第 2 条),never-allow 命中的直接拒。要加的是**按重要程度往
-这一层补条目**:哪些命令值得从 B、C 层提上来,取决于影子日志里 guard 在哪些地方判错
-或判得不稳。
+guard。它由已有命令闸门(spec 011)、第 10 条的 never-allow 谓词,以及可调优的精确
+command allow/deny entries 组成。deny entry 优先于 allow entry;只去掉首尾空白后做整串
+字面相等,不支持前缀、glob 或正则,所以一个条目不会给未经复核的变体扩权。闸门放行和
+allow entry 命中走快路,never-allow 或 deny entry 命中直接拒。要加的是**按重要程度往
+这一层补条目**:哪些命令值得从 B、C 层提上来,取决于 session 审计日志里 guard 在哪些
+地方判错或判得不稳。
 
 A 层的取舍标准是**重要性与频率**,不是"能不能枚举完":一条命令如果后果重(不可逆)、
 或者出现得足够频繁(每轮都在跑),值得花确定性规则的成本;剩下的交给下面两层。
@@ -736,6 +739,10 @@ guard 模型;它的裁决不影响任何执行结果。
 - `chat-approval-guard-enabled-p`:是否配置可用。
 - `chat-approval-guard--builtin-rules`:第 11 条的内置规则集,常量,用户不可改。
 - `chat-approval-guard-extra-rules`:用户补充规则,defcustom,拼在内置之后并标注来源。
+- `chat-approval-guard-allow-command-entries` /
+  `chat-approval-guard-deny-command-entries`:A 层精确条目;deny 优先,整串字面匹配。
+- `chat-approval-guard-untrusted-instruction-markers`:参数中试图影响裁决的窄标记,命中
+  后本地弃权,不把这类文本继续发给模型。
 - `chat-approval-guard-never-allow-p`:第 10 条第 3 点的确定性谓词。**不是** defcustom
   的清单——它是代码里的谓词,用户可以往严的方向加(`chat-approval-guard-never-allow-extra`),
   不能往松的方向减。
@@ -753,6 +760,10 @@ guard 模型;它的裁决不影响任何执行结果。
   (第 12 条的参照答案及其种类:`human` / `rules` / `none`)。
 - `chat-approval-guard--parse`:第 5 条,任何异常都归一为拒绝。
 - `chat-approval-guard-export-shadow-log`:第 12 条的成对样本导出。
+- `chat-approval-guard-log-verdict`:内存采样之外,把每次裁决作为
+  `approval-guard-review` 写入对应 session 的 wire JSONL;长参数按
+  `chat-approval-guard-log-argument-length` 截断。
+- `chat-approval-guard-session-reviews`:按 session 读取已持久化的 guard 审查记录。
 
 ### 模块:chat-approval.el(扩展)
 
@@ -917,7 +928,8 @@ spec 012 记过的那个形状("同一条 grant 生效与否取决于工具恰�
 
 33. 状态栏在 `guarded` 下显示模式;guard 请求在途时有在途指示且不阻塞输入。
 34. 每次裁决落 session 事件日志,含 `decision`、`matched-rule`、`reason`、
-    `confidence`、模型、耗时、是否影子。
+    `confidence`、来源、模型、耗时、是否影子、最终是否执行及有界参数摘要;重开会话后
+    仍可按 `approval-guard-review` 查询。
 
 ### 既有缺陷
 
