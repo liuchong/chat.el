@@ -2938,6 +2938,8 @@ assistant response being filled in."
              (list :model model
                    :messages messages-with-tools
                    :session session
+                   :track-task t
+                   :task-title (chat-session-name session)
                    :profile (plist-get (chat-session-tool-config session)
                                        :profile)
                    :project-root (chat-ui--path-completion-root)

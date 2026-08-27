@@ -96,6 +96,7 @@ Returns the list of files that were loaded."
 (require 'chat-session)
 (require 'chat-session-wire)
 (require 'chat-event)
+(require 'chat-task)
 (require 'chat-extension-trust)
 (require 'chat-runtime-hook)
 (require 'chat-session-index)
@@ -178,6 +179,7 @@ Returns the list of files that were loaded."
 ;; Load UI after tooling has been registered.
 (require 'chat-request-panel)
 (require 'chat-mdp-view)
+(require 'chat-task-view)
 (require 'chat-ui)
 
 ;; Load code capability (optional)

@@ -62,6 +62,25 @@
          (should (eq (chat-work-task-status task) 'cancelled))
          (should (equal finished id)))))))
 
+(ert-deftest chat-work-process-start-failure-closes-both-task-records ()
+  "A process creation error cannot leave either task projection running."
+  (chat-test-with-temp-dir
+   (let ((chat-work-directory (expand-file-name "work/" temp-dir))
+         (chat-task-directory (expand-file-name "runtime/" temp-dir))
+         (chat-work--tasks (make-hash-table :test 'equal))
+         (chat-task--registry (make-hash-table :test 'equal))
+         (chat-task--loaded-p t)
+         (chat-work-notify-task-completion nil))
+     (cl-letf (((symbol-function 'make-process)
+                (lambda (&rest _args) (error "cannot start"))))
+       (let* ((summary (chat-work-task-start "printf nope" temp-dir))
+              (id (alist-get 'id summary)))
+         (should (eq (chat-work-task-status (gethash id chat-work--tasks))
+                     'failed))
+         (should (eq (chat-task-status (chat-task-get id)) 'failed))
+         (should (equal (chat-task-error (chat-task-get id))
+                        "cannot start")))))))
+
 (ert-deftest chat-work-refuses-unknown-newer-task-schema ()
   "A newer task document stays untouched instead of being misread."
   (chat-test-with-temp-dir
@@ -76,6 +95,31 @@
        (insert-file-contents file)
        (should (string-match-p "\"schemaVersion\":999"
                                (buffer-string)))))))
+
+(ert-deftest chat-work-legacy-tasks-import-without-rewriting-source ()
+  "Legacy task records gain a unified copy while their source stays intact."
+  (chat-test-with-temp-dir
+   (let* ((chat-work-directory (expand-file-name "work/" temp-dir))
+          (chat-task-directory (expand-file-name "runtime/" temp-dir))
+          (chat-work--tasks (make-hash-table :test 'equal))
+          (chat-task--registry (make-hash-table :test 'equal))
+          (chat-task--loaded-p nil)
+          (source (expand-file-name "tasks.json" chat-work-directory))
+          (document
+           (concat
+            "{\"schemaVersion\":1,\"tasks\":[{"
+            "\"id\":\"legacy-1\",\"sessionId\":\"s1\","
+            "\"command\":\"printf old\",\"directory\":\"/tmp\","
+            "\"status\":\"succeeded\",\"exitCode\":0}]}")))
+     (make-directory chat-work-directory t)
+     (with-temp-file source (insert document))
+     (chat-work-load-tasks)
+     (should (eq (chat-task-status (chat-task-get "legacy-1")) 'completed))
+     (should (file-exists-p (expand-file-name "tasks.json"
+                                              chat-task-directory)))
+     (with-temp-buffer
+       (insert-file-contents source)
+       (should (string= (buffer-string) document))))))
 
 (ert-deftest chat-work-session-records-persist-in-session-metadata ()
   "Test plan, TODO, and goal records are session-local and durable."
@@ -109,11 +153,14 @@
      (let* ((workflow (chat-work-workflow-start
                        "Draft"
                        "[{\"kind\":\"approval\",\"message\":\"Continue?\"}]"))
-            (id (cdr (assoc 'id workflow)))
-            (cancelled (chat-work-workflow-cancel id)))
+            (id (cdr (assoc 'id workflow))))
        (should (string= (cdr (assoc 'status workflow))
                         "awaiting-approval"))
-       (should (string= (cdr (assoc 'status cancelled)) "cancelled"))
+       (should (eq (chat-task-status (chat-task-get id))
+                   'waiting-approval))
+       (let ((cancelled (chat-work-workflow-cancel id)))
+         (should (string= (cdr (assoc 'status cancelled)) "cancelled"))
+         (should (eq (chat-task-status (chat-task-get id)) 'canceled)))
        (should (equal (cdr (assoc 'kind (car (cdr (assoc 'steps workflow)))))
                       "approval"))))))
 

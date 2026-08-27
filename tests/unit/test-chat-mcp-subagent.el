@@ -213,7 +213,15 @@
     (should (string= (chat-subagent-summary subagent) "messages:1"))
     (should (string= (chat-session-parent-session-id
                       (chat-subagent-child-session subagent))
-                     "parent"))))
+                     "parent"))
+    (should (equal
+             (cdr (assoc 'parentTaskId
+                         (chat-session-metadata
+                          (chat-subagent-child-session subagent))))
+             (chat-subagent-id subagent)))
+    (should (eq (chat-task-status
+                 (chat-task-get (chat-subagent-id subagent)))
+                'completed))))
 
 (ert-deftest chat-subagent-lifecycle-is-recorded-on-the-parent-session ()
   "A child start and terminal outcome remain visible from its parent."
@@ -229,7 +237,9 @@
             "Child" nil (lambda (_session) "done") parent 1))
           (records (chat-session-wire-read "subagent-wire"))
           (kinds (mapcar (lambda (record) (alist-get 'kind record)) records)))
-     (should (equal kinds '("subagent-started" "subagent-ended")))
+     (should (equal kinds
+                    '("task-started" "subagent-started"
+                      "task-ended" "subagent-ended")))
      (should
       (cl-every
        (lambda (record)
@@ -252,6 +262,29 @@
      (should (string= (chat-subagent-external-output
                        (chat-subagent-id subagent))
                       "external-ok")))))
+
+(ert-deftest chat-subagent-external-start-failure-closes-runtime-task ()
+  "A subprocess creation error leaves a durable failed outcome."
+  (chat-test-with-temp-dir
+   (let ((chat-task-directory (expand-file-name "runtime/" temp-dir))
+         (chat-task--registry (make-hash-table :test 'equal))
+         (chat-task--loaded-p t)
+         (chat-subagent--registry (make-hash-table :test 'equal))
+         (id "external-failure"))
+     (cl-letf (((symbol-function 'make-process)
+                (lambda (&rest _args) (error "cannot start"))))
+       (should-error
+        (chat-subagent-start-external
+         "External" '("missing") nil
+         (expand-file-name "subagent.log" temp-dir)
+         0 nil nil id)
+        :type 'error))
+     (should (eq (chat-subagent-status
+                  (gethash id chat-subagent--registry))
+                 'failed))
+     (should (eq (chat-task-status (chat-task-get id)) 'failed))
+     (should (equal (chat-task-error (chat-task-get id))
+                    "cannot start")))))
 
 (ert-deftest chat-subagent-nested-agent-returns-parent-safe-summary ()
   "Test the nested backend uses the kernel and returns only final content."

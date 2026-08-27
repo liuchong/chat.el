@@ -30,7 +30,7 @@
     user-prompt-submitted user-prompt-queued
     pre-tool post-tool
     permission-requested permission-resolved
-    task-started task-ended
+    task-started task-updated task-ended
     subagent-started subagent-ended
     pre-compact post-compact)
   "Canonical lifecycle event types.

@@ -181,6 +181,8 @@ Acceptance:
 - existing task files migrate through readers without rewriting source data;
 - a subagent is a child task, not a separate orchestration system.
 
+Status: complete.
+
 ### M5: Multimodal Content
 
 Goal: carry text, images, audio, files and tool data through one typed content

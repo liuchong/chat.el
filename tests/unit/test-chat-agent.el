@@ -68,6 +68,57 @@ car collects the messages of every request."
       (should (= (length (car calls)) 1))
       (should (chat-agent-run-state-done run)))))
 
+(ert-deftest chat-agent-tracked-run-is-a-durable-foreground-task ()
+  "A UI-style run records one terminal task and clears its live marker."
+  (chat-test-with-temp-dir
+   (let* ((chat-task-directory temp-dir)
+          (chat-task--registry (make-hash-table :test 'equal))
+          (chat-task--loaded-p nil)
+          (chat-task-auto-save t)
+          (session (make-chat-session :id "tracked-session"
+                                      :name "Tracked run"
+                                      :model-id 'kimi))
+          run)
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport
+                 '((:content "done")) (list nil))))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi
+                    :messages (list (chat-agent-test--user-message))
+                    :session session
+                    :track-task t))))
+     (let ((task (chat-task-get (chat-agent-run-state-task-id run))))
+       (should (eq (chat-task-kind task) 'agent))
+       (should (eq (chat-task-status task) 'completed))
+       (should (string= (chat-task-result task) "done"))
+       (should-not (assoc 'activeTaskId (chat-session-metadata session)))))))
+
+(ert-deftest chat-agent-runtime-task-cancels-the-live-run-once ()
+  "Cancelling a foreground task cancels its attached agent run."
+  (chat-test-with-temp-dir
+   (let* ((chat-task-directory temp-dir)
+          (chat-task--registry (make-hash-table :test 'equal))
+          (chat-task--loaded-p nil)
+          (session (make-chat-session :id "cancel-session"
+                                      :name "Cancelable run"
+                                      :model-id 'kimi))
+          run)
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport nil (list nil))))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi
+                    :messages (list (chat-agent-test--user-message))
+                    :session session
+                    :track-task t))))
+     (chat-task-cancel (chat-agent-run-state-task-id run) "stop")
+     (should (chat-agent-run-state-done run))
+     (should (eq (chat-agent-run-state-status run) 'cancelled))
+     (should (eq (chat-task-status
+                  (chat-task-get (chat-agent-run-state-task-id run)))
+                 'canceled)))))
+
 (ert-deftest chat-agent-executes-tool-and-feeds-result-back ()
   "Test a tool call is executed and its result drives a follow-up turn."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))

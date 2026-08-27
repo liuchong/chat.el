@@ -8,7 +8,7 @@
 
 ## Current Phase
 
-M0 through M3 of the Agent Runtime roadmap are complete (2026-08-28). Decision
+M0 through M4 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes five versioned contracts: lifecycle events, durable tasks, model
 capabilities, typed content and agent profiles. Spec 014 orders their delivery
 through M8 so later features depend on contracts rather than provider, UI or
@@ -38,9 +38,17 @@ known model conflicts fail before dispatch. The selected profile remains
 session state while each run records a bounded resolved snapshot without
 rewriting earlier messages.
 
-The next implementation stage is M4: unify foreground work, background
-commands, workflows and subagents under one durable, parallel and cancellable
-task contract.
+Decision 0022 and M4 add `chat-task` version 1. Foreground UI runs, background
+commands, workflows and subagents now share one atomic registry, canonical
+state machine, parent/child identity and cancellation contract. The bounded
+scheduler serializes conflicting writes while allowing independent work to run
+in parallel. Running records load as interrupted rather than resurrecting live
+objects, and the native task tree keeps compact status separate from detailed
+checkpoints and outcomes.
+
+The next implementation stage is M5: introduce typed multimodal content while
+preserving the text-only behavior and provider-neutral boundaries established
+through M4.
 
 There is one chat surface (2026-08-26). Code capability is a property of
 a session rather than a second display: `chat-code-mode` is gone, and a
@@ -122,7 +130,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1430 tests passing.
+Canonical suite: 1444 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark

@@ -19,6 +19,7 @@
 (require 'subr-x)
 (require 'chat-event)
 (require 'chat-session)
+(require 'chat-task)
 (require 'chat-agent)
 (require 'chat-tool-forge)
 
@@ -114,6 +115,92 @@
      :subject subagent
      :payload (chat-subagent--event-payload subagent))))
 
+(defun chat-subagent--parent-task-id (session)
+  "Return the live task that owns SESSION, when known."
+  (when session
+    (let* ((metadata (chat-session-metadata session))
+           (id (or (cdr (assoc 'activeTaskId metadata))
+                   (cdr (assoc 'parentTaskId metadata)))))
+      (when-let* ((task (and id (chat-task-get id))))
+        (and (eq (chat-task-status task) 'running) id)))))
+
+(defun chat-subagent--task-status (status)
+  "Return canonical task status for sub-agent STATUS."
+  (pcase status
+    ((or 'completed 'stopped) 'completed)
+    ((or 'failed 'error) 'failed)
+    ('cancelled 'canceled)
+    ('interrupted 'interrupted)
+    (_ 'running)))
+
+(defun chat-subagent--register-runtime-task (subagent)
+  "Register SUBAGENT as a running durable runtime task."
+  (let* ((parent (chat-subagent-parent-session subagent))
+         (child (chat-subagent-child-session subagent))
+         (task
+          (chat-task-adopt
+           :id (chat-subagent-id subagent)
+           :parent-id (chat-subagent--parent-task-id parent)
+           :kind 'subagent
+           :title (chat-subagent-name subagent)
+           :status 'queued
+           :session-id (and parent (chat-session-id parent))
+           :source 'subagent
+           :payload
+           `((kind . ,(symbol-name (chat-subagent-kind subagent)))
+             (depth . ,(chat-subagent-depth subagent))
+             (budget . ,(chat-subagent-budget subagent))
+             (childSessionId . ,(and child (chat-session-id child))))
+           :metadata '((adapter . "subagent"))
+           :child-policy 'cancel
+           :cancel-function
+           (lambda (_task reason)
+             (chat-subagent--cancel-live subagent reason)))))
+    (chat-task-transition task 'running)
+    task))
+
+(defun chat-subagent--sync-runtime-task (subagent)
+  "Synchronize SUBAGENT's terminal outcome to its runtime task."
+  (when-let* ((task (chat-task-get (chat-subagent-id subagent))))
+    (let ((status (chat-subagent--task-status
+                   (chat-subagent-status subagent))))
+      (chat-task-transition
+       task status
+       :result (and (eq status 'completed)
+                    (chat-subagent-summary subagent))
+       :error (and (eq status 'failed)
+                   (chat-subagent-summary subagent))))))
+
+(defun chat-subagent--terminal-p (subagent)
+  "Return non-nil when SUBAGENT already finished."
+  (memq (chat-subagent-status subagent)
+        '(completed stopped failed error cancelled interrupted)))
+
+(defun chat-subagent--finish (subagent status &optional summary)
+  "Finish SUBAGENT once with STATUS and optional SUMMARY."
+  (unless (chat-subagent--terminal-p subagent)
+    (setf (chat-subagent-status subagent) status
+          (chat-subagent-summary subagent) summary
+          (chat-subagent-ended-at subagent) (chat-subagent--timestamp))
+    (chat-subagent--sync-runtime-task subagent)
+    (chat-subagent--emit-event 'subagent-ended subagent))
+  subagent)
+
+(defun chat-subagent--cancel-live (subagent reason)
+  "Cancel SUBAGENT's live adapter with REASON."
+  (unless (chat-subagent--terminal-p subagent)
+    (cond
+     ((and (chat-subagent-run subagent)
+           (chat-agent-active-p (chat-subagent-run subagent)))
+      (chat-agent-cancel (chat-subagent-run subagent)))
+     ((and (chat-subagent-process subagent)
+           (process-live-p (chat-subagent-process subagent)))
+      (delete-process (chat-subagent-process subagent))
+      (chat-subagent--finish subagent 'cancelled reason))
+     (t
+      (chat-subagent--finish subagent 'cancelled reason))))
+  subagent)
+
 (defun chat-subagent--session-depth (session)
   "Return nesting depth recorded on SESSION."
   (or (and session
@@ -121,7 +208,8 @@
                        (chat-session-metadata session))))
       0))
 
-(defun chat-subagent--child-session (name messages parent depth)
+(defun chat-subagent--child-session
+    (name messages parent depth &optional parent-task-id)
   "Create isolated child session NAME with MESSAGES.
 
 The child inherits the parent's approval mode and nothing else about
@@ -139,7 +227,10 @@ sub-agent that will run commands nobody sees."
                                 (chat-session-tool-config parent)))
    :approval-mode (or (and parent (chat-session-approval-mode parent))
                       'inherit)
-   :metadata `((subagentDepth . ,depth))
+   :metadata (delq nil
+                   `((subagentDepth . ,depth)
+                     ,(when parent-task-id
+                        (cons 'parentTaskId parent-task-id))))
    :parent-session-id (and parent (chat-session-id parent))))
 
 (defun chat-subagent-start-in-process (name messages runner
@@ -147,14 +238,15 @@ sub-agent that will run commands nobody sees."
   "Start an in-process sub-agent NAME with MESSAGES and RUNNER.
 RUNNER is a function called with the child session and must return a
 summary string or alist.  This helper provides isolated child-session
-state without dumping child transcripts into the parent."
+  state without dumping child transcripts into the parent."
   (let ((depth (or depth 0)))
     (chat-subagent--ensure-depth depth parent-session)
-    (let* ((child-session
+    (let* ((id (chat-subagent--id))
+           (child-session
             (chat-subagent--child-session
-             name messages parent-session depth))
+             name messages parent-session depth id))
            (subagent (make-chat-subagent
-                      :id (chat-subagent--id)
+                      :id id
                       :kind 'in-process
                       :name name
                       :status 'running
@@ -164,21 +256,15 @@ state without dumping child transcripts into the parent."
                       :child-session child-session
                       :started-at (chat-subagent--timestamp))))
       (puthash (chat-subagent-id subagent) subagent chat-subagent--registry)
+      (chat-subagent--register-runtime-task subagent)
       (chat-subagent--emit-event 'subagent-started subagent)
       (condition-case err
           (let ((summary (funcall runner child-session)))
-            (setf (chat-subagent-summary subagent) summary
-                  (chat-subagent-status subagent) 'completed
-                  (chat-subagent-ended-at subagent)
-                  (chat-subagent--timestamp))
-            (chat-subagent--emit-event 'subagent-ended subagent)
+            (chat-subagent--finish subagent 'completed summary)
             subagent)
         (error
-         (setf (chat-subagent-summary subagent) (error-message-string err)
-               (chat-subagent-status subagent) 'failed
-               (chat-subagent-ended-at subagent)
-               (chat-subagent--timestamp))
-         (chat-subagent--emit-event 'subagent-ended subagent)
+         (chat-subagent--finish
+          subagent 'failed (error-message-string err))
          subagent)))))
 
 (defun chat-subagent-start-agent
@@ -186,6 +272,7 @@ state without dumping child transcripts into the parent."
   "Start nested agent NAME for PROMPT and report through callbacks."
   (let* ((depth (1+ (chat-subagent--session-depth parent-session)))
          (_ (chat-subagent--ensure-depth depth parent-session))
+         (id (chat-subagent--id))
          (message
           (make-chat-message
            :id (chat-session-new-message-id "subagent-user")
@@ -194,10 +281,10 @@ state without dumping child transcripts into the parent."
            :timestamp (current-time)))
          (child-session
           (chat-subagent--child-session
-           name (list message) parent-session depth))
+           name (list message) parent-session depth id))
          (subagent
           (make-chat-subagent
-           :id (chat-subagent--id)
+           :id id
            :kind 'in-process
            :name name
            :status 'running
@@ -208,6 +295,7 @@ state without dumping child transcripts into the parent."
            :started-at (chat-subagent--timestamp)))
          run)
     (puthash (chat-subagent-id subagent) subagent chat-subagent--registry)
+    (chat-subagent--register-runtime-task subagent)
     (chat-subagent--emit-event 'subagent-started subagent)
     (chat-session-save child-session)
     (condition-case err
@@ -231,11 +319,7 @@ state without dumping child transcripts into the parent."
          (when (eq (plist-get event :type) 'agent-end)
            (let ((status (plist-get event :status))
                  (content (or (plist-get event :content) "")))
-             (setf (chat-subagent-status subagent) status
-                   (chat-subagent-summary subagent) content
-                   (chat-subagent-ended-at subagent)
-                   (chat-subagent--timestamp))
-             (chat-subagent--emit-event 'subagent-ended subagent)
+             (chat-subagent--finish subagent status content)
              (if (memq status '(completed stopped))
                  (funcall success
                           `((id . ,(chat-subagent-id subagent))
@@ -247,11 +331,7 @@ state without dumping child transcripts into the parent."
                           content)))))))))
       (error
        (let ((message (error-message-string err)))
-         (setf (chat-subagent-status subagent) 'failed
-               (chat-subagent-summary subagent) message
-               (chat-subagent-ended-at subagent)
-               (chat-subagent--timestamp))
-         (chat-subagent--emit-event 'subagent-ended subagent)
+         (chat-subagent--finish subagent 'failed message)
          (funcall error-callback message))))
     (setf (chat-subagent-run subagent) run)
     (list :cancel
@@ -278,37 +358,40 @@ captured in LOG-FILE."
                       :log-file log-file
                       :started-at (chat-subagent--timestamp)))
            proc)
-      (with-temp-file log-file)
-      (setq proc
-            (make-process
-             :name (concat "chat-subagent-" (chat-subagent-id subagent))
-             :buffer nil
-             :command command
-             :connection-type 'pipe
-             :noquery t
-             :filter (lambda (_proc chunk)
-                       (write-region chunk nil log-file 'append 'silent))
-             :sentinel (lambda (process _event)
-                         (unless (process-live-p process)
-                           (unless (eq (chat-subagent-status subagent)
-                                       'cancelled)
-                             (setf (chat-subagent-status subagent)
-                                   (if (zerop (process-exit-status process))
-                                       'completed
-                                     'failed)
-                                   (chat-subagent-summary subagent)
-                                   (chat-subagent--external-summary log-file)
-                                   (chat-subagent-ended-at subagent)
-                                   (chat-subagent--timestamp))
-                             (chat-subagent--emit-event
-                              'subagent-ended subagent))))))
-      (setf (chat-subagent-process subagent) proc)
       (puthash (chat-subagent-id subagent) subagent chat-subagent--registry)
+      (chat-subagent--register-runtime-task subagent)
       (chat-subagent--emit-event 'subagent-started subagent)
-      (when input-jsonl
-        (process-send-string proc input-jsonl))
-      (process-send-eof proc)
-      subagent)))
+      (with-temp-file log-file)
+      (condition-case err
+          (progn
+            (setq proc
+                  (make-process
+                   :name (concat "chat-subagent-"
+                                 (chat-subagent-id subagent))
+                   :buffer nil
+                   :command command
+                   :connection-type 'pipe
+                   :noquery t
+                   :filter (lambda (_proc chunk)
+                             (write-region chunk nil log-file 'append 'silent))
+                   :sentinel (lambda (process _event)
+                               (unless (process-live-p process)
+                                 (chat-subagent--finish
+                                  subagent
+                                  (if (zerop (process-exit-status process))
+                                      'completed
+                                    'failed)
+                                  (chat-subagent--external-summary
+                                   log-file))))))
+            (setf (chat-subagent-process subagent) proc)
+            (when input-jsonl
+              (process-send-string proc input-jsonl))
+            (process-send-eof proc)
+            subagent)
+        (error
+         (chat-subagent--finish
+          subagent 'failed (error-message-string err))
+         (signal (car err) (cdr err)))))))
 
 (defun chat-subagent--external-summary (log-file)
   "Return summary from the last valid JSONL record in LOG-FILE."
@@ -359,15 +442,9 @@ captured in LOG-FILE."
   (let ((subagent (gethash id chat-subagent--registry)))
     (unless subagent
       (error "Sub-agent not found: %s" id))
-    (setf (chat-subagent-status subagent) 'cancelled
-          (chat-subagent-ended-at subagent) (chat-subagent--timestamp))
-    (when-let ((run (chat-subagent-run subagent)))
-      (when (chat-agent-active-p run)
-        (chat-agent-cancel run)))
-    (when-let ((proc (chat-subagent-process subagent)))
-      (when (process-live-p proc)
-        (delete-process proc)))
-    (chat-subagent--emit-event 'subagent-ended subagent)
+    (if (chat-task-get id)
+        (chat-task-cancel id "cancelled by user")
+      (chat-subagent--cancel-live subagent "cancelled by user"))
     subagent))
 
 (defun chat-subagent-describe (id)

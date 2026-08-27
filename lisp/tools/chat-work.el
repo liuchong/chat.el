@@ -36,6 +36,7 @@
 (require 'chat-command-gate)
 (require 'chat-event)
 (require 'chat-session)
+(require 'chat-task)
 (require 'chat-tool-caller)
 (require 'chat-tool-forge)
 
@@ -108,6 +109,9 @@ something is missing, so the gap says how to close itself."
 
 (defvar chat-work--global-state nil
   "Fallback work state when no session is active.")
+
+(defvar chat-work--syncing-workflow-task nil
+  "Non-nil while workflow and task adapters synchronize each other.")
 
 (defun chat-work--ensure-directory ()
   "Ensure the work directory exists."
@@ -205,7 +209,8 @@ something is missing, so the gap says how to close itself."
   "Load background task state and mark stale running tasks interrupted."
   (chat-work--ensure-directory)
   (clrhash chat-work--tasks)
-  (let ((file (chat-work--state-file)))
+  (let ((file (chat-work--state-file))
+        migrated)
     (when (file-exists-p file)
       (let* ((json-array-type 'list)
              (data (condition-case nil
@@ -222,8 +227,29 @@ something is missing, so the gap says how to close itself."
             (when (eq (chat-work-task-status task) 'running)
               (setf (chat-work-task-status task) 'interrupted
                     (chat-work-task-ended-at task) (chat-work--timestamp)))
-            (puthash (chat-work-task-id task) task chat-work--tasks))))))
-  (hash-table-count chat-work--tasks))
+            (puthash (chat-work-task-id task) task chat-work--tasks)
+            (unless (chat-task-get (chat-work-task-id task))
+              (setq migrated t)
+              (let ((chat-task-auto-save nil))
+                (chat-task-adopt
+                 :id (chat-work-task-id task)
+                 :kind 'process
+                 :title (chat-work-task-command task)
+                 :status (chat-task-normalize-status
+                          (chat-work-task-status task))
+                 :session-id (chat-work-task-session-id task)
+                 :source 'work
+                 :resources
+                 (list (list :key (concat "directory:"
+                                          (chat-work-task-directory task))
+                             :mode 'write))
+                 :payload
+                 `((command . ,(chat-work-task-command task))
+                   (directory . ,(chat-work-task-directory task)))
+                 :result (chat-work-task-exit-code task)))))))
+      (when (and migrated chat-task-auto-save)
+        (chat-task-save)))
+  (hash-table-count chat-work--tasks)))
 
 (defun chat-work-task-refusal (command)
   "Return why COMMAND may not run as a background task, or nil when it may.
@@ -241,6 +267,73 @@ this tool is for, and refusing it would be refusing the tool."
    (chat-command-gate-explain refusal command)
    (when (eq (chat-command-gate-refusal-code refusal) 'unknown-command)
      ". Add it to `chat-work-task-allowed-commands' if this machine needs it")))
+
+(defun chat-work--runtime-resource (directory)
+  "Return the scheduler resource for DIRECTORY."
+  (list :key (concat "directory:"
+                     (file-name-as-directory
+                      (expand-file-name directory)))
+        :mode 'write))
+
+(defun chat-work--run-process-task (task _runtime-task complete fail)
+  "Start process adapter TASK for RUNTIME-TASK and finish through callbacks."
+  (let* ((id (chat-work-task-id task))
+         (command (chat-work-task-command task))
+         (log-file (chat-work-task-log-file task))
+         (default-directory (chat-work-task-directory task))
+         (process-environment (chat-command-gate-environment))
+         process)
+    (setf (chat-work-task-status task) 'running
+          (chat-work-task-started-at task) (chat-work--timestamp))
+    (condition-case err
+        (progn
+          (setq process
+                (make-process
+                 :name (concat "chat-work-" id)
+                 :buffer nil
+                 :command (list shell-file-name shell-command-switch command)
+                 :noquery t
+                 :connection-type 'pipe
+                 :filter (lambda (_proc chunk)
+                           (write-region chunk nil log-file 'append 'silent))
+                 :sentinel
+                 (lambda (proc _event)
+                   (unless (process-live-p proc)
+                     (unless (eq (chat-work-task-status task) 'cancelled)
+                       (let ((exit-code (process-exit-status proc)))
+                         (setf (chat-work-task-status task)
+                               (if (zerop exit-code) 'succeeded 'failed)
+                               (chat-work-task-exit-code task) exit-code
+                               (chat-work-task-ended-at task)
+                               (chat-work--timestamp))
+                         (chat-work-save-tasks)
+                         (if (zerop exit-code)
+                             (funcall complete `((exitCode . ,exit-code)
+                                                 (logFile . ,log-file)))
+                           (funcall fail
+                                    (format "Process exited with %d"
+                                            exit-code)))
+                         (chat-work--notify-task-finished task)))))))
+          (setf (chat-work-task-process task) process)
+          (chat-work-save-tasks)
+          :async)
+      (error
+       (setf (chat-work-task-status task) 'failed
+             (chat-work-task-ended-at task) (chat-work--timestamp))
+       (chat-work-save-tasks)
+       (chat-work--notify-task-finished task)
+       (signal (car err) (cdr err))))))
+
+(defun chat-work--cancel-process-task (task _runtime-task reason)
+  "Cancel process adapter TASK with REASON."
+  (setf (chat-work-task-status task) 'cancelled
+        (chat-work-task-ended-at task) (chat-work--timestamp))
+  (when-let* ((process (chat-work-task-process task)))
+    (when (process-live-p process)
+      (delete-process process)))
+  (chat-work-save-tasks)
+  (chat-work--notify-task-finished task)
+  reason)
 
 (defun chat-work-task-start (command &optional directory)
   "Start COMMAND as a cancellable background task in DIRECTORY.
@@ -265,56 +358,31 @@ anything."
   (let* ((session (chat-work--current-session))
          (session-id (and session (chat-session-id session)))
          (id (chat-work--task-id))
-         (default-directory (file-name-as-directory
-                             (or directory default-directory)))
+         (task-directory (file-name-as-directory
+                          (or directory default-directory)))
          (log-file (expand-file-name (concat id ".log") chat-work-directory))
-         ;; Read when the process is created, so binding it here is what
-         ;; the child inherits.  `make-process' has no keyword for this.
-         (process-environment (chat-command-gate-environment))
          (task (make-chat-work-task
                 :id id
                 :session-id session-id
                 :command command
-                :directory default-directory
-                :status 'running
-                :started-at (chat-work--timestamp)
-                :log-file log-file))
-         process)
+                :directory task-directory
+                :status 'queued
+                :log-file log-file)))
     (with-temp-file log-file)
-    (setq process
-          (make-process
-           :name (concat "chat-work-" id)
-           :buffer nil
-           :command (list shell-file-name shell-command-switch command)
-           :noquery t
-           ;; A pipe rather than the pty Emacs hands out by default.  A
-           ;; pty looks like a terminal, and a `git log' here started
-           ;; `less' because of it, which wrote "Press RETURN to continue"
-           ;; into the task log and sat there until the task was cancelled
-           ;; twenty seconds later.  The environment bound below covers
-           ;; the programs that page without asking a terminal first.
-           :connection-type 'pipe
-           :filter (lambda (_proc chunk)
-                     (write-region chunk nil log-file 'append 'silent))
-           :sentinel (lambda (proc _event)
-                       (unless (process-live-p proc)
-                         (unless (eq (chat-work-task-status task)
-                                     'cancelled)
-                           (setf (chat-work-task-status task)
-                                 (if (zerop (process-exit-status proc))
-                                     'succeeded
-                                   'failed)
-                                 (chat-work-task-exit-code task)
-                                 (process-exit-status proc)
-                                 (chat-work-task-ended-at task)
-                                 (chat-work--timestamp))
-                           (chat-work-save-tasks)
-                           (chat-work--emit-task-event 'task-ended task)
-                           (chat-work--notify-task-finished task))))))
-    (setf (chat-work-task-process task) process)
     (puthash id task chat-work--tasks)
     (chat-work-save-tasks)
-    (chat-work--emit-task-event 'task-started task)
+    (let ((runtime-task
+           (chat-task-create
+            :id id :kind 'process :title command :session-id session-id
+            :source 'work
+            :resources (list (chat-work--runtime-resource task-directory))
+            :payload `((command . ,command) (directory . ,task-directory)))))
+      (chat-task-submit
+       runtime-task
+       (lambda (generic complete fail _attention)
+         (chat-work--run-process-task task generic complete fail))
+       (lambda (generic reason)
+         (chat-work--cancel-process-task task generic reason))))
     (chat-work-task-summary task)))
 
 (defun chat-work-task-summary (task)
@@ -354,14 +422,9 @@ anything."
   (let ((task (gethash id chat-work--tasks)))
     (unless task
       (error "Task not found: %s" id))
-    (setf (chat-work-task-status task) 'cancelled
-          (chat-work-task-ended-at task) (chat-work--timestamp))
-    (when-let ((proc (chat-work-task-process task)))
-      (when (process-live-p proc)
-        (delete-process proc)))
-    (chat-work-save-tasks)
-    (chat-work--emit-task-event 'task-ended task)
-    (chat-work--notify-task-finished task)
+    (if (chat-task-get id)
+        (chat-task-cancel id "stopped by user")
+      (chat-work--cancel-process-task task nil "stopped by user"))
     (chat-work-task-summary task)))
 
 (defun chat-work--current-session ()
@@ -507,6 +570,90 @@ anything."
            :key (lambda (workflow) (chat-work--json-get workflow 'id))
            :test #'equal))
 
+(defun chat-work--session-parent-task-id (session)
+  "Return SESSION's live parent task id when it still exists."
+  (when session
+    (let* ((metadata (chat-session-metadata session))
+           (id (or (cdr (assoc 'activeTaskId metadata))
+                   (cdr (assoc 'parentTaskId metadata)))))
+      (when-let* ((task (and id (chat-task-get id))))
+        (and (eq (chat-task-status task) 'running) id)))))
+
+(defun chat-work--workflow-task-status (workflow)
+  "Return canonical task status for WORKFLOW."
+  (chat-task-normalize-status
+   (or (chat-work--json-get workflow 'status) "paused")))
+
+(defun chat-work--workflow-task-checkpoint (workflow)
+  "Return a bounded durable checkpoint for WORKFLOW."
+  (let ((status (chat-work--json-get workflow 'status))
+        (index (or (chat-work--json-get workflow 'stepIndex) 0)))
+    (cond
+     ((equal status "awaiting-approval")
+      (let ((step (nth index (chat-work--json-get workflow 'steps))))
+        `((stepIndex . ,index)
+          (kind . "approval")
+          (message . ,(chat-work--json-get step 'message)))))
+     ((equal status "paused")
+      `((stepIndex . ,index)
+        (error . ,(chat-work--json-get workflow 'error)))))))
+
+(defun chat-work--cancel-workflow-task (session id reason)
+  "Cancel workflow ID in SESSION because its runtime task was cancelled."
+  (unless chat-work--syncing-workflow-task
+    (let ((chat-tool-caller-current-session session)
+          (chat-work--syncing-workflow-task t))
+      (when-let* ((workflow (chat-work--workflow-find id)))
+        (unless (member (chat-work--json-get workflow 'status)
+                        '("completed" "cancelled"))
+          (setq workflow
+                (chat-work--alist-set
+                 (chat-work--alist-set workflow 'status "cancelled")
+                 'error reason))
+          (chat-work--workflow-store workflow))))))
+
+(defun chat-work--sync-workflow-task (workflow)
+  "Mirror WORKFLOW into the durable runtime task registry."
+  (unless chat-work--syncing-workflow-task
+    (let* ((chat-work--syncing-workflow-task t)
+           (session (chat-work--current-session))
+           (id (chat-work--json-get workflow 'id))
+           (status (chat-work--workflow-task-status workflow))
+           (task (chat-task-get id))
+           (cancel-function
+            (lambda (_task reason)
+              (chat-work--cancel-workflow-task session id reason))))
+      (unless task
+        (setq task
+              (chat-task-adopt
+               :id id
+               :parent-id (chat-work--session-parent-task-id session)
+               :kind 'workflow
+               :title (chat-work--json-get workflow 'name)
+               :status (if (eq status 'running) 'queued status)
+               :session-id (and session (chat-session-id session))
+               :source 'work
+               :payload
+               `((stepCount . ,(length
+                                (chat-work--json-get workflow 'steps))))
+               :metadata '((adapter . "session-workflow"))
+               :child-policy 'cancel
+               :cancel-function cancel-function)))
+      (setf (chat-task-title task) (chat-work--json-get workflow 'name)
+            (chat-task-session-id task)
+            (and session (chat-session-id session))
+            (chat-task-payload task)
+            `((stepIndex . ,(or (chat-work--json-get workflow 'stepIndex) 0))
+              (stepCount . ,(length
+                             (chat-work--json-get workflow 'steps))))
+            (chat-task-metadata task) '((adapter . "session-workflow"))
+            (chat-task-cancel-function task) cancel-function)
+      (chat-task-transition
+       task status
+       :result (chat-work--json-get workflow 'results)
+       :error (chat-work--json-get workflow 'error)
+       :checkpoint (chat-work--workflow-task-checkpoint workflow)))))
+
 (defun chat-work--workflow-store (workflow)
   "Persist WORKFLOW and return it."
   (let* ((state (chat-work--state))
@@ -523,6 +670,7 @@ anything."
       (setq workflows (append workflows (list workflow))))
     (chat-work--set-state
      (chat-work--state-put state 'workflows workflows))
+    (chat-work--sync-workflow-task workflow)
     workflow))
 
 (defun chat-work--workflow-valid-step-p (step)
@@ -776,15 +924,21 @@ DECISION is `approve' or `reject' when the workflow awaits approval."
                   workflows))
     (unless found
       (error "Workflow not found: %s" id))
-    (chat-work--set-state (chat-work--state-put state 'workflows workflows))
-    (cl-find id workflows
-             :key (lambda (workflow)
-                    (chat-work--json-get workflow 'id))
-             :test #'equal)))
+    (let ((workflow
+           (cl-find id workflows
+                    :key (lambda (entry)
+                           (chat-work--json-get entry 'id))
+                    :test #'equal)))
+      (chat-work--set-state
+       (chat-work--state-put state 'workflows workflows))
+      (chat-work--sync-workflow-task workflow)
+      workflow)))
 
 (defun chat-work-workflow-list ()
   "List session-local workflow records."
-  (chat-work--state-get (chat-work--state) 'workflows))
+  (let ((workflows (chat-work--state-get (chat-work--state) 'workflows)))
+    (mapc #'chat-work--sync-workflow-task workflows)
+    workflows))
 
 (defun chat-work--register-tool (id name description parameters fn effects)
   "Register a work orchestration tool."
