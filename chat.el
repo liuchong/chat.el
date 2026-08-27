@@ -169,6 +169,7 @@ Returns the list of files that were loaded."
 
 ;; Load UI after tooling has been registered.
 (require 'chat-request-panel)
+(require 'chat-mdp-view)
 (require 'chat-ui)
 
 ;; Load code capability (optional)

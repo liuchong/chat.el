@@ -1105,6 +1105,12 @@ is the only way to check that the two readings agree: a payload that
 reads correctly to a person while parsing one field short has no other
 symptom.
 
+To compare them directly, select one complete MDP payload and run
+`M-x chat-mdp-preview-region`. The preview shows the Markdown document
+reading first and the parsed, typed machine reading below it. A malformed
+payload keeps its document reading visible and replaces the machine section
+with the exact MDP error code and line number.
+
 ## Code Capability (AI Programming)
 
 Code capability is a property of a chat session, not a second interface.
@@ -1252,6 +1258,7 @@ same scoped tool and approval policy as other capabilities.
 | `lisp/ui/chat-mark.el` | Glyphs and brand colours for modes and providers |
 | `lisp/core/chat-markdown.el` | Markdown shown as a document, in the buffer |
 | `lisp/core/chat-mdp.el` | The MDP codec and the machine view of a payload |
+| `lisp/ui/chat-mdp-view.el` | Interactive comparison of an MDP payload's two readings |
 | `lisp/core/chat-align.el` | Laying out columns by display width, shared by both views |
 | `lisp/core/chat-session.el` | Session and message persistence |
 | `lisp/llm/chat-llm.el` | Provider abstraction and async request handling |

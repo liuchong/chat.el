@@ -193,7 +193,10 @@ view belongs to 005 and is free, the machine view belongs here because 005
 has no parse result and so cannot tell structure from comment. MDS is
 deferred at zero cost, since its own spec makes validation a separable
 layer above parsing; the parser keeps to four line types so that stays
-true.
+true. `lisp/ui/chat-mdp-view.el` composes those two owners without moving UI
+concerns into the codec: select one payload and run
+`M-x chat-mdp-preview-region` to compare the rendered document with the
+typed parse result or its exact error.
 
 The prompt now answers both halves of "what will RET do" (spec 007). It
 already named the command holding the line; it did not name the provider
