@@ -322,6 +322,29 @@ through; a reader wants to see which file."
             parts))
     (nreverse parts)))
 
+(defun chat-transcript--attachment-summary (message)
+  "Return the durable attachment summary shown with user MESSAGE."
+  (let (lines)
+    (dolist (part (chat-message-parts message))
+      (when (memq (chat-content-part-type part) '(image file))
+        (push (format "[%s] %s (%s)"
+                      (symbol-name (chat-content-part-type part))
+                      (chat-content-part-name part)
+                      (chat-content-part-mime-type part))
+              lines)))
+    (when lines
+      (concat "Attachments:\n" (string-join (nreverse lines) "\n")))))
+
+(defun chat-transcript--user-text (message)
+  "Return MESSAGE text followed by its attachment references."
+  (let ((text (chat-message-text message))
+        (attachments (chat-transcript--attachment-summary message)))
+    (cond
+     ((and (not (chat-transcript--blank-p text)) attachments)
+      (concat text "\n\n" attachments))
+     (attachments attachments)
+     (t text))))
+
 (defun chat-transcript-message-parts (message)
   "Return the ordered parts MESSAGE contributes to a transcript."
   (let ((parts
@@ -333,7 +356,9 @@ through; a reader wants to see which file."
            (list (chat-transcript--part message
                                         (chat-transcript-category message)
                                         (chat-transcript-work message)
-                                        (chat-message-content message)))))
+                                        (if (eq (chat-message-role message) :user)
+                                            (chat-transcript--user-text message)
+                                          (chat-message-text message))))))
         (index -1))
     ;; A message can contribute several parts, so a part needs a key of its
     ;; own for fold groups to stay put while later parts stream in.

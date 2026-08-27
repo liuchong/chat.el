@@ -18,6 +18,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'chat-content)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -67,6 +68,7 @@
   id                    ; Unique identifier
   role                  ; :user :assistant :system :tool
   content               ; Message content string
+  content-parts         ; Optional typed chat-content-part list
   timestamp             ; Message timestamp
   parent-id             ; Parent message ID for branching
   branch-ids            ; List of branch message IDs
@@ -671,7 +673,10 @@ branch starts with no messages. SESSION is never truncated."
                           :key #'chat-message-id
                           :test #'equal)))
     (when message
-      (setf (chat-message-content message) new-content)
+      (setf (chat-message-content message) new-content
+            (chat-message-content-parts message)
+            (chat-content-parts-with-text
+             (chat-message-parts message) new-content))
       (setf (chat-session-updated-at session) (current-time))
       (when chat-session-auto-save
         (chat-session-save session))
@@ -755,7 +760,9 @@ branch starts with no messages. SESSION is never truncated."
   "Convert MESSAGE struct to JSON-serializable alist."
   `((id . ,(chat-message-id message))
     (role . ,(symbol-name (chat-message-role message)))
-    (content . ,(chat-message-content message))
+    (content . ,(chat-message-text message))
+    (contentParts . ,(mapcar #'chat-content-part-to-json
+                             (chat-message-parts message)))
     (timestamp . ,(format-time-string
                    "%Y-%m-%dT%H:%M:%S"
                    (or (chat-message-timestamp message)
@@ -1095,23 +1102,43 @@ once a session had been reopened -- and then got written back."
 
 (defun chat-message--deserialize (data)
   "Convert JSON-parsed DATA to chat-message struct."
-  (make-chat-message
-   :id (chat-session--alist-get data 'id)
-   :role (intern (chat-session--alist-get data 'role))
-   :content (chat-session--alist-get data 'content)
-   :timestamp (chat-session--parse-timestamp
-               (chat-session--alist-get data 'timestamp))
-   :parent-id (chat-session--alist-get data 'parentId)
-   :branch-ids (chat-session--normalize-list
-                (chat-session--alist-get data 'branchIds))
-   :metadata (chat-session--message-metadata-from-json
-              (chat-session--alist-get data 'metadata))
-   :tool-calls (chat-session--normalize-tool-calls
-                (chat-session--alist-get data 'toolCalls))
-   :tool-results (chat-session--normalize-list
-                  (chat-session--alist-get data 'toolResults))
-   :raw-request (chat-session--alist-get data 'rawRequest)
-   :raw-response (chat-session--alist-get data 'rawResponse)))
+  (let* ((content (chat-session--alist-get data 'content))
+         (parts-data (chat-session--alist-get data 'contentParts))
+         (parts (and parts-data
+                     (chat-content-parts-normalize nil parts-data))))
+    (make-chat-message
+     :id (chat-session--alist-get data 'id)
+     :role (intern (chat-session--alist-get data 'role))
+     :content (if (stringp content)
+                  content
+                (chat-content-parts-text parts))
+     :content-parts parts
+     :timestamp (chat-session--parse-timestamp
+                 (chat-session--alist-get data 'timestamp))
+     :parent-id (chat-session--alist-get data 'parentId)
+     :branch-ids (chat-session--normalize-list
+                  (chat-session--alist-get data 'branchIds))
+     :metadata (chat-session--message-metadata-from-json
+                (chat-session--alist-get data 'metadata))
+     :tool-calls (chat-session--normalize-tool-calls
+                  (chat-session--alist-get data 'toolCalls))
+     :tool-results (chat-session--normalize-list
+                    (chat-session--alist-get data 'toolResults))
+     :raw-request (chat-session--alist-get data 'rawRequest)
+     :raw-response (chat-session--alist-get data 'rawResponse))))
+
+(defun chat-message-parts (message)
+  "Return MESSAGE content as validated typed parts."
+  (chat-content-parts-normalize
+   (chat-message-content message)
+   (chat-message-content-parts message)))
+
+(defun chat-message-text (message)
+  "Return MESSAGE's stable ordinary text projection."
+  (let ((content (chat-message-content message)))
+    (if (stringp content)
+        content
+      (chat-content-parts-text (chat-message-parts message)))))
 
 ;; ------------------------------------------------------------------
 ;; Utility Functions

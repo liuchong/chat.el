@@ -116,6 +116,29 @@ Merging them would be `insert', and choosing `queue' is choosing not to."
     (setq-local chat-ui--queued-sends nil)
     (should-not (chat-ui--drain-queued-sends))))
 
+(ert-deftest chat-send-attachments-wait-as-one-typed-draft ()
+  "An attachment submitted during a run starts the next turn intact."
+  (let* ((digest (make-string 64 ?a))
+         (part (chat-content-part-create
+                :type 'image :attachment-id digest :name "screen.png"
+                :mime-type "image/png" :size 12 :sha256 digest))
+         sent-text
+         sent-parts)
+    (cl-letf (((symbol-function 'chat-agent-active-p) (lambda (_) t))
+              ((symbol-function 'chat-ui--send-user-message)
+               (lambda (text &optional parts)
+                 (setq sent-text text sent-parts parts))))
+      (with-temp-buffer
+        (setq-local chat-ui--queued-sends nil)
+        (chat-ui--send-in-mode "look" 'insert (list part))
+        (should (= 1 (length chat-ui--queued-sends)))
+        (should (equal (list part)
+                       (chat-ui--draft-parts (car chat-ui--queued-sends))))
+        (chat-ui--drain-queued-sends)
+        (sit-for 0.05)
+        (should (equal "look" sent-text))
+        (should (equal (list part) sent-parts))))))
+
 ;; ------------------------------------------------------------------
 ;; interrupt
 ;; ------------------------------------------------------------------
@@ -166,6 +189,26 @@ nothing to point at."
          (setq-local chat-ui--live-response-content "   ")
          (chat-ui--send-in-mode "换个问题" 'interrupt)))
      (should (= before (length (chat-session-messages session)))))))
+
+(ert-deftest chat-send-interrupt-carries-typed-attachments-to-the-new-turn ()
+  "Interrupt mode cancels first and then sends the attachment-bearing turn."
+  (let* ((digest (make-string 64 ?d))
+         (part (chat-content-part-create
+                :type 'image :attachment-id digest :name "new.png"
+                :mime-type "image/png" :size 12 :sha256 digest))
+         cancelled
+         sent-parts)
+    (cl-letf (((symbol-function 'chat-agent-active-p) (lambda (_) t))
+              ((symbol-function 'chat-ui-cancel-response)
+               (lambda () (setq cancelled t)))
+              ((symbol-function 'chat-ui--redraw-conversation) #'ignore)
+              ((symbol-function 'chat-ui--send-user-message)
+               (lambda (_text &optional parts) (setq sent-parts parts))))
+      (with-temp-buffer
+        (setq-local chat-ui--live-response-content "")
+        (chat-ui--send-in-mode "replace it" 'interrupt (list part))))
+    (should cancelled)
+    (should (equal (list part) sent-parts))))
 
 ;; ------------------------------------------------------------------
 ;; Choosing a mode

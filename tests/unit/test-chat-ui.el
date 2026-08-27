@@ -2322,5 +2322,72 @@ recorded Markdown."
         (chat-ui--follow-live-output (current-buffer))
         (should-not moved)))))
 
+(ert-deftest chat-ui-attachment-draft-is-visible-and-sends-without-text ()
+  "A staged file is visible at the prompt and can form a message by itself."
+  (chat-test-with-temp-dir
+   (let* ((chat-attachment-directory (expand-file-name "attachments" temp-dir))
+          (file (expand-file-name "screen.png" temp-dir))
+          (session (chat-session-create "attachments" 'kimi)))
+     (with-temp-file file
+       (set-buffer-multibyte nil)
+       (insert "not-a-real-png"))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-test-silently (chat-ui-attach-file file))
+       (let ((prompt (chat-ui--pending-attachments-prompt)))
+         (should (string-match-p "Attachments (1)" prompt))
+         (should (string-match-p "screen.png" prompt)))
+       (cl-letf (((symbol-function 'chat-ui--get-response) #'ignore))
+         (chat-test-silently (chat-ui-send-message)))
+       (let* ((message (car (chat-session-messages session)))
+              (parts (chat-message-parts message)))
+         (should (string-empty-p (chat-message-text message)))
+         (should (= 1 (length parts)))
+         (should (eq 'image (chat-content-part-type (car parts))))
+         (should-not chat-ui--pending-content-parts))))))
+
+(ert-deftest chat-ui-control-command-keeps-staged-attachments ()
+  "A command beside a draft does not silently consume its attachment."
+  (chat-test-with-temp-dir
+   (let* ((chat-attachment-directory (expand-file-name "attachments" temp-dir))
+          (file (expand-file-name "notes.txt" temp-dir))
+          (session (chat-session-create "attachments" 'kimi)))
+     (with-temp-file file (insert "notes"))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-test-silently (chat-ui-attach-file file))
+       (goto-char (point-max))
+       (insert "/pwd")
+       (chat-test-silently (chat-ui-send-message))
+       (should (= 1 (length chat-ui--pending-content-parts)))))))
+
+(ert-deftest chat-ui-edit-resend-restores-message-attachments ()
+  "Editing a user turn restores both its text and its attachment draft."
+  (chat-test-with-temp-dir
+   (let* ((chat-attachment-directory (expand-file-name "attachments" temp-dir))
+          (file (expand-file-name "design.txt" temp-dir))
+          (session (chat-session-create "edit attachment" 'kimi)))
+     (with-temp-file file (insert "design"))
+     (let ((part (chat-content-attach-file file)))
+       (chat-session-add-message
+        session
+        (make-chat-message
+         :id "user-with-file" :role :user :content "review this"
+         :content-parts (list (chat-content-text-part "review this") part))))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-ui-edit-last-user-message)
+       (should (= 1 (length chat-ui--pending-content-parts)))
+       (should (equal "design.txt"
+                      (chat-content-part-name
+                       (car chat-ui--pending-content-parts))))
+       (should (string= "review this"
+                        (buffer-substring-no-properties
+                         (marker-position chat-ui--input-overlay)
+                         (point-max))))))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

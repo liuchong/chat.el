@@ -93,6 +93,7 @@ Returns the list of files that were loaded."
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-command)
+(require 'chat-content)
 (require 'chat-session)
 (require 'chat-session-wire)
 (require 'chat-event)
@@ -267,6 +268,8 @@ Keys:
   C-c C-m               - Switch model
   C-c C-e / C-c C-g     - Edit last message / regenerate last response
   C-c C-s / C-c C-p     - Request status / request panel
+  C-c C-o / C-c C-y     - Attach a file / paste a clipboard image
+  C-c C-x                - Remove a staged attachment
   C-c C-t               - Toggle auto-approval for this session
   C-c C-q / C-c C-SPC   - Quote active region / ask about it
   C-c C-d               - Show or fold all detail
@@ -590,6 +593,12 @@ somewhere else is the same as advice that is wrong."
     ;; Watching a run.
     (define-key map (kbd "C-c C-s") 'chat-show-current-request-status)
     (define-key map (kbd "C-c C-p") 'chat-ui-toggle-request-panel)
+    ;; Typed attachments stay beside the draft until a recorded send owns
+    ;; them.  Preview remains an M-x command because it prompts for any
+    ;; staged or recorded attachment rather than acting on point.
+    (define-key map (kbd "C-c C-o") 'chat-ui-attach-file)
+    (define-key map (kbd "C-c C-y") 'chat-ui-paste-image)
+    (define-key map (kbd "C-c C-x") 'chat-ui-remove-attachment)
     ;; Approval.  Auto-approve moves off C-c C-a, which the code surface
     ;; used for accepting an edit; on one keymap only one of them could
     ;; keep it, and accepting an edit is the riskier thing to fire by

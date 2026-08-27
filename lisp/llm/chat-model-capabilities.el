@@ -17,8 +17,10 @@
 (require 'json)
 (require 'seq)
 (require 'subr-x)
+(require 'chat-content)
 
 (declare-function chat-llm-get-provider-config "chat-llm" (provider))
+(declare-function chat-message-parts "chat-session" (message))
 
 (defgroup chat-model-capabilities nil
   "Model capability declarations and discovery cache."
@@ -227,6 +229,33 @@ with the same provider, model and source replaces the earlier one."
 (defun chat-model-capability-supported-p (capabilities key)
   "Return non-nil only when CAPABILITIES explicitly supports KEY."
   (eq t (chat-model-capability capabilities key)))
+
+(defun chat-model-capabilities-message-modalities (messages)
+  "Return distinct model input modalities required by MESSAGES."
+  (delete-dups
+   (apply #'append
+          (mapcar
+           (lambda (message)
+             (mapcar #'chat-content-part-required-modality
+                     (chat-message-parts message)))
+           messages))))
+
+(defun chat-model-capabilities-validate-messages
+    (provider model messages)
+  "Validate that PROVIDER MODEL accepts all content in MESSAGES."
+  (let* ((capabilities (chat-model-capabilities-resolve provider model))
+         (supported (chat-model-capabilities-input-modalities capabilities))
+         (required (delq 'text
+                         (chat-model-capabilities-message-modalities messages))))
+    (dolist (modality required)
+      (cond
+       ((eq supported 'unknown)
+        (error "Input capability is unknown for %s/%s; cannot send %s"
+               provider model modality))
+       ((not (memq modality supported))
+        (error "Model %s/%s does not support %s input"
+               provider model modality))))
+    capabilities))
 
 (defun chat-model-capabilities--requested-mode (value)
   "Normalize requested capability VALUE to a symbol."

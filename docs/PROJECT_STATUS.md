@@ -11,7 +11,7 @@ Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/too
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
-The Agent Runtime roadmap is active. M0 through M4 are complete: a versioned
+The Agent Runtime roadmap is active. M0 through M5 are complete: a versioned
 lifecycle event contract now unifies runtime hooks and session-scoped audit for
 turns, prompts, tools, permissions, compaction, background tasks and child
 agents. Model capabilities now resolve from explicit versioned facts, and
@@ -20,7 +20,9 @@ runtime hooks, lazy skills and resolved agent profiles now extend the same loop
 behind explicit trust and non-widening authority rules. Foreground runs,
 background commands, workflows and subagents now share one durable task state
 machine, bounded resource scheduler, parent/child cancellation contract and
-native tree/detail view. M5 adds typed multimodal content next.
+native tree/detail view. Typed image and file content now persists through a
+content-addressed attachment store, capability preflight and provider-specific
+wire adapters. M6 adds checkpoints, worktrees and execution backends next.
 
 ## Implemented Areas
 
@@ -39,6 +41,9 @@ native tree/detail view. M5 adds typed multimodal content next.
 - durable foreground, process, workflow and subagent task identities
 - bounded parallel task scheduling with read/write resource conflicts
 - native task tree, checkpoint details, cancellation and workflow resume
+- versioned typed message parts with legacy text projection
+- durable image and file attachments across reload, branch and edit-resend
+- native file attach, clipboard image, preview and staged removal commands
 
 ### LLM Providers
 
@@ -50,6 +55,7 @@ native tree/detail view. M5 adds typed multimodal content next.
 - versioned dynamic discovery cache with static fallback and user precedence
 - pre-dispatch validation for known unsupported request combinations
 - one normalized event vocabulary for streaming and asynchronous transports
+- capability-driven image and file request encoding at provider boundaries
 
 ### Tool Calling
 
@@ -161,8 +167,8 @@ native tree/detail view. M5 adds typed multimodal content next.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1444 regression tests discovered
-- 1444 passing
+- 1466 regression tests discovered
+- 1466 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

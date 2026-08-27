@@ -28,6 +28,7 @@
 (declare-function chat-wiki-dispatch "chat-wiki" (arg))
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
+(require 'chat-content)
 (require 'chat-event)
 (require 'chat-transcript)
 (require 'chat-markdown)
@@ -111,6 +112,12 @@ Declared here rather than beside its use: bound with `let', so it has to
 be known as a dynamic variable before the first binding is compiled, or
 the binding is lexical and does nothing at all.")
 
+(defvar chat-ui--send-content-parts nil
+  "Typed attachment parts carried by the input currently being dispatched.")
+
+(defvar chat-ui--send-content-parts-consumed nil
+  "Non-nil when the current dispatch recorded or queued its attachments.")
+
 (defconst chat-ui-send-modes '(insert queue interrupt)
   "How input is handled when a run is already in progress.
 
@@ -132,6 +139,9 @@ See `chat-ui-send-modes'.")
 
 (defvar-local chat-ui--queued-sends nil
   "Messages waiting for the current run to finish, in arrival order.")
+
+(defvar-local chat-ui--pending-content-parts nil
+  "Attachment parts staged beside the current input text.")
 
 (defvar-local chat-ui--active-agent-run nil
   "Currently active agent run state, or nil.")
@@ -773,6 +783,167 @@ not always the directory the buffer sits in."
     (goto-char (point-max)))
   (insert "\n"))
 
+(defun chat-ui--human-bytes (bytes)
+  "Return BYTES as a compact size for the attachment row."
+  (cond
+   ((< bytes 1024) (format "%d B" bytes))
+   ((< bytes (* 1024 1024)) (format "%.1f KB" (/ bytes 1024.0)))
+   (t (format "%.1f MB" (/ bytes 1048576.0)))))
+
+(defun chat-ui--attachment-label (part)
+  "Return a compact label for attachment PART."
+  (format "%s  %s  %s"
+          (symbol-name (chat-content-part-type part))
+          (chat-content-part-name part)
+          (chat-ui--human-bytes (chat-content-part-size part))))
+
+(defun chat-ui--pending-attachments-prompt ()
+  "Return prompt rows for attachments staged with the current input."
+  (if (null chat-ui--pending-content-parts)
+      ""
+    (concat
+     (chat-ui--prompt-segment
+      (format "  Attachments (%d)\n" (length chat-ui--pending-content-parts))
+      'face 'font-lock-keyword-face)
+     (mapconcat
+      (lambda (part)
+        (chat-ui--prompt-segment
+         (format "    %s\n" (chat-ui--attachment-label part))
+         'face 'shadow
+         'help-echo "M-x chat-ui-preview-attachment to preview"))
+      chat-ui--pending-content-parts
+      ""))))
+
+(defun chat-ui--refresh-attachment-prompt ()
+  "Refresh the input prompt after its staged attachments change."
+  (when (and (derived-mode-p 'chat-mode)
+             (markerp chat-ui--input-overlay))
+    (chat-ui--render-input-prompt)))
+
+(defun chat-ui-attach-file (file)
+  "Stage FILE as a durable attachment for the next recorded message."
+  (interactive "fAttach file: ")
+  (unless chat--current-session
+    (user-error "No active chat session"))
+  (let ((part (chat-content-attach-file file)))
+    (unless (seq-some
+             (lambda (existing)
+               (and (eq (chat-content-part-type existing)
+                        (chat-content-part-type part))
+                    (equal (chat-content-part-attachment-id existing)
+                           (chat-content-part-attachment-id part))))
+             chat-ui--pending-content-parts)
+      (setq chat-ui--pending-content-parts
+            (append chat-ui--pending-content-parts (list part))))
+    (chat-ui--refresh-attachment-prompt)
+    (message "Attached %s" (chat-content-part-name part))))
+
+(defun chat-ui--clipboard-image-data ()
+  "Return clipboard image data and suffix, or nil when unavailable."
+  (catch 'image
+    (dolist (entry '(("image/png" . ".png")
+                     ("image/jpeg" . ".jpg")))
+      (let ((data (and (fboundp 'gui-get-selection)
+                       (ignore-errors
+                         (gui-get-selection
+                          'CLIPBOARD (intern (car entry)))))))
+        (when (and (stringp data) (> (length data) 0))
+          (throw 'image (cons data (cdr entry))))))))
+
+(defun chat-ui--clipboard-image-file ()
+  "Copy the clipboard image to a temporary file and return its path."
+  (if-let* ((entry (chat-ui--clipboard-image-data)))
+      (let ((file (make-temp-file "chat-clipboard-" nil (cdr entry))))
+        (with-temp-buffer
+          (set-buffer-multibyte nil)
+          (insert (car entry))
+          (write-region (point-min) (point-max) file nil 'silent))
+        file)
+    (when-let* ((program (executable-find "pngpaste")))
+      (let ((file (make-temp-file "chat-clipboard-" nil ".png")))
+        (if (= 0 (call-process program nil nil nil file))
+            file
+          (delete-file file)
+          nil)))))
+
+(defun chat-ui-paste-image ()
+  "Stage the image currently on the system clipboard."
+  (interactive)
+  (unless chat--current-session
+    (user-error "No active chat session"))
+  (let ((file (chat-ui--clipboard-image-file)))
+    (unless file
+      (user-error "The clipboard does not contain a readable image"))
+    (unwind-protect
+        (let ((part (chat-content-attach-file file 'image)))
+          (setf (chat-content-part-name part)
+                (format "clipboard-%s.png" (format-time-string "%Y%m%d-%H%M%S")))
+          (setq chat-ui--pending-content-parts
+                (append chat-ui--pending-content-parts (list part)))
+          (chat-ui--refresh-attachment-prompt)
+          (message "Attached clipboard image"))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(defun chat-ui--all-attachment-parts ()
+  "Return staged and recorded attachments available for preview."
+  (let ((parts (copy-sequence chat-ui--pending-content-parts)))
+    (when chat--current-session
+      (dolist (message (reverse (chat-session-messages chat--current-session)))
+        (dolist (part (chat-message-parts message))
+          (when (memq (chat-content-part-type part) '(image file))
+            (push part parts)))))
+    (delete-dups parts)))
+
+(defun chat-ui--choose-attachment (parts prompt)
+  "Choose one of PARTS using PROMPT and return it."
+  (let ((index 0)
+        choices)
+    (dolist (part parts)
+      (setq index (1+ index))
+      (push (cons (format "%d  %s" index (chat-ui--attachment-label part))
+                  part)
+            choices))
+    (setq choices (nreverse choices))
+    (cdr (assoc (completing-read prompt choices nil t) choices))))
+
+(defun chat-ui-preview-attachment ()
+  "Preview a staged or recorded attachment."
+  (interactive)
+  (let* ((parts (chat-ui--all-attachment-parts))
+         (part (and parts (chat-ui--choose-attachment parts "Preview: "))))
+    (unless part
+      (user-error "No attachments are available"))
+    (let ((file (chat-content-part-file part)))
+      (if (eq (chat-content-part-type part) 'image)
+          (let ((image (create-image file nil nil))
+                (buffer (get-buffer-create "*chat-attachment-preview*")))
+            (unless image
+              (user-error "Emacs cannot decode %s"
+                          (chat-content-part-mime-type part)))
+            (with-current-buffer buffer
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (insert-image image (chat-content-part-name part))
+                (insert "\n"))
+              (special-mode))
+            (pop-to-buffer buffer))
+        (find-file-other-window file)))))
+
+(defun chat-ui-remove-attachment (&optional all)
+  "Remove one staged attachment, or every staged attachment with ALL."
+  (interactive "P")
+  (unless chat-ui--pending-content-parts
+    (user-error "No staged attachments"))
+  (if all
+      (setq chat-ui--pending-content-parts nil)
+    (let ((part (chat-ui--choose-attachment
+                 chat-ui--pending-content-parts "Remove: ")))
+      (setq chat-ui--pending-content-parts
+            (delq part chat-ui--pending-content-parts))))
+  (chat-ui--refresh-attachment-prompt)
+  (message "%s" (if all "Removed all attachments" "Removed attachment")))
+
 (defun chat-ui-beginning-of-input ()
   "Move to the start of what you typed, not to the start of the line.
 
@@ -1376,18 +1547,20 @@ model, because that is what it will reach.  Neither shows the other: the
 model is not what a shell line is about, and the baseline command has
 never been announced by name."
   (let ((claimed (chat-ui-default-command-claimed-p)))
-    (if (not claimed)
-        (concat (chat-ui--prompt-model-segment)
-                (chat-ui--prompt-send-mode-segment)
-                (chat-ui--prompt-segment "> "))
-      (let ((mark (chat-mark-for-mode (chat-ui-default-command))))
-        (concat
-         (chat-ui--prompt-mark (car mark) (cdr mark))
-         (chat-ui--prompt-segment
-          (format "%s%s> "
-                  (chat-ui--display-command-name (chat-ui-default-command))
-                  (chat-ui--prompt-send-mode-text))
-          'face 'chat-ui-claimed-prompt))))))
+    (concat
+     (chat-ui--pending-attachments-prompt)
+     (if (not claimed)
+         (concat (chat-ui--prompt-model-segment)
+                 (chat-ui--prompt-send-mode-segment)
+                 (chat-ui--prompt-segment "> "))
+       (let ((mark (chat-mark-for-mode (chat-ui-default-command))))
+         (concat
+          (chat-ui--prompt-mark (car mark) (cdr mark))
+          (chat-ui--prompt-segment
+           (format "%s%s> "
+                   (chat-ui--display-command-name (chat-ui-default-command))
+                   (chat-ui--prompt-send-mode-text))
+           'face 'chat-ui-claimed-prompt)))))))
 
 (defun chat-ui--prompt-send-mode-text ()
   "Return how the chosen send mode reads in the prompt, or \"\".
@@ -1525,7 +1698,10 @@ where some of it is."
            (input-end (point-max))
            (content (string-trim (buffer-substring-no-properties input-start input-end)))
            (command (chat-command-parse content))
-           (control (chat-ui--control-command command)))
+           (control (chat-ui--control-command command))
+           (chat-ui--send-content-parts
+            (copy-sequence chat-ui--pending-content-parts))
+           (chat-ui--send-content-parts-consumed nil))
       ;; Anything actually sent becomes recallable, commands included --
       ;; that is what a shell does, and a mistyped command is exactly what
       ;; one wants back.  Sending also ends any walk in progress, so the
@@ -1535,6 +1711,11 @@ where some of it is."
         (chat-input-history-reset-position))
       (chat-ui--clock "history")
       (cond
+       ((and (eq (plist-get command :kind) 'empty)
+             chat-ui--send-content-parts)
+        (chat-ui--clear-input input-start input-end)
+        (chat-ui--send-in-mode "" (chat-ui-send-mode)
+                               chat-ui--send-content-parts))
        ((eq (plist-get command :kind) 'empty)
         (message "%s" (chat-i18n 'empty-message "Cannot send empty message")))
        (control
@@ -1549,13 +1730,17 @@ where some of it is."
             (chat-ui--dispatch-command command)
           (let ((chat-ui--input-was-typed t))
             (chat-ui--send-in-mode (chat-ui--command-message-text command)
-                                   (chat-ui-send-mode)))))
+                                   (chat-ui-send-mode)
+                                   chat-ui--send-content-parts))))
        ((chat-ui--response-active-p)
         (message "%s" (chat-i18n 'request-in-progress
                           "A response is already in progress. Cancel it before sending another message.")))
        (t
         (chat-ui--clear-input input-start input-end)
-        (chat-ui--dispatch-command command))))))
+        (chat-ui--dispatch-command command)))
+      (when chat-ui--send-content-parts-consumed
+        (setq chat-ui--pending-content-parts nil)
+        (chat-ui--refresh-attachment-prompt)))))
 
 (defun chat-ui--clear-input (input-start input-end)
   "Remove the text between INPUT-START and INPUT-END from the input area."
@@ -1822,35 +2007,41 @@ two settings nobody can talk about."
           (when mode (cons 'mode (format "%s" mode)))))
    :subject message))
 
-(defun chat-ui--send-user-message (content)
-  "Record CONTENT as a user message and ask the model to respond."
-  (if (string-empty-p content)
-      (message "%s" (chat-i18n 'empty-message "Cannot send empty message"))
-    (if (chat-tool-forge-ai--tool-request-p content)
-        (chat-ui--handle-tool-creation content)
-      (let* ((user-msg (chat-ui--stamp-user-message
-                        (make-chat-message
-                         :id (chat-session-new-message-id)
-                         :role :user
-                         :content content
-                         :timestamp (current-time))))
-             (event (chat-ui--prompt-event
-                     'user-prompt-submitted user-msg))
-             (outcome (chat-event-publish event))
-             (user-msg (chat-event-subject event)))
-        (if (not (and (chat-event-allowed-p outcome)
-                      (chat-message-p user-msg)))
-            (message
-             (chat-i18n 'message-blocked "Message blocked: %s")
-             (or (plist-get outcome :reason)
-                 "runtime policy returned an invalid message"))
-          (chat-session-add-message chat--current-session user-msg)
-          (chat-ui--clock "record")
-          ;; Drawn from the record rather than inserted directly, so the
-          ;; live boundary lands after this message instead of before it.
-          (chat-ui--redraw-conversation)
-          (chat-ui--clock "redraw")
-          (chat-ui--get-response))))))
+(defun chat-ui--send-user-message (content &optional content-parts)
+  "Record CONTENT and CONTENT-PARTS as a user message, then respond."
+  (let* ((attachments (or content-parts chat-ui--send-content-parts))
+         (parts (chat-content-parts-with-text attachments content)))
+    (if (and (string-empty-p content) (null parts))
+        (message "%s" (chat-i18n 'empty-message "Cannot send empty message"))
+      (if (and (null attachments)
+               (chat-tool-forge-ai--tool-request-p content))
+          (chat-ui--handle-tool-creation content)
+        (let* ((user-msg (chat-ui--stamp-user-message
+                          (make-chat-message
+                           :id (chat-session-new-message-id)
+                           :role :user
+                           :content content
+                           :content-parts parts
+                           :timestamp (current-time))))
+               (event (chat-ui--prompt-event
+                       'user-prompt-submitted user-msg))
+               (outcome (chat-event-publish event))
+               (user-msg (chat-event-subject event)))
+          (if (not (and (chat-event-allowed-p outcome)
+                        (chat-message-p user-msg)))
+              (message
+               (chat-i18n 'message-blocked "Message blocked: %s")
+               (or (plist-get outcome :reason)
+                   "runtime policy returned an invalid message"))
+            (chat-session-add-message chat--current-session user-msg)
+            (setq chat-ui--send-content-parts-consumed
+                  (and attachments t))
+            (chat-ui--clock "record")
+            ;; Drawn from the record rather than inserted directly, so the
+            ;; live boundary lands after this message instead of before it.
+            (chat-ui--redraw-conversation)
+            (chat-ui--clock "redraw")
+            (chat-ui--get-response)))))))
 
 (defun chat-ui--stamp-user-message (message)
   "Number MESSAGE with the turn it opens.
@@ -2079,27 +2270,45 @@ of one, which changes the mode for later ones."
   (message (chat-i18n 'send-mode-set "Sending during a run now: %s")
            (chat-ui--send-mode-name mode)))
 
-(defun chat-ui--send-in-mode (content mode)
+(defun chat-ui--send-in-mode (content mode &optional content-parts)
   "Send CONTENT, handling a run already in progress according to MODE.
 
 With nothing running the three modes are the same thing, because there is
 nothing to insert into, wait for, or interrupt."
-  (cond
-   ((not (chat-agent-active-p chat-ui--active-agent-run))
-    (chat-ui--send-user-message content))
-   ((eq mode 'queue) (chat-ui--queue-send content))
-   ((eq mode 'interrupt) (chat-ui--interrupt-with content))
-   (t (chat-ui--steer-active-agent content))))
+  (let ((parts (or content-parts chat-ui--send-content-parts)))
+    (cond
+     ((not (chat-agent-active-p chat-ui--active-agent-run))
+      (if parts
+          (chat-ui--send-user-message content parts)
+        (chat-ui--send-user-message content)))
+     ((eq mode 'queue) (chat-ui--queue-send content parts))
+     ((eq mode 'interrupt) (chat-ui--interrupt-with content parts))
+     (parts (chat-ui--queue-send content parts))
+     (t (chat-ui--steer-active-agent content)))))
 
-(defun chat-ui--queue-send (content)
-  "Hold CONTENT until the current run finishes, then send it on its own."
-  (setq chat-ui--queued-sends (append chat-ui--queued-sends (list content)))
-  (chat-event-publish
-   (chat-ui--prompt-event
-    'user-prompt-queued content (length chat-ui--queued-sends) 'run))
-  (message (chat-i18n 'send-queued-count
-                      "Queued until this response finishes (%d waiting).")
-           (length chat-ui--queued-sends)))
+(defun chat-ui--draft (content parts)
+  "Return a queued draft for CONTENT and typed PARTS."
+  (if parts (list :text content :parts parts) content))
+
+(defun chat-ui--draft-text (draft)
+  "Return DRAFT's compatibility text."
+  (if (stringp draft) draft (or (plist-get draft :text) "")))
+
+(defun chat-ui--draft-parts (draft)
+  "Return DRAFT's typed parts, or nil for a legacy string draft."
+  (and (listp draft) (plist-get draft :parts)))
+
+(defun chat-ui--queue-send (content &optional content-parts)
+  "Hold CONTENT and CONTENT-PARTS until the current run finishes."
+  (let ((draft (chat-ui--draft content content-parts)))
+    (setq chat-ui--queued-sends (append chat-ui--queued-sends (list draft)))
+    (setq chat-ui--send-content-parts-consumed (and content-parts t))
+    (chat-event-publish
+     (chat-ui--prompt-event
+      'user-prompt-queued draft (length chat-ui--queued-sends) 'run))
+    (message (chat-i18n 'send-queued-count
+                        "Queued until this response finishes (%d waiting).")
+             (length chat-ui--queued-sends))))
 
 (defun chat-ui--drain-queued-sends ()
   "Send the first message waiting for a run that has just finished.
@@ -2120,12 +2329,16 @@ Swallowing the input would be worse than carrying a failure forward."
        (lambda ()
          (when (buffer-live-p buffer)
            (with-current-buffer buffer
-             (chat-ui--send-user-message next))))))))
+             (let ((text (chat-ui--draft-text next))
+                   (parts (chat-ui--draft-parts next)))
+               (if parts
+                   (chat-ui--send-user-message text parts)
+                 (chat-ui--send-user-message text))))))))))
 
 (defconst chat-ui--interrupted-marker "[interrupted after %s characters]"
   "How a reply cut short introduces itself to later turns.")
 
-(defun chat-ui--interrupt-with (content)
+(defun chat-ui--interrupt-with (content &optional content-parts)
   "Stop the current run, keep what it produced, and send CONTENT instead.
 
 Keeping it is the part that did not exist.  A cancelled run's in-flight
@@ -2146,7 +2359,9 @@ had already completed were always kept; this is about the one in flight."
         :timestamp (current-time))))
     (chat-ui-cancel-response)
     (chat-ui--redraw-conversation)
-    (chat-ui--send-user-message content)))
+    (if content-parts
+        (chat-ui--send-user-message content content-parts)
+      (chat-ui--send-user-message content))))
 
 (defun chat-ui--command-quick (arg)
   "Ask the model ARG once, without recording it in the session."
@@ -3701,7 +3916,11 @@ This is an ephemeral query - the result is displayed but not persisted."
              (chat-message-id user-msg)
              nil
              '((reason . "edit-resend"))))
-      (chat-ui--rebuild-buffer (chat-message-content user-msg)))))
+      (setq chat-ui--pending-content-parts
+            (seq-remove
+             (lambda (part) (eq (chat-content-part-type part) 'text))
+             (chat-message-parts user-msg)))
+      (chat-ui--rebuild-buffer (chat-message-text user-msg)))))
 
 ;; ------------------------------------------------------------------
 ;; View Raw Messages

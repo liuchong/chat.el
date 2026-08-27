@@ -185,7 +185,7 @@ Status: complete.
 
 ### M5: Multimodal Content
 
-Goal: carry text, images, audio, files and tool data through one typed content
+Goal: carry text, images, files and tool data through one typed content
 pipeline without collapsing content into strings.
 
 Deliverables:
@@ -203,6 +203,9 @@ Acceptance:
 - streamed parts retain order and tool-call identity;
 - large binary data is referenced rather than embedded in session events;
 - old text-only sessions remain readable through the compatibility adapter.
+
+Status: complete. Audio and video remain outside the first typed-input UI and
+can use the same versioned contract in a later phase.
 
 ### M6: Checkpoints, Worktrees And Backends
 

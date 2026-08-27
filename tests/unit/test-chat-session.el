@@ -51,6 +51,33 @@
     (should (eq (chat-message-role msg) :user))
     (should (string= (chat-message-content msg) "Hello world"))))
 
+(ert-deftest chat-message-typed-content-survives-session-round-trip ()
+  "Text and attachment references persist while text remains compatible."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory (expand-file-name "sessions/" temp-dir))
+          (chat-attachment-directory (expand-file-name "attachments/" temp-dir))
+          (source (expand-file-name "note.txt" temp-dir))
+          (session (chat-test-silently
+                    (chat-session-create "Typed" 'gpt-4o))))
+     (with-temp-file source (insert "attachment"))
+     (chat-session-add-message
+      session
+      (make-chat-message
+       :id "typed-1"
+       :role :user
+       :content "Read this"
+       :content-parts
+       (list (chat-content-text-part "Read this")
+             (chat-content-attach-file source))))
+     (let* ((loaded (chat-session-load (chat-session-id session)))
+            (message (car (chat-session-messages loaded)))
+            (parts (chat-message-parts message)))
+       (should (equal (chat-message-text message) "Read this"))
+       (should (equal (mapcar #'chat-content-part-type parts)
+                      '(text file)))
+       (should (equal (chat-content-part-file-text (cadr parts))
+                      "attachment"))))))
+
 ;; Test session creation
 (ert-deftest chat-session-create-test ()
   "Test creating a new session."

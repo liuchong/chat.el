@@ -51,18 +51,46 @@
 (defun chat-llm-gemini--message-part (content)
   "Build one Gemini text part from CONTENT."
   `((text . ,content)))
+(defun chat-llm-gemini--content-part (part)
+  "Encode typed PART for a Gemini user message."
+  (pcase (chat-content-part-type part)
+    ('text (chat-llm-gemini--message-part
+            (chat-content-part-text part)))
+    ('image
+     `((inlineData . ((mimeType . ,(chat-content-part-mime-type part))
+                      (data . ,(chat-content-part-base64 part))))))
+    ('file
+     (if (chat-content-part-text-file-p part)
+         (chat-llm-gemini--message-part
+          (chat-content-part-file-prompt part))
+       `((inlineData . ((mimeType . ,(chat-content-part-mime-type part))
+                        (data . ,(chat-content-part-base64 part)))))))
+    (_
+     (error "Content part %s is not valid user input"
+            (chat-content-part-type part)))))
 (defun chat-llm-gemini--build-request (messages options)
   "Build Gemini request with MESSAGES and OPTIONS."
   (let ((system-lines nil)
         (contents nil))
     (dolist (msg messages)
-      (let ((role (chat-message-role msg))
-            (content (or (chat-message-content msg) "")))
-        (when (not (string-empty-p content))
+      (let* ((role (chat-message-role msg))
+             (content (or (chat-message-text msg) ""))
+             (parts (chat-message-parts msg)))
+        (when (or (not (string-empty-p content))
+                  (seq-some (lambda (part)
+                              (not (eq (chat-content-part-type part) 'text)))
+                            parts))
           (if (eq role :system)
-              (push content system-lines)
+              (progn
+                (when (seq-some
+                       (lambda (part)
+                         (not (eq (chat-content-part-type part) 'text)))
+                       parts)
+                  (error "System messages cannot contain attachments"))
+                (push content system-lines))
             (push `((role . ,(chat-llm-gemini--message-role role))
-                    (parts . [,(chat-llm-gemini--message-part content)]))
+                    (parts . ,(vconcat
+                               (mapcar #'chat-llm-gemini--content-part parts))))
                   contents)))))
     (let ((request
            (list :contents (vconcat (nreverse contents))
@@ -115,6 +143,9 @@
                  :reasoning nil :input-modalities (text)
                  :structured-output nil
                  :supported-options (:temperature :max-tokens))
+ :model-capabilities
+ (list (cons chat-llm-gemini-default-model
+             '(:input-modalities (text image file))))
  :request-fn #'chat-llm-gemini--build-request
  :response-fn #'chat-llm-gemini--parse-response
  :stream-fn #'chat-llm-gemini--parse-stream-chunk)

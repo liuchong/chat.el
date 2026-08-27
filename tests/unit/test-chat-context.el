@@ -67,6 +67,44 @@
                    :tool-results '("patched demo.el"))))
     (should (> (chat-context-message-tokens message) 4))))
 
+(ert-deftest chat-context-message-tokens-counts-typed-attachments ()
+  "Images and files consume budget even though compatibility text is short."
+  (let* ((image-digest (make-string 64 ?a))
+         (file-digest (make-string 64 ?b))
+         (chat-context-image-token-estimate 900)
+         (image (chat-content-part-create
+                 :type 'image :attachment-id image-digest :name "screen.png"
+                 :mime-type "image/png" :size 100 :sha256 image-digest))
+         (file (chat-content-part-create
+                :type 'file :attachment-id file-digest :name "notes.txt"
+                :mime-type "text/plain" :size 3000 :sha256 file-digest))
+         (message (make-chat-message
+                   :role :user :content "read"
+                   :content-parts
+                   (list (chat-content-text-part "read") image file))))
+    (should (> (chat-context-message-tokens message) 1900))))
+
+(ert-deftest chat-context-compaction-keeps-latest-attachment-part ()
+  "Preparing an over-budget request preserves typed parts on the latest turn."
+  (let* ((digest (make-string 64 ?c))
+         (attachment
+          (chat-content-part-create
+           :type 'image :attachment-id digest :name "latest.png"
+           :mime-type "image/png" :size 100 :sha256 digest))
+         (messages
+          (list (make-chat-message :role :user :content (make-string 500 ?a))
+                (make-chat-message :role :assistant :content (make-string 500 ?b))
+                (make-chat-message
+                 :id "latest" :role :user :content "what is this"
+                 :content-parts
+                 (list (chat-content-text-part "what is this") attachment))))
+         (prepared (chat-context-prepare-messages messages 400))
+         (latest (car (last prepared))))
+    (should (equal "latest" (chat-message-id latest)))
+    (should (eq 'image
+                (chat-content-part-type
+                 (car (last (chat-message-parts latest))))))))
+
 (ert-deftest chat-context-auto-compaction-persists-and-reuses-summary ()
   "Test over-budget preparation stores and applies a durable summary."
   (let* ((chat-session-auto-save nil)

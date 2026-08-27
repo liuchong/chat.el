@@ -63,7 +63,10 @@ If nil, will try to lookup from auth-source or chat-llm-openai-api-key-fn."
  "https://api.openai.com/v1"
  chat-llm-openai-default-model
  :api-key-fn #'chat-llm-openai--get-api-key
- :max-output-tokens 2048)
+ :max-output-tokens 2048
+ :model-capabilities
+ (list (cons chat-llm-openai-default-model
+             '(:input-modalities (text image)))))
 
 (provide 'chat-llm-openai)
 ;;; chat-llm-openai.el ends here

@@ -61,6 +61,22 @@
     (should (equal (test-chat-transcript--categories parts) '((ai-final . nil))))
     (should (chat-transcript-final-part-p (car parts)))))
 
+(ert-deftest chat-transcript-shows-durable-user-attachment-references ()
+  "Reloaded user turns identify attachments without exposing local paths."
+  (let* ((digest (make-string 64 ?a))
+         (attachment
+          (chat-content-part-create
+           :type 'image :attachment-id digest :name "screen.png"
+           :mime-type "image/png" :size 20 :sha256 digest))
+         (message
+          (make-chat-message
+           :id "with-image" :role :user :content "inspect"
+           :content-parts (list (chat-content-text-part "inspect") attachment)))
+         (text (plist-get (car (chat-transcript-message-parts message)) :text)))
+    (should (string-match-p "inspect" text))
+    (should (string-match-p "\\[image\\] screen.png" text))
+    (should-not (string-match-p chat-attachment-directory text))))
+
 (ert-deftest chat-transcript-does-not-decide-final-by-position ()
   "A trailing step stays a step even when nothing follows it.
 

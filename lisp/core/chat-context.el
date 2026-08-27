@@ -34,6 +34,11 @@
   :type 'boolean
   :group 'chat)
 
+(defcustom chat-context-image-token-estimate 1024
+  "Conservative token estimate for one image content part."
+  :type 'integer
+  :group 'chat)
+
 (defun chat-context-count-tokens (text)
   "Estimate token count for TEXT (rough approximation)."
   (if (string-blank-p text)
@@ -64,6 +69,17 @@ anything else is JSON on the wire."
    ((null arguments) 0)
    (t (chat-context-count-tokens (json-encode arguments)))))
 
+(defun chat-context--content-part-tokens (part)
+  "Estimate the extra request tokens contributed by typed PART."
+  (pcase (chat-content-part-type part)
+    ('image chat-context-image-token-estimate)
+    ('file
+     ;; Do not reread a potentially large attachment on every budget pass.
+     ;; Three bytes per token is conservative for source and CJK text, and
+     ;; keeps binary document requests from being treated as free.
+     (+ 8 (ceiling (/ (chat-content-part-size part) 3.0))))
+    (_ 0)))
+
 (defun chat-context-message-tokens (msg)
   "Estimate token count for MSG as the request will carry it.
 
@@ -79,7 +95,9 @@ was throwing away: the snippets concatenated every tool result and ran a
 regexp over the whole thing to keep a preview, and this runs for every
 message on every send."
   (+ 4
-     (chat-context-count-tokens (or (chat-message-content msg) ""))
+     (chat-context-count-tokens (chat-message-text msg))
+     (cl-loop for part in (chat-message-parts msg)
+              sum (chat-context--content-part-tokens part))
      (cl-loop for call in (chat-message-tool-calls msg)
               sum (+ (chat-context-count-tokens (or (plist-get call :name) ""))
                      (chat-context--argument-tokens

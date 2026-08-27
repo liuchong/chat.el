@@ -47,10 +47,41 @@
     (:tool "user")
     (_ "user")))
 
+(defun chat-llm-claude--input-part (part)
+  "Encode typed PART for an Anthropic-compatible user message."
+  (pcase (chat-content-part-type part)
+    ('text
+     `((type . "text") (text . ,(chat-content-part-text part))))
+    ('image
+     `((type . "image")
+       (source . ((type . "base64")
+                  (media_type . ,(chat-content-part-mime-type part))
+                  (data . ,(chat-content-part-base64 part))))))
+    ('file
+     (cond
+      ((chat-content-part-text-file-p part)
+       `((type . "document")
+         (source . ((type . "text")
+                    (media_type . ,(chat-content-part-mime-type part))
+                    (data . ,(chat-content-part-file-text part))))
+         (title . ,(chat-content-part-name part))))
+      ((equal (chat-content-part-mime-type part) "application/pdf")
+       `((type . "document")
+         (source . ((type . "base64")
+                    (media_type . "application/pdf")
+                    (data . ,(chat-content-part-base64 part))))
+         (title . ,(chat-content-part-name part))))
+      (t
+       (error "Anthropic-compatible messages cannot inline file: %s"
+              (chat-content-part-name part)))))
+    (_
+     (error "Content part %s is not valid user input"
+            (chat-content-part-type part)))))
+
 (defun chat-llm-claude--content-for (msg)
   "Build Claude content for MSG, including tool_use / tool_result blocks."
   (let ((role (chat-message-role msg))
-        (content (or (chat-message-content msg) ""))
+        (content (or (chat-message-text msg) ""))
         (calls (chat-message-tool-calls msg))
         (metadata (chat-message-metadata msg)))
     (cond
@@ -72,6 +103,13 @@
              (name . ,(plist-get call :name))
              (input . ,(or (plist-get call :arguments) (make-hash-table)))))
          calls))))
+     ((seq-some (lambda (part)
+                  (not (eq (chat-content-part-type part) 'text)))
+                (chat-message-parts msg))
+      (unless (eq role :user)
+        (error "Only user messages may contain input attachments"))
+      (vconcat (mapcar #'chat-llm-claude--input-part
+                       (chat-message-parts msg))))
      (t content))))
 
 (defun chat-llm-claude--build-request (provider messages options)
@@ -82,7 +120,7 @@
          (tools (plist-get options :tools)))
     (dolist (msg messages)
       (let ((role (chat-message-role msg))
-            (content (or (chat-message-content msg) "")))
+            (content (or (chat-message-text msg) "")))
         (cond
          ((eq role :system)
           (unless (string-empty-p content)
@@ -181,6 +219,9 @@ OPTIONS are appended to the provider plist; useful keys include
  "Claude"
  "https://api.anthropic.com"
  chat-llm-claude-default-model
- :api-key-fn #'chat-llm-claude--get-api-key)
+ :api-key-fn #'chat-llm-claude--get-api-key
+ :model-capabilities
+ (list (cons chat-llm-claude-default-model
+             '(:input-modalities (text image file)))))
 (provide 'chat-llm-claude)
 ;;; chat-llm-claude.el ends here

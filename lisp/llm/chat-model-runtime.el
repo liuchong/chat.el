@@ -171,10 +171,12 @@ failure."
             (funcall finish 'error (list :message message))))
          prepared)
     (condition-case err
-        (setq prepared
-              (chat-model-capabilities-prepare-options
-               provider model (plist-put (copy-tree options)
-                                         :request-id request-id)))
+        (progn
+          (chat-model-capabilities-validate-messages provider model messages)
+          (setq prepared
+                (chat-model-capabilities-prepare-options
+                 provider model (plist-put (copy-tree options)
+                                           :request-id request-id))))
       (error
        (funcall finish-error (error-message-string err))))
     (when prepared

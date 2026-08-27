@@ -20,6 +20,7 @@
 (require 'seq)
 (require 'url)
 (require 'subr-x)
+(require 'chat-content)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
 (require 'chat-model-capabilities)
@@ -31,6 +32,8 @@
 (declare-function chat-message-id "chat-session" (message))
 (declare-function chat-message-role "chat-session" (message))
 (declare-function chat-message-content "chat-session" (message))
+(declare-function chat-message-parts "chat-session" (message))
+(declare-function chat-message-text "chat-session" (message))
 (declare-function chat-message-metadata "chat-session" (message))
 (declare-function chat-message-tool-calls "chat-session" (message))
 (declare-function chat-message-tool-results "chat-session" (message))
@@ -313,6 +316,40 @@ not both claim the same ids."
       (function . ((name . ,name)
                    (arguments . ,encoded))))))
 
+(defun chat-llm--openai-content-part (part)
+  "Encode typed PART for an OpenAI-compatible user message."
+  (pcase (chat-content-part-type part)
+    ('text
+     `((type . "text") (text . ,(chat-content-part-text part))))
+    ('image
+     `((type . "image_url")
+       (image_url
+        . ((url . ,(format "data:%s;base64,%s"
+                           (chat-content-part-mime-type part)
+                           (chat-content-part-base64 part)))))))
+    ('file
+     (if (chat-content-part-text-file-p part)
+         `((type . "text")
+           (text . ,(chat-content-part-file-prompt part)))
+       (error "OpenAI-compatible chat cannot inline file attachment: %s"
+              (chat-content-part-name part))))
+    (_
+     (error "Content part %s is not valid user input"
+            (chat-content-part-type part)))))
+
+(defun chat-llm--openai-content (msg)
+  "Return MSG content in OpenAI-compatible wire form."
+  (let* ((parts (chat-message-parts msg))
+         (non-text (seq-some
+                    (lambda (part)
+                      (not (eq (chat-content-part-type part) 'text)))
+                    parts)))
+    (if (not non-text)
+        (chat-message-text msg)
+      (unless (eq (chat-message-role msg) :user)
+        (error "Only user messages may contain input attachments"))
+      (vconcat (mapcar #'chat-llm--openai-content-part parts)))))
+
 (defun chat-llm--format-one-message (msg &optional replay-reasoning)
   "Convert one chat-message MSG to a provider payload alist.
 
@@ -321,7 +358,7 @@ assistant tool-call message.  Some reasoning transports require that
 field on the following tool-result request; other transports must not
 receive it."
   (let ((role (chat-message-role msg))
-        (content (or (chat-message-content msg) ""))
+        (content (or (chat-message-text msg) ""))
         (calls (chat-message-tool-calls msg))
         (metadata (chat-message-metadata msg)))
     (cond
@@ -351,7 +388,7 @@ receive it."
       `((role . ,(if (keywordp role)
                      (substring (symbol-name role) 1)
                    (symbol-name role)))
-        (content . ,content))))))
+        (content . ,(chat-llm--openai-content msg)))))))
 
 (defun chat-llm--synthetic-tool-messages (msg)
   "Expand persisted tool-results on assistant MSG into tool payloads.
