@@ -401,17 +401,19 @@ reported and changed with `/approve`:
 | Mode | Command gate | Asks | For |
 | --- | --- | --- | --- |
 | `manual` | advice: its reason goes in the question, your yes wins | when not already granted | the default |
-| `auto` | authoritative: a refusal is final | never | unattended work |
+| `guarded` | evidence: its refusal is handed to the guard, which decides | never | unattended work |
 | `dangerous` | skipped | never | throwaway environments |
 
-`manual` is the default rather than `auto` because a refusal under `auto`
-cannot be appealed: a reasonable command the rules happen not to cover is
-simply denied, and a user who does not know which mode they are in cannot
-tell that apart from a broken tool. `dangerous` has to be set on purpose
-and asks to confirm; no interactive choice reaches it, because approving
-one command must never be a way to turn asking off altogether. The status
-line names the mode whenever it is not `manual`, `dangerous` in a warning
-face.
+`manual` is the default rather than `guarded` because nobody is present to
+overrule a guard denial. `dangerous` has to be set on purpose and asks to
+confirm; no interactive choice reaches it, because approving one command
+must never be a way to turn asking off altogether. The status line names
+the mode whenever it is not `manual`, `dangerous` in a warning face.
+
+`guarded` was called `auto`, which pointed the wrong way: it never
+automatically approved anything, it automatically refused. The old name is
+still accepted wherever a mode is read — `/approve auto`, a session file,
+your configuration — and is written back out as `guarded`.
 
 `dangerous` still honours `chat-files-allowed-directories` and the tools a
 session has switched off. Those are limits you configured, not questions

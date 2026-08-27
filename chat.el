@@ -282,7 +282,9 @@ Auto (Default Command):
 Approval (who decides whether a tool call runs):
   /approve            - Say which mode is in force, and where it was set
   /approve manual     - Granted calls run, everything else asks (default)
-  /approve auto       - The rules decide and nothing asks; a refusal is final
+  /approve guarded    - A guard model decides and nothing asks; a denial
+                        goes back to the assistant, which may take another
+                        route. Accepts the old name `auto'.
   /approve dangerous  - Everything runs, command gate off; asks to confirm
   When asked, you can allow once, allow for this session, or allow from now
   on. The last two are remembered as grants: M-x chat-approval-list-grants
@@ -714,24 +716,26 @@ the header and in which commands do anything."
     (message "%s" (chat-approval-mode-report session))))
 
 (defun chat-toggle-auto-approve-global ()
-  "Switch the global approval mode between `auto' and `manual'.
+  "Switch the global approval mode between `guarded' and `manual'.
 
 Sets the mode rather than a separate flag.  Two settings that both mean
 \"stop asking\" can disagree, and then neither the status line nor the
 user can say which one is in force."
   (interactive)
   (chat-approval-set-mode
-   (if (eq chat-approval-mode 'auto) 'manual 'auto))
+   (if (eq (chat-approval-normalize-mode chat-approval-mode) 'guarded)
+       'manual
+     'guarded))
   (message "%s" (chat-approval-mode-report nil)))
 
 (defun chat-toggle-auto-approve-session ()
-  "Switch this session's approval mode between `auto' and `manual'."
+  "Switch this session's approval mode between `guarded' and `manual'."
   (interactive)
   (if (and (boundp 'chat--current-session) chat--current-session)
       (let* ((session chat--current-session)
-             (mode (if (eq (chat-approval-effective-mode session) 'auto)
+             (mode (if (eq (chat-approval-effective-mode session) 'guarded)
                        'manual
-                     'auto)))
+                     'guarded)))
         (chat-approval-set-mode mode session)
         (message "Session '%s': %s"
                  (chat-session-name session)

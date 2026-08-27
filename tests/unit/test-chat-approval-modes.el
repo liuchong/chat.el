@@ -42,12 +42,35 @@
         (session (make-chat-session :id "s" :name "S")))
     (setf (chat-session-approval-mode session) 'inherit)
     (should (eq (chat-approval-effective-mode session) 'manual))
-    (setf (chat-session-approval-mode session) 'auto)
-    (should (eq (chat-approval-effective-mode session) 'auto))
+    (setf (chat-session-approval-mode session) 'guarded)
+    (should (eq (chat-approval-effective-mode session) 'guarded))
     (let ((chat-approval-mode 'dangerous))
-      (should (eq (chat-approval-effective-mode session) 'auto)))))
+      (should (eq (chat-approval-effective-mode session) 'guarded)))))
 
-(ert-deftest chat-approval-an-old-session-with-auto-approve-reads-as-auto ()
+(ert-deftest chat-approval-the-old-auto-name-still-reads-as-guarded ()
+  "`auto' has to be accepted on the way in, and never written back out.
+
+Sessions on disk carry `approvalMode: \"auto\"'.  Dropping the name would
+read them as the default and quietly change what those sessions may do,
+which is the same failure as ignoring `autoApprove'."
+  (should (eq (chat-approval-normalize-mode 'auto) 'guarded))
+  (should (eq (chat-approval-normalize-mode "auto") 'guarded))
+  (should (eq (chat-approval-normalize-mode 'guarded) 'guarded))
+  (should-not (chat-approval-normalize-mode 'nonsense))
+  (should-not (memq 'auto chat-approval-modes))
+  (let ((chat-approval-mode 'manual)
+        (session (make-chat-session :id "s" :name "S")))
+    (setf (chat-session-approval-mode session) 'auto)
+    (should (eq (chat-approval-effective-mode session) 'guarded))
+    ;; Read as an alias, written as the current name.
+    (should (equal (chat-session--approval-mode-wire session) "guarded")))
+  (should (eq (chat-session--approval-mode-from-wire "auto" nil) 'guarded))
+  ;; A global set to the old name behaves as the new one too, because user
+  ;; configuration outlives a rename just as session files do.
+  (let ((chat-approval-mode 'auto))
+    (should (eq (chat-approval-effective-mode nil) 'guarded))))
+
+(ert-deftest chat-approval-an-old-session-with-auto-approve-reads-as-guarded ()
   "Sessions on disk carry `autoApprove'; it must not read as the default.
 
 A session saved with the flag set was running with approval off.  Reading
@@ -56,8 +79,8 @@ and reading it as `dangerous' would hand out the one mode that has to be
 chosen on purpose."
   (let ((chat-approval-mode 'manual)
         (session (make-chat-session :id "s" :name "S" :auto-approve t)))
-    (should (eq (chat-approval-effective-mode session) 'auto))
-    (should (eq (chat-session--approval-mode-from-wire nil t) 'auto))
+    (should (eq (chat-approval-effective-mode session) 'guarded))
+    (should (eq (chat-session--approval-mode-from-wire nil t) 'guarded))
     (should (eq (chat-session--approval-mode-from-wire nil :json-false)
                 'inherit))
     (should (eq (chat-session--approval-mode-from-wire "dangerous" nil)
@@ -66,7 +89,7 @@ chosen on purpose."
 (ert-deftest chat-approval-an-old-auto-approve-session-goes-through-the-rules ()
   "The mode has to be the only route, or it is decoration.
 
-Reading `autoApprove' as `auto' is not enough on its own: while the flag
+Reading `autoApprove' as `guarded' is not enough on its own: while the flag
 also had its own branch in the decision, such a session approved
 everything without consulting a rule, and the mode it reported was not the
 mode it behaved as."
@@ -75,8 +98,9 @@ mode it behaved as."
          (chat-approval-required-tools '(shell_execute))
          (session (make-chat-session :id "s" :name "S" :auto-approve t))
          (chat-approval-decision-function
-          (lambda (&rest _args) (ert-fail "an auto session must not ask"))))
-     (should (eq (chat-approval-effective-mode session) 'auto))
+          (lambda (&rest _args)
+            (ert-fail "a guarded session must not ask"))))
+     (should (eq (chat-approval-effective-mode session) 'guarded))
      ;; Allowed by the gate, so the rules let it through.
      (should (chat-approval-authorize
               (test-chat-approval-tool 'shell_execute)
@@ -123,12 +147,16 @@ mode it behaved as."
      (should-error (chat-files-write "/etc/chat-el-should-not-write" "nope"))
      (should-not (file-exists-p "/etc/chat-el-should-not-write")))))
 
-(ert-deftest chat-approval-auto-mode-follows-the-gate-and-never-asks ()
-  "Under auto the rules are final, and they are the gate's rules."
+(ert-deftest chat-approval-guarded-without-a-guard-follows-the-gate-and-never-asks ()
+  "With no guard configured the fallback rules decide, and they never ask.
+
+This is the degraded path, not the mode's intent: `guarded' means a guard
+model rules on the call.  Nothing is configured here, so the fallback runs
+and its verdict is the gate's."
   (chat-test-with-grants
-   (let ((chat-approval-mode 'auto)
+   (let ((chat-approval-mode 'guarded)
          (chat-approval-decision-function
-          (lambda (&rest _args) (ert-fail "auto mode must not ask")))
+          (lambda (&rest _args) (ert-fail "guarded mode must not ask")))
          events)
      ;; `cat' passes the gate and is on no whitelist, so the rules are what
      ;; decided here rather than a grant.
@@ -151,27 +179,32 @@ mode it behaved as."
                                  (eq (plist-get event :type) 'approval))
                                events)))
        (should-not (plist-get approval :approved))
-       (should (string-match-p "push" (plist-get approval :reason)))))))
+       (should (string-match-p "push" (plist-get approval :reason)))
+       ;; The fallback has to say it is the fallback.  A mode that silently
+       ;; behaves as a worse mode is the failure this flag exists to
+       ;; prevent.
+       (should (plist-get approval :degraded))
+       (should (eq (plist-get approval :decision) 'guarded-fallback))))))
 
-(ert-deftest chat-approval-auto-mode-allows-a-read-only-tool ()
+(ert-deftest chat-approval-guarded-fallback-allows-a-read-only-tool ()
   "Reading needs nobody's permission."
   (chat-test-with-grants
-   (let ((chat-approval-mode 'auto)
+   (let ((chat-approval-mode 'guarded)
          (chat-approval-required-tools '(inspect_thing))
          (chat-approval-decision-function
-          (lambda (&rest _args) (ert-fail "auto mode must not ask"))))
+          (lambda (&rest _args) (ert-fail "guarded mode must not ask"))))
      (should (eq (chat-approval-authorize
                   (test-chat-approval-tool 'inspect_thing '(read))
                   '(:name "inspect_thing" :arguments nil))
                  'rule)))))
 
-(ert-deftest chat-approval-auto-mode-denies-an-unexamined-write ()
+(ert-deftest chat-approval-guarded-fallback-denies-an-unexamined-write ()
   "With nobody watching, a write no rule allowed does not happen."
   (chat-test-with-grants
-   (let ((chat-approval-mode 'auto)
+   (let ((chat-approval-mode 'guarded)
          (chat-approval-required-tools '(publish_thing))
          (chat-approval-decision-function
-          (lambda (&rest _args) (ert-fail "auto mode must not ask"))))
+          (lambda (&rest _args) (ert-fail "guarded mode must not ask"))))
      (should-not (chat-approval-authorize
                   (test-chat-approval-tool 'publish_thing '(outbound))
                   '(:name "publish_thing" :arguments nil))))))
@@ -442,8 +475,12 @@ only a person looking at this particular command can decide that."
     ;; The default is not announced, on the same grounds as the baseline
     ;; command: naming the ordinary case trains the reader to skip it.
     (should-not (chat-ui--status-approval nil)))
+  (let ((chat-approval-mode 'guarded))
+    (should (string-match-p "guarded" (chat-ui--status-approval nil))))
+  ;; A configuration still set to the old name shows the current one, so
+  ;; the status line and the mode in force cannot disagree.
   (let ((chat-approval-mode 'auto))
-    (should (string-match-p "auto" (chat-ui--status-approval nil))))
+    (should (string-match-p "guarded" (chat-ui--status-approval nil))))
   (let* ((chat-approval-mode 'dangerous)
          (segment (chat-ui--status-approval nil)))
     (should (string-match-p "DANGEROUS" segment))
@@ -451,7 +488,7 @@ only a person looking at this particular command can decide that."
 
 (ert-deftest chat-approval-the-report-says-where-the-mode-came-from ()
   "Undoing a mode happens in different places depending on where it was set."
-  (let ((chat-approval-mode 'auto)
+  (let ((chat-approval-mode 'guarded)
         (session (make-chat-session :id "s" :name "S")))
     (should (string-match-p "global default" (chat-approval-mode-report nil)))
     (setf (chat-session-approval-mode session) 'manual)

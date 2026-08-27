@@ -232,7 +232,7 @@ The other two are announced always, and `dangerous' in a face of its own
 worst way for this to fail."
   (pcase (chat-approval-effective-mode session)
     ('manual nil)
-    ('auto (chat-i18n 'status-approval-auto "approval: auto"))
+    ('guarded (chat-i18n 'status-approval-guarded "approval: guarded"))
     ('dangerous
      (propertize (chat-i18n 'status-approval-dangerous "approval: DANGEROUS")
                  'face 'warning))
@@ -1735,9 +1735,12 @@ two settings nobody can talk about."
        (concat (chat-approval-mode-report session)
                ". "
                (chat-i18n 'approval-usage
-                          "/approve manual | auto | dangerous"))))
-     ((member request '("manual" "auto" "dangerous"))
-      (let ((mode (intern request)))
+                          "/approve manual | guarded | dangerous"))))
+     ;; `chat-approval-normalize-mode' rather than a list of names, so
+     ;; `/approve auto' keeps working for anyone whose fingers learned it
+     ;; and for notes written before the rename.
+     ((chat-approval-normalize-mode request)
+      (let ((mode (chat-approval-normalize-mode request)))
         (condition-case err
             (progn
               (chat-approval-set-mode mode session)
@@ -1752,7 +1755,7 @@ two settings nobody can talk about."
      (t
       (chat-ui--insert-system-message
        (chat-i18n 'approval-unknown-mode
-                  "Unknown approval mode `%s'. One of: manual, auto, dangerous."
+                  "Unknown approval mode `%s'. One of: manual, guarded, dangerous."
                   request))))))
 
 (defun chat-ui--repeatable-command-list ()

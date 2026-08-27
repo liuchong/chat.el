@@ -8,7 +8,7 @@
 ;; The answer has a name now.  `chat-approval-mode' is one of three:
 ;;
 ;;   manual     ask, unless a grant already covers the call
-;;   auto       let the rules decide and never ask
+;;   guarded    a guard model rules on the call and the user is not asked
 ;;   dangerous  run everything, skip the gate as well as the prompt
 ;;
 ;; Six independent switches used to produce that answer between them, and
@@ -18,12 +18,20 @@
 ;;
 ;; The mode also settles what the gate is worth.  Under `manual' a person
 ;; reads the command and decides, so the gate is advice: its reason goes into
-;; the prompt and a yes overrides it.  Under `auto' nobody is watching, so the
-;; gate is final.  Under `dangerous' it is not consulted.  The old ordering
-;; had approval first and the gate second with no way for one to inform the
-;; other, so a person could approve a command and watch it be refused anyway.
+;; the prompt and a yes overrides it.  Under `guarded' the guard model plays
+;; that part, so the gate's refusal is evidence handed to it rather than the
+;; end of the matter.  Under `dangerous' it is not consulted.  The old
+;; ordering had approval first and the gate second with no way for one to
+;; inform the other, so a person could approve a command and watch it be
+;; refused anyway.
 ;;
-;; See specs/012-approval-modes-and-grants.md.
+;; The middle mode was called `auto' and did not deserve the name: it was
+;; four table lookups that could only say no, so it never automatically
+;; approved anything.  `auto' is still accepted on the way in, because
+;; sessions on disk carry it.
+;;
+;; See specs/012-approval-modes-and-grants.md and
+;; specs/013-guard-model-approval.md.
 ;;; Code:
 (require 'cl-lib)
 (require 'seq)
@@ -49,25 +57,45 @@
   "Approval handling for chat.el."
   :group 'chat)
 
-(defconst chat-approval-modes '(manual auto dangerous)
+(defconst chat-approval-modes '(manual guarded dangerous)
   "The three answers to who decides whether a tool call may run.")
+
+(defconst chat-approval-mode-aliases '((auto . guarded))
+  "Older mode names and what they mean now.
+
+Read-side only.  `chat-approval-normalize-mode' applies these; nothing
+writes an alias back out.  `auto' is here because sessions on disk carry
+`approvalMode: \"auto\"' and dropping it would read those sessions as the
+default and quietly change what they may do.")
+
+(defun chat-approval-normalize-mode (mode)
+  "Return the current name for MODE, or nil when it is not a mode.
+
+Accepts a symbol or a string, so callers reading from disk or from a
+command argument do not each have to intern first."
+  (let ((symbol (cond ((stringp mode) (intern mode))
+                      ((symbolp mode) mode))))
+    (cond
+     ((memq symbol chat-approval-modes) symbol)
+     ((alist-get symbol chat-approval-mode-aliases)))))
 
 (defcustom chat-approval-mode 'manual
   "Who decides whether a tool call may run.
 
 `manual'     a grant lets it through, otherwise the user is asked
-`auto'       `chat-approval-rules' decide and the user is never asked
+`guarded'    a guard model rules on the call and the user is not asked
 `dangerous'  everything runs; the command gate is skipped too
 
-The default is `manual' rather than `auto' because a refusal under `auto'
-is final.  A reasonable command that the rules happen not to cover is
-simply denied, with nobody to appeal to, and a user who does not know
-which mode they are in has no way to tell that apart from a broken tool.
+The default is `manual' rather than `guarded' because a guard denial is
+not something the user is present to overrule.  It can be worked around --
+the model is told and may take another route -- but a user who does not
+know which mode they are in still cannot tell a policy denial apart from a
+broken tool.
 
 `dangerous' has to be set on purpose.  No interactive choice reaches it:
 approving one command must never be a way to turn asking off altogether."
   :type '(choice (const :tag "Ask when not already granted" manual)
-                 (const :tag "Let the rules decide, never ask" auto)
+                 (const :tag "Let a guard model decide, never ask" guarded)
                  (const :tag "Allow everything (dangerous)" dangerous))
   :group 'chat-approval)
 
@@ -150,11 +178,14 @@ Only file writing tools with a clear directory scope can use this whitelist."
   :group 'chat-approval)
 
 (defcustom chat-approval-rules
-  '(chat-approval-rule-granted
-    chat-approval-rule-command-gate
+  '(chat-approval-rule-command-gate
     chat-approval-rule-read-only
     chat-approval-rule-effects)
-  "Rules consulted under `auto', in order, until one has an opinion.
+  "Rules consulted when `guarded' has no guard, in order, until one speaks.
+
+This is the fallback, not the policy.  With a guard model configured the
+guard decides and these are not consulted; they run when it is unavailable,
+and the event log says the mode is operating degraded.
 
 Each is called with (TOOL CALL SESSION) and returns `allow', nil for no
 opinion, or a cons (deny . REASON).  Returning nil is what lets a rule
@@ -208,23 +239,24 @@ disk carry it: a session saved with it set was running with approval off,
 and reading it as the default would silently change what that session is
 allowed to do."
   (let ((session-mode
-         (and session
-              (fboundp 'chat-session-approval-mode)
-              (chat-session-approval-mode session))))
+         (chat-approval-normalize-mode
+          (and session
+               (fboundp 'chat-session-approval-mode)
+               (chat-session-approval-mode session)))))
     (cond
-     ((memq session-mode chat-approval-modes) session-mode)
+     (session-mode session-mode)
      ((and session
            (fboundp 'chat-session-auto-approve)
            (eq (chat-session-auto-approve session) t))
-      'auto)
-     ((memq chat-approval-mode chat-approval-modes) chat-approval-mode)
+      'guarded)
+     ((chat-approval-normalize-mode chat-approval-mode))
      (t 'manual))))
 
 (defun chat-approval-mode-description (mode)
   "Return a short label for MODE."
-  (pcase mode
+  (pcase (chat-approval-normalize-mode mode)
     ('manual "manual approval")
-    ('auto "auto approval")
+    ('guarded "guarded: a guard model decides")
     ('dangerous "DANGEROUS: allow everything")
     (_ (format "%s" mode))))
 
@@ -232,18 +264,19 @@ allowed to do."
   "Return a sentence describing the approval mode in force for SESSION.
 
 Says where the mode came from as well as what it is.  A user looking at
-`auto' needs to know whether this session chose it or the global default
-did, because those are undone in different places."
+`guarded' needs to know whether this session chose it or the global
+default did, because those are undone in different places."
   (let* ((session (or session
                       (and (boundp 'chat--current-session)
                            chat--current-session)))
          (mode (chat-approval-effective-mode session))
-         (session-mode (and session
-                            (fboundp 'chat-session-approval-mode)
-                            (chat-session-approval-mode session))))
+         (session-mode (chat-approval-normalize-mode
+                        (and session
+                             (fboundp 'chat-session-approval-mode)
+                             (chat-session-approval-mode session)))))
     (format "Approval: %s (%s)"
             (chat-approval-mode-description mode)
-            (if (memq session-mode chat-approval-modes)
+            (if session-mode
                 "set on this session"
               "global default"))))
 
@@ -258,20 +291,20 @@ runs anything cannot be entered without saying yes to it."
                                  (mapcar #'symbol-name chat-approval-modes)
                                  nil t))
          (and (boundp 'chat--current-session) chat--current-session)))
-  (unless (memq mode chat-approval-modes)
-    (user-error "Unknown approval mode: %s" mode))
-  (when (and (eq mode 'dangerous)
-             (not noninteractive)
-             (not (yes-or-no-p
-                   "Dangerous mode runs every command without asking. Enable? ")))
-    (user-error "Left approval mode unchanged"))
-  (if session
-      (when (fboundp 'chat-session-set-approval-mode)
-        (chat-session-set-approval-mode session mode))
-    (setq chat-approval-mode mode))
-  mode)
+  (let ((mode (or (chat-approval-normalize-mode mode)
+                  (user-error "Unknown approval mode: %s" mode))))
+    (when (and (eq mode 'dangerous)
+               (not noninteractive)
+               (not (yes-or-no-p
+                     "Dangerous mode runs every command without asking. Enable? ")))
+      (user-error "Left approval mode unchanged"))
+    (if session
+        (when (fboundp 'chat-session-set-approval-mode)
+          (chat-session-set-approval-mode session mode))
+      (setq chat-approval-mode mode))
+    mode))
 
-;;; Rules for auto mode
+;;; Fallback rules, for when `guarded' has no guard to consult
 
 (defun chat-approval--command-refusal (tool-id arguments)
   "Return the tool's refusal for the command in ARGUMENTS, or nil."
@@ -290,7 +323,12 @@ runs anything cannot be entered without saying yes to it."
     (format "%s" refusal)))
 
 (defun chat-approval-rule-granted (tool call session)
-  "Allow when a grant already covers this CALL of TOOL in SESSION."
+  "Allow when a grant already covers this CALL of TOOL in SESSION.
+
+Not in `chat-approval-rules' by default, because on the authorize path it
+can never fire: grants are matched before the mode is branched on, so a
+call that reaches the rules has already failed this test.  Kept for a user
+who assembles their own rule list and wants the check explicit."
   (and (chat-approval-grant-match (chat-forged-tool-id tool)
                                   (plist-get call :arguments)
                                   session)
@@ -307,11 +345,20 @@ runs anything cannot be entered without saying yes to it."
         'allow))))
 
 (defun chat-approval-rule-read-only (tool _call _session)
-  "Allow TOOL when reading is all it does."
+  "Allow TOOL when reading is all it does and what it reads is not sensitive.
+
+Sensitivity has to be part of this, not just effects.  An MCP tool always
+declares `:sensitivity 'network' while its effects come from the remote
+end, so a remote that describes itself as read-only used to be waved
+through on its own word.  Reading is not harmless when the thing read is a
+credential."
   (let ((effects (and (chat-forged-tool-p tool)
-                      (chat-forged-tool-effects tool))))
+                      (chat-forged-tool-effects tool)))
+        (sensitivity (and (chat-forged-tool-p tool)
+                          (chat-forged-tool-sensitivity tool))))
     (and effects
          (seq-every-p (lambda (effect) (eq effect 'read)) effects)
+         (not (memq sensitivity chat-approval-required-sensitivities))
          'allow)))
 
 (defun chat-approval-rule-effects (tool _call _session)
@@ -323,7 +370,7 @@ runs anything cannot be entered without saying yes to it."
                               effects)))
     (when matched
       (cons 'deny
-            (format "auto approval will not run a tool with %s effects; %s"
+            (format "the fallback rules will not run a tool with %s effects; %s"
                     (mapconcat #'symbol-name matched ", ")
                     "approve it once in manual mode or grant it")))))
 
@@ -483,7 +530,7 @@ call it: every one of these settings is read as a grant now, and a session
 flag is read as a mode, so answering the same question twice by two routes
 would let them disagree and would make the mode decoration."
   (and (or (chat-approval-grant-match tool-id nil session)
-           (memq (chat-approval-effective-mode session) '(auto dangerous)))
+           (memq (chat-approval-effective-mode session) '(guarded dangerous)))
        t))
 
 (defun chat-approval--notify (observer event)
@@ -689,8 +736,13 @@ said \"this\" and did \"everything\"."
            :approved t))))
 
 (defun chat-approval--authorize-by-rules (tool tool-id arguments session observer)
-  "Decide CALL of TOOL under `auto' from `chat-approval-rules'.
-Returns the consent symbol, or nil after telling OBSERVER why not."
+  "Decide CALL of TOOL from `chat-approval-rules' with no guard to consult.
+Returns the consent symbol, or nil after telling OBSERVER why not.
+
+Every event this reports carries `:degraded t'.  Under `guarded' the guard
+is meant to decide; falling back to a table that can only say no is a
+worse mode than the one the user asked for, and the one thing that must
+not happen is for it to look the same from outside."
   (let ((verdict (chat-approval-evaluate-rules
                   tool (list :arguments arguments) session)))
     (pcase verdict
@@ -699,7 +751,8 @@ Returns the consent symbol, or nil after telling OBSERVER why not."
         observer
         (append (list :type 'approval
                       :tool (symbol-name tool-id)
-                      :decision 'auto-rules
+                      :decision 'guarded-fallback
+                      :degraded t
                       :approved t)
                 (chat-approval--event-context tool-id arguments)))
        'rule)
@@ -708,22 +761,25 @@ Returns the consent symbol, or nil after telling OBSERVER why not."
         observer
         (append (list :type 'approval
                       :tool (symbol-name tool-id)
-                      :decision 'auto-rules
+                      :decision 'guarded-fallback
+                      :degraded t
                       :approved nil
                       :reason reason)
                 (chat-approval--event-context tool-id arguments)))
        nil)
       (_
-       ;; No rule had an opinion.  Under auto there is nobody to ask, and
-       ;; running an unexamined write is the one outcome this mode must not
-       ;; produce, so silence means no.
+       ;; No rule had an opinion.  With no guard and nobody to ask, running
+       ;; an unexamined write is the one outcome this mode must not produce,
+       ;; so silence means no.
        (chat-approval--notify
         observer
         (append (list :type 'approval
                       :tool (symbol-name tool-id)
-                      :decision 'auto-rules
+                      :decision 'guarded-fallback
+                      :degraded t
                       :approved nil
-                      :reason "no rule allowed this call under auto approval")
+                      :reason (concat "no guard model is configured and no "
+                                      "fallback rule allowed this call"))
                 (chat-approval--event-context tool-id arguments)))
        nil))))
 
@@ -768,7 +824,7 @@ the tool happened to be asynchronous."
                    (list :directory (chat-approval-grant-pattern grant)))
                  (chat-approval--event-context tool-id arguments)))
         'grant))
-     ((eq mode 'auto)
+     ((eq mode 'guarded)
       (chat-approval--authorize-by-rules
        tool tool-id arguments session observer))
      ((chat-approval--allow-noninteractive-p) 'rule)

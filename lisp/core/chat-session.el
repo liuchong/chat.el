@@ -59,7 +59,7 @@
   summaries             ; Durable compaction or branch summary records
   recovery-state        ; Computed interrupted-run recovery metadata
   auto-approve          ; Superseded by approval-mode; still read from old files
-  approval-mode         ; manual, auto, dangerous, 'inherit, or nil
+  approval-mode         ; manual, guarded, dangerous, 'inherit, or nil
   approval-grants       ; Session-scoped approval grants; never persisted
   metadata)             ; Additional metadata alist keyed by symbols
 
@@ -856,27 +856,44 @@ branch starts with no messages. SESSION is never truncated."
    (t (list value))))
 
 (defun chat-session--approval-mode-wire (session)
-  "Return SESSION's approval mode for the wire format."
-  (let ((mode (chat-session-approval-mode session)))
-    (if (memq mode '(manual auto dangerous))
-        (symbol-name mode)
-      "inherit")))
+  "Return SESSION's approval mode for the wire format.
+
+Writes the current name only.  A session read as `guarded' from the older
+`auto' is written back as `guarded', so the alias does not outlive the
+files that need it."
+  (if-let ((mode (chat-session--normalize-approval-mode
+                  (chat-session-approval-mode session))))
+      (symbol-name mode)
+    "inherit"))
+
+(defun chat-session--normalize-approval-mode (mode)
+  "Return MODE as a current mode name symbol, or nil.
+
+Delegates to `chat-approval' when it is loaded so there is one list of
+mode names.  Sessions are readable without the approval module, hence the
+fallback."
+  (if (fboundp 'chat-approval-normalize-mode)
+      (chat-approval-normalize-mode mode)
+    (let ((symbol (cond ((stringp mode) (intern mode))
+                        ((symbolp mode) mode))))
+      (cond ((memq symbol '(manual guarded dangerous)) symbol)
+            ((eq symbol 'auto) 'guarded)))))
 
 (defun chat-session--approval-mode-from-wire (value auto-approve-value)
   "Return an approval mode from wire VALUE, or from AUTO-APPROVE-VALUE.
 
 A session written before modes existed carries only `autoApprove'.  When
 that was true the session was running with approval switched off, so it
-reads back as `auto' rather than as the default: reading it as `manual'
+reads back as `guarded' rather than as the default: reading it as `manual'
 would start asking in a session someone left unattended, and reading it as
-`dangerous' would hand out the one mode that must be chosen deliberately."
-  (cond
-   ((and (stringp value)
-         (member value '("manual" "auto" "dangerous")))
-    (intern value))
-   ((memq value '(manual auto dangerous)) value)
-   ((eq auto-approve-value t) 'auto)
-   (t 'inherit)))
+`dangerous' would hand out the one mode that must be chosen deliberately.
+
+Sessions written while the middle mode was called `auto' read back as
+`guarded' for the same reason -- as the default they would silently change
+what that session may do."
+  (or (chat-session--normalize-approval-mode value)
+      (and (eq auto-approve-value t) 'guarded)
+      'inherit))
 
 (defun chat-session--deserialize (data)
   "Convert JSON-parsed DATA to chat-session struct."
