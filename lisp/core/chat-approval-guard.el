@@ -1198,7 +1198,7 @@ will not come is a hung turn."
               (list :temperature 0
                     :timeout chat-approval-guard-timeout
                     :tools chat-approval-guard--verdict-tool
-                    :tool-choice "required")
+                    :tool-choice "auto")
               (when-let ((name (chat-approval-guard--model-name session)))
                 (list :model name)))))
         (error

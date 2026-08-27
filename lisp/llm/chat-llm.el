@@ -1011,10 +1011,9 @@ OPTIONS is an optional plist of request parameters."
       (if tools
           (append payload
                   (list :tools tools
-                        ;; "auto" leaves the model free to answer in prose
-                        ;; instead, which is right for a conversation and
-                        ;; wrong for a caller that wants one structured
-                        ;; answer and nothing else.
+                        ;; "auto" is the portable default: some thinking
+                        ;; models reject forced tool calls.  Callers that
+                        ;; require structure must validate the response.
                         :tool_choice (or (plist-get options :tool-choice)
                                          "auto")))
         payload))))

@@ -459,7 +459,9 @@ Answer by calling the verdict tool exactly once, and output nothing else.
 ### 5. 输出契约与失败即拒
 
 裁决走受约束的结构化输出——优先用工具调用的 schema(照 goose),provider 不支持时退到
-严格 JSON。字段:
+严格 JSON。工具调用使用 `tool_choice: auto`,因为部分 provider 的思考模式支持工具调用,
+但拒绝 `required`。提示词要求只调用一次裁决工具,而解析器不信任提示词:模型若改答散文或
+返回坏 JSON,仍按失败即拒处理。字段:
 
 | 字段 | 取值 | 说明 |
 |---|---|---|

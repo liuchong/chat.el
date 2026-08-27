@@ -496,8 +496,8 @@ code matches against."
        (lambda (_verdict) (setq count (1+ count))))
       (should (= count 1)))))
 
-(ert-deftest chat-approval-guard-a-request-asks-for-a-structured-verdict ()
-  "`tool_choice' of \"auto\" leaves the model free to answer in prose."
+(ert-deftest chat-approval-guard-a-request-uses-portable-tool-choice ()
+  "Thinking models may reject forced calls, so structure is validated here."
   (let ((chat-approval-guard-provider 'test-provider)
         (options nil))
     (cl-letf (((symbol-function 'chat-llm-request-async)
@@ -509,9 +509,9 @@ code matches against."
        nil
        #'ignore)
       (should (plist-get options :tools))
-      (should (equal (plist-get options :tool-choice) "required"))
-      ;; Temperature zero because the same call should get the same answer;
-      ;; reproducibility is most of what a policy decision is worth.
+      (should (equal (plist-get options :tool-choice) "auto"))
+      ;; Useful to providers that honor it.  Thinking providers may ignore
+      ;; temperature, so correctness comes from validation and fail-closed.
       (should (equal (plist-get options :temperature) 0))
       (should (equal (plist-get options :timeout)
                      chat-approval-guard-timeout)))))

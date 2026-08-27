@@ -68,7 +68,9 @@ Two supporting choices:
 **Structured output, and failure is refusal.** An allow requires
 `decision: allow`, `confidence: high` and a non-empty `matched-rule`.
 Prose, bad JSON, an abstain, a hedge, a timeout, a missing provider — all
-refuse. A guard that fails open is not one.
+refuse. The verdict tool is offered with `tool_choice: auto`: thinking
+models may reject a forced call, while validation makes a prose response a
+refusal rather than authority. A guard that fails open is not one.
 
 **Denials are remembered for the session, allowances never are.** The key
 is the exact arguments, so a refused call repeated verbatim costs nothing

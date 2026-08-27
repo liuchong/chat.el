@@ -442,6 +442,8 @@ call within policy" towards "does the assistant seem to want this".
 It cannot mint authority. A verdict allows only when it says which policy
 rule it matched, at high confidence. Deny, abstain, a missing field,
 prose, a timeout, no provider — every one of those is a refusal.
+The verdict tool uses the portable `auto` choice because some thinking
+models reject forced tool calls; returning prose still refuses.
 
 Underneath it is a floor that no verdict moves: writes outside the allowed
 directories, recursive deletes of the filesystem root or your home or the
