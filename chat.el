@@ -115,6 +115,7 @@ Returns the list of files that were loaded."
 (require 'chat-reading)
 (require 'chat-approval-grants)
 (require 'chat-approval)
+(require 'chat-approval-guard)
 (require 'chat-wiki)
 
 ;; Load LLM providers.

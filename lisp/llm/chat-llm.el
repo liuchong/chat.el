@@ -1009,7 +1009,14 @@ OPTIONS is an optional plist of request parameters."
                          :stream stream))
           (tools (plist-get options :tools)))
       (if tools
-          (append payload (list :tools tools :tool_choice "auto"))
+          (append payload
+                  (list :tools tools
+                        ;; "auto" leaves the model free to answer in prose
+                        ;; instead, which is right for a conversation and
+                        ;; wrong for a caller that wants one structured
+                        ;; answer and nothing else.
+                        :tool_choice (or (plist-get options :tool-choice)
+                                         "auto")))
         payload))))
 
 (defun chat-llm-parse-openai-compatible-response (json-data)
