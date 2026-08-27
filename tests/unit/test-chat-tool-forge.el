@@ -119,6 +119,28 @@
     ;; Cleanup
     (remhash 'test-add chat-tool-forge--registry)))
 
+(ert-deftest chat-tool-forge-counts-a-tool-that-never-said-where-to-start ()
+  "A tool built without a counter still runs, and still counts.
+
+Every registration site in the tree writes `:usage-count 0', which is a
+default living in twenty places instead of one.  The cost of that showed up
+where it always does: a tool constructed without it registers cleanly and
+then dies on execution, incrementing nil, so the failure lands a layer away
+from the omission and reads as the tool being broken."
+  (let ((tool (make-chat-forged-tool
+               :id 'test-uncounted
+               :name "Test Uncounted"
+               :language 'elisp
+               :compiled-function (lambda (&rest _) "ran")
+               :is-active t)))
+    (should (= (chat-forged-tool-usage-count tool) 0))
+    (puthash 'test-uncounted tool chat-tool-forge--registry)
+    (unwind-protect
+        (progn
+          (should (equal (chat-tool-forge-execute 'test-uncounted nil) "ran"))
+          (should (= (chat-forged-tool-usage-count tool) 1)))
+      (remhash 'test-uncounted chat-tool-forge--registry))))
+
 (ert-deftest chat-tool-forge-compile-rejects-non-lambda-form ()
   "Test tool compilation rejects forms other than a single lambda."
   (let ((tool (make-chat-forged-tool

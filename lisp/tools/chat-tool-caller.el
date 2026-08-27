@@ -841,91 +841,214 @@ An access contains :resource, :mode, and optional :exclusive."
    ((and (consp handle) (functionp (plist-get handle :cancel)))
     (ignore-errors (funcall (plist-get handle :cancel))))))
 
+(defmacro chat-tool-caller--with-execution-context (session &rest body)
+  "Run BODY with the file boundary and working directory SESSION implies.
+
+Re-established rather than inherited, because a guard verdict arrives in an
+HTTP callback: the dynamic bindings the enclosing `let' set up are long
+gone by then.  Inheriting them worked only as long as authorization was
+synchronous, and the failure it produces when it stops being synchronous is
+the quiet kind -- the tool runs against the global
+`chat-files-allowed-directories' instead of the session's, so the path
+boundary the floor relies on is wider than anyone asked for."
+  (declare (indent 1))
+  `(let* ((chat-tool-caller-current-session ,session)
+          (chat-files-allowed-directories
+           (chat-tool-caller--allowed-directories))
+          (default-directory
+           (file-name-as-directory
+            (chat-files--resolved-path
+             (chat-tool-caller--execution-directory ,session)))))
+     ,@body))
+
+(defun chat-tool-caller--denial-text (name reason)
+  "Return what the assistant is told when CALL of NAME was denied for REASON.
+
+Three parts, and each is there because leaving it out changed what the
+assistant did next.  It says the decision was an automatic policy one
+rather than the user objecting, because those mean opposite things: a
+person refusing means stop and wait, a policy refusing means this route is
+closed.  It gives the reason, because \"Approval denied\" with nothing
+after it is what sent a run round the same loop for eight minutes.  And it
+names the two ways forward, without the word STOP -- a policy denial is
+usually worth working around, and telling the assistant to halt on one
+throws away a task that had another route."
+  (format "%s %s %s"
+          (format (concat "Denied: the automatic approval policy did not"
+                          " permit this call to '%s' (this is not the user"
+                          " declining).")
+                  name)
+          (if reason (format "Reason: %s." reason) "")
+          (concat "You may try a different approach that stays within the"
+                  " policy, or explain this limitation and finish without"
+                  " it. Do not repeat this same call unchanged.")))
+
+(defun chat-tool-caller--run-async-tool
+    (tool name arguments consent observer success error-callback)
+  "Run TOOL's asynchronous function for CALL, already authorized as CONSENT.
+
+The caller has re-established the execution context; this spawns the work
+inside it, since an async tool validates its command and starts its
+process before returning."
+  (let ((argv (chat-tool-caller--arguments-to-argv tool arguments)))
+    (cl-incf (chat-forged-tool-usage-count tool))
+    ;; The binding has to cover the call that starts the work, not the
+    ;; callbacks: an async tool validates its command and spawns the
+    ;; process before returning, and a dynamic binding would be long gone
+    ;; by the time output arrives.
+    (let ((chat-approval-consent consent))
+      (funcall
+       (chat-forged-tool-async-function tool)
+       argv
+       (lambda (result)
+         (let ((text (chat-tool-caller--stringify-result result)))
+           (chat-tool-caller--notify
+            observer
+            (list :type 'tool-result
+                  :tool name
+                  :result-summary
+                  (chat-tool-caller--tool-result-summary text)))
+           (funcall success text)))
+       (lambda (message)
+         (let ((text (format "Error executing tool '%s': %s" name message)))
+           (chat-tool-caller--notify
+            observer
+            (list :type 'tool-error
+                  :tool name
+                  :result-summary (chat-tool-caller--compact-text text)))
+           (funcall error-callback text)))))))
+
 (defun chat-tool-caller-execute-async
     (call session observer success error-callback)
   "Execute CALL and invoke SUCCESS or ERROR-CALLBACK.
-Tools without an asynchronous runner complete synchronously through the
-normal execution path. Asynchronous runners receive ARGV, SUCCESS, and
-ERROR-CALLBACK and return a cancellable handle."
-  (let ((tool (chat-tool-caller-call-tool call)))
-    (if (not (and tool (chat-forged-tool-async-function tool)))
-        (funcall success (chat-tool-caller-execute call session observer))
-      (let* ((name (plist-get call :name))
-             (arguments (plist-get call :arguments))
-             (tool-id (chat-forged-tool-id tool))
-             (actual-session (or session
-                                 (when (boundp 'chat--current-session)
-                                   chat--current-session))))
-        (condition-case err
-            (let ((chat-tool-caller-current-session actual-session)
-                  (chat-files-allowed-directories
-                   (chat-tool-caller--allowed-directories))
-                  (default-directory
-                   (file-name-as-directory
-                    (chat-files--resolved-path
-                     (chat-tool-caller--execution-directory actual-session)))))
+
+The one place live tool execution is authorized, and it happens before the
+split between tools that have an asynchronous runner and tools that do
+not.  It used to happen after: a tool without an async function was handed
+to the synchronous path, which authorized it separately, so which of two
+authorization sites applied depended on whether the tool happened to be
+asynchronous.  That is the same shape as the bug where a grant took effect
+or did not for the same reason.
+
+A denial arrives through SUCCESS, not ERROR-CALLBACK.  It is a policy
+outcome the assistant should read and route around, and reporting it as a
+tool fault gets it the wrong wording and the wrong handling from the agent
+loop."
+  (let* ((tool (chat-tool-caller-call-tool call))
+         (name (plist-get call :name))
+         (arguments (plist-get call :arguments))
+         (tool-id (intern name))
+         (actual-session (or session
+                             (when (boundp 'chat--current-session)
+                               chat--current-session))))
+    (condition-case err
+        (chat-tool-caller--with-execution-context actual-session
+          (chat-tool-caller--notify
+           observer
+           (append (list :type 'tool-call
+                         :tool name
+                         :arguments arguments)
+                   (when tool
+                     (chat-tool-caller--permission-metadata tool))))
+          (cond
+           ((null tool)
+            (funcall success (format "Error: Tool '%s' not found" name)))
+           ((not (chat-session-tool-enabled-p actual-session tool-id))
+            (let ((text (format "Error: Tool '%s' is disabled for this session"
+                                name)))
               (chat-tool-caller--notify
                observer
-               (append (list :type 'tool-call
-                             :tool name
-                             :arguments arguments)
-                       (chat-tool-caller--permission-metadata tool)))
-              (unless (chat-session-tool-enabled-p actual-session tool-id)
-                (error "Tool '%s' is disabled for this session" name))
-              (let ((argv (chat-tool-caller--arguments-to-argv tool arguments))
-                    (consent (chat-approval-authorize
-                              tool call actual-session observer)))
-                (if (not consent)
-                    (let ((text (format "Approval denied for tool '%s'" name)))
-                      (chat-tool-caller--notify
-                       observer
-                       (list :type 'tool-error
-                             :tool name
-                             :result-summary text))
-                      (funcall error-callback text))
-                  (cl-incf (chat-forged-tool-usage-count tool))
-                  ;; The binding has to cover the call that starts the work,
-                  ;; not the callbacks: an async tool validates its command
-                  ;; and spawns the process before returning, and a dynamic
-                  ;; binding would be long gone by the time output arrives.
-                  (let ((chat-approval-consent consent))
-                    (funcall
-                     (chat-forged-tool-async-function tool)
-                     argv
-                     (lambda (result)
-                       (let ((text (chat-tool-caller--stringify-result result)))
-                         (chat-tool-caller--notify
-                          observer
-                          (list :type 'tool-result
-                                :tool name
-                                :result-summary
-                                (chat-tool-caller--tool-result-summary text)))
-                         (funcall success text)))
-                     (lambda (message)
-                       (let ((text (format "Error executing tool '%s': %s"
-                                           name message)))
-                         (chat-tool-caller--notify
-                          observer
-                          (list :type 'tool-error
-                                :tool name
-                                :result-summary
-                                (chat-tool-caller--compact-text text)))
-                         (funcall error-callback text))))))))
-          (error
-           (let ((text (format "Error executing tool '%s': %s"
-                               name (error-message-string err))))
-             (chat-tool-caller--notify
-              observer
-              (list :type 'tool-error
-                    :tool name
-                    :result-summary
-                    (chat-tool-caller--compact-text text)))
-             (funcall error-callback text))))))))
+               (list :type 'tool-error :tool name :result-summary text))
+              (funcall success text)))
+           (t
+            (chat-approval-authorize-async
+             tool call actual-session observer
+             (lambda (consent reason)
+               ;; Re-established here: with a guard this callback runs from
+               ;; an HTTP response, by which time the bindings above are
+               ;; gone.
+               (chat-tool-caller--with-execution-context actual-session
+                 (cond
+                  ((not consent)
+                   (let ((text (chat-tool-caller--denial-text name reason)))
+                     (chat-tool-caller--notify
+                      observer
+                      (list :type 'tool-error
+                            :tool name
+                            :result-summary
+                            (chat-tool-caller--compact-text text)))
+                     (funcall success text)))
+                  ((chat-forged-tool-async-function tool)
+                   (chat-tool-caller--run-async-tool
+                    tool name arguments consent
+                    observer success error-callback))
+                  (t
+                   (funcall success
+                            (chat-tool-caller--execute-authorized
+                             tool call actual-session observer
+                             consent))))))))))
+      (error
+       (let ((text (format "Error executing tool '%s': %s"
+                           name (error-message-string err))))
+         (chat-tool-caller--notify
+          observer
+          (list :type 'tool-error
+                :tool name
+                :result-summary (chat-tool-caller--compact-text text)))
+         (funcall error-callback text))))))
+
+(defun chat-tool-caller--execute-authorized
+    (tool call _session observer consent)
+  "Run CALL of TOOL, which has already been authorized as CONSENT.
+
+Split out so that authorization happens exactly once per call.  Both entry
+points authorize and then land here; when the asynchronous one delegates a
+tool that has no asynchronous runner, it does not go back through a second
+authorization, which would ask a second time under `manual'.
+
+The caller has re-established the execution context."
+  (let ((name (plist-get call :name))
+        (arguments (plist-get call :arguments))
+        (tool-id (chat-forged-tool-id tool)))
+    (condition-case err
+        (let ((result
+               (chat-tool-caller--stringify-result
+                (let ((chat-approval-consent consent))
+                  (chat-tool-forge-execute
+                   tool-id
+                   (chat-tool-caller--arguments-to-argv tool arguments))))))
+          (chat-tool-caller--notify
+           observer
+           (list :type 'tool-result
+                 :tool name
+                 :result-summary
+                 (chat-tool-caller--tool-result-summary result)))
+          result)
+      (error
+       (let ((result
+              (format "Error executing tool '%s': %s"
+                      name
+                      (chat-tool-caller--access-denied-hint
+                       tool-id (error-message-string err)))))
+         (chat-tool-caller--notify
+          observer
+          (list :type 'tool-error
+                :tool name
+                :result-summary (chat-tool-caller--compact-text result)))
+         result)))))
 
 (defun chat-tool-caller-execute (call &optional session observer)
-  "Execute one parsed tool CALL.
+  "Execute one parsed tool CALL synchronously and return its result text.
 Optional SESSION is the current chat session for approval context.
-If SESSION is nil, uses `chat--current-session' if bound."
+If SESSION is nil, uses `chat--current-session' if bound.
+
+Not on the live path -- `chat-tool-caller-execute-async' is the only
+execution entry the agent loop and workflows use -- but still public, and
+called directly by tests and prototypes.  It authorizes for itself rather
+than trusting its caller, and under `guarded' with a guard available it
+refuses: there is nowhere in a synchronous function to wait for a verdict,
+and falling back to the rules the guard was configured to replace would be
+a silent downgrade of the mode."
   (let* ((name (plist-get call :name))
          (arguments (plist-get call :arguments))
          (tool-id (intern name))
@@ -934,12 +1057,7 @@ If SESSION is nil, uses `chat--current-session' if bound."
                              (when (boundp 'chat--current-session)
                                chat--current-session))))
     (condition-case err
-        (let ((chat-tool-caller-current-session actual-session)
-              (chat-files-allowed-directories (chat-tool-caller--allowed-directories))
-              (default-directory (file-name-as-directory
-                                  (chat-files--resolved-path
-                                   (chat-tool-caller--execution-directory
-                                    actual-session)))))
+        (chat-tool-caller--with-execution-context actual-session
           (chat-tool-caller--notify
            observer
            (append
@@ -960,33 +1078,18 @@ If SESSION is nil, uses `chat--current-session' if bound."
                      :result-summary result))
               result))
            (t
-            ;; One gate for every tool.  The shell whitelist used to be
-            ;; consulted here and nowhere else, so a grant took effect or did
-            ;; not depending on whether the tool happened to be asynchronous.
-            ;; `chat-approval-authorize' now knows about grants, and reports
-            ;; how it decided so the tool can tell whether a person looked.
             (let ((consent (chat-approval-authorize
                             tool call actual-session observer)))
               (if consent
-                  (let ((result
-                         (chat-tool-caller--stringify-result
-                          (let ((chat-approval-consent consent))
-                            (chat-tool-forge-execute
-                             tool-id
-                             (chat-tool-caller--arguments-to-argv
-                              tool arguments))))))
-                    (chat-tool-caller--notify
-                     observer
-                     (list :type 'tool-result
-                           :tool name
-                           :result-summary (chat-tool-caller--tool-result-summary result)))
-                    result)
-                (let ((result (format "Approval denied for tool '%s'" name)))
+                  (chat-tool-caller--execute-authorized
+                   tool call actual-session observer consent)
+                (let ((result (chat-tool-caller--denial-text name nil)))
                   (chat-tool-caller--notify
                    observer
                    (list :type 'tool-error
                          :tool name
-                         :result-summary result))
+                         :result-summary
+                         (chat-tool-caller--compact-text result)))
                   result))))))
       (error
        (let ((result
@@ -1033,36 +1136,32 @@ If SESSION is nil, uses `chat--current-session' if bound."
                         t)))
         (string-trim-right result))))))
 
-(defun chat-tool-caller-process-response-data (content &optional session observer)
-  "Process CONTENT for SESSION and return a result plist.
+(defun chat-tool-caller-process-response-data (content &optional _session observer)
+  "Process CONTENT and return a result plist.
+
+Parses and reports; it does not execute.  It used to carry a loop over the
+parsed calls that ran each one, and that loop could not run: the agent loop
+calls this only from the branch where there are no calls to run
+\(`chat-agent-loop.el', the `(t ...)' arm), so the loop body always had
+nothing to iterate.  What it did have was a route to execution that
+authorized nothing, with no caller to notice it drifting -- which is the
+next hole rather than dead code.
 
 The calls returned here are persisted alongside their results, so they
 have to carry the ids the next request will pair them by."
   (let* ((calls (chat-tool-caller-parse content))
          (parse-error (and (null calls)
-                           (chat-tool-caller--attempted-tool-call-p content)))
-         tool-results
-         tool-events)
+                           (chat-tool-caller--attempted-tool-call-p content))))
     (when (and observer
                (not (string-empty-p (string-trim (chat-tool-caller-extract-content content)))))
       (funcall observer
                (list :type 'thinking
                      :summary (chat-tool-caller--compact-text
                                (chat-tool-caller-extract-content content)))))
-    (cl-loop for call in calls
-             for index from 1
-             do (push (chat-tool-caller-execute
-                       call
-                       session
-                       (lambda (event)
-                         (let ((indexed (copy-tree event)))
-                           (setq indexed (plist-put indexed :index index))
-                           (push indexed tool-events))))
-                      tool-results))
     (list :content (string-trim-right (chat-tool-caller-extract-content content))
           :tool-calls calls
-          :tool-results (nreverse tool-results)
-          :tool-events (nreverse tool-events)
+          :tool-results nil
+          :tool-events nil
           :parse-error parse-error)))
 
 (defun chat-tool-caller-process-response (content callback)

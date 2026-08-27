@@ -253,8 +253,9 @@ How much that list is worth depends on who is watching, so it is applied
 by mode rather than always (see Approval Modes below). Under `manual` a
 command you read and approved runs as typed: you have already made the
 decision the list exists to make, and checking it afterwards would only
-void your answer. Under `auto` the list decides, because there nobody
-read anything. Under `dangerous` it is not consulted.
+void your answer. Under `guarded` its refusal becomes evidence handed to
+the guard, which decides with that in hand. Under `dangerous` it is not
+consulted.
 
 Background task commands are deliberately not open-ended for the
 unattended case, and the default list has no build runners in it, because
@@ -421,6 +422,88 @@ about whether to ask.
 
 A session may override the global default, and a sub-agent inherits the
 mode it was started in rather than choosing its own.
+
+### The Guard: What Decides Under `guarded`
+
+Under `guarded` a model rules on the calls a table cannot settle. Three
+things make it a guard rather than a second opinion from the assistant:
+
+It is a separate request. Not a step in the run being judged, no shared
+history, and it never appears in the conversation or the context budget. A
+model asked to approve its own work approves it.
+
+It is told facts, not intent. Absolute paths as written and as resolved,
+the project root, where writes are confined, the session's settings, and
+the command gate's own objection — all measured here. The task
+description, your words and the assistant's reasoning are never sent: that
+text is where an injection would sit, and it drags a judge from "is this
+call within policy" towards "does the assistant seem to want this".
+
+It cannot mint authority. A verdict allows only when it says which policy
+rule it matched, at high confidence. Deny, abstain, a missing field,
+prose, a timeout, no provider — every one of those is a refusal.
+
+Underneath it is a floor that no verdict moves: writes outside the allowed
+directories, recursive deletes of the filesystem root or your home or the
+project root, force pushes and history rewrites, piping credentials to the
+network, and edits to the approval machinery itself. Those are code, not
+prompt text, because irreversibility does not suit a sampled answer.
+
+A guard denial is not a stop. It goes back as a tool result saying the
+policy refused and why, and the run may take another route — so a wrong
+denial costs an attempt rather than the task.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `chat-approval-guard-provider` | nil | Which provider to ask; nil follows the session's model |
+| `chat-approval-guard-model` | nil | Remote model name, when it differs from the provider default |
+| `chat-approval-guard-timeout` | 20 | Seconds before a missing verdict becomes a refusal |
+| `chat-approval-guard-extra-rules` | nil | Policy rules of yours, added after the built-in ones |
+| `chat-approval-guard-never-allow-extra` | nil | Predicates that tighten the floor; they cannot loosen it |
+
+Your rules are added as data and labelled as yours. They can add effects
+and boundaries; they cannot change the discipline above them, because a
+rule pasted from somewhere unknown is another way in.
+
+The status line names the mode, and shows `Guard Judging: TOOL` while a
+verdict is outstanding. Nothing blocks: you can keep typing.
+
+### Shadow Running: Tuning The Guard
+
+`chat-approval-guard-shadow` runs the guard alongside whatever mode is in
+force. It is not a fourth mode — the mode still decides — and it is off by
+default. Turning it on has three consequences worth knowing before you do:
+it makes an extra model request for every call that reaches the approval
+decision, it sends tool arguments to the guard model in modes that would
+otherwise make no model call at all, and it changes no outcome.
+
+What it is for is tuning. The policy prompt cannot be made accurate
+against an invented test set, because the real distribution of calls is
+not known yet. Paired samples do it, and the pairs differ in quality by
+mode:
+
+| Alongside | Reference answer | Signal |
+| --- | --- | --- |
+| `manual` | your actual decision | the best available: a labelled sample |
+| `guarded` | what the fallback rules would have said | weak; it exercises the live path |
+| `dangerous` | everything ran | unlabelled, but it measures false denials |
+
+`manual` is the pairing worth having, and for a structural reason: the
+calls that reach you under `manual` are the same set that reaches the
+guard under `guarded`, so a prompt tuned on them transfers.
+
+`M-x chat-approval-guard-export-shadow-log` writes the samples as JSON
+lines — the verdict, the rule it matched, its confidence, what actually
+decided and what sort of answer that was, and whether the call ran.
+Verdicts that decided are logged on the same terms as shadow ones; the
+difference is recorded, not the reason for recording. A reference is a
+comparison and not ground truth, which is why its kind is kept: a tired
+person's fortieth allow is a noisy label.
+
+With the defaults — `manual` and shadow off — no guard request is ever
+made. No extra model call, no added latency, no tool arguments leaving the
+process. The guard rules only when you switch to `guarded`, and the shadow
+runs only when you turn it on.
 
 ### Grants: What Skips The Question
 

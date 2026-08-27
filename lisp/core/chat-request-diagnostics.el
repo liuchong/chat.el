@@ -50,11 +50,16 @@
    tool-events))
 
 (defun chat-request-diagnostics--latest-tool-event (tool-events)
-  "Return the latest notable tool event from TOOL-EVENTS."
+  "Return the latest notable tool event from TOOL-EVENTS.
+
+`approval-guard-pending' is among them because a turn waiting on a guard
+verdict is not stalled, and a report that omitted it would say the last
+thing that happened was the tool call it is deciding about."
   (car (last (seq-filter
               (lambda (event)
                 (memq (plist-get event :type)
-                      '(tool-call tool-result tool-error approval approval-pending)))
+                      '(tool-call tool-result tool-error approval
+                                  approval-pending approval-guard-pending)))
               tool-events))))
 
 (defun chat-request-diagnostics--handle-live-p (handle)

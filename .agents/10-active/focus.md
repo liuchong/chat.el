@@ -350,7 +350,55 @@ they were doing was filling the threshold during a long reply, so the
 collection landed on whatever allocated next. The first send after a
 restart still pays for startup garbage that is not this program's.
 
-Canonical suite: 1100 tests passing.
+Approval has an approver, and it is called what it is (spec 013). `auto`
+was reported as not doing what its name said, and it was not: fast path
+for grants, fixed rule list, refuse without asking -- `manual` with the
+question suppressed, which costs the user their yes and buys no safety,
+since the list is the same list. It is `guarded` now, with `auto` accepted
+everywhere it is read and written nowhere, and under it
+`lisp/core/chat-approval-guard.el` sends one neutral request per call that
+reaches the mode branch. Its prompt is two parts, an immutable preamble
+and rules the user may extend; its payload is facts and no narrative --
+environment, arguments labelled untrusted, relative paths as written and
+as resolved, and the gate's own objection as evidence. No history and
+nothing from the executing model, because a guard carrying the run's
+history stops answering "is this within policy" and starts answering "does
+the assistant want this". An allow needs a decision, high confidence and a
+named rule; everything else refuses, including a timeout and a missing
+provider.
+
+A verdict counts as a person's approval does, which is one `memq` in
+`chat-approval-command-consent-p` and is the whole mechanism -- the gate
+already objected and the guard ruled anyway, so a gate that refuses again
+makes the verdict decoration. Its price is that a wrong verdict skips the
+gate, which is what `chat-approval-guard-never-allow-p` bounds: writes
+outside the boundary, deleting a home or a project root, rewriting
+published history, a credential and the network in one command, and edits
+to the approval records themselves, checked before any request and not
+arguable. A refusal comes back as a tool result rather than an error and
+says the policy refused rather than the user, so the run changes route
+instead of retrying -- the eight-minute git incident, one layer up.
+
+Two structural faults came out with it. Authorization happened separately
+in the two execution paths, so a grant applied or did not depending on
+whether a tool declared an `async-function`; it is one point now, before
+the split, and the synchronous entry refuses under `guarded` rather than
+quietly applying the rules the guard replaces. And the floor was silently
+inert for its first hour, every predicate returning nil because command
+parsing was reached through `fboundp` and the module was not loaded -- a
+conditional dependency on the thing the floor is made of is not a
+dependency.
+
+Shadow running is built and ships off. It runs the guard alongside any
+mode, decides nothing, and records the verdict against what actually
+happened with the kind of reference noted, because a tired person's
+fortieth allow is a noisy label. Under `guarded` it hands the decision
+back to the rules, since shadow meaning one thing there and another under
+`manual` would make the switch unreadable. Default-off has a stated cost:
+samples come only from people who turn it on. Decision 0016 records the
+lot.
+
+Canonical suite: 1344 tests passing.
 
 ## Next Stage
 

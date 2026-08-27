@@ -2287,17 +2287,37 @@ there is no second request path to hold it."
            (format "- Approval Pending %s: %s"
                    (plist-get event :index)
                    (plist-get event :tool)))
+          ('approval-guard-pending
+           (format "- Guard Judging %s: %s"
+                   (plist-get event :index)
+                   (plist-get event :tool)))
           ('approval
            ;; The source and the reason are the whole value of this line.
            ;; "Approval 3: granted" leaves the reader unable to tell a
            ;; builtin pattern from something they allowed last month, and a
            ;; refusal with no reason is the failure spec 011 set out to fix.
+           ;;
+           ;; A guard's allow names the rule it matched, and that is shown
+           ;; for the same reason the reason for a refusal is: an approver
+           ;; whose permissions cannot be reviewed afterwards is worse than
+           ;; no approver.
            (concat
             (format "- Approval %s: %s"
                     (plist-get event :index)
                     (plist-get event :decision))
             (when-let ((source (plist-get event :source)))
               (format " (%s)" source))
+            (when-let ((rule (plist-get event :matched-rule)))
+              (format " [%s]" rule))
+            (when-let ((reason (plist-get event :reason)))
+              (format " -- %s" reason))))
+          ('approval-shadow
+           ;; Marked as deciding nothing, because a line that reads like an
+           ;; approval but changed no outcome is worse than no line.
+           (concat
+            (format "- Guard Shadow %s: %s (decided nothing)"
+                    (plist-get event :index)
+                    (plist-get event :verdict))
             (when-let ((reason (plist-get event :reason)))
               (format " -- %s" reason))))
           ('tool-result

@@ -693,6 +693,30 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: feed real result content back up to `chat-tool-caller-result-max-chars` (default 8000) with an explicit omission marker beyond the cap.
 
+### Two Authorization Points Make A Grant Apply To Half The Tools
+
+**Problem**: a grant, or an approval mode, takes effect for one tool and not for another with the same name and the same arguments.
+
+**Cause**: the synchronous and asynchronous execution paths each authorized separately, so which check ran depended on whether the tool happened to declare an `async-function`.
+
+**Solution**: authorize once in `chat-tool-caller-execute-async` before the sync/async split. A second entry point that cannot reach the current authorization mechanism must refuse rather than fall back to an older one, because a fallback silently downgrades the policy instead of reporting that it could not be applied.
+
+### An Approved Call Refused Again By The Tool's Own Gate
+
+**Problem**: a command is approved — by a person, or by the guard under `guarded` — and the tool then refuses it because the program is not on an allowlist.
+
+**Cause**: the tool's gate ran again after approval, so the approval decided nothing.
+
+**Solution**: tools consult `chat-approval-command-consent-p`, which is true for `human`, `guard` and `dangerous`. The gate stays in place for callers that never went through approval. What this costs is that a wrong verdict skips the gate, which is why `chat-approval-guard-never-allow-p` runs before any request and is a predicate rather than a rule the guard weighs.
+
+### A Struct Default Written At Twenty Construction Sites
+
+**Problem**: a tool registered programmatically fails on execution with `Wrong type argument: number-or-marker-p, nil`, not on registration.
+
+**Cause**: `usage-count` had no default in `chat-forged-tool`, and every one of the twenty construction sites wrote `:usage-count 0`; the site that forgot produced a tool that registered cleanly and died where the counter is incremented, a layer away from the omission.
+
+**Solution**: give the slot its default in the `cl-defstruct`. A value every caller must supply identically is a default in the wrong place.
+
 ### `split-string-and-unquote` Mangles Single Quotes
 
 **Problem**: model generated commands like `awk 'BEGIN{...}' file` fail with confusing errors and the model retries until the loop limit.
@@ -827,6 +851,14 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
  (let ((first (expand-file-name "one" temp-dir)))   ; not (expand-file-name "one")
    ...))
 ```
+
+### A Test That Errors Mid-Body Leaves State For Later Tests
+
+**Problem**: a test that had passed for weeks started failing, and the real defect was in a new test that ran earlier in the alphabet.
+
+**Cause**: a `let` unwinds on a signal, but a test that dies partway through has already done whatever it did before dying — registered something, created a session, written a file. The failure surfaces in whichever later test depends on that state, which is not where the fault is.
+
+**Solution**: when an unrelated test starts failing, first check whether an earlier one is erroring rather than merely failing an assertion. Renaming the suspect so it sorts last is enough to confirm the direction in one run; `git stash` on the new test file confirms it in the other. Fix the erroring test, not the test that reported.
 
 ### External Process Calls Must Not Trust Ambient `default-directory`
 

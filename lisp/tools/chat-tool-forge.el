@@ -65,7 +65,11 @@
   version               ; Tool version
   created-at            ; Creation timestamp
   updated-at            ; Last update timestamp
-  usage-count           ; How many times used
+  ;; Counted from zero here rather than at each construction site.  Twenty
+  ;; of them write `:usage-count 0' and the twenty-first would not fail on
+  ;; registration but on execution, where the counter is incremented and nil
+  ;; is not a number.
+  (usage-count 0)       ; How many times used
   is-active)            ; Whether tool is active
 
 ;; ------------------------------------------------------------------

@@ -318,6 +318,247 @@ hedges -- does not run the call."
        (let ((rule (chat-approval-guard-verdict-matched-rule verdict)))
          (and (stringp rule) (not (string-empty-p (string-trim rule)))))))
 
+(defun chat-approval-guard-verdict-note-reference (verdict reference kind)
+  "Record on VERDICT that REFERENCE of KIND is what actually decided.
+
+Lives here rather than at the call site because the struct's setters are
+only defined where the struct is, and the approval module reaches this one
+through `fboundp'.
+
+KIND is `human', `rules', `guard' or `none'.  It is kept because a
+reference is a comparison and not ground truth: approval fatigue is a
+documented failure mode, so a person's fortieth allow is a noisy label and
+offline analysis has to know which sort of answer it is measuring against.
+
+Says nothing about whether this verdict decided anything -- a verdict that
+ruled can also have something to be compared against.  That is
+`chat-approval-guard-verdict-mark-shadow'."
+  (setf (chat-approval-guard-verdict-reference verdict) reference)
+  (setf (chat-approval-guard-verdict-reference-kind verdict) kind)
+  verdict)
+
+(defun chat-approval-guard-verdict-mark-shadow (verdict)
+  "Record that VERDICT decided nothing.
+
+Separate from having a reference, because the two answer different
+questions and only one of them can be inferred: whether the call ran is
+the verdict's own answer when it ruled and the reference's when it did
+not, so a log that conflated them would report the wrong outcome for every
+shadow sample."
+  (setf (chat-approval-guard-verdict-shadow verdict) t)
+  verdict)
+
+;;; Remembered refusals
+;;
+;; Refusals are remembered for the session and allows are not, and the
+;; asymmetry is the point.  Repeating a refused call is the loop this
+;; mechanism was built after -- eight minutes of the same `git log' -- and
+;; paying a model request for each lap buys nothing, because the answer
+;; cannot have changed: the key is the exact arguments, so one character of
+;; difference is a different call and gets a fresh verdict.
+;;
+;; An allow is never remembered.  A permission that outlives the request it
+;; was given for is a grant, grants are something a person creates on
+;; purpose, and a guard that could mint them would be handing out authority
+;; it was only lent.
+
+(defcustom chat-approval-guard-remember-refusals t
+  "Whether a refused call stays refused for the rest of the session.
+
+Keyed by the exact arguments, so this only ever skips a request whose
+answer is already known.  Set it to nil while tuning the policy, when the
+rules under a verdict may change between two identical calls."
+  :type 'boolean
+  :group 'chat-approval-guard)
+
+(defvar chat-approval-guard--refusals (make-hash-table :test 'equal)
+  "Refusal reasons, keyed by session, tool and exact arguments.")
+
+(defconst chat-approval-guard--refusals-limit 2000
+  "How many remembered refusals to hold before starting over.
+
+A cap rather than eviction by age: this table exists to save repeated
+requests within one session, and the cost of forgetting all of it is one
+more request per call that comes round again.")
+
+(defun chat-approval-guard--refusal-key (session tool-id arguments)
+  "Return the key under which a refusal of TOOL-ID is remembered.
+
+Includes SESSION because a verdict was reached about that session's
+directory, mode and settings, and ARGUMENTS in full because \"the same
+call\" can only mean the same arguments."
+  (format "%s\0%s\0%s"
+          (or (and session (fboundp 'chat-session-id) (chat-session-id session))
+              "none")
+          tool-id
+          (prin1-to-string arguments)))
+
+(defun chat-approval-guard-remembered-refusal (session tool-id arguments)
+  "Return why TOOL-ID with ARGUMENTS was refused in SESSION before, or nil."
+  (when chat-approval-guard-remember-refusals
+    (gethash (chat-approval-guard--refusal-key session tool-id arguments)
+             chat-approval-guard--refusals)))
+
+(defun chat-approval-guard-remember-refusal (session tool-id arguments reason)
+  "Remember that TOOL-ID with ARGUMENTS was refused in SESSION for REASON."
+  (when chat-approval-guard-remember-refusals
+    (when (> (hash-table-count chat-approval-guard--refusals)
+             chat-approval-guard--refusals-limit)
+      (clrhash chat-approval-guard--refusals))
+    (puthash (chat-approval-guard--refusal-key session tool-id arguments)
+             (or reason "the guard refused this call earlier")
+             chat-approval-guard--refusals)))
+
+(defun chat-approval-guard-forget-refusals ()
+  "Forget every remembered refusal."
+  (interactive)
+  (clrhash chat-approval-guard--refusals))
+
+;;; The sample log
+;;
+;; Every verdict lands here, shadow or not.  The two are the same
+;; measurement and differ only in whether anything acted on it, so a log
+;; that recorded one and not the other could not answer the question it
+;; exists for: how a prompt that decides compares with the answer that was
+;; actually right.
+
+(defcustom chat-approval-guard-log-limit 500
+  "How many verdicts to keep for tuning, or nil for no limit.
+
+Bounded by default because this grows while Emacs runs and its whole
+purpose is to be exported and read later, not to be complete.  Set it to
+nil only while collecting a run you intend to export."
+  :type '(choice (const :tag "Unlimited" nil) integer)
+  :group 'chat-approval-guard)
+
+(defcustom chat-approval-guard-log-argument-length 200
+  "How much of each argument value to keep in a sample."
+  :type 'integer
+  :group 'chat-approval-guard)
+
+(defvar chat-approval-guard--log nil
+  "Recorded verdicts, newest first.  See `chat-approval-guard-log'.")
+
+(defun chat-approval-guard-log ()
+  "Return the recorded verdicts, newest first."
+  chat-approval-guard--log)
+
+(defun chat-approval-guard-clear-log ()
+  "Forget the recorded verdicts."
+  (interactive)
+  (setq chat-approval-guard--log nil))
+
+(defun chat-approval-guard--argument-summary (arguments)
+  "Return ARGUMENTS with each value shortened, for a sample.
+
+Shortened rather than dropped: which path a call named is most of what
+distinguishes a right verdict from a wrong one, and a sample that says
+only \"files_write\" cannot be graded.  Shortened rather than kept whole
+because one `files_write' of a large file would otherwise be the log."
+  (mapcar (lambda (entry)
+            (let* ((value (format "%s" (cdr entry)))
+                   (limit chat-approval-guard-log-argument-length))
+              (cons (format "%s" (car entry))
+                    (if (and limit (> (length value) limit))
+                        (concat (substring value 0 limit) "...")
+                      value))))
+          arguments))
+
+(defun chat-approval-guard-log-verdict (verdict tool-id arguments mode)
+  "Record VERDICT about TOOL-ID with ARGUMENTS, reached under MODE.
+
+Whether the verdict decided anything is read off the verdict itself: a
+shadow one did not, and one that is not shadow is the guard ruling under
+`guarded'.  Returns the sample."
+  (when (chat-approval-guard-verdict-p verdict)
+    (let* ((shadow (and (chat-approval-guard-verdict-shadow verdict) t))
+           (sample
+            (list :time (format-time-string "%FT%T%z")
+                  :tool (format "%s" tool-id)
+                  :mode (format "%s" mode)
+                  :arguments (chat-approval-guard--argument-summary arguments)
+                  :decision
+                  (format "%s" (chat-approval-guard-verdict-decision verdict))
+                  :matched-rule
+                  (chat-approval-guard-verdict-matched-rule verdict)
+                  :reason (chat-approval-guard-verdict-reason verdict)
+                  :confidence
+                  (format "%s" (chat-approval-guard-verdict-confidence verdict))
+                  :model (chat-approval-guard-verdict-model verdict)
+                  :elapsed (chat-approval-guard-verdict-elapsed verdict)
+                  :would-allow
+                  (and (chat-approval-guard-verdict-allows-p verdict) t)
+                  :shadow shadow
+                  ;; What the verdict was measured against, and what sort of
+                  ;; answer that is.  A person's fortieth allow is a noisy
+                  ;; label, and offline analysis cannot treat it as truth
+                  ;; without knowing that is what it is.
+                  :reference
+                  (let ((reference
+                         (chat-approval-guard-verdict-reference verdict)))
+                    (and reference (format "%s" reference)))
+                  :reference-kind
+                  (format "%s" (or (chat-approval-guard-verdict-reference-kind
+                                    verdict)
+                                   (if shadow 'none 'guard)))
+                  ;; Whether the call went on to run.  Under shadow that is
+                  ;; the reference; when the guard decided it is the verdict.
+                  :allowed
+                  (if shadow
+                      (and (chat-approval-guard-verdict-reference verdict) t)
+                    (and (chat-approval-guard-verdict-allows-p verdict) t)))))
+      (push sample chat-approval-guard--log)
+      (when chat-approval-guard-log-limit
+        (let ((excess (- (length chat-approval-guard--log)
+                         chat-approval-guard-log-limit)))
+          (when (> excess 0)
+            (setq chat-approval-guard--log
+                  (butlast chat-approval-guard--log excess)))))
+      sample)))
+
+(defun chat-approval-guard--sample-json (sample)
+  "Return SAMPLE as one JSON object.
+
+Values are normalised on the way out because a plist has no way to say
+\"absent\": nil would serialise as an empty array, and a field that
+sometimes means false and sometimes means missing is a field offline
+analysis has to guess at."
+  (let ((object (list)))
+    (cl-loop for (key value) on sample by #'cddr
+             do (let ((name (intern (substring (symbol-name key) 1))))
+                  (push (cons name
+                              (cond
+                               ((eq value t) t)
+                               ((null value) :false)
+                               ((eq key :arguments)
+                                (mapcar (lambda (entry)
+                                          (cons (intern (car entry))
+                                                (cdr entry)))
+                                        value))
+                               ((numberp value) value)
+                               (t (format "%s" value))))
+                        object)))
+    (json-serialize (nreverse object) :false-object :false :null-object :null)))
+
+(defun chat-approval-guard-export-shadow-log (file)
+  "Write the recorded verdicts to FILE as JSON lines, oldest first.
+
+JSON lines rather than one document so a collection can be appended to and
+read a sample at a time, which is how it gets used: the tuning loop reads
+the pairs where the verdict and the reference disagree and turns the
+interesting ones into anchor examples in the policy."
+  (interactive "FExport guard verdicts to: ")
+  (let ((samples (reverse chat-approval-guard--log)))
+    (with-temp-file file
+      (dolist (sample samples)
+        (insert (chat-approval-guard--sample-json sample) "\n")))
+    (when (called-interactively-p 'interactive)
+      (message "Wrote %d guard verdict%s to %s"
+               (length samples)
+               (if (= (length samples) 1) "" "s")
+               file))
+    (length samples)))
+
 (defun chat-approval-guard--refusal-verdict (reason &optional model elapsed)
   "Return a verdict refusing because the guard could not rule, citing REASON.
 

@@ -13,6 +13,7 @@
 (require 'chat-session)
 (require 'chat-approval-grants)
 (require 'chat-approval)
+(require 'chat-approval-guard)
 (require 'chat-files)
 (require 'chat-tool-forge)
 (require 'chat-tool-shell)
@@ -28,6 +29,20 @@
    :language 'elisp
    :is-active t
    :effects (or effects '(write))))
+
+(defmacro test-chat-approval-without-a-guard (&rest body)
+  "Run BODY with no model a guard verdict could be asked of.
+
+`guarded' falls back to the rules only when there is nothing to ask, and
+\"nothing to ask\" means no provider at all: no dedicated guard setting, no
+session model, and no global default.  Tests about the fallback have to say
+so, because the shipped default names a model and so a guard is normally
+reachable."
+  (declare (indent 0) (debug t))
+  `(let ((chat-approval-guard-provider nil)
+         (chat-approval-guard-model nil)
+         (chat-default-model nil))
+     ,@body))
 
 ;;; The three modes
 
@@ -94,25 +109,27 @@ also had its own branch in the decision, such a session approved
 everything without consulting a rule, and the mode it reported was not the
 mode it behaved as."
   (chat-test-with-grants
-   (let ((chat-approval-mode 'manual)
-         (chat-approval-required-tools '(shell_execute))
-         (session (make-chat-session :id "s" :name "S" :auto-approve t))
-         (chat-approval-decision-function
-          (lambda (&rest _args)
-            (ert-fail "a guarded session must not ask"))))
-     (should (eq (chat-approval-effective-mode session) 'guarded))
-     ;; Allowed by the gate, so the rules let it through.
-     (should (chat-approval-authorize
-              (test-chat-approval-tool 'shell_execute)
-              '(:name "shell_execute" :arguments (("command" . "cat /etc/hosts")))
-              session))
-     ;; Refused by the gate, so the rules refuse it -- it does not sail
-     ;; through on the strength of the flag.
-     (should-not (chat-approval-authorize
-                  (test-chat-approval-tool 'shell_execute)
-                  '(:name "shell_execute"
-                    :arguments (("command" . "git push origin main")))
-                  session)))))
+   (test-chat-approval-without-a-guard
+     (let ((chat-approval-mode 'manual)
+           (chat-approval-required-tools '(shell_execute))
+           (session (make-chat-session :id "s" :name "S" :auto-approve t))
+           (chat-approval-decision-function
+            (lambda (&rest _args)
+              (ert-fail "a guarded session must not ask"))))
+       (should (eq (chat-approval-effective-mode session) 'guarded))
+       ;; Allowed by the gate, so the rules let it through.
+       (should (chat-approval-authorize
+                (test-chat-approval-tool 'shell_execute)
+                '(:name "shell_execute"
+                  :arguments (("command" . "cat /etc/hosts")))
+                session))
+       ;; Refused by the gate, so the rules refuse it -- it does not sail
+       ;; through on the strength of the flag.
+       (should-not (chat-approval-authorize
+                    (test-chat-approval-tool 'shell_execute)
+                    '(:name "shell_execute"
+                      :arguments (("command" . "git push origin main")))
+                    session))))))
 
 (ert-deftest chat-approval-dangerous-mode-runs-what-the-gate-would-refuse ()
   "Allow everything has to mean the gate too, or it means nothing."
@@ -154,60 +171,115 @@ This is the degraded path, not the mode's intent: `guarded' means a guard
 model rules on the call.  Nothing is configured here, so the fallback runs
 and its verdict is the gate's."
   (chat-test-with-grants
+   (test-chat-approval-without-a-guard
+     (let ((chat-approval-mode 'guarded)
+           (chat-approval-decision-function
+            (lambda (&rest _args) (ert-fail "guarded mode must not ask")))
+           events)
+       ;; `cat' passes the gate and is on no whitelist, so the rules are what
+       ;; decided here rather than a grant.
+       (should (eq (chat-approval-authorize
+                    (test-chat-approval-tool 'shell_execute)
+                    '(:name "shell_execute"
+                      :arguments (("command" . "cat /etc/hosts")))
+                    nil
+                    (lambda (event) (push event events)))
+                   'rule))
+       ;; A writing one does not, and the refusal says which token failed.
+       (setq events nil)
+       (should-not (chat-approval-authorize
+                    (test-chat-approval-tool 'shell_execute)
+                    '(:name "shell_execute"
+                      :arguments (("command" . "git push origin main")))
+                    nil
+                    (lambda (event) (push event events))))
+       (let ((approval (seq-find (lambda (event)
+                                   (eq (plist-get event :type) 'approval))
+                                 events)))
+         (should-not (plist-get approval :approved))
+         (should (string-match-p "push" (plist-get approval :reason)))
+         ;; The fallback has to say it is the fallback.  A mode that silently
+         ;; behaves as a worse mode is the failure this flag exists to
+         ;; prevent.
+         (should (plist-get approval :degraded))
+         (should (eq (plist-get approval :decision) 'guarded-fallback)))))))
+
+(ert-deftest chat-approval-guarded-fallback-allows-a-read-only-tool ()
+  "Reading needs nobody's permission."
+  (chat-test-with-grants
+   (test-chat-approval-without-a-guard
+     (let ((chat-approval-mode 'guarded)
+           (chat-approval-required-tools '(inspect_thing))
+           (chat-approval-decision-function
+            (lambda (&rest _args) (ert-fail "guarded mode must not ask"))))
+       (should (eq (chat-approval-authorize
+                    (test-chat-approval-tool 'inspect_thing '(read))
+                    '(:name "inspect_thing" :arguments nil))
+                   'rule))))))
+
+(ert-deftest chat-approval-guarded-fallback-denies-an-unexamined-write ()
+  "With nobody watching, a write no rule allowed does not happen."
+  (chat-test-with-grants
+   (test-chat-approval-without-a-guard
+     (let ((chat-approval-mode 'guarded)
+           (chat-approval-required-tools '(publish_thing))
+           (chat-approval-decision-function
+            (lambda (&rest _args) (ert-fail "guarded mode must not ask"))))
+       (should-not (chat-approval-authorize
+                    (test-chat-approval-tool 'publish_thing '(outbound))
+                    '(:name "publish_thing" :arguments nil)))))))
+
+(ert-deftest chat-approval-reading-a-credential-is-not-reading ()
+  "The fallback rules let a tool through on its effects; that is not enough.
+
+An MCP tool declares its sensitivity as `network' here while its effects
+come from the remote end, so a remote describing itself as read-only used
+to be waved through on its own word.  Reading is not harmless when the
+thing read is a credential."
+  (chat-test-with-grants
+   (test-chat-approval-without-a-guard
+     (let ((chat-approval-mode 'guarded)
+           (chat-approval-required-tools '(peek_thing))
+           (chat-approval-decision-function
+            (lambda (&rest _args) (ert-fail "guarded mode must not ask")))
+           (tool (make-chat-forged-tool
+                  :id 'peek_thing :name "peek_thing" :language 'elisp
+                  :is-active t :effects '(read) :sensitivity 'credential)))
+       (should (memq 'credential chat-approval-required-sensitivities))
+       (should-not (chat-approval-authorize
+                    tool '(:name "peek_thing" :arguments nil)))
+       ;; And a read with nothing sensitive behind it still goes through.
+       (setf (chat-forged-tool-sensitivity tool) nil)
+       (should (eq (chat-approval-authorize
+                    tool '(:name "peek_thing" :arguments nil))
+                   'rule))))))
+
+(ert-deftest chat-approval-a-synchronous-caller-cannot-stand-in-for-the-guard ()
+  "`chat-approval-authorize' has nowhere to wait for a verdict.
+
+So under `guarded' with a guard reachable it refuses, and says which
+entry point could not consult one.  The alternative -- running the
+fallback rules instead -- is the failure this mode was renamed to make
+visible: the mode would report `guarded' and behave as a whitelist."
+  (chat-test-with-grants
    (let ((chat-approval-mode 'guarded)
+         (chat-approval-guard-provider 'kimi)
+         (chat-approval-required-tools '(publish_thing))
          (chat-approval-decision-function
           (lambda (&rest _args) (ert-fail "guarded mode must not ask")))
          events)
-     ;; `cat' passes the gate and is on no whitelist, so the rules are what
-     ;; decided here rather than a grant.
-     (should (eq (chat-approval-authorize
-                  (test-chat-approval-tool 'shell_execute)
-                  '(:name "shell_execute"
-                    :arguments (("command" . "cat /etc/hosts")))
-                  nil
-                  (lambda (event) (push event events)))
-                 'rule))
-     ;; A writing one does not, and the refusal says which token failed.
-     (setq events nil)
      (should-not (chat-approval-authorize
-                  (test-chat-approval-tool 'shell_execute)
-                  '(:name "shell_execute"
-                    :arguments (("command" . "git push origin main")))
+                  (test-chat-approval-tool 'publish_thing '(read))
+                  '(:name "publish_thing" :arguments nil)
                   nil
                   (lambda (event) (push event events))))
      (let ((approval (seq-find (lambda (event)
                                  (eq (plist-get event :type) 'approval))
                                events)))
-       (should-not (plist-get approval :approved))
-       (should (string-match-p "push" (plist-get approval :reason)))
-       ;; The fallback has to say it is the fallback.  A mode that silently
-       ;; behaves as a worse mode is the failure this flag exists to
-       ;; prevent.
-       (should (plist-get approval :degraded))
-       (should (eq (plist-get approval :decision) 'guarded-fallback))))))
-
-(ert-deftest chat-approval-guarded-fallback-allows-a-read-only-tool ()
-  "Reading needs nobody's permission."
-  (chat-test-with-grants
-   (let ((chat-approval-mode 'guarded)
-         (chat-approval-required-tools '(inspect_thing))
-         (chat-approval-decision-function
-          (lambda (&rest _args) (ert-fail "guarded mode must not ask"))))
-     (should (eq (chat-approval-authorize
-                  (test-chat-approval-tool 'inspect_thing '(read))
-                  '(:name "inspect_thing" :arguments nil))
-                 'rule)))))
-
-(ert-deftest chat-approval-guarded-fallback-denies-an-unexamined-write ()
-  "With nobody watching, a write no rule allowed does not happen."
-  (chat-test-with-grants
-   (let ((chat-approval-mode 'guarded)
-         (chat-approval-required-tools '(publish_thing))
-         (chat-approval-decision-function
-          (lambda (&rest _args) (ert-fail "guarded mode must not ask"))))
-     (should-not (chat-approval-authorize
-                  (test-chat-approval-tool 'publish_thing '(outbound))
-                  '(:name "publish_thing" :arguments nil))))))
+       (should (eq (plist-get approval :decision) 'guard-unreachable))
+       (should (string-match-p "asynchronously" (plist-get approval :reason)))
+       ;; And this is not the degraded fallback: no rule was consulted.
+       (should-not (plist-get approval :degraded))))))
 
 (ert-deftest chat-approval-manual-mode-asks-and-says-why-the-rules-object ()
   "The gate's reason belongs in the question, not instead of it."

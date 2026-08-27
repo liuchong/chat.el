@@ -62,11 +62,22 @@ keeping the chat as one big buffer that you split yourself."
       (when-let ((actions (plist-get event :actions)))
         (list (format "  Actions: %s"
                       (mapconcat #'identity actions ", "))))))
+    ('approval-guard-pending
+     (append
+      (list (format "- Guard Judging %s: %s"
+                    (or (plist-get event :index) "?")
+                    (or (plist-get event :tool) "")))
+      (when-let ((command (plist-get event :command)))
+        (list (format "  Command: %s" command)))))
     ('approval
      (append
       (list (format "- Approval %s: %s"
                     (or (plist-get event :index) "?")
                     (or (plist-get event :decision) "")))
+      (when-let ((rule (plist-get event :matched-rule)))
+        (list (format "  Rule: %s" rule)))
+      (when-let ((reason (plist-get event :reason)))
+        (list (format "  Reason: %s" reason)))
       (when-let ((directory (plist-get event :directory)))
         (list (format "  Directory: %s" directory)))
       (when-let ((command (plist-get event :command)))

@@ -222,6 +222,38 @@ which is worth remembering: the 42 tests written first all passed, because
 the test helper hand-wrote the frontmatter that the ordinary path failed to
 write. Decision 0015 records it.
 
+Approval has an approver (spec 013). The middle mode was named for
+something it did not do: `auto` ran the fast path for grants, then a fixed
+rule list, then refused without asking -- `manual` with the question
+suppressed, which loses the user's ability to say yes and gains nothing,
+since the list is the same list. It is now `guarded`, `auto` is an alias in
+every reading path, and under it a model rules on the call.
+`lisp/core/chat-approval-guard.el` sends one neutral request per call that
+reaches the mode branch, against its own two-part prompt -- an immutable
+preamble and policy rules the user may extend -- carrying facts and no
+narrative: environment, arguments labelled untrusted, relative paths shown
+as written and as resolved, and the gate's own objection as evidence. No
+history, no task text, nothing from the executing model. An allow needs
+`decision: allow`, `confidence: high` and a non-empty `matched-rule`; prose,
+bad JSON, an abstain, a hedge, a timeout and a missing provider all refuse.
+
+A verdict is worth what a person's approval is worth, which is one `memq`
+in `chat-approval-command-consent-p` and is the whole mechanism -- the
+gate's objection was handed to the guard, so a gate that refuses regardless
+makes the verdict decoration. That price is bounded by a floor:
+`chat-approval-guard-never-allow-p` refuses writes outside the boundary,
+deleting a home or project root, rewriting published history, a credential
+and the network in one command, and edits to the approval records
+themselves, before any request is made and with no verdict able to move it.
+A refusal returns as a tool result rather than an error, saying the policy
+refused rather than the user, so the run picks another route instead of
+looping -- the eight-minute git incident, one layer up. Authorization also
+collapsed to one point: it used to happen separately in the two execution
+paths, so a grant applied or did not depending on whether a tool declared
+an `async-function`. Shadow running exists and ships off: the guard runs
+alongside any mode, decides nothing, and records paired samples. Decision
+0016 records it.
+
 Two fixes landed before that. Tool call ids are now answered by one
 function, so the assistant `tool_calls` entry and the `tool_call_id` of its
 result cannot disagree; two fallbacks that did disagree made any session
@@ -289,6 +321,9 @@ surface advertises only relevant scoped tools.
 - `lisp/tools/chat-mcp.el`
 - `lisp/tools/chat-subagent.el`
 - `lisp/tools/chat-capability-packs.el`
+- `lisp/core/chat-approval.el`
+- `lisp/core/chat-approval-guard.el`
+- `lisp/core/chat-command-gate.el`
 - `lisp/core/chat-session.el`
 - `lisp/core/chat-session-tree.el`
 - `lisp/core/chat-agent.el` (load-path shim)
@@ -302,6 +337,7 @@ surface advertises only relevant scoped tools.
 - `../20-reference/decisions/0013-naming-the-commands.md`
 - `../20-reference/decisions/0012-input-surface-and-language.md`
 - `../20-reference/decisions/0011-auto-and-the-command-table.md`
+- `../20-reference/decisions/0016-a-model-that-approves.md`
 - `../20-reference/decisions/0015-one-wiki-command.md`
 - `../20-reference/decisions/0014-whose-command-is-it.md`
 - `../20-reference/decisions/0010-rendering-the-transcript.md`
@@ -311,6 +347,7 @@ surface advertises only relevant scoped tools.
 - `../20-reference/decisions/0006-typed-transcript-and-step-budget.md`
 - `../20-reference/decisions/0005-typed-command-trust-and-punctuation-folding.md`
 - `../20-reference/decisions/0004-agent-kernel-and-plugin-host.md`
+- `../30-records/logs/stage-2026-08-27-the-approver-and-its-floor.md`
 - `../30-records/logs/stage-2026-08-26-commands-and-language.md`
 - `../30-records/logs/stage-2026-08-26-input-surface-and-language.md`
 - `../30-records/logs/stage-2026-08-26-auto-default-command.md`

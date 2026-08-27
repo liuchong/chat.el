@@ -326,7 +326,13 @@ A prompt rule without a reason reads as optional."
       (should (string-match-p "Markdown" with)))))
 
 (ert-deftest chat-tool-caller-denies-unapproved-dangerous-tool ()
-  "Test that dangerous tools are blocked when approval is denied."
+  "A denied tool does not run, and the assistant is told enough to move on.
+
+The text says the policy refused rather than the user, and names the ways
+forward.  Both matter for what happens next: a person refusing means stop
+and wait, a policy refusing means this route is closed and another may be
+open -- and a bare \"denied\" is what sent a run round the same call for
+eight minutes."
   (chat-test-with-temp-dir
    (let* ((target-file (expand-file-name "blocked.txt" temp-dir))
           (chat-files-allowed-directories (list temp-dir))
@@ -342,7 +348,12 @@ A prompt rule without a reason reads as optional."
                         :arguments (("path" . ,target-file)
                                     ("content" . "blocked"))))))
          (should (eq captured-tool 'files_write))
-         (should (string-match-p "Approval denied" result))
+         (should (string-match-p "Denied" result))
+         (should (string-match-p "not the user declining" result))
+         (should (string-match-p "different approach" result))
+         ;; And it does not tell the assistant to halt: a policy denial is
+         ;; usually worth working around.
+         (should-not (string-match-p "STOP" result))
          (should-not (file-exists-p target-file)))))))
 
 (ert-deftest chat-tool-caller-directory-whitelist-auto-approves-file-write ()
@@ -552,42 +563,49 @@ in the same variable and the check has to be the capability itself."
     (should (string= (nth 0 result) "Hello, how can I help?"))
     (should (null (nth 1 result)))))
 
-(ert-deftest chat-tool-caller-process-response-data-uses-session-for-approval ()
-  "Test tool execution receives the provided session context."
+(ert-deftest chat-tool-caller-process-response-data-parses-without-executing ()
+  "This function reports what the model asked for; it does not run it.
+
+It used to hold a loop that executed each parsed call, reachable from no
+caller -- the agent loop calls this only where there are no calls -- and
+authorizing nothing on the way.  A route to execution that skips approval
+and has no caller to keep it honest is the next hole, not dead code, so
+the loop is gone and this pins that down."
   (chat-test-with-temp-dir
    (let* ((target-file (expand-file-name "new.txt" temp-dir))
           (chat-files-allowed-directories (list temp-dir))
           (chat-tool-forge--registry (make-hash-table :test 'eq))
           (session (chat-session-create "Approval Session"))
-          captured-session)
+          (asked nil))
      (chat-files-register-built-in-tools)
      (cl-letf (((symbol-function 'chat-approval-authorize)
-                (lambda (_tool _call &optional maybe-session _observer)
-                  (setq captured-session maybe-session)
-                  'human)))
+                (lambda (&rest _args) (setq asked t) 'human)))
        (let ((result (chat-tool-caller-process-response-data
                       (format "{\"function_call\":{\"name\":\"files_write\",\"arguments\":{\"path\":\"%s\",\"content\":\"ok\"}}}"
                               target-file)
                       session)))
-         (should (eq captured-session session))
-         (should (file-exists-p target-file))
-         (should (= (length (plist-get result :tool-results)) 1)))))))
+         (should (= (length (plist-get result :tool-calls)) 1))
+         (should (equal (plist-get (car (plist-get result :tool-calls)) :name)
+                        "files_write"))
+         (should-not (plist-get result :tool-results))
+         (should-not (plist-get result :tool-events))
+         (should-not asked)
+         (should-not (file-exists-p target-file)))))))
 
-(ert-deftest chat-tool-caller-process-response-data-collects-tool-events ()
-  "Test tool processing returns structured event data."
-  (chat-test-with-temp-dir
-   (let* ((source-file (expand-file-name "source.txt" temp-dir))
-          (chat-files-allowed-directories (list temp-dir))
-          (chat-tool-forge--registry (make-hash-table :test 'eq)))
-     (with-temp-file source-file
-       (insert "hello tool"))
-     (chat-files-register-built-in-tools)
-     (let ((result (chat-tool-caller-process-response-data
-                    (format "{\"function_call\":{\"name\":\"files_read\",\"arguments\":{\"path\":\"%s\"}}}"
-                            source-file))))
-       (should (= (length (plist-get result :tool-events)) 2))
-       (should (eq (plist-get (car (plist-get result :tool-events)) :type) 'tool-call))
-       (should (eq (plist-get (cadr (plist-get result :tool-events)) :type) 'tool-result))))))
+(ert-deftest chat-tool-caller-process-response-data-keeps-the-call-ids ()
+  "Parsed calls are persisted beside their results and paired by id.
+
+A text-shaped call carries no id of its own, so one is minted here.  It
+has to survive this function, because the result stored against it is
+matched back by that id on the next request."
+  (let ((result (chat-tool-caller-process-response-data
+                 "Thinking about it.\n{\"function_call\":{\"name\":\"files_read\",\"arguments\":{\"path\":\"/tmp/x\"}}}")))
+    (should (equal (plist-get result :content) "Thinking about it."))
+    (let ((call (car (plist-get result :tool-calls))))
+      (should (equal (plist-get call :name) "files_read"))
+      (should (stringp (plist-get call :id)))
+      (should-not (string-empty-p (plist-get call :id))))
+    (should-not (plist-get result :parse-error))))
 
 (ert-deftest chat-tool-caller-whitelisted-shell-event-keeps-command-context ()
   "Test whitelisted shell execution reports command context."
