@@ -13,6 +13,8 @@
          (chat-session-wire--sizes (make-hash-table :test 'equal))
          (chat-session-wire-enabled t)
          (chat-work--tasks (make-hash-table :test 'equal))
+         (chat-execution-directory (expand-file-name "executions/" temp-dir))
+         (chat-execution--records (make-hash-table :test 'equal))
          (chat-work-notify-task-completion nil)
          (chat-tool-caller-current-session
           (make-chat-session :id "work-wire" :name "Work wire"))
@@ -29,6 +31,14 @@
          (should (eq (chat-work-task-status task) 'succeeded))
          (should (equal finished id))
          (should (string= (chat-work-task-output id) "hello"))
+         (let* ((records (chat-execution-list))
+                (record (car records))
+                (request (chat-execution-record-request record)))
+           (should (= (length records) 1))
+           (should (eq (chat-execution-record-status record) 'completed))
+           (should (equal (chat-execution-request-session-id request)
+                          "work-wire"))
+           (should (equal (chat-execution-request-task-id request) id)))
          (should (file-exists-p
                   (expand-file-name "tasks.json" temp-dir)))
          (with-temp-buffer
@@ -39,7 +49,11 @@
          (let* ((records (chat-session-wire-read "work-wire"))
                 (kinds (mapcar (lambda (record) (alist-get 'kind record))
                                records)))
-           (should (equal kinds '("task-started" "task-ended")))
+           (should (equal kinds
+                          '("task-started"
+                            "execution-started"
+                            "execution-ended"
+                            "task-ended")))
            (should (cl-every
                     (lambda (record) (equal id (alist-get 'task_id record)))
                     records))))))))

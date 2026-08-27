@@ -4,47 +4,51 @@
 - Attention: active
 - Status: active
 - Scope: agent-runtime
-- Tags: stage, plan, checkpoints, worktrees, backends
+- Tags: stage, plan, memory, tracing, evaluations
 
 ## Goal
 
-Deliver M6: checkpointed recovery, optional worktree ownership and one execution
-backend contract for local and future isolated work.
+Deliver M7: provenance-aware memory, reconstructable Trace records and a
+deterministic Agent evaluation harness.
 
 ## Completed
 
-- M0-M4 runtime contracts, lifecycle events, model capabilities, extensions and
-  unified tasks
-- M5 typed content with durable image and file attachments
-- capability preflight and three offline provider request fixtures
-- attachment input, clipboard staging, preview, transcript replay and context
-  budgeting
-- canonical verification at 1466/1466
+- M0-M5 runtime contracts, lifecycle events, model capabilities, extensions,
+  unified tasks and typed multimodal content
+- M6 owned-file checkpoints and independent code/conversation rollback
+- optional owned worktrees with restart reconciliation and explicit cleanup
+- one versioned local execution backend with durable attempt history
+- canonical verification at 1484/1484
 
 ## Next Steps
 
-1. Define the checkpoint and execution backend schemas before changing edit
-   behavior.
-2. Record a checkpoint before each user turn that may directly modify files.
-3. Separate code rollback, conversation rollback and combined rollback.
-4. Add optional worktree-backed sessions with explicit ownership and cleanup.
-5. Reconcile dirty working trees and external file changes without claiming
-   rollback coverage the runtime does not own.
-6. Map local execution through the backend interface and leave the remote
-   adapter slot versioned but unimplemented.
-7. Prove restart recovery, branch preservation, cancellation and cleanup with
-   offline tests before adding the native recovery UI.
+1. Define versioned memory, Trace and evaluation contracts before extending the
+   current memory implementation.
+2. Add provenance, scope, confidence, timestamps, retention and sensitivity to
+   every durable memory item.
+3. Preserve existing explicit memory commands through a compatibility reader,
+   then add review, edit, merge, delete and automatic-memory controls.
+4. Reconstruct one Trace tree from lifecycle, model, task, execution,
+   permission, checkpoint and artifact records using stable correlation IDs.
+5. Record bounded latency, token, cache, tool, approval, compaction and task
+   measurements without copying prompts, secrets or unbounded output.
+6. Build deterministic offline scenarios for editing, Guard, recovery,
+   compaction and provider protocol behavior.
+7. Add native memory and Trace inspection commands, then run focused and
+   canonical verification before stage closeout.
 
 ## Risks
 
-- Git snapshots can accidentally imply ownership of unrelated user changes.
-- Conversation branching and filesystem rollback have different boundaries and
-  must never be coupled implicitly.
-- A worktree is isolation from the current checkout, not an operating-system
-  sandbox.
-- Backend recovery must not resurrect stale processes or repeat non-idempotent
-  actions without renewed permission.
+- Automatic memory can preserve stale, incorrect or sensitive conclusions if
+  provenance and retention are weak.
+- Trace joins can duplicate or mis-parent events when correlation is absent or
+  adapters emit terminal state more than once.
+- Evaluations can become brittle if they assert provider prose instead of
+  contract-level outcomes.
+- Metrics must stay bounded and must not become a second transcript containing
+  prompts, credentials or full tool output.
 
 ## Next Entry
 
-Record the checkpoint/backend decision and M6 spec before implementation begins.
+Record the M7 memory/Trace/evaluation decision and acceptance spec before
+implementation begins.

@@ -2389,5 +2389,54 @@ recorded Markdown."
                          (marker-position chat-ui--input-overlay)
                          (point-max))))))))
 
+(ert-deftest chat-ui-user-message-checkpoints-before-session-write ()
+  "An accepted user Turn is recoverable before it enters session history."
+  (chat-test-with-temp-dir
+   (let* ((chat-checkpoint-directory
+           (expand-file-name "checkpoints/" temp-dir))
+          (chat-checkpoint--registry (make-hash-table :test 'equal))
+          (session (chat-session-create "Checkpoint send" 'kimi))
+          response-started)
+     (chat-session-set-working-directory session temp-dir)
+     (with-temp-buffer
+       (let ((default-directory (file-name-as-directory temp-dir)))
+         (setq-local chat--current-session session)
+         (chat-ui-setup-buffer session)
+         (cl-letf (((symbol-function 'chat-ui--redraw-conversation) #'ignore)
+                   ((symbol-function 'chat-ui--get-response)
+                    (lambda () (setq response-started t))))
+           (chat-ui--send-user-message "recover me"))))
+     (let* ((messages (chat-session-messages session))
+            (message (car messages))
+            (checkpoint (car (chat-checkpoint-list
+                              (chat-session-id session)))))
+       (should response-started)
+       (should (= (length messages) 1))
+       (should checkpoint)
+       (should-not (chat-checkpoint-conversation-head-id checkpoint))
+       (should (equal (plist-get (chat-message-metadata message)
+                                 :checkpoint-id)
+                      (chat-checkpoint-id checkpoint)))))))
+
+(ert-deftest chat-ui-checkpoint-failure-blocks-message-and-response ()
+  "A failed pre-Turn checkpoint cannot leave an unprotected user message."
+  (chat-test-with-temp-dir
+   (let ((session (chat-session-create "Checkpoint failure" 'kimi))
+         response-started)
+     (chat-session-set-working-directory session temp-dir)
+     (with-temp-buffer
+       (let ((default-directory (file-name-as-directory temp-dir)))
+         (setq-local chat--current-session session)
+         (chat-ui-setup-buffer session)
+         (cl-letf (((symbol-function 'chat-checkpoint-create)
+                    (lambda (&rest _args) (error "snapshot unavailable")))
+                   ((symbol-function 'chat-ui--redraw-conversation) #'ignore)
+                   ((symbol-function 'chat-ui--get-response)
+                    (lambda () (setq response-started t))))
+           (chat-test-silently
+            (chat-ui--send-user-message "must not send")))))
+     (should-not response-started)
+     (should-not (chat-session-messages session)))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here

@@ -82,6 +82,11 @@
   /save                 - 保存当前会话
   /clear                - 丢掉本会话的对话内容，会话本身保留
   M-x chat-session-tree-open - 以树形浏览已保存会话
+  M-x chat-ui-checkpoint-list - 查看当前会话可恢复的检查点
+  M-x chat-ui-checkpoint-create - 手动建立一个检查点
+  M-x chat-ui-checkpoint-rollback-code - 恢复运行时拥有的文件修改
+  M-x chat-ui-checkpoint-rollback-conversation - 从检查点分支对话
+  M-x chat-ui-checkpoint-rollback-both - 先恢复文件，再分支对话
 
 快捷 Shell（混合模式）：
   !<命令>               - 直接执行 shell 命令
@@ -93,6 +98,9 @@
   \\<文本>              - 原样发送，即使开头是 ! 或 /
 
 工作目录属于会话，重开会话时会恢复，AI 工具也在该目录下运行。
+  M-x chat-ui-workspace-enable - 把当前会话移入独立 worktree
+  M-x chat-ui-workspace-status - 查看并核对工作区归属状态
+  M-x chat-ui-workspace-release - 返回来源 checkout
 
 命令语法处的全角标点一律有效：！ ？ ／ 和全角空格都能走到同一个命令。
 命令参数不会被改写，所以 shell 命令体和问题内容保留你自己的标点。

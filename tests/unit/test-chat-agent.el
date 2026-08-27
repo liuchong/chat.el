@@ -68,6 +68,17 @@ car collects the messages of every request."
       (should (= (length (car calls)) 1))
       (should (chat-agent-run-state-done run)))))
 
+(ert-deftest chat-agent-cancelled-result-returns-from-completion-cleanly ()
+  "A transport cancellation finishes without falling through or throwing."
+  (let ((run (chat-agent--run-create))
+        finished)
+    (cl-letf (((symbol-function 'chat-agent--finish)
+               (lambda (seen status reason)
+                 (setq finished (list seen status reason)))))
+      (should-not
+       (chat-agent--complete-result run nil '(:cancelled t) nil)))
+    (should (equal finished (list run 'cancelled nil)))))
+
 (ert-deftest chat-agent-tracked-run-is-a-durable-foreground-task ()
   "A UI-style run records one terminal task and clears its live marker."
   (chat-test-with-temp-dir
@@ -1176,6 +1187,39 @@ per piece for that to stop being true."
          (pieces (make-list 50 "0123456789"))
          (published (chat-agent-test--publish-all pieces)))
     (should (= (length (car published)) 50))))
+
+(ert-deftest chat-agent-checkpoint-ownership-requires-tool-success ()
+  "Denied results never claim file ownership; successful results do."
+  (dolist (case '(("Denied: policy refused" . 0)
+                  ("written" . 1)))
+    (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+          (session (make-chat-session :id "checkpoint-agent"
+                                      :name "Checkpoint agent"
+                                      :model-id 'kimi))
+          (calls (list nil))
+          (before-count 0)
+          (complete-count 0)
+          (tool-result (car case)))
+      (chat-agent-test--register-demo-tool (list 0))
+      (cl-letf (((symbol-function 'chat-llm-request-async)
+                 (chat-agent-test--stub-transport
+                  (list (list :content chat-agent-test--tool-call-json)
+                        '(:content "done"))
+                  calls))
+                ((symbol-function 'chat-checkpoint-before-tool)
+                 (lambda (&rest _args) (cl-incf before-count)))
+                ((symbol-function 'chat-checkpoint-complete-tool)
+                 (lambda (&rest _args) (cl-incf complete-count)))
+                ((symbol-function 'chat-tool-caller-execute-async)
+                 (lambda (_call _session _observer success _error &optional _context)
+                   (funcall success tool-result)
+                   'done)))
+        (chat-agent-start
+         (list :model 'kimi
+               :session session
+               :messages (list (chat-agent-test--user-message)))))
+      (should (= before-count 1))
+      (should (= complete-count (cdr case))))))
 
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here

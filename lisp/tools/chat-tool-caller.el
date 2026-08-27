@@ -46,6 +46,11 @@ model knows content is missing."
 (defvar chat-tool-caller-current-session nil
   "Session whose tool overlay is used for provider tool exposure.")
 
+(defvar chat-tool-caller-current-execution-context nil
+  "Correlation plist for the tool call currently being executed.")
+
+(defvar chat-execution-current-context nil)
+
 ;; Bound buffer-locally by the chat surface, which loads after this.
 (defvar chat--current-session)
 
@@ -862,6 +867,8 @@ the quiet kind -- the tool runs against the global
 boundary the floor relies on is wider than anyone asked for."
   (declare (indent 1))
   `(let* ((chat-tool-caller-current-session ,session)
+          (chat-execution-current-context
+           chat-tool-caller-current-execution-context)
           (chat-files-allowed-directories
            (chat-tool-caller--allowed-directories))
           (default-directory
@@ -928,7 +935,7 @@ process before returning."
            (funcall error-callback text)))))))
 
 (defun chat-tool-caller-execute-async
-    (call session observer success error-callback)
+    (call session observer success error-callback &optional execution-context)
   "Execute CALL and invoke SUCCESS or ERROR-CALLBACK.
 
 The one place live tool execution is authorized, and it happens before the
@@ -943,7 +950,8 @@ A denial arrives through SUCCESS, not ERROR-CALLBACK.  It is a policy
 outcome the assistant should read and route around, and reporting it as a
 tool fault gets it the wrong wording and the wrong handling from the agent
 loop."
-  (let* ((tool (chat-tool-caller-call-tool call))
+  (let* ((chat-tool-caller-current-execution-context execution-context)
+         (tool (chat-tool-caller-call-tool call))
          (name (plist-get call :name))
          (arguments (plist-get call :arguments))
          (tool-id (intern name))
@@ -976,26 +984,28 @@ loop."
                ;; Re-established here: with a guard this callback runs from
                ;; an HTTP response, by which time the bindings above are
                ;; gone.
-               (chat-tool-caller--with-execution-context actual-session
-                 (cond
-                  ((not consent)
-                   (let ((text (chat-tool-caller--denial-text name reason)))
-                     (chat-tool-caller--notify
-                      observer
-                      (list :type 'tool-error
-                            :tool name
-                            :result-summary
-                            (chat-tool-caller--compact-text text)))
-                     (funcall success text)))
-                  ((chat-forged-tool-async-function tool)
-                   (chat-tool-caller--run-async-tool
-                    tool name arguments consent
-                    observer success error-callback))
-                  (t
-                   (funcall success
-                            (chat-tool-caller--execute-authorized
-                             tool call actual-session observer
-                             consent))))))))))
+               (let ((chat-tool-caller-current-execution-context
+                      execution-context))
+                 (chat-tool-caller--with-execution-context actual-session
+                   (cond
+                    ((not consent)
+                     (let ((text (chat-tool-caller--denial-text name reason)))
+                       (chat-tool-caller--notify
+                        observer
+                        (list :type 'tool-error
+                              :tool name
+                              :result-summary
+                              (chat-tool-caller--compact-text text)))
+                       (funcall success text)))
+                    ((chat-forged-tool-async-function tool)
+                     (chat-tool-caller--run-async-tool
+                      tool name arguments consent
+                      observer success error-callback))
+                    (t
+                     (funcall success
+                              (chat-tool-caller--execute-authorized
+                               tool call actual-session observer
+                               consent)))))))))))
       (error
        (let ((text (format "Error executing tool '%s': %s"
                            name (error-message-string err))))

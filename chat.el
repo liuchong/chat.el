@@ -97,6 +97,9 @@ Returns the list of files that were loaded."
 (require 'chat-session)
 (require 'chat-session-wire)
 (require 'chat-event)
+(require 'chat-execution)
+(require 'chat-checkpoint)
+(require 'chat-workspace)
 (require 'chat-task)
 (require 'chat-extension-trust)
 (require 'chat-runtime-hook)
@@ -162,6 +165,9 @@ Returns the list of files that were loaded."
 ;; local policy can tighten capability exposure on first registration.
 (chat-load-config-files chat-root-directory)
 
+(chat-execution-initialize)
+(chat-checkpoint-install)
+
 (chat-tool-forge-load-all)
 (chat-files-register-built-in-tools)
 (chat-work-load-tasks)
@@ -195,6 +201,8 @@ Returns the list of files that were loaded."
   (require 'chat-code-git)
   (require 'chat-code-perf)
   (require 'chat-code))
+
+(chat-workspace-initialize)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -242,6 +250,11 @@ Sessions:
   /save                 - Save current session
   /clear                - Discard this conversation, keeping the session
   M-x chat-session-tree-open - Browse saved sessions as a tree
+  M-x chat-ui-checkpoint-list - Inspect recoverable session checkpoints
+  M-x chat-ui-checkpoint-create - Create an explicit checkpoint
+  M-x chat-ui-checkpoint-rollback-code - Restore runtime-owned files
+  M-x chat-ui-checkpoint-rollback-conversation - Branch conversation history
+  M-x chat-ui-checkpoint-rollback-both - Restore files, then branch history
 
 Quick Shell (Hybrid Mode):
   !<cmd>                - Execute shell command directly
@@ -254,6 +267,9 @@ Quick Shell (Hybrid Mode):
 
 The working directory belongs to the session, so it is restored when the
 session is reopened, and the AI tools run there too.
+  M-x chat-ui-workspace-enable - Move this session into an owned worktree
+  M-x chat-ui-workspace-status - Inspect and reconcile workspace ownership
+  M-x chat-ui-workspace-release - Return to the source checkout
 
 Fullwidth punctuation works wherever command syntax appears, so ！ ？ ／
 and an ideographic space all reach the same commands.  A command argument

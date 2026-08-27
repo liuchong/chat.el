@@ -18,6 +18,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'chat-event)
+(require 'chat-execution)
 (require 'chat-session)
 (require 'chat-task)
 (require 'chat-agent)
@@ -195,7 +196,10 @@
       (chat-agent-cancel (chat-subagent-run subagent)))
      ((and (chat-subagent-process subagent)
            (process-live-p (chat-subagent-process subagent)))
-      (delete-process (chat-subagent-process subagent))
+      (let ((process (chat-subagent-process subagent)))
+        (if-let* ((record (chat-execution-record-for-native process)))
+            (chat-execution-cancel record reason)
+          (delete-process process)))
       (chat-subagent--finish subagent 'cancelled reason))
      (t
       (chat-subagent--finish subagent 'cancelled reason))))
@@ -364,25 +368,33 @@ captured in LOG-FILE."
       (with-temp-file log-file)
       (condition-case err
           (progn
-            (setq proc
-                  (make-process
-                   :name (concat "chat-subagent-"
-                                 (chat-subagent-id subagent))
-                   :buffer nil
-                   :command command
-                   :connection-type 'pipe
-                   :noquery t
-                   :filter (lambda (_proc chunk)
-                             (write-region chunk nil log-file 'append 'silent))
-                   :sentinel (lambda (process _event)
-                               (unless (process-live-p process)
-                                 (chat-subagent--finish
-                                  subagent
-                                  (if (zerop (process-exit-status process))
-                                      'completed
-                                    'failed)
-                                  (chat-subagent--external-summary
-                                   log-file))))))
+            (let ((record
+                   (chat-execution-start
+                    (chat-execution-request-from-context
+                     command
+                     :session-id (and parent-session
+                                      (chat-session-id parent-session))
+                     :task-id (chat-subagent-id subagent)
+                     :parent-id (chat-subagent--parent-task-id parent-session)
+                     :idempotency 'non-idempotent
+                     :metadata '((kind . "external-subagent")))
+                    :name (concat "chat-subagent-"
+                                  (chat-subagent-id subagent))
+                    :buffer nil
+                    :connection-type 'pipe
+                    :noquery t
+                    :filter (lambda (_proc chunk)
+                              (write-region chunk nil log-file 'append 'silent))
+                    :sentinel (lambda (process _event)
+                                (unless (process-live-p process)
+                                  (chat-subagent--finish
+                                   subagent
+                                   (if (zerop (process-exit-status process))
+                                       'completed
+                                     'failed)
+                                   (chat-subagent--external-summary
+                                    log-file)))))))
+              (setq proc (chat-execution-native-handle record)))
             (setf (chat-subagent-process subagent) proc)
             (when input-jsonl
               (process-send-string proc input-jsonl))

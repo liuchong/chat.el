@@ -24,6 +24,7 @@
 (require 'chat-transcript)
 (require 'chat-context-budget)
 (require 'chat-event)
+(require 'chat-checkpoint)
 (require 'chat-tool-caller)
 (require 'chat-llm)
 (require 'chat-model-runtime)
@@ -593,7 +594,19 @@ need approval carry exclusive accesses and therefore remain serialized."
           running)
          conflict))
      complete-fn
-     (lambda (index call result)
+     (lambda (index call result &optional failed)
+       (unless (or failed
+                   (null (chat-agent-run-state-session run)))
+         (condition-case err
+             (chat-checkpoint-complete-tool
+              (chat-agent-run-state-session run)
+              (chat-agent-run-state-turn run)
+              call)
+           (error
+            (setq failed t
+                  result
+                  (format "Tool changed files but checkpoint ownership failed: %s"
+                          (error-message-string err))))))
        (unless (aref results index)
          (aset results index result)
          (remhash index running)
@@ -629,27 +642,52 @@ need approval carry exclusive accesses and therefore remain serialized."
           ((not (chat-event-allowed-p lifecycle-outcome))
            (funcall complete-fn index call
                     (or (plist-get lifecycle-outcome :reason)
-                        "Tool execution was blocked by runtime policy")))
+                        "Tool execution was blocked by runtime policy")
+                    t))
           ((and (listp blocked) (plist-get blocked :block))
            (funcall complete-fn index call
                     (or (plist-get blocked :reason)
-                        "Tool execution was blocked")))
+                        "Tool execution was blocked")
+                    t))
           (t
-           (let ((handle
-                  (chat-tool-caller-execute-async
-                   call
-                   (chat-agent-run-execution-session run)
-                   (lambda (event)
-                     (let ((indexed (copy-tree event)))
-                       (setq indexed
-                             (plist-put indexed :index display-index))
-                       (funcall observer indexed)))
-                   (lambda (result)
-                     (funcall complete-fn index call result))
-                   (lambda (result)
-                     (funcall complete-fn index call result)))))
-             (when-let ((job (gethash index running)))
-               (puthash index (plist-put job :handle handle) running)))))))
+           (condition-case err
+               (progn
+                 (when (chat-agent-run-state-session run)
+                   (chat-checkpoint-before-tool
+                    (chat-agent-run-state-session run)
+                    (chat-agent-run-state-turn run)
+                    call))
+                 (let ((handle
+                        (chat-tool-caller-execute-async
+                         call
+                         (chat-agent-run-execution-session run)
+                         (lambda (event)
+                           (let ((indexed (copy-tree event)))
+                             (setq indexed
+                                   (plist-put indexed :index display-index))
+                             (funcall observer indexed)))
+                         (lambda (result)
+                           (funcall
+                            complete-fn index call result
+                            (and (stringp result)
+                                 (string-match-p
+                                  "\\`\\(?:Error\\|Denied\\):" result))))
+                         (lambda (result)
+                           (funcall complete-fn index call result t))
+                         (list
+                          :session-id
+                          (and (chat-agent-run-state-session run)
+                               (chat-session-id
+                                (chat-agent-run-state-session run)))
+                          :turn-id (chat-agent-run-state-turn run)
+                          :task-id (chat-agent-run-state-task-id run)))))
+                   (when-let* ((job (gethash index running)))
+                     (puthash index (plist-put job :handle handle) running))))
+             (error
+              (funcall complete-fn index call
+                       (format "Tool checkpoint failed: %s"
+                               (error-message-string err))
+                       t)))))))
      pump-fn
      (lambda ()
        (unless (or reported cancelled)
@@ -690,7 +728,7 @@ need approval carry exclusive accesses and therefore remain serialized."
         (funcall report-fn)
       (funcall pump-fn))))
 
-(defun chat-agent--complete-result (run result processed truncated)
+(cl-defun chat-agent--complete-result (run result processed truncated)
   "Commit PROCESSED transport RESULT for RUN.
 TRUNCATED is non-nil when tool calls were refused for length."
   (when (plist-get processed :cancelled)

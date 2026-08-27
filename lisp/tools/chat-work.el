@@ -34,6 +34,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'chat-command-gate)
+(require 'chat-execution)
 (require 'chat-event)
 (require 'chat-session)
 (require 'chat-task)
@@ -287,33 +288,41 @@ this tool is for, and refusing it would be refusing the tool."
           (chat-work-task-started-at task) (chat-work--timestamp))
     (condition-case err
         (progn
-          (setq process
-                (make-process
-                 :name (concat "chat-work-" id)
-                 :buffer nil
-                 :command (list shell-file-name shell-command-switch command)
-                 :noquery t
-                 :connection-type 'pipe
-                 :filter (lambda (_proc chunk)
-                           (write-region chunk nil log-file 'append 'silent))
-                 :sentinel
-                 (lambda (proc _event)
-                   (unless (process-live-p proc)
-                     (unless (eq (chat-work-task-status task) 'cancelled)
-                       (let ((exit-code (process-exit-status proc)))
-                         (setf (chat-work-task-status task)
-                               (if (zerop exit-code) 'succeeded 'failed)
-                               (chat-work-task-exit-code task) exit-code
-                               (chat-work-task-ended-at task)
-                               (chat-work--timestamp))
-                         (chat-work-save-tasks)
-                         (if (zerop exit-code)
-                             (funcall complete `((exitCode . ,exit-code)
-                                                 (logFile . ,log-file)))
-                           (funcall fail
-                                    (format "Process exited with %d"
-                                            exit-code)))
-                         (chat-work--notify-task-finished task)))))))
+          (let ((record
+                 (chat-execution-start
+                  (chat-execution-request-from-context
+                   (list shell-file-name shell-command-switch command)
+                   :directory default-directory
+                   :environment process-environment
+                   :session-id (chat-work-task-session-id task)
+                   :task-id id
+                   :idempotency 'non-idempotent
+                   :metadata '((kind . "background-task")))
+                  :name (concat "chat-work-" id)
+                  :buffer nil
+                  :noquery t
+                  :connection-type 'pipe
+                  :filter (lambda (_proc chunk)
+                            (write-region chunk nil log-file 'append 'silent))
+                  :sentinel
+                  (lambda (proc _event)
+                    (unless (process-live-p proc)
+                      (unless (eq (chat-work-task-status task) 'cancelled)
+                        (let ((exit-code (process-exit-status proc)))
+                          (setf (chat-work-task-status task)
+                                (if (zerop exit-code) 'succeeded 'failed)
+                                (chat-work-task-exit-code task) exit-code
+                                (chat-work-task-ended-at task)
+                                (chat-work--timestamp))
+                          (chat-work-save-tasks)
+                          (if (zerop exit-code)
+                              (funcall complete `((exitCode . ,exit-code)
+                                                  (logFile . ,log-file)))
+                            (funcall fail
+                                     (format "Process exited with %d"
+                                             exit-code)))
+                          (chat-work--notify-task-finished task))))))))
+            (setq process (chat-execution-native-handle record)))
           (setf (chat-work-task-process task) process)
           (chat-work-save-tasks)
           :async)
@@ -330,7 +339,9 @@ this tool is for, and refusing it would be refusing the tool."
         (chat-work-task-ended-at task) (chat-work--timestamp))
   (when-let* ((process (chat-work-task-process task)))
     (when (process-live-p process)
-      (delete-process process)))
+      (if-let* ((record (chat-execution-record-for-native process)))
+          (chat-execution-cancel record reason)
+        (delete-process process))))
   (chat-work-save-tasks)
   (chat-work--notify-task-finished task)
   reason)

@@ -20,6 +20,7 @@
 (require 'subr-x)
 (require 'url)
 (require 'url-http)
+(require 'chat-execution)
 (require 'chat-session)
 (require 'chat-tool-forge)
 
@@ -171,20 +172,25 @@ user or agent invokes the connect tool."
   (unless (chat-mcp-client-command client)
     (error "Missing stdio command"))
   (let ((proc nil))
-    (setq proc
-          (make-process
-           :name (format "chat-mcp-%s" (chat-mcp-client-id client))
-           :buffer nil
-           :command (chat-mcp-client-command client)
-           :connection-type 'pipe
-           :noquery t
-           :filter (lambda (proc chunk)
-                     (chat-mcp--filter client proc chunk))
-           :sentinel (lambda (_proc _event)
-                       (unless (and (chat-mcp-client-process client)
-                                    (process-live-p
-                                     (chat-mcp-client-process client)))
-                         (setf (chat-mcp-client-status client) 'stopped)))))
+    (let ((record
+           (chat-execution-start
+            (chat-execution-request-from-context
+             (chat-mcp-client-command client)
+             :idempotency 'non-idempotent
+             :metadata `((kind . "stdio-extension")
+                         (clientId . ,(chat-mcp-client-id client))))
+            :name (format "chat-mcp-%s" (chat-mcp-client-id client))
+            :buffer nil
+            :connection-type 'pipe
+            :noquery t
+            :filter (lambda (proc chunk)
+                      (chat-mcp--filter client proc chunk))
+            :sentinel (lambda (_proc _event)
+                        (unless (and (chat-mcp-client-process client)
+                                     (process-live-p
+                                      (chat-mcp-client-process client)))
+                          (setf (chat-mcp-client-status client) 'stopped))))))
+      (setq proc (chat-execution-native-handle record)))
     (setf (chat-mcp-client-process client) proc
           (chat-mcp-client-status client) 'running)
     client))
@@ -200,7 +206,9 @@ user or agent invokes the connect tool."
   (clrhash (chat-mcp-client-pending client))
   (when-let ((proc (chat-mcp-client-process client)))
     (when (process-live-p proc)
-      (delete-process proc)))
+      (if-let* ((record (chat-execution-record-for-native proc)))
+          (chat-execution-cancel record "MCP client stopped")
+        (delete-process proc))))
   (setf (chat-mcp-client-status client) 'stopped)
   client)
 

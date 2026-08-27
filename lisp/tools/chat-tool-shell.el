@@ -8,6 +8,7 @@
 
 (require 'chat-approval-grants)
 (require 'chat-command-gate)
+(require 'chat-execution)
 (require 'chat-files)
 (require 'chat-tool-forge)
 (require 'seq)
@@ -216,45 +217,59 @@ truncated and spills into a temporary file."
          (buffer (generate-new-buffer " *chat-shell*"))
          (stderr-buffer (generate-new-buffer " *chat-shell-stderr*"))
          (process-environment (chat-command-gate-environment))
+         (record nil)
          (proc nil)
+         (deadline nil)
          (timed-out nil))
     (unwind-protect
         (progn
-          (setq proc (make-process
-                      :name "chat-shell"
-                      :buffer buffer
-                      :command argv
-                      :stderr stderr-buffer
-                      :noquery t
-                      ;; A pipe, not the pty Emacs hands out by default.
-                      ;; A pty looks like a terminal, and a pager started
-                      ;; because of it waits for a keystroke that cannot
-                      ;; arrive -- so the command runs out its timeout and
-                      ;; reports a timeout for a command that finished
-                      ;; its work immediately.
-                      :connection-type 'pipe
-                      :sentinel #'ignore))
-          (let ((deadline (+ (float-time) timeout)))
-            (while (and (process-live-p proc)
-                        (< (float-time) deadline))
-              (accept-process-output proc 0.2)))
+          (setq record
+                (chat-execution-start
+                 (chat-execution-request-from-context
+                  argv
+                  :directory default-directory
+                  :environment process-environment
+                  :idempotency 'non-idempotent
+                  :timeout timeout
+                  :metadata '((kind . "shell-tool")))
+                 :name "chat-shell"
+                 :buffer buffer
+                 :stderr stderr-buffer
+                 :noquery t
+                 ;; A pipe, not the pty Emacs hands out by default.  A pty
+                 ;; can make a pager wait for input this tool cannot send.
+                 :connection-type 'pipe
+                 :sentinel #'ignore))
+          (setq proc (chat-execution-native-handle record))
+          (setq deadline (+ (float-time) timeout))
+          (while (and (process-live-p proc)
+                      (< (float-time) deadline))
+            (accept-process-output proc 0.2))
           (when (process-live-p proc)
             (setq timed-out t)
-            (delete-process proc))
+            (chat-execution-cancel record "shell command timed out"))
+          ;; stderr is a second Emacs process.  The command process can exit
+          ;; before its final pipe chunk reaches STDERR-BUFFER, so drain that
+          ;; process under the same deadline before reading the result.
+          (when-let* ((stderr-process (get-buffer-process stderr-buffer)))
+            (while (and (process-live-p stderr-process)
+                        (< (float-time) deadline))
+              (accept-process-output stderr-process 0.05)))
           (chat-tool-shell--format-result
            (with-current-buffer buffer (buffer-string))
            ;; The default stderr sentinel appends a status line such as
            ;; "Process chat-shell stderr finished"; drop it.  The process
-           ;; name may carry a <N> suffix when instances overlap.
+           ;; either process name may carry a <N> suffix when instances
+           ;; overlap.
            (replace-regexp-in-string
-            "\n?Process chat-shell\\(<[0-9]+>\\)? stderr [^\n]*\n?\\'"
+            "\n?Process chat-shell\\(?:<[0-9]+>\\)? stderr\\(?:<[0-9]+>\\)? [^\n]*\n?\\'"
             ""
             (with-current-buffer stderr-buffer (buffer-string)))
            (and (not timed-out) (process-exit-status proc))
            timed-out
            timeout))
-      (when (and proc (process-live-p proc))
-        (delete-process proc))
+      (when (and record (chat-execution-live-p record))
+        (chat-execution-cancel record "shell caller cleanup"))
       (when (buffer-live-p buffer)
         (kill-buffer buffer))
       (when (buffer-live-p stderr-buffer)

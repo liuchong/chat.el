@@ -230,6 +230,10 @@ Acceptance:
 - moving backends preserves task, parent and event correlation;
 - recovery leaves no orphan process, timer, buffer or callback.
 
+Status: complete. Direct file tools have owned rollback coverage; opaque shell,
+workflow and delegated execution remain explicitly partial rather than being
+described as operating-system isolation.
+
 ### M7: Memory, Tracing And Evaluations
 
 Goal: improve long-running agent quality with inspectable memory and measurable
@@ -307,10 +311,10 @@ Every phase must preserve:
 
 ## Current Baseline
 
-M0 through M3 are complete. Named runtime hooks use the unified lifecycle bus,
-skills are discovered without eager body loading, and agent profiles resolve
-model requirements, instructions, tools, approval and limits before dispatch.
-Project extensions require explicit trust, effective authority cannot widen,
-and each run records a bounded profile snapshot without rewriting history. The
-next implementation stage is M4: one durable task contract for foreground,
-background, workflow and delegated work.
+M0 through M6 are complete. The runtime has versioned lifecycle, model,
+extension, task and content contracts, plus durable owned-file checkpoints,
+optional owned worktrees and a unified local execution backend. Restart never
+resurrects stale processes, non-idempotent retries require renewed permission,
+and recovery distinguishes runtime-owned changes from external drift. The next
+implementation stage is M7: provenance-aware memory, correlated Trace views and
+deterministic Agent evaluations.

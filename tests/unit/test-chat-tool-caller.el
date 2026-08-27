@@ -774,5 +774,41 @@ being a thing the reader could do when the two surfaces merged."
        (should (equal (chat-forged-tool-effects tool)
                       '(read outbound)))))))
 
+(ert-deftest chat-tool-caller-restores-execution-context-after-async-approval ()
+  "A delayed guard verdict keeps the task correlation of the original call."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (context '(:session-id "session-1" :turn-id 7 :task-id "task-2"))
+         decision
+         observed
+         result)
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'context-tool
+       :name "Context Tool"
+       :description "Observe execution context"
+       :language 'elisp
+       :parameters nil
+       :compiled-function
+       (lambda ()
+         (setq observed chat-execution-current-context)
+         "ok")
+       :is-active t
+       :usage-count 0))
+     (cl-letf (((symbol-function 'chat-approval-authorize-async)
+                (lambda (_tool _call _session _observer callback)
+                  (setq decision callback)
+                  'pending-approval)))
+       (chat-tool-caller-execute-async
+        '(:name "context-tool" :arguments nil)
+        nil #'ignore
+        (lambda (value) (setq result value))
+        #'ert-fail
+        context))
+     (should decision)
+     (funcall decision t 'guard)
+     (should (equal observed context))
+     (should (string= result "ok")))))
+
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

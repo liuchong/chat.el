@@ -32,7 +32,13 @@
     permission-requested permission-resolved
     task-started task-updated task-ended
     subagent-started subagent-ended
-    pre-compact post-compact)
+    pre-compact post-compact
+    checkpoint-created checkpoint-file-captured checkpoint-updated
+    checkpoint-rolled-back
+    workspace-created workspace-reconciled workspace-release-refused
+    workspace-released
+    execution-started execution-ended execution-interrupted
+    execution-retry-refused)
   "Canonical lifecycle event types.
 
 Other diagnostic event types may travel through the same bus.  This list

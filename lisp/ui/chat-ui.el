@@ -25,10 +25,13 @@
 (declare-function chat-help-text "chat" ())
 (declare-function chat-new-session "chat" (&optional name model))
 (declare-function chat-list-sessions "chat" ())
+(declare-function chat--open-chat-session "chat" (session))
 (declare-function chat-wiki-dispatch "chat-wiki" (arg))
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
 (require 'chat-content)
+(require 'chat-checkpoint)
+(require 'chat-workspace)
 (require 'chat-event)
 (require 'chat-transcript)
 (require 'chat-markdown)
@@ -2033,15 +2036,43 @@ two settings nobody can talk about."
                (chat-i18n 'message-blocked "Message blocked: %s")
                (or (plist-get outcome :reason)
                    "runtime policy returned an invalid message"))
-            (chat-session-add-message chat--current-session user-msg)
-            (setq chat-ui--send-content-parts-consumed
-                  (and attachments t))
-            (chat-ui--clock "record")
-            ;; Drawn from the record rather than inserted directly, so the
-            ;; live boundary lands after this message instead of before it.
-            (chat-ui--redraw-conversation)
-            (chat-ui--clock "redraw")
-            (chat-ui--get-response)))))))
+            (let (checkpoint-error)
+              (condition-case err
+                  (chat-ui--checkpoint-user-message user-msg)
+                (error
+                 (setq checkpoint-error err)
+                 (chat-event-emit
+                  'turn-failed
+                  :session-id (chat-session-id chat--current-session)
+                  :turn-id (chat-transcript-turn user-msg)
+                  :source 'checkpoint
+                  :payload
+                  (list (cons 'reason (error-message-string err))))
+                 (message "Message not sent: checkpoint failed: %s"
+                          (error-message-string err))))
+              (unless checkpoint-error
+                (chat-session-add-message chat--current-session user-msg)
+                (setq chat-ui--send-content-parts-consumed
+                      (and attachments t))
+                (chat-ui--clock "record")
+                ;; Drawn from the record rather than inserted directly, so
+                ;; the live boundary lands after this message, not before it.
+                (chat-ui--redraw-conversation)
+                (chat-ui--clock "redraw")
+                (chat-ui--get-response)))))))))
+
+(defun chat-ui--checkpoint-user-message (message)
+  "Create the pre-Turn checkpoint for user MESSAGE and link its ID."
+  (let ((checkpoint
+         (chat-checkpoint-create
+          chat--current-session
+          :turn-id (chat-transcript-turn message)
+          :reason 'user-turn)))
+    (setf (chat-message-metadata message)
+          (plist-put (chat-message-metadata message)
+                     :checkpoint-id
+                     (chat-checkpoint-id checkpoint)))
+    checkpoint))
 
 (defun chat-ui--stamp-user-message (message)
   "Number MESSAGE with the turn it opens.
@@ -2385,6 +2416,170 @@ had already completed were always kept; this is about the one in flight."
 (defun chat-ui--command-list (_arg)
   "Show the saved sessions."
   (call-interactively #'chat-list-sessions))
+
+(defun chat-ui--require-current-session ()
+  "Return the current session or signal a user-facing error."
+  (or chat--current-session
+      (user-error "%s" (chat-i18n 'no-session "No session here."))))
+
+(defun chat-ui--require-recovery-idle ()
+  "Refuse structural recovery while the current response is active."
+  (when (chat-ui--response-active-p)
+    (user-error "Cancel or finish the current response before recovery")))
+
+(defun chat-ui--checkpoint-time (checkpoint)
+  "Return CHECKPOINT creation time for display."
+  (if-let* ((timestamp (chat-checkpoint-created-at checkpoint)))
+      (format-time-string "%Y-%m-%d %H:%M:%S"
+                          (seconds-to-time (/ timestamp 1000.0)))
+    "unknown time"))
+
+(defun chat-ui--checkpoint-label (checkpoint)
+  "Return one concise selection label for CHECKPOINT."
+  (format "%s  %s  %s  %d owned"
+          (chat-checkpoint-id checkpoint)
+          (chat-ui--checkpoint-time checkpoint)
+          (chat-checkpoint-reason checkpoint)
+          (seq-count
+           (lambda (entry)
+             (eq (chat-checkpoint-file-status entry) 'owned))
+           (chat-checkpoint-files checkpoint))))
+
+(defun chat-ui--read-checkpoint ()
+  "Read one checkpoint belonging to the current session."
+  (let* ((session (chat-ui--require-current-session))
+         (checkpoints (chat-checkpoint-list (chat-session-id session))))
+    (unless checkpoints
+      (user-error "This session has no checkpoints"))
+    (let* ((choices
+            (mapcar (lambda (checkpoint)
+                      (cons (chat-ui--checkpoint-label checkpoint) checkpoint))
+                    checkpoints))
+           (choice (completing-read "Checkpoint: " choices nil t)))
+      (cdr (assoc choice choices)))))
+
+;;;###autoload
+(defun chat-ui-checkpoint-list ()
+  "Show checkpoints owned by the current session."
+  (interactive)
+  (let* ((session (chat-ui--require-current-session))
+         (checkpoints (chat-checkpoint-list (chat-session-id session))))
+    (with-help-window "*chat checkpoints*"
+      (princ (format "Checkpoints for %s\n\n" (chat-session-name session)))
+      (if checkpoints
+          (dolist (checkpoint checkpoints)
+            (princ (chat-ui--checkpoint-label checkpoint))
+            (when-let* ((limitations (chat-checkpoint-limitations checkpoint)))
+              (princ (format "  %d limitation%s"
+                             (length limitations)
+                             (if (= (length limitations) 1) "" "s"))))
+            (princ "\n"))
+        (princ "No checkpoints.\n")))))
+
+;;;###autoload
+(defun chat-ui-checkpoint-create ()
+  "Create an explicit checkpoint for the current session."
+  (interactive)
+  (chat-ui--require-recovery-idle)
+  (let ((checkpoint
+         (chat-checkpoint-create
+          (chat-ui--require-current-session) :reason 'manual)))
+    (chat-ui--insert-system-message
+     (format "Checkpoint created: %s" (chat-checkpoint-id checkpoint)))
+    checkpoint))
+
+;;;###autoload
+(defun chat-ui-checkpoint-rollback-code (checkpoint &optional force)
+  "Restore runtime-owned files from CHECKPOINT.
+With a prefix argument FORCE, overwrite externally drifted owned paths."
+  (interactive (list (chat-ui--read-checkpoint) current-prefix-arg))
+  (chat-ui--require-recovery-idle)
+  (let ((result (chat-checkpoint-rollback-code checkpoint force)))
+    (chat-ui--insert-system-message
+     (format "Checkpoint %s restored %d owned file%s%s."
+             (plist-get result :checkpoint-id)
+             (plist-get result :restored-files)
+             (if (= (plist-get result :restored-files) 1) "" "s")
+             (if (plist-get result :forced) " with force" "")))
+    result))
+
+;;;###autoload
+(defun chat-ui-checkpoint-rollback-conversation (checkpoint)
+  "Create and open a conversation branch at CHECKPOINT."
+  (interactive (list (chat-ui--read-checkpoint)))
+  (chat-ui--require-recovery-idle)
+  (let ((branch
+         (chat-checkpoint-rollback-conversation
+          checkpoint (chat-ui--require-current-session))))
+    (chat--open-chat-session branch)
+    branch))
+
+;;;###autoload
+(defun chat-ui-checkpoint-rollback-both (checkpoint &optional force)
+  "Restore CHECKPOINT files and then open a conversation branch.
+With a prefix argument FORCE, overwrite externally drifted owned paths."
+  (interactive (list (chat-ui--read-checkpoint) current-prefix-arg))
+  (chat-ui--require-recovery-idle)
+  (let* ((result
+          (chat-checkpoint-rollback-both
+           checkpoint (chat-ui--require-current-session) force))
+         (branch (plist-get result :branch)))
+    (chat--open-chat-session branch)
+    result))
+
+;;;###autoload
+(defun chat-ui-workspace-status ()
+  "Show and reconcile the current session workspace."
+  (interactive)
+  (let* ((session (chat-ui--require-current-session))
+         (workspace (chat-workspace-get session)))
+    (with-help-window "*chat workspace*"
+      (princ (format "Workspace for %s\n\n" (chat-session-name session)))
+      (if (null workspace)
+          (progn
+            (princ "Kind: checkout\n")
+            (princ (format "Path: %s\n" default-directory)))
+        (setq workspace (chat-workspace-reconcile workspace session))
+        (princ (format "Kind: %s\n" (chat-workspace-kind workspace)))
+        (princ (format "Status: %s\n" (chat-workspace-status workspace)))
+        (princ (format "Path: %s\n" (chat-workspace-path workspace)))
+        (princ (format "Source: %s\n"
+                       (chat-workspace-source-root workspace)))
+        (princ (format "Base: %s\n"
+                       (chat-workspace-base-revision workspace)))
+        (princ (format "Dirty: %s\n"
+                       (if (chat-workspace-dirty workspace) "yes" "no")))))))
+
+;;;###autoload
+(defun chat-ui-workspace-enable (&optional revision)
+  "Give the current session an owned worktree at optional REVISION."
+  (interactive
+   (list (and current-prefix-arg
+              (read-string "Base revision: " "HEAD"))))
+  (chat-ui--require-recovery-idle)
+  (let* ((session (chat-ui--require-current-session))
+         (workspace
+          (chat-workspace-enable-worktree
+           session default-directory :revision revision)))
+    (setq-local default-directory (chat-workspace-path workspace))
+    (chat-ui--insert-system-message
+     (format "Owned worktree enabled: %s" default-directory))
+    workspace))
+
+;;;###autoload
+(defun chat-ui-workspace-release (&optional force)
+  "Release the current session's owned worktree.
+With a prefix argument FORCE, discard changes in that owned worktree."
+  (interactive "P")
+  (chat-ui--require-recovery-idle)
+  (let* ((session (chat-ui--require-current-session))
+         (workspace (chat-workspace-release session force)))
+    (setq-local default-directory
+                (chat-workspace-source-root workspace))
+    (chat-ui--insert-system-message
+     (format "Owned worktree released%s; source checkout restored: %s"
+             (if force " with force" "") default-directory))
+    workspace))
 
 (defun chat-ui--command-save (_arg)
   "Write this session to disk now."

@@ -11,6 +11,21 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'chat-execution)
+
+(defun chat-code-test--start-process (name buffer command directory sentinel)
+  "Start COMMAND for a code test through the execution runtime."
+  (let ((record
+         (chat-execution-start
+          (chat-execution-request-from-context
+           command
+           :directory directory
+           :idempotency 'non-idempotent
+           :metadata '((kind . "code-test")))
+          :name name
+          :buffer buffer
+          :sentinel sentinel)))
+    (chat-execution-native-handle record)))
 
 ;; ------------------------------------------------------------------
 ;; Test Framework Detection
@@ -67,17 +82,15 @@ If TEST-NAME is provided, run only that test."
     (with-current-buffer buffer
       (erase-buffer)
       (insert (format "Running: %s\n\n" cmd)))
-    (make-process
-     :name "chat-pytest"
-     :buffer buffer
-     :command (list "bash" "-c" cmd)
-     :sentinel (lambda (proc event)
-                 (when (string-match-p "finished" event)
-                   (with-current-buffer (process-buffer proc)
-                     (goto-char (point-max))
-                     (insert "\n\nTest run complete.\n")
-                     (chat-code-test--parse-pytest-output (current-buffer)))
-                   (pop-to-buffer (process-buffer proc)))))))
+    (chat-code-test--start-process
+     "chat-pytest" buffer (list "bash" "-c" cmd) default-directory
+     (lambda (proc event)
+       (when (string-match-p "finished" event)
+         (with-current-buffer (process-buffer proc)
+           (goto-char (point-max))
+           (insert "\n\nTest run complete.\n")
+           (chat-code-test--parse-pytest-output (current-buffer)))
+         (pop-to-buffer (process-buffer proc)))))))
 
 (defun chat-code-test--run-ert (file-path &optional test-name)
   "Run ERT tests in FILE-PATH."
@@ -100,13 +113,11 @@ If TEST-NAME is provided, run only that test."
     (with-current-buffer buffer
       (erase-buffer)
       (insert (format "Running: %s\n\n" cmd)))
-    (make-process
-     :name "chat-jest"
-     :buffer buffer
-     :command (list "bash" "-c" cmd)
-     :sentinel (lambda (proc event)
-                 (when (string-match-p "finished" event)
-                   (pop-to-buffer (process-buffer proc)))))))
+    (chat-code-test--start-process
+     "chat-jest" buffer (list "bash" "-c" cmd) default-directory
+     (lambda (proc event)
+       (when (string-match-p "finished" event)
+         (pop-to-buffer (process-buffer proc)))))))
 
 (defun chat-code-test--run-go-test (file-path &optional test-name)
   "Run Go tests in FILE-PATH."
@@ -118,13 +129,11 @@ If TEST-NAME is provided, run only that test."
     (with-current-buffer buffer
       (erase-buffer)
       (insert (format "Running: %s\n\n" cmd)))
-    (make-process
-     :name "chat-go-test"
-     :buffer buffer
-     :command (list "bash" "-c" cmd)
-     :sentinel (lambda (proc event)
-                 (when (string-match-p "finished" event)
-                   (pop-to-buffer (process-buffer proc)))))))
+    (chat-code-test--start-process
+     "chat-go-test" buffer (list "bash" "-c" cmd) default-directory
+     (lambda (proc event)
+       (when (string-match-p "finished" event)
+         (pop-to-buffer (process-buffer proc)))))))
 
 ;; ------------------------------------------------------------------
 ;; Test Result Parsing
@@ -252,13 +261,11 @@ Returns list of failures."
     (with-current-buffer buffer
       (erase-buffer)
       (insert (format "Running: %s\n\n" cmd)))
-    (make-process
-     :name "chat-pytest-coverage"
-     :buffer buffer
-     :command (list "bash" "-c" cmd)
-     :sentinel (lambda (proc event)
-                 (when (string-match-p "finished" event)
-                   (pop-to-buffer (process-buffer proc)))))))
+    (chat-code-test--start-process
+     "chat-pytest-coverage" buffer (list "bash" "-c" cmd) default-directory
+     (lambda (proc event)
+       (when (string-match-p "finished" event)
+         (pop-to-buffer (process-buffer proc)))))))
 
 ;; ------------------------------------------------------------------
 ;; Commands
