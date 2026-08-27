@@ -2,7 +2,7 @@
 
 - Type: decisions
 - Attention: reference
-- Status: accepted
+- Status: superseded by 0018 (structural decisions still stand)
 - Scope: code-prompt
 - Tags: prompt, agent, objectivity, interaction
 

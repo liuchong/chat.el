@@ -959,15 +959,16 @@ distinguishes an answer that was written down from one that was not.
 Code-capable sessions begin their system prompt with
 `chat-code-highest-priority-rules`, ahead of the persona, ordinary hard
 rules and project instructions. The defaults make objective, correct task
-completion primary; prohibit flattery, appeasement and emotional coaching;
-require errors, contradictions and ambiguity to be named directly; and
-pause only the unresolved or risky part instead of guessing.
+completion the sole goal; forbid emotional labour such as flattery,
+appeasement and comfort; require errors, contradictions and ambiguous
+instructions to be refused rather than guessed at; refuse to reply when
+the developer has broken down emotionally; strike back directly at abuse;
+and keep output strictly task-relevant.
 
-Hostility is not a form of objectivity. The defaults explicitly prohibit
-retaliating or mirroring abuse: the assistant sets a short boundary and
-continues only with a clear task. Likewise, an incoherent instruction
-pauses risky action and asks for one actionable instruction rather than
-silently inventing intent.
+Unlike the technical rule lists, this section is pure interaction prose,
+so it follows `chat-prompt-language`: a Simplified Chinese translation
+ships in `lisp/core/chat-i18n-zh-cn.el`, and a customized list wins over
+any translation, on the same principle as the persona.
 
 The section is a customizable list so a local configuration can audit or
 replace individual rules without copying the rest of the coding prompt:
@@ -1014,8 +1015,9 @@ translated prompt starts behaving worse than the English one.
 Machine-read parts of a prompt are never translated at either setting:
 JSON keys, tool names, the `*** Begin Patch` envelope, the `code-edit`
 fence language. A parser matches those literally. For the same reason the
-coding rule lists stay English while the persona around them is
-translated: they are dense with literal tool names, and a translation
+technical coding rule lists stay English while the persona and the
+highest-priority interaction rules around them are translated: the
+technical lists are dense with literal tool names, and a translation
 would have to carry all of them through untouched for no change in what
 the model does.
 

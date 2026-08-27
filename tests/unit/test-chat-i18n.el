@@ -349,6 +349,25 @@ why only prose is in the prompt catalog."
         (chat-code-system-prompt "Only do what I said."))
     (should (equal (chat-code--persona-prompt) "Only do what I said."))))
 
+(ert-deftest chat-prompt-highest-priority-rules-follow-the-language ()
+  "The interaction rules are pure prose, so they ship translated.
+Unlike the technical rule lists, nothing in them is matched literally
+by a parser."
+  (let ((chat-prompt-language 'zh-CN))
+    (let ((prompt (chat-code--compose-system-prompt)))
+      (should (string-match-p "最高优先级任务规则：" prompt))
+      (should (string-match-p "禁止情绪劳动" prompt))))
+  (let ((chat-prompt-language 'en))
+    (should (string-prefix-p "Highest-priority task rules:\n- Indulging"
+                             (chat-code--compose-system-prompt)))))
+
+(ert-deftest chat-prompt-customized-rules-win-over-their-translation ()
+  "A rule list the user set is not a default to be localized away."
+  (let ((chat-prompt-language 'zh-CN)
+        (chat-code-highest-priority-rules '("My own rule.")))
+    (should (string-prefix-p "Highest-priority task rules:\n- My own rule."
+                             (chat-code--compose-system-prompt)))))
+
 (ert-deftest chat-help-text-follows-the-language ()
   "The surface shows the catalog entry, not the English constant."
   (let ((chat-language 'zh-CN))

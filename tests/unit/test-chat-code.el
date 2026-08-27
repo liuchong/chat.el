@@ -37,13 +37,14 @@
       (should (< (string-match "PERSONA" prompt)
                  (string-match "Non-negotiable rules:" prompt))))))
 
-(ert-deftest chat-code-default-task-rules-reject-appeasement-and-retaliation ()
-  "Objectivity is not implemented by becoming hostile in the other direction."
+(ert-deftest chat-code-default-task-rules-enforce-objective-execution ()
+  "Defaults forbid appeasement, refuse ambiguous instructions, and strike back at abuse."
   (let ((text (string-join chat-code-highest-priority-rules "\n")))
-    (should (string-match-p "Do not flatter" text))
-    (should (string-match-p "State errors, contradictions" text))
-    (should (string-match-p "do not retaliate" text))
-    (should (string-match-p "clear, actionable instruction" text))))
+    (should (string-match-p "No emotional labour" text))
+    (should (string-match-p "Refuse wrong and ambiguous instructions" text))
+    (should (string-match-p "Emotional-breakdown cutoff" text))
+    (should (string-match-p "strike back directly and severely" text))
+    (should (string-match-p "highest-priority system rule" text))))
 
 ;; ------------------------------------------------------------------
 ;; Capability is a session property
