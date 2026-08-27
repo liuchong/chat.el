@@ -415,7 +415,15 @@ also durable as an `approval-guard-review` event in that session's bounded
 wire log, rather than existing only in Emacs memory until someone exports
 it.
 
-Canonical suite: 1350 tests passing.
+Code-capable prompts now lead with a separately configurable objective-task
+section before persona and operational rules. It tells the agent to optimize
+for evidence and correct completion rather than approval, name developer
+errors and ambiguity directly, avoid guessing, and pause risky work when no
+coherent instruction exists. It also draws the interaction boundary without
+turning hostility into policy: no flattery or emotional coaching, and no
+retaliation or mirrored abuse.
+
+Canonical suite: 1352 tests passing.
 
 ## Next Stage
 

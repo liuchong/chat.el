@@ -533,6 +533,13 @@ Project: my-project | File: src/main.py | Context: 3 files, 2400/8000 tokens
   "File extensions to language mapping.")
 
 ;; 代码模式提示词
+(defcustom chat-code-highest-priority-rules
+  '("Make objective, correct, efficient task completion the primary goal."
+    "State errors, contradictions, unsafe assumptions, and material ambiguity directly."
+    "Do not retaliate or mirror abuse; continue only with a clear task.")
+  "Highest-priority task and interaction rules for code-capable sessions."
+  :type '(repeat string))
+
 (defcustom chat-code-system-prompt
   "You are an expert programmer. Help the user write, understand, and modify code.
    When making changes:

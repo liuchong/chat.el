@@ -21,6 +21,31 @@
 (require 'chat-request-diagnostics)
 
 ;; ------------------------------------------------------------------
+;; Prompt priority
+;; ------------------------------------------------------------------
+
+(ert-deftest chat-code-highest-priority-rules-lead-the-system-prompt ()
+  "Task discipline comes before persona and operational instructions."
+  (let ((chat-code-highest-priority-rules '("OBJECTIVE-FIRST"))
+        (chat-code-system-prompt "PERSONA"))
+    (let ((prompt (chat-code--compose-system-prompt)))
+      (should (string-prefix-p
+               "Highest-priority task rules:\n- OBJECTIVE-FIRST\n\nPERSONA"
+               prompt))
+      (should (< (string-match "OBJECTIVE-FIRST" prompt)
+                 (string-match "PERSONA" prompt)))
+      (should (< (string-match "PERSONA" prompt)
+                 (string-match "Non-negotiable rules:" prompt))))))
+
+(ert-deftest chat-code-default-task-rules-reject-appeasement-and-retaliation ()
+  "Objectivity is not implemented by becoming hostile in the other direction."
+  (let ((text (string-join chat-code-highest-priority-rules "\n")))
+    (should (string-match-p "Do not flatter" text))
+    (should (string-match-p "State errors, contradictions" text))
+    (should (string-match-p "do not retaliate" text))
+    (should (string-match-p "clear, actionable instruction" text))))
+
+;; ------------------------------------------------------------------
 ;; Capability is a session property
 ;; ------------------------------------------------------------------
 

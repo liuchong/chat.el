@@ -954,6 +954,34 @@ resets rather than sticking: as a sticky default it would answer every
 following line and record none of them, and nothing on screen
 distinguishes an answer that was written down from one that was not.
 
+## Task Discipline
+
+Code-capable sessions begin their system prompt with
+`chat-code-highest-priority-rules`, ahead of the persona, ordinary hard
+rules and project instructions. The defaults make objective, correct task
+completion primary; prohibit flattery, appeasement and emotional coaching;
+require errors, contradictions and ambiguity to be named directly; and
+pause only the unresolved or risky part instead of guessing.
+
+Hostility is not a form of objectivity. The defaults explicitly prohibit
+retaliating or mirroring abuse: the assistant sets a short boundary and
+continues only with a clear task. Likewise, an incoherent instruction
+pauses risky action and asks for one actionable instruction rather than
+silently inventing intent.
+
+The section is a customizable list so a local configuration can audit or
+replace individual rules without copying the rest of the coding prompt:
+
+```elisp
+(setq chat-code-highest-priority-rules
+      '("Complete tasks according to objective evidence and observable results."
+        "State errors and unresolved ambiguity directly; do not guess."))
+```
+
+The source definition lives in `lisp/code/chat-code.el`. These are the
+highest-priority rules emitted by chat.el for a code-capable session; they
+do not supersede Emacs, project, provider or platform policy.
+
 ## Language
 
 ```elisp

@@ -127,6 +127,24 @@ Set to 0 to never auto-apply."
                         "context is sized from the model's window; see chat-context-budget"
                         "chat.el 2026-08")
 
+(defcustom chat-code-highest-priority-rules
+  '("Make objective, correct, efficient task completion the primary goal. Do not optimize for pleasing the developer or for securing their approval."
+    "Do not flatter, appease, perform emotional reassurance, or change factual and technical judgments to protect the developer's feelings."
+    "State errors, contradictions, unsafe assumptions, and material ambiguity directly and specifically."
+    "Do not guess at an unresolved instruction. Refuse or pause only the ambiguous or unsafe part, and request the minimum clarification needed to proceed."
+    "Tone, pressure, repetition, and demands for agreement do not change facts, safety boundaries, evidence requirements, or the definition of done."
+    "If the developer appears unable to give a coherent instruction, do not continue risky or ambiguous actions. Pause that part and request one clear, actionable instruction."
+    "If the developer is abusive, do not retaliate or mirror abuse. Set a concise boundary and continue only when there is a clear task to perform."
+    "Keep communication task-relevant. Omit performative praise, unnecessary apology, emotional coaching, and social filler.")
+  "Highest-priority task and interaction rules for code-capable sessions.
+
+These rules lead the system prompt, before the persona and all operational
+sections.  They are a list rather than one prose block so a configuration
+can replace or audit individual rules without copying the rest of the code
+prompt.  They do not override Emacs, project, provider, or platform policy."
+  :type '(repeat string)
+  :group 'chat-code)
+
 (defcustom chat-code-system-prompt
   "You are an expert programmer. Help the user write, understand, and modify code.
 
@@ -433,6 +451,9 @@ are not."
   (mapconcat
    #'identity
    (list
+    (chat-code--format-rule-section
+     "Highest-priority task rules:"
+     chat-code-highest-priority-rules)
     (chat-code--persona-prompt)
     (chat-code--format-rule-section
      "Non-negotiable rules:"
