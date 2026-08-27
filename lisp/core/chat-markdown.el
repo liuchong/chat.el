@@ -73,11 +73,7 @@
   :group 'chat-markdown)
 
 (defface chat-code-block-face
-  '((((background light)) :inherit fixed-pitch :background "gray95"
-     :extend t)
-    (((background dark)) :inherit fixed-pitch :background "gray15"
-     :extend t)
-    (t :inherit fixed-pitch :extend t))
+  '((t :inherit fixed-pitch))
   "A fenced code block.
 
 One face where there were two.  `chat-ui-code-block-face' was identical
@@ -121,11 +117,7 @@ so the same visual surface was split in half and could drift."
   :group 'chat-markdown)
 
 (defface chat-markdown-table
-  '((((background light)) :inherit fixed-pitch :background "gray95"
-     :extend t)
-    (((background dark)) :inherit fixed-pitch :background "gray15"
-     :extend t)
-    (t :inherit fixed-pitch :extend t))
+  '((t :inherit fixed-pitch))
   "A Markdown table, kept fixed-pitch so columns share one metric."
   :group 'chat-markdown)
 
@@ -620,12 +612,29 @@ copied out, it works."
               'display shown
               'face (chat-markdown--face 'chat-markdown-table-border base)))
 
-(defun chat-markdown--add-face (text face base)
-  "Return TEXT with FACE over BASE appended to its existing faces."
+(defun chat-markdown--table-aligned-border (source shown column base)
+  "Return SOURCE with SHOWN placed at absolute table COLUMN over BASE.
+
+SOURCE begins with one padding space followed by its Markdown pipe.
+The space stretches to COLUMN in units of the table face's character
+width, so the pipe no longer depends on the pixel widths of the cell's
+glyphs or their fallback fonts."
+  (let ((result (copy-sequence source))
+        (face (chat-markdown--face 'chat-markdown-table-border base)))
+    (add-text-properties
+     0 1 `(display (space :align-to (,column . width)) face ,face) result)
+    (add-text-properties 1 2 `(display ,shown face ,face) result)
+    result))
+
+(defun chat-markdown--add-face (text face)
+  "Return TEXT with FACE before its existing faces.
+
+FACE owns structural metrics such as a table's fixed-pitch family, so it
+must outrank channel and inline faces.  Attributes it does not specify,
+such as foreground colour, still fall through to those existing faces."
   (let ((result (copy-sequence text)))
     (when (> (length result) 0)
-      (add-face-text-property 0 (length result)
-                              (chat-markdown--face face base) t result))
+      (add-face-text-property 0 (length result) face nil result))
     result))
 
 (defun chat-markdown--render-table-row
@@ -636,19 +645,33 @@ WIDTHS and ALIGNMENTS lay out the cells.  BASE carries the transcript
 channel and HEADER-P adds the table-header face.  The pipe characters
 stay in the string while `display' shows box-drawing borders, so copying
 the row still gives valid Markdown."
-  (chat-markdown--add-face
-   (concat
-    (chat-markdown--table-border "| " "│ " base)
-    (chat-markdown--align-visible-row
-     (cl-loop for cell in cells
-              for column from 0
-              collect (chat-markdown--table-cell
-                       cell (nth column widths) base))
-     widths alignments
-     (chat-markdown--table-border " | " " │ " base))
-    (chat-markdown--table-border " |" " │" base))
-   (if header-p 'chat-markdown-table-header 'chat-markdown-table)
-   base))
+  (let ((parts (list (chat-markdown--table-border "| " "│ " base)))
+        ;; The first cell begins after the leading pipe and one space.
+        (screen-column 2)
+        (count (length cells)))
+    (cl-loop for cell in cells
+             for width in widths
+             for alignment in alignments
+             for index from 0
+             do
+             (push (chat-markdown--pad-visible
+                    (chat-markdown--table-cell cell width base)
+                    width alignment)
+                   parts)
+             ;; Leave one visual column before the pipe.  `:align-to'
+             ;; makes this an absolute destination rather than a guess
+             ;; expressed as ordinary spaces.
+             (setq screen-column (+ screen-column width 1))
+             (push (chat-markdown--table-aligned-border
+                    (if (= index (1- count)) " |" " | ")
+                    "│" screen-column base)
+                   parts)
+             ;; The pipe itself and the following source space occupy
+             ;; two columns before the next cell begins.
+             (setq screen-column (+ screen-column 2)))
+    (chat-markdown--add-face
+     (apply #'concat (nreverse parts))
+     (if header-p 'chat-markdown-table-header 'chat-markdown-table))))
 
 (defun chat-markdown--table-cell (cell width base)
   "Return CELL rendered for a column of WIDTH over BASE."

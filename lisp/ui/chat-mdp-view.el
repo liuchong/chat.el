@@ -16,11 +16,7 @@
 (require 'chat-mdp)
 
 (defface chat-mdp-view-machine
-  '((((background light)) :inherit fixed-pitch :background "gray95"
-     :extend t)
-    (((background dark)) :inherit fixed-pitch :background "gray15"
-     :extend t)
-    (t :inherit fixed-pitch :extend t))
+  '((t :inherit fixed-pitch))
   "The parsed, typed reading of an MDP payload."
   :group 'chat)
 

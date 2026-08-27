@@ -33,6 +33,10 @@
          (faces (if (listp face) face (list face))))
     (should (memq 'chat-mdp-view-machine faces))))
 
+(ert-deftest chat-mdp-view-does-not-paint-a-background-panel ()
+  (should (eq 'unspecified
+              (face-attribute 'chat-mdp-view-machine :background nil nil))))
+
 (ert-deftest chat-mdp-preview-is-an-interactive-command ()
   (should (commandp 'chat-mdp-preview-region)))
 

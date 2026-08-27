@@ -26,12 +26,16 @@ when each row uses a different metric.
 
 - Table widths are measured from the final screen text after `invisible` and
   string-valued `display` properties are applied.
-- Every table row uses one fixed-pitch metric. Source pipes display as quiet
+- Every table row puts one fixed-pitch structural face ahead of channel and
+  inline faces, so that metric actually wins. Source pipes display as quiet
   Unicode borders, and separator rows display as joined box-drawing rules.
 - Visibility-aware truncation preserves hidden closing markers, so copied
   Markdown remains valid.
 - Headings have a clearer hierarchy; fenced code has labelled top and bottom
   rails plus a body rail; blockquotes retain a visible rail.
+- Tables, code blocks and machine views deliberately inherit the buffer
+  background. Their structure comes from typography and rails, never a panel
+  of hard-coded light or dark colour.
 - The output-format prompt now forbids wrapping an ordinary answer or a
   Markdown rendering demonstration in a `markdown` fence.
 - The README shortcut was corrected from the nonexistent `C-c C-;` to the

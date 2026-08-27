@@ -2297,8 +2297,16 @@ arithmetic was then displayed through faces with different pixel metrics.
 **Solution**: render each cell first, derive its screen text from
 `invisible` and `display` properties, and measure that with `string-width`.
 Give the whole table one fixed-pitch face before adding header, code and
-border faces. Keep truncation visibility-aware too, so it does not discard
-hidden closing markers from the copyable Markdown source.
+border faces, and put that structural face first in the face list. Appending
+it behind an existing channel face records the intent without giving it
+control of the font metric. Keep truncation visibility-aware too, so it does
+not discard hidden closing markers from the copyable Markdown source.
+
+On graphical Emacs, fixed-pitch inheritance is still not a pixel guarantee
+for mixed scripts: a CJK glyph can come from a fallback font whose width is
+not exactly two Latin cells. Put each column border at an absolute display
+column with `(space :align-to ...)`; padding spaces then preserve readable
+source but no longer decide where the visible border lands.
 
 **General rule**: display layout must measure the display representation,
 not the storage representation. Once text properties can hide or replace

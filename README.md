@@ -1069,7 +1069,8 @@ quiet left rail, bullets become `•`, and links show their text. Tables use
 one fixed-pitch metric and Unicode borders; widths come from the text that
 is actually visible, so hidden backticks, link destinations and Chinese
 cells cannot move a column boundary. No preview window, no external
-renderer.
+renderer. Tables, code blocks and machine views inherit the buffer
+background instead of drawing light or dark panels.
 
 Markers are hidden rather than removed, so copying a reply gives back the
 Markdown the model wrote, stars and hashes included. `C-c C-u` shows the

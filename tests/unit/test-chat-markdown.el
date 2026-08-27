@@ -229,13 +229,24 @@ them, not text written in their place."
 
 The arithmetic is in character columns, so every visible table row has
 to be fixed-pitch.  Otherwise a logically aligned table still drifts by
-pixels as soon as a header is bold or a cell contains inline code."
+pixels as soon as a header is bold or a cell contains inline code.  A
+variable-pitch channel face reproduces the transcript conflict: merely
+having the table face somewhere in the list is not enough; it must lead."
   (let* ((rendered (chat-markdown-render
-                    "| field | value |\n| --- | --- |\n| 中文 | `code` |"))
+                    "| field | value |\n| --- | --- |\n| 中文 | `code` |"
+                    'variable-pitch))
          (header-faces (test-markdown--faces-at rendered "field"))
-         (body-faces (test-markdown--faces-at rendered "中文")))
-    (should (memq 'chat-markdown-table-header header-faces))
-    (should (memq 'chat-markdown-table body-faces))))
+         (body-faces (test-markdown--faces-at rendered "中文"))
+         (code-faces (test-markdown--faces-at rendered "code")))
+    (should (eq 'chat-markdown-table-header (car header-faces)))
+    (should (eq 'chat-markdown-table (car body-faces)))
+    (should (eq 'chat-markdown-table (car code-faces)))
+    (should (memq 'variable-pitch body-faces))))
+
+(ert-deftest chat-markdown-document-surfaces-do-not-paint-backgrounds ()
+  "Tables and code blocks belong to the buffer, not to white panels."
+  (dolist (face '(chat-markdown-table chat-code-block-face))
+    (should (eq 'unspecified (face-attribute face :background nil nil)))))
 
 (ert-deftest chat-markdown-table-width-ignores-hidden-inline-markers ()
   "Backticks and link destinations must not pull a border to the left."
@@ -260,9 +271,22 @@ pixels as soon as a header is bold or a cell contains inline code."
          (first-pipe (string-match "|" rendered))
          (inner-pipe (string-match "|" rendered (1+ first-pipe))))
     (should (equal "│ " (get-text-property first-pipe 'display rendered)))
-    (should (equal " │ " (get-text-property inner-pipe 'display rendered)))
+    (should (equal "│" (get-text-property inner-pipe 'display rendered)))
     (should (string-match-p "| a +| b +|"
                             (substring-no-properties rendered)))))
+
+(ert-deftest chat-markdown-table-borders-use-absolute-display-columns ()
+  "Padding glyphs cannot be trusted to share one pixel metric on macOS."
+  (let* ((rendered (chat-markdown-render
+                    "| field | value |\n| --- | --- |\n| 中文 | `main` |"
+                    'variable-pitch))
+         (first-inner-pipe (string-match " | " rendered))
+         (padding (get-text-property first-inner-pipe 'display rendered))
+         (pipe (get-text-property (1+ first-inner-pipe) 'display rendered)))
+    (should (equal 'space (car padding)))
+    (should (eq :align-to (nth 1 padding)))
+    (should (equal 'width (cdr (nth 2 padding))))
+    (should (equal "│" pipe))))
 
 (ert-deftest chat-markdown-a-wide-table-does-not-run-off-the-side ()
   "It is narrowed to the limit rather than left to overflow unseen."
