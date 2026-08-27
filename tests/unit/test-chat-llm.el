@@ -423,6 +423,65 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
       (should (equal (cdr (assoc 'role tool)) "tool"))
       (should (equal (cdr (assoc 'tool_call_id tool)) "call-1")))))
 
+(ert-deftest chat-llm-format-messages-replays-reasoning-for-tool-call ()
+  "Reasoning replay is explicit and limited to assistant tool calls."
+  (let* ((assistant
+          (make-chat-message
+           :role :assistant
+           :content ""
+           :metadata '(:reasoning "inspect before editing")
+           :tool-calls '((:id "call-1" :name "demo-tool"
+                          :arguments (("input" . "x"))))))
+         (without-replay (aref (chat-llm--format-messages
+                                (list assistant)) 0))
+         (with-replay (aref (chat-llm--format-messages
+                             (list assistant) t) 0)))
+    (should-not (assoc 'reasoning_content without-replay))
+    (should (equal (cdr (assoc 'reasoning_content with-replay))
+                   "inspect before editing"))))
+
+(ert-deftest chat-llm-format-messages-never-replays-plain-reasoning ()
+  "A reasoning-only assistant message remains ordinary content."
+  (let* ((assistant
+          (make-chat-message :role :assistant
+                             :content "done"
+                             :metadata '(:reasoning "private work")))
+         (formatted (aref (chat-llm--format-messages
+                           (list assistant) t) 0)))
+    (should-not (assoc 'reasoning_content formatted))))
+
+(ert-deftest chat-llm-openai-request-replays-reasoning-by-capability ()
+  "An explicitly reasoning model carries its tool-call thought forward."
+  (chat-llm-register-openai-compatible-provider
+   'reasoning-wire-test "Reasoning Wire" "https://example.invalid/v1" "r1"
+   :capabilities '(:stream t :tools t :reasoning t))
+  (let* ((assistant
+          (make-chat-message
+           :role :assistant :content ""
+           :metadata '(:reasoning "retain this continuation")
+           :tool-calls '((:id "call-1" :name "demo-tool"
+                          :arguments nil))))
+         (request (chat-llm--build-request
+                   'reasoning-wire-test (list assistant) nil))
+         (wire-message (aref (plist-get request :messages) 0)))
+    (should (equal (cdr (assoc 'reasoning_content wire-message))
+                   "retain this continuation"))))
+
+(ert-deftest chat-llm-openai-request-omits-reasoning-when-unknown ()
+  "An unknown capability never authorizes a provider-specific field."
+  (chat-llm-register-openai-compatible-provider
+   'unknown-wire-test "Unknown Wire" "https://example.invalid/v1" "u1")
+  (let* ((assistant
+          (make-chat-message
+           :role :assistant :content ""
+           :metadata '(:reasoning "do not send")
+           :tool-calls '((:id "call-1" :name "demo-tool"
+                          :arguments nil))))
+         (request (chat-llm--build-request
+                   'unknown-wire-test (list assistant) nil))
+         (wire-message (aref (plist-get request :messages) 0)))
+    (should-not (assoc 'reasoning_content wire-message))))
+
 (ert-deftest chat-llm-format-messages-expands-persisted-tool-results ()
   "Test stored assistant tool-results become tool role payloads."
   (let* ((messages (list

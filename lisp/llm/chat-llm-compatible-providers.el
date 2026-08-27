@@ -71,7 +71,21 @@ identity shared with another protocol, or the model list it serves."
  :vendor 'deepseek
  :models '("deepseek-v4-flash"
            "deepseek-v4-pro"
-           "deepseek-v4-flash-vision-exp"))
+           "deepseek-v4-flash-vision-exp")
+ :model-capabilities
+ '(("deepseek-v4-flash" .
+    (:reasoning t :tool-choice (auto)
+     :structured-output (json-object)
+     :supported-options (:max-tokens)))
+   ("deepseek-v4-pro" .
+    (:reasoning t :tool-choice (auto)
+     :structured-output (json-object)
+     :supported-options (:max-tokens)))
+   ("deepseek-v4-flash-vision-exp" .
+    (:reasoning t :tool-choice (auto)
+     :input-modalities (text image)
+     :structured-output (json-object)
+     :supported-options (:max-tokens)))))
 
 ;; The same host also speaks the Anthropic Messages protocol, under a
 ;; path of its own.  Kept out of menus, reachable by name -- see

@@ -308,6 +308,7 @@ Returns the process object."
          (headers (chat-llm--make-headers provider))
          (request-id (plist-get options :request-id))
          (reasoning-callback (plist-get options :on-reasoning))
+         (payload-callback (plist-get options :on-payload))
          ;; Build request body
          (opts (plist-put (copy-tree options) :stream t))
          (_ (chat-log-timing-mark "headers"))
@@ -365,7 +366,8 @@ Returns the process object."
                       :command (cons "curl" curl-args)
                       :filter (lambda (proc string)
                                (chat-stream--handle-output
-                                proc string provider callback reasoning-callback))
+                                proc string provider callback reasoning-callback
+                                payload-callback))
                       :sentinel (lambda (proc event)
                                  (chat-log "[STREAM] Process event: %s" event)
                                  (when (string-match-p "finished\\|exited" event)
@@ -381,7 +383,8 @@ Returns the process object."
                                           (concat chat-stream--partial-line "\n")
                                           provider
                                           callback
-                                          reasoning-callback))))
+                                          reasoning-callback
+                                          payload-callback))))
                                    (kill-buffer buffer)))
                       :stderr (get-buffer-create "*chat-stream-err*")))
       (error
@@ -411,7 +414,8 @@ Returns the process object."
     process))
 
 (defun chat-stream--handle-output
-    (proc string provider callback &optional reasoning-callback)
+    (proc string provider callback
+          &optional reasoning-callback payload-callback)
   "Handle output STRING from process PROC."
   (chat-log "[STREAM] Received %d bytes" (length string))
   (condition-case err
@@ -432,6 +436,13 @@ Returns the process object."
                 (if (chat-stream--parse-sse-line clean-line)
                     (let ((data (chat-stream--parse-sse-line clean-line)))
                       (chat-stream-accumulate-payload proc data)
+                      (when payload-callback
+                        (condition-case callback-error
+                            (funcall payload-callback data)
+                          (error
+                           (chat-log
+                            "[STREAM] Payload callback error: %s"
+                            (error-message-string callback-error)))))
                       (when reasoning-callback
                         (let* ((json-object-type 'alist)
                                (json-array-type 'list)

@@ -33,6 +33,7 @@
 (require 'chat-markdown)
 (require 'chat-llm)
 (require 'chat-stream)
+(require 'chat-model-runtime)
 (require 'chat-tool-forge-ai)
 (require 'chat-tool-caller)
 (require 'chat-context)
@@ -2272,11 +2273,24 @@ there is no second request path to hold it."
                                    lsp))
                    "\n\n"))))
 
+(defun chat-ui--current-model-supports-tools-p ()
+  "Return nil only when the current model explicitly lacks tool support."
+  (if (null chat--current-session)
+      t
+    (let* ((provider (chat-session-model-id chat--current-session))
+           (config (chat-llm-get-provider-config provider))
+           (model (or (chat-session-model-name chat--current-session)
+                      (plist-get config :model))))
+      (not (null
+            (chat-model-capabilities-tools
+             (chat-model-capabilities-resolve provider model)))))))
+
 (defun chat-ui--prepare-messages-with-tools (messages)
   "Prepare message list with tool calling system prompt."
-  (if (not chat-tool-caller-enabled)
+  (if (or (not chat-tool-caller-enabled)
+          (not (chat-ui--current-model-supports-tools-p)))
       (progn
-        (chat-log "[TOOLS] Tool calling disabled, using original messages")
+        (chat-log "[TOOLS] Tools unavailable, using original messages")
         messages)
     (let* ((code-prompt (chat-ui--code-capability-prompt chat--current-session))
            (base-prompt (or code-prompt
@@ -2747,6 +2761,13 @@ assistant response being filled in."
                tool-events
                (chat-ui--request-live-detail))
               (chat-ui--follow-live-output ui-buffer))))
+         ((eq type 'model-tool-call-delta)
+          ;; Transport telemetry is persisted by the wire observer.  The
+          ;; transcript renders completed tool activity and final text, so
+          ;; partial call arguments and token counters need no visible row.
+          nil)
+         ((eq type 'model-usage)
+          nil)
          ((eq type 'tool-event)
           (setq tool-events (append tool-events
                                     (list (plist-get event :event))))
@@ -3548,7 +3569,7 @@ This is an ephemeral query - the result is displayed but not persisted."
       (let* ((session chat--current-session)
              (model (chat-session-model-id session))
              (buffer (current-buffer)))
-        (chat-llm-request-async
+        (chat-model-request-result
          model
          (list (make-chat-message
                 :id (chat-session-new-message-id "ephemeral")

@@ -63,7 +63,9 @@ Uses OpenAI-compatible format."
          (max-tokens (or (plist-get options :max-tokens) 32768))
          (stream (plist-get options :stream)))
     `((model . ,model)
-      (messages . ,(chat-llm--format-messages messages))
+      (messages . ,(chat-llm--format-messages
+                    messages
+                    (chat-llm--replay-reasoning-p 'kimi-code model)))
       ;; 这个端点只接受 temperature 1，k3、k3-256k、kimi-for-coding 一律
       ;; 如此，别的值一律 400 invalid temperature。调用方给的值只能丢掉：
       ;; chat-ui 固定传 0.7，照传过去每个请求都会失败。
@@ -156,6 +158,10 @@ generation, the highspeed one gated behind a higher tier.")
  :models chat-llm-kimi-code-models
  :context-window 262144
  :max-output-tokens 32768
+ :capabilities '(:stream t :tools t :tool-choice (auto)
+                 :reasoning t :input-modalities (text)
+                 :structured-output unknown
+                 :supported-options (:max-tokens))
  :headers #'chat-llm-kimi-code--headers
  :build-request-fn #'chat-llm-kimi-code--build-request
  :response-fn #'chat-llm-kimi-code--parse-response
@@ -173,7 +179,11 @@ generation, the highspeed one gated behind a higher tier.")
  :vendor 'kimi-code
  :models chat-llm-kimi-code-models
  :context-window 262144
- :max-output-tokens 32768)
+ :max-output-tokens 32768
+ :capabilities '(:stream t :tools t :tool-choice nil
+                 :reasoning t :input-modalities (text)
+                 :structured-output nil
+                 :supported-options (:max-tokens)))
 
 (provide 'chat-llm-kimi-code)
 ;;; chat-llm-kimi-code.el ends here

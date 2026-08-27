@@ -467,7 +467,7 @@ code matches against."
   (let ((chat-approval-guard-provider 'test-provider)
         (chat-approval-guard-timeout 0)
         (verdict nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (&rest _) 'handle)))
       (chat-approval-guard-request
        (test-chat-guard-tool 'shell_execute)
@@ -485,7 +485,7 @@ code matches against."
   "The reason has to blame the guard, not the command."
   (let ((chat-approval-guard-provider 'test-provider)
         (verdict nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (_provider _messages _success error-callback &rest _)
                  (funcall error-callback "connection refused"))))
       (chat-approval-guard-request
@@ -503,7 +503,7 @@ code matches against."
   "Two verdicts for one call would authorise it twice."
   (let ((chat-approval-guard-provider 'test-provider)
         (count 0))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (_provider _messages success error-callback &rest _)
                  (funcall success '(:content "{\"decision\":\"deny\",\"reason\":\"no\",\"confidence\":\"high\"}"))
                  ;; A provider that reports both is not hypothetical: a
@@ -520,7 +520,7 @@ code matches against."
   "Thinking models may reject forced calls, so structure is validated here."
   (let ((chat-approval-guard-provider 'test-provider)
         (options nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (_provider _messages _success _error &optional opts)
                  (setq options opts))))
       (chat-approval-guard-request
@@ -541,7 +541,7 @@ code matches against."
   (let ((chat-approval-guard-provider 'test-provider)
         (chat-approval-guard-allow-command-entries '("make test"))
         (verdict nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (&rest _)
                  (ert-fail "an exact allow entry must not call the model"))))
       (chat-approval-guard-request
@@ -560,7 +560,7 @@ code matches against."
         (chat-approval-guard-allow-command-entries '("git push"))
         (chat-approval-guard-deny-command-entries '("git push"))
         (verdict nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (&rest _)
                  (ert-fail "an exact deny entry must not call the model"))))
       (chat-approval-guard-request
@@ -577,7 +577,7 @@ code matches against."
         (chat-approval-guard-allow-command-entries '("make test"))
         (requests 0)
         (verdict nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (_provider _messages success _error &rest _)
                  (setq requests (1+ requests))
                  (funcall success
@@ -594,7 +594,7 @@ code matches against."
   "Tool arguments are evidence, never a second approval prompt."
   (let ((chat-approval-guard-provider 'test-provider)
         (verdict nil))
-    (cl-letf (((symbol-function 'chat-llm-request-async)
+    (cl-letf (((symbol-function 'chat-model-request-result)
                (lambda (&rest _)
                  (ert-fail "adjudication instructions must stay local"))))
       (chat-approval-guard-request

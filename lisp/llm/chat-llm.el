@@ -22,6 +22,8 @@
 (require 'subr-x)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
+(require 'chat-model-capabilities)
+(require 'chat-model-event)
 
 ;; Declared rather than required: `chat-session' defines the message
 ;; struct and sits above this layer, so requiring it here would close a
@@ -150,10 +152,7 @@ everywhere a menu is built.
 A registration that lists nothing offers exactly its default model.  That
 is not a claim about the vendor -- most of them serve many more -- it is
 the honest extent of what was written down."
-  (let ((config (chat-llm-get-provider-config provider)))
-    (or (plist-get config :models)
-        (when-let ((model (plist-get config :model)))
-          (list model)))))
+  (chat-model-discovery-models provider))
 
 (defun chat-llm-vendor-providers (vendor)
   "Return the providers belonging to VENDOR.
@@ -206,7 +205,8 @@ CONFIG is a plist with keys:
   :response-fn - Function to parse response"
   (setq chat-llm-providers
         (cons (cons symbol config)
-              (assq-delete-all symbol chat-llm-providers))))
+              (assq-delete-all symbol chat-llm-providers)))
+  (chat-model-capabilities-register-provider symbol config))
 
 (defun chat-llm-get-provider (symbol)
   "Get configuration for provider SYMBOL."
@@ -313,8 +313,13 @@ not both claim the same ids."
       (function . ((name . ,name)
                    (arguments . ,encoded))))))
 
-(defun chat-llm--format-one-message (msg)
-  "Convert one chat-message MSG to a provider payload alist."
+(defun chat-llm--format-one-message (msg &optional replay-reasoning)
+  "Convert one chat-message MSG to a provider payload alist.
+
+When REPLAY-REASONING is non-nil, include recorded reasoning on an
+assistant tool-call message.  Some reasoning transports require that
+field on the following tool-result request; other transports must not
+receive it."
   (let ((role (chat-message-role msg))
         (content (or (chat-message-content msg) ""))
         (calls (chat-message-tool-calls msg))
@@ -329,6 +334,12 @@ not both claim the same ids."
      ((and (eq role :assistant) calls)
       `((role . "assistant")
         (content . ,(if (string-blank-p content) json-null content))
+        ,@(when-let* ((reasoning
+                       (and replay-reasoning
+                            (plist-get metadata :reasoning))))
+            (when (and (stringp reasoning)
+                       (not (string-blank-p reasoning)))
+              `((reasoning_content . ,reasoning))))
         (tool_calls . ,(vconcat
                         (seq-map-indexed
                          (lambda (call index)
@@ -367,21 +378,31 @@ construction rather than by two fallbacks happening to match."
               results (cdr results)))
       (nreverse out))))
 
-(defun chat-llm--format-messages (messages)
+(defun chat-llm--format-messages (messages &optional replay-reasoning)
   "Convert chat MESSAGE structs to API format.
 This is the convertToLlm boundary: empty assistant messages are
 dropped, :tool messages keep tool_call_id, and assistant tool
 calls become provider tool_calls.  Persisted assistant messages
 that still store tool-results on the same struct are expanded
-into tool role messages."
+into tool role messages.  REPLAY-REASONING is forwarded to
+`chat-llm--format-one-message'."
   (let (out)
     (dolist (msg messages)
-      (let ((formatted (chat-llm--format-one-message msg)))
+      (let ((formatted (chat-llm--format-one-message
+                        msg replay-reasoning)))
         (when formatted
           (push formatted out)))
       (dolist (tool-msg (chat-llm--synthetic-tool-messages msg))
         (push tool-msg out)))
     (vconcat (nreverse out))))
+
+(defun chat-llm--replay-reasoning-p (provider model)
+  "Return non-nil when PROVIDER and MODEL explicitly support reasoning.
+
+This predicate is intentionally conservative: an unknown capability
+does not authorize adding a provider-specific request field."
+  (eq t (chat-model-capabilities-reasoning
+         (chat-model-capabilities-resolve provider model))))
 
 (defun chat-llm--request-builder (config)
   "Return the request builder function from CONFIG."
@@ -432,7 +453,9 @@ into tool role messages."
     (if builder
         (funcall builder messages options)
       (list :model model
-            :messages (chat-llm--format-messages messages)
+            :messages (chat-llm--format-messages
+                       messages
+                       (chat-llm--replay-reasoning-p provider model))
             :temperature temperature
             :stream stream
             :max_tokens max-tokens))))
@@ -801,6 +824,33 @@ Anthropic style top level `stop_reason', normalizing
      ((stringp reason) reason)
      (t nil))))
 
+(defun chat-llm--extract-reasoning (json-data)
+  "Extract reasoning text from OpenAI or Anthropic JSON-DATA."
+  (let* ((choices (chat-llm--json-list (cdr (assoc 'choices json-data))))
+         (first (car choices))
+         (message (and first (cdr (assoc 'message first))))
+         (openai
+          (and (listp message)
+               (or (cdr (assoc 'reasoning_content message))
+                   (cdr (assoc 'reasoning message))
+                   (cdr (assoc 'thinking message)))))
+         (blocks (chat-llm--json-list (cdr (assoc 'content json-data))))
+         (thoughts nil))
+    (dolist (block blocks)
+      (when (and (listp block)
+                 (member (cdr (assoc 'type block)) '("thinking" "reasoning")))
+        (when-let* ((text (or (cdr (assoc 'thinking block))
+                              (cdr (assoc 'reasoning block))
+                              (cdr (assoc 'text block)))))
+          (push text thoughts))))
+    (cond
+     ((and (stringp openai) (not (string-empty-p openai))) openai)
+     (thoughts (mapconcat #'identity (nreverse thoughts) "")))))
+
+(defun chat-llm--extract-usage (json-data)
+  "Extract normalized token usage from JSON-DATA."
+  (chat-model-event-normalize-usage json-data))
+
 (defun chat-llm--decode-response (config raw-request raw-response status-code)
   "Decode one response using CONFIG and request metadata."
   (let ((parser (chat-llm--response-parser config)))
@@ -810,8 +860,10 @@ Anthropic style top level `stop_reason', normalizing
         (error "HTTP error %d: %s" status-code raw-response)
       (let ((json-data (json-read-from-string raw-response)))
         (list :content (funcall parser json-data)
+              :reasoning (chat-llm--extract-reasoning json-data)
               :tool-calls (chat-llm--extract-tool-calls json-data)
               :finish-reason (chat-llm--extract-finish-reason json-data)
+              :usage (chat-llm--extract-usage json-data)
               :raw-request raw-request
               :raw-response raw-response)))))
 
@@ -1003,7 +1055,10 @@ OPTIONS is an optional plist of request parameters."
                          (plist-get config :max-output-tokens)))
          (stream (plist-get options :stream)))
     (let ((payload (list :model model
-                         :messages (chat-llm--format-messages messages)
+                         :messages
+                         (chat-llm--format-messages
+                          messages
+                          (chat-llm--replay-reasoning-p provider model))
                          :temperature temperature
                          :max_tokens max-tokens
                          :stream stream))
@@ -1038,21 +1093,26 @@ NAME is the display name.
 BASE-URL is the provider API base URL.
 MODEL is the default remote model name.
 OPTIONS are appended to the provider plist."
-  (apply #'chat-llm-register-provider
-         symbol
-         :name name
-         :base-url base-url
-         :model model
-         ;; The factory knows the protocol, so no registration has to
-         ;; remember to say it.  Overridable by OPTIONS all the same,
-         ;; which is why it goes before them.
-         :protocol 'openai
-         :request-fn (lambda (messages request-options)
-                       (chat-llm-build-openai-compatible-request
-                        symbol messages request-options))
-         :response-fn #'chat-llm-parse-openai-compatible-response
-         :stream-fn #'chat-llm-parse-openai-compatible-stream
-         options))
+  (let ((capabilities
+         (if (plist-member options :capabilities)
+             (plist-get options :capabilities)
+           '(:stream t :tools t :tool-choice (auto)
+             :reasoning unknown :input-modalities (text)
+             :structured-output unknown
+             :supported-options (:temperature :max-tokens)))))
+    (apply #'chat-llm-register-provider
+           symbol
+           :name name
+           :base-url base-url
+           :model model
+           :protocol 'openai
+           :capabilities capabilities
+           :request-fn (lambda (messages request-options)
+                         (chat-llm-build-openai-compatible-request
+                          symbol messages request-options))
+           :response-fn #'chat-llm-parse-openai-compatible-response
+           :stream-fn #'chat-llm-parse-openai-compatible-stream
+           options)))
 
 ;; ------------------------------------------------------------------
 ;; Provider Implementations

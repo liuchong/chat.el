@@ -137,6 +137,24 @@ a run that worked into a run that failed while being watched."
        (list (cons 'chars (chat-agent-wire--chars (plist-get event :content)))
              (cons 'reasoning_chars (chat-agent-wire--chars
                                      (plist-get event :reasoning)))))
+      ('model-tool-call-delta
+       (let ((delta (plist-get event :delta)))
+         (list (cons 'index (plist-get delta :index))
+               (cons 'id (chat-agent-wire--short (plist-get delta :id)))
+               (cons 'name (chat-agent-wire--short (plist-get delta :name)))
+               (cons 'arguments_chars
+                     (chat-agent-wire--chars
+                      (or (plist-get delta :arguments-delta)
+                          (plist-get delta :arguments)))))))
+      ('model-usage
+       (let ((usage (plist-get event :usage)))
+         (list (cons 'input_tokens (plist-get usage :input-tokens))
+               (cons 'output_tokens (plist-get usage :output-tokens))
+               (cons 'total_tokens (plist-get usage :total-tokens))
+               (cons 'cache_read_tokens
+                     (plist-get usage :cache-read-tokens))
+               (cons 'cache_write_tokens
+                     (plist-get usage :cache-write-tokens)))))
       ('tool-batch-start
        (list (cons 'count (plist-get event :count))))
       ('tool-event

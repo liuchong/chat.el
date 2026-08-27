@@ -13,7 +13,8 @@
 ;;
 ;;   agent-start  context-transformed  turn-start  turn-ended  turn-failed
 ;;   stream-chunk
-;;   stream-reasoning  stream-result  tool-batch-start  tool-event  tool-batch-end
+;;   stream-reasoning  stream-result  model-tool-call-delta  model-usage
+;;   tool-batch-start  tool-event  tool-batch-end
 ;;   message-appended  truncated  response  followup  steering
 ;;   prepared-next-turn  error  agent-end
 ;;

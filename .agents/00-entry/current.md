@@ -8,7 +8,7 @@
 
 ## Current Phase
 
-M0 and M1 of the Agent Runtime roadmap are complete (2026-08-28). Decision
+M0, M1 and M2 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes five versioned contracts: lifecycle events, durable tasks, model
 capabilities, typed content and agent profiles. Spec 014 orders their delivery
 through M8 so later features depend on contracts rather than provider, UI or
@@ -22,10 +22,18 @@ prompt, tool, permission, background task, child-agent and compaction paths
 emit through it. Security boundary failures close; notification failures stay
 auditable and continue.
 
-The next implementation stage is M2: define model capabilities and normalize
-the streaming, asynchronous and compatibility request paths into one event
-stream. One provider path migrates end to end first; lifecycle records remain
-the behavioral oracle while the adapter set expands.
+Decision 0020 and the M2 implementation make model behavior explicit. Static,
+discovered and user capability facts resolve by provenance without model-name
+guessing, and `unknown` remains distinct from false. Streaming and asynchronous
+requests now emit one ordered model event vocabulary for text, reasoning, tool
+deltas, usage and terminal outcomes. Application callers use that runtime or a
+compatibility projection over it; reasoning required for a tool continuation is
+replayed only for an explicitly capable model.
+
+The next implementation stage is M3: define versioned extension declarations,
+lazy skills and resolved agent profiles. Profiles compose over the same loop,
+must be inspectable before dispatch and cannot silently widen tool or approval
+authority.
 
 There is one chat surface (2026-08-26). Code capability is a property of
 a session rather than a second display: `chat-code-mode` is gone, and a
@@ -107,7 +115,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1387 tests passing.
+Canonical suite: 1405 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark

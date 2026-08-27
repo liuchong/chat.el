@@ -153,22 +153,28 @@ MODEL is the default remote model name.
 OPTIONS are appended to the provider plist; useful keys include
 `:request-path' (default `/v1/messages'), `:anthropic-version', and
 `:api-key-fn'."
-  (apply #'chat-llm-register-provider
-         symbol
-         :name name
-         :base-url base-url
-         :request-path "/v1/messages"
-         :model model
-         ;; The factory knows the protocol, so no registration has to
-         ;; remember to say it.
-         :protocol 'anthropic
-         :auth-headers-fn #'chat-llm-claude--auth-headers
-         :request-fn (lambda (messages request-options)
-                       (chat-llm-claude--build-request
-                        symbol messages request-options))
-         :response-fn #'chat-llm-claude--parse-response
-         :stream-fn #'chat-llm-claude--parse-stream-chunk
-         options))
+  (let ((capabilities
+         (if (plist-member options :capabilities)
+             (plist-get options :capabilities)
+           '(:stream t :tools t :tool-choice nil
+             :reasoning unknown :input-modalities (text)
+             :structured-output nil
+             :supported-options (:temperature :max-tokens)))))
+    (apply #'chat-llm-register-provider
+           symbol
+           :name name
+           :base-url base-url
+           :request-path "/v1/messages"
+           :model model
+           :protocol 'anthropic
+           :capabilities capabilities
+           :auth-headers-fn #'chat-llm-claude--auth-headers
+           :request-fn (lambda (messages request-options)
+                         (chat-llm-claude--build-request
+                          symbol messages request-options))
+           :response-fn #'chat-llm-claude--parse-response
+           :stream-fn #'chat-llm-claude--parse-stream-chunk
+           options)))
 
 (chat-llm-register-anthropic-compatible-provider
  'claude

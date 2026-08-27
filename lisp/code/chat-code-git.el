@@ -12,6 +12,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'chat-model-runtime)
 
 ;; Declared rather than required: this module is loaded for its commands
 ;; and reaches the session only to add context to it, so requiring the
@@ -155,7 +156,7 @@ MAX-LINES limits the diff output."
                           diff)))
          (buffer (current-buffer)))
     ;; Send to AI
-    (chat-llm-request-async
+    (chat-model-request-result
      chat-default-model
      (list (make-chat-message
             :id "system"
@@ -202,7 +203,7 @@ MAX-LINES limits the diff output."
       (insert "Reviewing changes...\n"))
     (pop-to-buffer buffer)
     ;; Send to AI
-    (chat-llm-request-async
+    (chat-model-request-result
      chat-default-model
      (list (make-chat-message
             :id "system"
@@ -244,7 +245,7 @@ MAX-LINES limits the diff output."
          (prompt (format "Review these files for issues before committing:\n\n```\n%s\n```\n\nCheck for:\n1. Syntax errors\n2. Style issues\n3. Debug code left in\n4. Missing documentation\n5. Security issues"
                         context)))
     (message "Running pre-commit check...")
-    (chat-llm-request-async
+    (chat-model-request-result
      chat-default-model
      (list (make-chat-message
             :id "system"

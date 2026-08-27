@@ -131,6 +131,8 @@ Acceptance:
 - discovery cannot silently override explicit user configuration;
 - offline fixtures prove equivalent normalized events across transport paths.
 
+Status: complete.
+
 ### M3: Hooks, Skills And Custom Agents
 
 Goal: make runtime behavior extensible without cloning the loop or injecting
@@ -298,7 +300,8 @@ Every phase must preserve:
 
 ## Current Baseline
 
-M0 and M1 are complete. The canonical suite passes 1387/1387. The next
-implementation stage is M2: define model capabilities, normalize transport
-events and migrate one provider path end to end before widening the adapter
-set. Existing lifecycle events are the acceptance oracle for that migration.
+M0, M1 and M2 are complete. The canonical suite passes 1405/1405. Model
+capabilities now resolve from explicit facts and every application request path
+projects into one versioned transport event vocabulary. The next implementation
+stage is M3: compose hooks, lazy skills and custom agent profiles without
+forking the runtime or widening permissions implicitly.

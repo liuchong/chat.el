@@ -111,6 +111,10 @@
  :auth-headers-fn #'chat-llm-gemini--auth-headers
  :request-url-fn #'chat-llm-gemini--request-url
  :model chat-llm-gemini-default-model
+ :capabilities '(:stream t :tools nil :tool-choice nil
+                 :reasoning nil :input-modalities (text)
+                 :structured-output nil
+                 :supported-options (:temperature :max-tokens))
  :request-fn #'chat-llm-gemini--build-request
  :response-fn #'chat-llm-gemini--parse-response
  :stream-fn #'chat-llm-gemini--parse-stream-chunk)

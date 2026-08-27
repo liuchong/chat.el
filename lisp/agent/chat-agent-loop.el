@@ -26,7 +26,7 @@
 (require 'chat-event)
 (require 'chat-tool-caller)
 (require 'chat-llm)
-(require 'chat-stream)
+(require 'chat-model-runtime)
 
 (defvar chat-plugin-before-tool-call-functions nil)
 (defvar chat-plugin-after-tool-call-functions nil)
@@ -257,6 +257,19 @@ on screen, where the marker would be noise.  It belongs on the wire only."
         (setq base (plist-put base :tools nil))
       (when (and (chat-agent-run-state-native-tools run)
                  (null (plist-get base :tools))
+                 (not
+                  (null
+                   (chat-model-capabilities-tools
+                    (chat-model-capabilities-resolve
+                     (chat-agent-run-state-model run)
+                     (or (plist-get base :model)
+                         (and (chat-agent-run-state-session run)
+                              (chat-session-model-name
+                               (chat-agent-run-state-session run)))
+                         (plist-get
+                          (chat-llm-get-provider-config
+                           (chat-agent-run-state-model run))
+                          :model))))))
                  (fboundp 'chat-tool-caller-provider-tools))
         (let* ((chat-tool-caller-current-session
                 (chat-agent-run-state-session run))
@@ -310,18 +323,7 @@ last because that is where a short instruction is actually noticed."
 
 (defun chat-agent--dispatch-sync (run)
   "Dispatch RUN through the request-response transport."
-  (setf (chat-agent-run-state-handle run)
-        (chat-llm-request-async
-         (chat-agent-run-state-model run)
-         (chat-agent--request-messages run)
-         (lambda (result)
-           (unless (chat-agent-run-state-cancelled run)
-             (chat-agent--handle-result run result)))
-         (lambda (err-message)
-           (unless (chat-agent-run-state-cancelled run)
-             (chat-agent--emit run 'error :message err-message)
-             (chat-agent--finish run 'error err-message)))
-         (chat-agent--options-for-turn run))))
+  (chat-agent--dispatch-model run nil))
 
 ;; ------------------------------------------------------------------
 ;; Stream Accumulation
@@ -396,72 +398,69 @@ single pending piece becomes the delta without being copied."
 
 (defun chat-agent--dispatch-stream (run)
   "Dispatch RUN through the streaming transport."
+  (chat-agent--dispatch-model run t))
+
+(defun chat-agent--publish-model-delta (run type text-state piece)
+  "Publish PIECE for RUN as TYPE using TEXT-STATE batching."
+  (when (and (stringp piece) (not (string-empty-p piece))
+             (chat-agent--stream-add text-state piece))
+    (let ((published (chat-agent--stream-publish text-state)))
+      (if (eq type 'stream-reasoning)
+          (chat-agent--emit run type
+                            :text (car published)
+                            :reasoning (cdr published))
+        (chat-agent--emit run type
+                          :text (car published)
+                          :content (cdr published))))))
+
+(defun chat-agent--dispatch-model (run stream)
+  "Dispatch RUN through the unified model runtime using STREAM when non-nil."
   (let ((content (chat-agent--stream-text-create))
-        (reasoning (chat-agent--stream-text-create)))
-    (let* ((request-messages
-            (prog1 (chat-agent--request-messages run)
-              (chat-log-timing-mark "budget")))
-           (proc
-           (chat-stream-request
-            (chat-agent-run-state-model run)
-            request-messages
-            (lambda (piece)
-              (when (and piece (> (length piece) 0))
-                (when (chat-agent--stream-add content piece)
-                  (let ((published (chat-agent--stream-publish content)))
-                    (chat-agent--emit run 'stream-chunk
-                                      :text (car published)
-                                      :content (cdr published))))))
-            (append (list :stream t
-                          :on-reasoning
-                          (lambda (piece)
-                            (when (and piece (> (length piece) 0))
-                              (when (chat-agent--stream-add reasoning piece)
-                                (let ((published
-                                       (chat-agent--stream-publish reasoning)))
-                                  (chat-agent--emit
-                                   run 'stream-reasoning
-                                   :text (car published)
-                                   :reasoning (cdr published)))))))
-                    (chat-agent--options-for-turn run)))))
-      (setf (chat-agent-run-state-handle run) proc)
-      (let ((inner (process-sentinel proc)))
-        (set-process-sentinel
-         proc
-         (lambda (p event)
-           (when (and inner (not (chat-agent-run-state-cancelled run)))
-             (condition-case nil
-                 (funcall inner p event)
-               (error nil)))
-           (cond
-            ((chat-agent-run-state-cancelled run)
-             nil)
-            ((string-match-p "abnormally\\|failed\\|killed\\|deleted" event)
-             (let ((message (string-trim event)))
-               (chat-agent--emit run 'error :message message)
-               (chat-agent--finish run 'error message)))
-            ((string-match-p "finished\\|exited" event)
-             (let ((stream-error (process-get p 'chat-stream-http-error)))
-               (if stream-error
-                   (progn
-                     (chat-agent--emit run 'error :message stream-error)
-                     (chat-agent--finish run 'error stream-error))
-                 (chat-agent--handle-result
-                  run
-                  ;; Whatever was still unpublished lands here, so a reply
-                  ;; whose tail never reached the publishing threshold is
-                  ;; still complete by the time it is recorded.
-                  (let ((native (chat-stream-native-result p))
-                        (all (chat-agent--stream-all content)))
-                    (chat-agent--emit run 'stream-result
-                                      :content all
-                                      :reasoning (chat-agent--stream-all
-                                                  reasoning)
-                                      :native native)
-                    (append (list :content all
-                                  :raw-request nil
-                                  :raw-response nil)
-                            native)))))))))))))
+        (reasoning (chat-agent--stream-text-create))
+        (request-messages
+         (prog1 (chat-agent--request-messages run)
+           (chat-log-timing-mark "budget"))))
+    (setf
+     (chat-agent-run-state-handle run)
+     (chat-model-request-events
+      (chat-agent-run-state-model run)
+      request-messages
+      (lambda (event)
+        (unless (chat-agent-run-state-cancelled run)
+          (let ((payload (chat-model-event-payload event)))
+            (pcase (chat-model-event-type event)
+              ('text-delta
+               (when stream
+                 (chat-agent--publish-model-delta
+                  run 'stream-chunk content (plist-get payload :delta))))
+              ('reasoning-delta
+               (when stream
+                 (chat-agent--publish-model-delta
+                  run 'stream-reasoning reasoning
+                  (plist-get payload :delta))))
+              ('tool-call-delta
+               (chat-agent--emit run 'model-tool-call-delta
+                                 :delta payload))
+              ('usage
+               (chat-agent--emit run 'model-usage :usage payload))
+              ('completed
+               (let ((result (plist-get payload :result)))
+                 (when stream
+                   ;; Flush any tail that did not reach the adaptive publish
+                   ;; threshold before recording the complete provider result.
+                   (chat-agent--stream-all content)
+                   (chat-agent--stream-all reasoning)
+                   (chat-agent--emit
+                    run 'stream-result
+                    :content (plist-get result :content)
+                    :reasoning (plist-get result :reasoning)
+                    :native result))
+                 (chat-agent--handle-result run result)))
+              ('error
+               (let ((message (plist-get payload :message)))
+                 (chat-agent--emit run 'error :message message)
+                 (chat-agent--finish run 'error message)))))))
+      (plist-put (chat-agent--options-for-turn run) :stream stream)))))
 
 (defun chat-agent--collect-tool-calls (result content)
   "Return tool calls from native RESULT or JSON-in-text CONTENT."

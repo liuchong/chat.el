@@ -50,6 +50,7 @@
 ;; guard with no provider configured.
 (require 'chat-approval)
 (require 'chat-event)
+(require 'chat-model-runtime)
 ;; A hard dependency, not an optional one.  The floor works by taking a
 ;; command apart, and with no parser available every predicate in it
 ;; returns nil -- which is to say the floor silently becomes decoration
@@ -58,8 +59,6 @@
 (require 'chat-command-gate)
 
 ;; Forward declarations
-(declare-function chat-llm-request-async "chat-llm"
-                  (provider messages success-callback error-callback &optional options))
 (declare-function chat-session-id "chat-session" (session))
 (declare-function chat-session-model-id "chat-session" (session))
 (declare-function chat-session-model-name "chat-session" (session))
@@ -1082,7 +1081,7 @@ than delegated to the schema.")
 
 (defun chat-approval-guard-enabled-p (&optional session)
   "Return non-nil when a verdict could actually be obtained for SESSION."
-  (and (fboundp 'chat-llm-request-async)
+  (and (fboundp 'chat-model-request-result)
        (chat-approval-guard--provider session)
        t))
 
@@ -1304,7 +1303,7 @@ will not come is a hung turn."
                                (format "it did not answer within %ss"
                                        chat-approval-guard-timeout)
                                model nil)))))
-            (chat-llm-request-async
+            (chat-model-request-result
              provider
              (list (make-chat-message
                     :id "guard-system"

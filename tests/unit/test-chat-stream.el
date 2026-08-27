@@ -81,6 +81,26 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-handle-output-exposes-complete-payloads ()
+  "The normalized runtime can observe each complete raw SSE payload."
+  (let ((buffer (generate-new-buffer " *chat-stream-payload-test*"))
+        payloads)
+    (unwind-protect
+        (let ((proc (make-pipe-process :name "chat-stream-payload-test"
+                                       :buffer buffer :noquery t)))
+          (with-current-buffer buffer
+            (setq-local chat-stream--partial-line ""))
+          (chat-stream--handle-output
+           proc "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n"
+           'kimi #'ignore nil
+           (lambda (payload) (push payload payloads)))
+          (should (= (length payloads) 1))
+          (should (string-match-p "\\\"content\\\":\\\"ok\\\""
+                                  (car payloads)))
+          (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest chat-stream-redact-curl-args-for-log-hides-secrets ()
   "Test curl args logging hides bearer tokens and large bodies."
   (let ((redacted

@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'chat-session)
 (require 'chat-event)
+(require 'chat-model-runtime)
 (require 'json)
 (require 'subr-x)
 
@@ -335,7 +336,6 @@ ERROR-CALLBACK receives transport errors."
                    (format "Compaction blocked: %s"
                            (or (plist-get outcome :reason)
                                "runtime policy returned an invalid plan")))
-        (require 'chat-llm)
         (let* ((previous (plist-get plan :previous))
                (source (chat-context--durable-summary-text
                         previous (plist-get plan :messages)))
@@ -352,7 +352,7 @@ ERROR-CALLBACK receives transport errors."
                   :role :user
                   :content source
                   :timestamp (current-time)))))
-          (chat-llm-request-async
+          (chat-model-request-result
            (chat-session-model-id session)
            messages
            (lambda (result)

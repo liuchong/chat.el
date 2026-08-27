@@ -11,10 +11,12 @@ Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/too
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
-The Agent Runtime roadmap is active. M0 and M1 are complete: a versioned
+The Agent Runtime roadmap is active. M0, M1 and M2 are complete: a versioned
 lifecycle event contract now unifies runtime hooks and session-scoped audit for
 turns, prompts, tools, permissions, compaction, background tasks and child
-agents. The next stage is model capability and transport normalization.
+agents. Model capabilities now resolve from explicit versioned facts, and
+streaming and asynchronous requests share one normalized event stream. The next
+stage is hooks, skills and custom agent profiles.
 
 ## Implemented Areas
 
@@ -37,6 +39,10 @@ agents. The next stage is model capability and transport normalization.
 - provider specific auth headers and request URLs
 - provider enable and disable list via configuration
 - config loading from `~/.chat.el`, `~/.chat/config.el`, and project `chat-config.local.el`
+- provider and model capability declarations with explicit unknown values
+- versioned dynamic discovery cache with static fallback and user precedence
+- pre-dispatch validation for known unsupported request combinations
+- one normalized event vocabulary for streaming and asynchronous transports
 
 ### Tool Calling
 
@@ -135,8 +141,8 @@ agents. The next stage is model capability and transport normalization.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1387 regression tests discovered
-- 1387 passing
+- 1405 regression tests discovered
+- 1405 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -197,6 +203,10 @@ agents. The next stage is model capability and transport normalization.
 - streaming completion now emits a normalized `stream-result` event carrying accumulated text and native tool metadata before regular result handling
 - stream normalization now also carries typed reasoning, native partial
   tool input, nested stop reasons, and terminal provider errors
+- model requests now normalize streaming and asynchronous transports into
+  ordered text, reasoning, tool, usage and terminal events
+- reasoning-capable tool continuations replay the producing assistant step's
+  reasoning metadata without exposing it to unknown or unsupported models
 - tool batches preserve provider result order, overlap only
   non-conflicting asynchronous reads, serialize writes and approvals,
   and cancel active asynchronous handles with the parent run

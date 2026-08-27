@@ -128,6 +128,7 @@ Returns the list of files that were loaded."
 (require 'chat-llm-claude)
 (require 'chat-llm-gemini)
 (require 'chat-llm-ark)
+(require 'chat-model-runtime)
 
 ;; Load tool modules.
 (require 'chat-command-gate)

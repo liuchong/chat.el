@@ -220,8 +220,9 @@ the display from having to guess later."
   "Return the reasoning text recorded on MESSAGE, or nil.
 
 Reasoning lives on the step that produced it rather than in a record of
-its own: it is an attribute of that step, and keeping it there means no
-request path can leak it by forgetting to filter a separate row."
+its own.  A transport may replay it only when the same assistant step
+also produced tool calls and the selected model explicitly supports the
+provider's reasoning continuation field."
   (let ((value (chat-transcript--field message :reasoning)))
     (and (stringp value)
          (not (string-empty-p (string-trim value)))
@@ -231,7 +232,8 @@ request path can leak it by forgetting to filter a separate row."
   "Record REASONING on MESSAGE and return MESSAGE.
 
 Reasoning rides along with the step that produced it rather than
-becoming its own message, so it never enters the request context."
+becoming its own message.  Request adapters decide whether the selected
+model requires it for a tool-call continuation."
   (when (and message (stringp reasoning)
              (not (string-empty-p (string-trim reasoning))))
     (setf (chat-message-metadata message)
