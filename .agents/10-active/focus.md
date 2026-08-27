@@ -417,13 +417,14 @@ it.
 
 Code-capable prompts now lead with a separately configurable objective-task
 section before persona and operational rules. It tells the agent to optimize
-for evidence and correct completion rather than approval, name developer
-errors and ambiguity directly, avoid guessing, and pause risky work when no
-coherent instruction exists. It also draws the interaction boundary without
-turning hostility into policy: no flattery or emotional coaching, and no
-retaliation or mirrored abuse.
+for objective completion rather than approval, refuse developer errors and
+ambiguity rather than guess, perform no emotional labour, stop replying on
+identified emotional breakdown, answer abuse directly, and keep output
+strictly task-relevant. Decision 0018 supersedes decision 0017's earlier
+non-retaliatory interaction stance while retaining the separate leading
+section and its customization boundary.
 
-Canonical suite: 1352 tests passing.
+Canonical suite: 1354 tests passing.
 
 ## Next Stage
 

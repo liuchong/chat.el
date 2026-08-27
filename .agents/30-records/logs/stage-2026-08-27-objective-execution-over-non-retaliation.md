@@ -49,4 +49,4 @@ with `chat-prompt-language` at `zh-CN` the composed prompt leads with the
 Chinese section (最高优先级任务规则 / 禁止情绪劳动), and a customized rule
 list wins over the translation. README's Task Discipline and i18n sections
 were rewritten to describe the new defaults and the translation carve-out. Full suite:
-`emacs -Q -batch -l tests/run-tests.el` — 1352 tests, 0 unexpected.
+`emacs -Q -batch -l tests/run-tests.el` — 1354 tests, 0 unexpected.
