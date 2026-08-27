@@ -312,7 +312,8 @@ A number nobody can trace back to something counted is worse than an
 admitted gap in the panel."
   (cl-letf (((symbol-function 'chat-tool-caller-provider-tools)
              (lambda () nil))
-            ((symbol-function 'chat-memory-snippet) (lambda () nil)))
+            ((symbol-function 'chat-memory-snippet)
+             (lambda (&optional _session) nil)))
     (let ((measured (chat-context-budget-measurements nil)))
       (should-not (assq 'tool-definitions measured))
       (should-not (assq 'memory measured))

@@ -257,15 +257,11 @@ CONTEXT is envelope-level grouping, as in `chat-session-wire--encode'."
                  kind (error-message-string err))
        nil))))
 
-(defun chat-session-wire-read (session-id &optional kinds)
-  "Return the records in SESSION-ID's stream, oldest first.
-
-KINDS, when given, keeps only those kinds.  A line that does not parse is
-skipped rather than raised: an append-only stream can end mid-line if
-Emacs died while writing, and one torn line at the end is not a reason to
-refuse the rest of the history."
-  (let ((file (chat-session-wire-file session-id))
-        (records nil))
+(defun chat-session-wire--read-file (file &optional kinds)
+  "Return readable records from FILE, optionally limited to KINDS."
+  (let ((records nil)
+        (kind-names (and kinds
+                         (mapcar (lambda (kind) (format "%s" kind)) kinds))))
     (when (file-exists-p file)
       (with-temp-buffer
         (insert-file-contents file)
@@ -281,13 +277,71 @@ refuse the rest of the history."
                                   (json-read-from-string line))
                               (error nil))))
                 (when (and record
-                           (or (null kinds)
-                               (member (alist-get 'kind record)
-                                       (mapcar (lambda (k) (format "%s" k))
-                                               kinds))))
+                           (or (null kind-names)
+                               (member (alist-get 'kind record) kind-names)))
                   (push record records)))))
           (forward-line 1))))
     (nreverse records)))
+
+(defun chat-session-wire-read (session-id &optional kinds)
+  "Return the records in SESSION-ID's current stream, oldest first.
+
+KINDS, when given, keeps only those kinds.  A line that does not parse is
+skipped rather than raised: an append-only stream can end mid-line if
+Emacs died while writing, and one torn line at the end is not a reason to
+refuse the rest of the history."
+  (chat-session-wire--read-file
+   (chat-session-wire-file session-id) kinds))
+
+(defun chat-session-wire--archive-files (session-id)
+  "Return SESSION-ID archive paths in numeric index order."
+  (let* ((directory (chat-session-wire--directory))
+         (regexp
+          (format "\\`%s\\.\\([0-9]+\\)\\.jsonl\\'"
+                  (regexp-quote session-id)))
+         files)
+    (when (file-directory-p directory)
+      (dolist (name (directory-files directory nil regexp))
+        (when (string-match regexp name)
+          (push (cons (string-to-number (match-string 1 name))
+                      (expand-file-name name directory))
+                files))))
+    (mapcar #'cdr
+            (sort files (lambda (left right) (< (car left) (car right)))))))
+
+(defun chat-session-wire-read-all (session-id &optional kinds)
+  "Return every readable record for SESSION-ID in sequence order.
+
+Numbered archives and the current stream are one logical history.  Torn
+lines are skipped independently in each file.  KINDS is applied after
+ordering so archive boundaries cannot change filtering behavior."
+  (let ((records nil)
+        (position 0)
+        (kind-names (and kinds
+                         (mapcar (lambda (kind) (format "%s" kind)) kinds))))
+    (dolist (file (append (chat-session-wire--archive-files session-id)
+                          (list (chat-session-wire-file session-id))))
+      (dolist (record (chat-session-wire--read-file file))
+        (push (cons (setq position (1+ position)) record) records)))
+    (setq records
+          (sort records
+                (lambda (left right)
+                  (let ((ls (alist-get 'seq (cdr left)))
+                        (rs (alist-get 'seq (cdr right))))
+                    (cond ((and (numberp ls) (numberp rs))
+                           (if (= ls rs)
+                               (< (car left) (car right))
+                             (< ls rs)))
+                          ((numberp ls) t)
+                          ((numberp rs) nil)
+                          (t (< (car left) (car right))))))))
+    (let ((ordered (mapcar #'cdr records)))
+      (if (null kind-names)
+          ordered
+        (seq-filter
+         (lambda (record)
+           (member (alist-get 'kind record) kind-names))
+         ordered)))))
 
 (provide 'chat-session-wire)
 ;;; chat-session-wire.el ends here

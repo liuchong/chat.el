@@ -382,7 +382,7 @@ can trace is worse than an admitted gap."
     (when-let ((tools (chat-context-budget--measure-tools)))
       (push (cons 'tool-definitions tools) measured))
     (when (fboundp 'chat-memory-snippet)
-      (when-let ((snippet (ignore-errors (chat-memory-snippet))))
+      (when-let ((snippet (ignore-errors (chat-memory-snippet session))))
         (push (cons 'memory (chat-context-count-tokens snippet)) measured)))
     (when (and session (fboundp 'chat-project-instructions-partitioned))
       (when-let* ((dir (or (chat-session-working-directory session)

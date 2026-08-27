@@ -112,6 +112,55 @@ event rather than an oversized one."
                         (chat-session-wire-read "s1"))))
      (should (member "wire-archived" kinds)))))
 
+(ert-deftest chat-wire-read-all-crosses-every-archive-in-sequence ()
+  "Complete reading reconstructs one history across numbered files."
+  (chat-test-with-wire
+   (let ((chat-session-wire-max-bytes 400))
+     (dotimes (i 30)
+       (chat-session-wire-record "s1" 'turn-start `((i . ,i)))))
+   (let ((records (chat-session-wire-read-all "s1")))
+     (should (> (length (chat-session-wire--archive-files "s1")) 1))
+     (should (equal (number-sequence 1 (length records))
+                    (mapcar (lambda (record) (alist-get 'seq record))
+                            records))))))
+
+(ert-deftest chat-wire-read-all-sorts-archive-indices-numerically ()
+  "Archive ten follows archive nine instead of archive one."
+  (chat-test-with-wire
+   (make-directory (chat-session-wire--directory) t)
+   (dolist (pair '((10 . 10) (2 . 2) (1 . 1)))
+     (with-temp-file (chat-session-wire--archive-file "s.1" (car pair))
+       (insert (json-encode
+                `((schema_version . 1)
+                  (seq . ,(cdr pair))
+                  (session_id . "s.1")
+                  (kind . "turn-start")
+                  (payload . nil)))
+               "\n")))
+   (should (equal '(1 2 10)
+                  (mapcar (lambda (record) (alist-get 'seq record))
+                          (chat-session-wire-read-all "s.1"))))))
+
+(ert-deftest chat-wire-read-all-filters-after-cross-file-ordering ()
+  "Kind filtering keeps the same sequence order across archives."
+  (chat-test-with-wire
+   (let ((chat-session-wire-max-bytes 360))
+     (dotimes (i 20)
+       (chat-session-wire-record
+        "s1" (if (zerop (% i 2)) 'turn-start 'model-usage)
+        `((i . ,i)))))
+   (let ((records (chat-session-wire-read-all "s1" '(model-usage))))
+     (should records)
+     (should (equal records
+                    (sort (copy-sequence records)
+                          (lambda (left right)
+                            (< (alist-get 'seq left)
+                               (alist-get 'seq right))))))
+     (should (cl-every
+              (lambda (record)
+                (equal "model-usage" (alist-get 'kind record)))
+              records)))))
+
 (ert-deftest chat-wire-recording-off-writes-nothing ()
   "Turning it off leaves no file, not an empty one."
   (chat-test-with-wire

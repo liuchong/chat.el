@@ -255,6 +255,8 @@ Acceptance:
 - offline evals are deterministic and separate from opt-in live checks;
 - regressions are reported with reproducible inputs and contract-level events.
 
+Status: complete.
+
 ### M8: Termini Integration
 
 Goal: add `termini.el` as the Emacs-native bridge between the Agent Runtime and
@@ -311,10 +313,10 @@ Every phase must preserve:
 
 ## Current Baseline
 
-M0 through M6 are complete. The runtime has versioned lifecycle, model,
-extension, task and content contracts, plus durable owned-file checkpoints,
-optional owned worktrees and a unified local execution backend. Restart never
-resurrects stale processes, non-idempotent retries require renewed permission,
-and recovery distinguishes runtime-owned changes from external drift. The next
-implementation stage is M7: provenance-aware memory, correlated Trace views and
-deterministic Agent evaluations.
+M0 through M7 are complete. The runtime now adds attributable scoped memory,
+Trace reconstruction over the canonical session wire, immutable deterministic
+evaluation results and native inspection views to the earlier lifecycle,
+capability, extension, task, content and recovery contracts. Sensitive or
+out-of-scope memory never enters prompts, Trace remains a derived bounded
+projection and live evaluations stay opt-in. The next implementation stage is
+M8: the versioned Termini bridge.

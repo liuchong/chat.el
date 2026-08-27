@@ -97,6 +97,8 @@ Returns the list of files that were loaded."
 (require 'chat-session)
 (require 'chat-session-wire)
 (require 'chat-event)
+(require 'chat-trace)
+(require 'chat-eval)
 (require 'chat-execution)
 (require 'chat-checkpoint)
 (require 'chat-workspace)
@@ -187,6 +189,7 @@ Returns the list of files that were loaded."
 (require 'chat-request-panel)
 (require 'chat-mdp-view)
 (require 'chat-task-view)
+(require 'chat-observability-view)
 (require 'chat-ui)
 
 ;; Load code capability (optional)
@@ -201,6 +204,8 @@ Returns the list of files that were loaded."
   (require 'chat-code-git)
   (require 'chat-code-perf)
   (require 'chat-code))
+
+(require 'chat-eval-scenarios)
 
 (chat-workspace-initialize)
 

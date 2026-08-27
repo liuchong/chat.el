@@ -4,14 +4,13 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, runtime, events, tasks, capabilities, content, profiles
+- Tags: current, phase, runtime, memory, traces, evaluations, termini
 
 ## Current Phase
 
-M0 through M4 of the Agent Runtime roadmap are complete (2026-08-28). Decision
-0019 fixes five versioned contracts: lifecycle events, durable tasks, model
-capabilities, typed content and agent profiles. Spec 014 orders their delivery
-through M8 so later features depend on contracts rather than provider, UI or
+M0 through M7 of the Agent Runtime roadmap are complete (2026-08-28). Decision
+0019 fixes the foundational contracts and Spec 014 orders their delivery through
+M8 so later features depend on runtime boundaries rather than provider, UI or
 process internals.
 
 `lisp/core/chat-event.el` is the first contract. It separates synchronous
@@ -38,17 +37,22 @@ known model conflicts fail before dispatch. The selected profile remains
 session state while each run records a bounded resolved snapshot without
 rewriting earlier messages.
 
-Decision 0022 and M4 add `chat-task` version 1. Foreground UI runs, background
-commands, workflows and subagents now share one atomic registry, canonical
-state machine, parent/child identity and cancellation contract. The bounded
-scheduler serializes conflicting writes while allowing independent work to run
-in parallel. Running records load as interrupted rather than resurrecting live
-objects, and the native task tree keeps compact status separate from detailed
-checkpoints and outcomes.
+Decisions 0022 through 0024 complete unified tasks, typed content and recovery.
+Foreground runs, background commands, workflows and subagents share durable
+task identity; content remains typed through transport; checkpoints and owned
+workspaces reconstruct intent without resurrecting stale processes.
 
-The next implementation stage is M5: introduce typed multimodal content while
-preserving the text-only behavior and provider-neutral boundaries established
-through M4.
+Decision 0025 and M7 add attributable scoped memory, Trace reconstruction over
+all session-wire archives and immutable deterministic evaluations. Memory
+retrieval is provenance-aware and excludes sensitive, expired, archived and
+out-of-scope items. Trace exports measurements and identifiers without copying
+transcripts. Five offline scenarios cover editing, Guard, recovery, compaction
+and normalized provider events. Native views expose Memory review, Trace detail
+and evaluation run, export and comparison commands.
+
+The next implementation stage is M8: add `termini.el` through a versioned bridge
+for task dispatch, progress, cancellation, artifacts and completion while
+keeping local `chat.el` independently usable.
 
 There is one chat surface (2026-08-26). Code capability is a property of
 a session rather than a second display: `chat-code-mode` is gone, and a
@@ -130,7 +134,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1444 tests passing.
+Canonical suite: 1511 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark

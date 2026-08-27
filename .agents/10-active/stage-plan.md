@@ -4,51 +4,50 @@
 - Attention: active
 - Status: active
 - Scope: agent-runtime
-- Tags: stage, plan, memory, tracing, evaluations
+- Tags: stage, plan, termini, bridge, integration
 
 ## Goal
 
-Deliver M7: provenance-aware memory, reconstructable Trace records and a
-deterministic Agent evaluation harness.
+Deliver M8: a versioned `termini.el` bridge between the local Agent Runtime and
+the Termini platform without making either side depend on the other's UI or
+process internals.
 
 ## Completed
 
-- M0-M5 runtime contracts, lifecycle events, model capabilities, extensions,
-  unified tasks and typed multimodal content
-- M6 owned-file checkpoints and independent code/conversation rollback
-- optional owned worktrees with restart reconciliation and explicit cleanup
-- one versioned local execution backend with durable attempt history
-- canonical verification at 1484/1484
+- M0-M6 lifecycle, capability, extension, task, content and recovery contracts
+- M7 attributable memory, derived Trace reconstruction and deterministic evals
+- native Memory, Trace and evaluation inspection views
+- canonical verification at 1511/1511
 
 ## Next Steps
 
-1. Define versioned memory, Trace and evaluation contracts before extending the
-   current memory implementation.
-2. Add provenance, scope, confidence, timestamps, retention and sensitivity to
-   every durable memory item.
-3. Preserve existing explicit memory commands through a compatibility reader,
-   then add review, edit, merge, delete and automatic-memory controls.
-4. Reconstruct one Trace tree from lifecycle, model, task, execution,
-   permission, checkpoint and artifact records using stable correlation IDs.
-5. Record bounded latency, token, cache, tool, approval, compaction and task
-   measurements without copying prompts, secrets or unbounded output.
-6. Build deterministic offline scenarios for editing, Guard, recovery,
-   compaction and provider protocol behavior.
-7. Add native memory and Trace inspection commands, then run focused and
-   canonical verification before stage closeout.
+1. Inspect the Termini repository and freeze the bridge boundary before adding
+   transport code to `chat.el`.
+2. Define versioned request, progress, cancellation, artifact and completion
+   envelopes with stable session, Turn, task and parent correlation.
+3. Add capability negotiation and deterministic handling for unsupported or
+   newer bridge contracts.
+4. Implement local bridge state independently of Emacs buffers and provider
+   request objects.
+5. Add idempotent reconnect and duplicate-delivery handling, including terminal
+   completion and cancellation races.
+6. Expose concise native dispatch, status, detail, cancel and reconnect commands
+   in `termini.el`.
+7. Build offline adapter fixtures first, then isolate opt-in live integration,
+   stress and security checks from the canonical suite.
 
 ## Risks
 
-- Automatic memory can preserve stale, incorrect or sensitive conclusions if
-  provenance and retention are weak.
-- Trace joins can duplicate or mis-parent events when correlation is absent or
-  adapters emit terminal state more than once.
-- Evaluations can become brittle if they assert provider prose instead of
-  contract-level outcomes.
-- Metrics must stay bounded and must not become a second transcript containing
-  prompts, credentials or full tool output.
+- A bridge can accidentally become a second task database instead of an
+  adapter over runtime-owned state.
+- Retries can duplicate remote work unless request identity and terminal
+  idempotence are explicit before transport implementation.
+- Reconnect can confuse stale progress with current state if revisions and
+  ordering are absent.
+- Artifact transfer must remain bounded and referenced rather than embedding
+  large or sensitive payloads in lifecycle records.
 
 ## Next Entry
 
-Record the M7 memory/Trace/evaluation decision and acceptance spec before
-implementation begins.
+Record the M8 Termini bridge decision and acceptance spec before implementation
+begins.

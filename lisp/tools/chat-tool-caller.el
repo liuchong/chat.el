@@ -294,7 +294,7 @@ own transcript is, where it may write scratch files, and what shared
 knowledge already exists.  A run that does not know its record is on disk
 will ask again for something it was already told."
   (let ((base (if-let ((memory (and (fboundp 'chat-memory-snippet)
-                                    (chat-memory-snippet))))
+                                    (chat-memory-snippet session))))
                   (concat base-prompt "\n\n" memory)
                 base-prompt)))
     (when-let ((storage (chat-tool-caller--durable-storage-note session)))
