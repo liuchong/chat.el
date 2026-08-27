@@ -2282,6 +2282,28 @@ whose appearance is settled. Cutting past it trades a correct display for
 an append, and the display never recovers, because the append path has no
 reason to look back.
 
+### Measuring Markdown Source Instead Of What Reaches The Screen
+
+**Problem**: a table looked aligned in plain source but its borders drifted
+after rendering. Rows containing `` `main` `` or a link were the most
+obvious failures, and a bold proportional-font header made the drift vary
+by theme.
+
+**Cause**: column widths were measured before inline rendering. Hidden
+backticks, brackets and link destinations counted toward the width even
+though they contributed no screen columns. The resulting character-column
+arithmetic was then displayed through faces with different pixel metrics.
+
+**Solution**: render each cell first, derive its screen text from
+`invisible` and `display` properties, and measure that with `string-width`.
+Give the whole table one fixed-pitch face before adding header, code and
+border faces. Keep truncation visibility-aware too, so it does not discard
+hidden closing markers from the copyable Markdown source.
+
+**General rule**: display layout must measure the display representation,
+not the storage representation. Once text properties can hide or replace
+characters, source length is no longer evidence about occupied space.
+
 ### Emacs Gives A Subprocess A Pty, So Git Starts A Pager And Waits Forever
 
 **Problem**: `git log` and `git tag -l` run their whole timeout and then

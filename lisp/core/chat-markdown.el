@@ -46,17 +46,19 @@
   :group 'chat)
 
 (defface chat-markdown-heading-1
-  '((t :inherit bold :height 1.15))
+  '((t :inherit (font-lock-function-name-face bold) :height 1.20
+       :extend t))
   "A second-level Markdown heading, the highest the prompt asks for."
   :group 'chat-markdown)
 
 (defface chat-markdown-heading-2
-  '((t :inherit bold))
+  '((t :inherit (font-lock-function-name-face bold) :height 1.10
+       :extend t))
   "A third-level Markdown heading."
   :group 'chat-markdown)
 
 (defface chat-markdown-heading-3
-  '((t :inherit bold :slant italic))
+  '((t :inherit (font-lock-function-name-face bold) :extend t))
   "A fourth-level Markdown heading."
   :group 'chat-markdown)
 
@@ -66,12 +68,16 @@
   :group 'chat-markdown)
 
 (defface chat-markdown-code
-  '((t :inherit (fixed-pitch shadow)))
+  '((t :inherit (fixed-pitch font-lock-constant-face)))
   "Code inside a paragraph."
   :group 'chat-markdown)
 
 (defface chat-code-block-face
-  '((t :inherit fixed-pitch :extend t))
+  '((((background light)) :inherit fixed-pitch :background "gray95"
+     :extend t)
+    (((background dark)) :inherit fixed-pitch :background "gray15"
+     :extend t)
+    (t :inherit fixed-pitch :extend t))
   "A fenced code block.
 
 One face where there were two.  `chat-ui-code-block-face' was identical
@@ -80,18 +86,23 @@ so the same visual surface was split in half and could drift."
   :group 'chat-markdown)
 
 (defface chat-markdown-fence
-  '((t :inherit shadow))
+  '((t :inherit (fixed-pitch font-lock-comment-face)))
   "The ``` line of a fenced block, kept visible so its language shows."
   :group 'chat-markdown)
 
 (defface chat-markdown-list-marker
-  '((t :inherit shadow))
+  '((t :inherit font-lock-builtin-face :weight bold))
   "The bullet or number introducing a list item."
   :group 'chat-markdown)
 
 (defface chat-markdown-blockquote
-  '((t :inherit (shadow italic)))
+  '((t :inherit (font-lock-doc-face italic)))
   "Quoted text."
+  :group 'chat-markdown)
+
+(defface chat-markdown-blockquote-border
+  '((t :inherit font-lock-comment-face :weight bold))
+  "The visible rail beside a blockquote."
   :group 'chat-markdown)
 
 (defface chat-markdown-link
@@ -105,8 +116,27 @@ so the same visual surface was split in half and could drift."
   :group 'chat-markdown)
 
 (defface chat-markdown-table-separator
-  '((t :inherit shadow))
+  '((t :inherit (fixed-pitch shadow)))
   "The dashed row under a table's header."
+  :group 'chat-markdown)
+
+(defface chat-markdown-table
+  '((((background light)) :inherit fixed-pitch :background "gray95"
+     :extend t)
+    (((background dark)) :inherit fixed-pitch :background "gray15"
+     :extend t)
+    (t :inherit fixed-pitch :extend t))
+  "A Markdown table, kept fixed-pitch so columns share one metric."
+  :group 'chat-markdown)
+
+(defface chat-markdown-table-header
+  '((t :inherit (chat-markdown-table bold)))
+  "The header row of a Markdown table."
+  :group 'chat-markdown)
+
+(defface chat-markdown-table-border
+  '((t :inherit (chat-markdown-table shadow)))
+  "Unicode borders displayed over a Markdown table's pipe characters."
   :group 'chat-markdown)
 
 (defface chat-markdown-html
@@ -559,7 +589,18 @@ copied out, it works."
                         for index from 0
                         unless (eql index separator-index)
                         collect row))
-         (widths (chat-align-column-widths data))
+         ;; Width belongs to what reaches the screen, not to the source.
+         ;; `main` is six source columns including its hidden backticks but
+         ;; four visible columns; measuring the source moves every border
+         ;; on that row two columns to the left.
+         (visible-data
+          (mapcar (lambda (row)
+                    (mapcar (lambda (cell)
+                              (chat-markdown--screen-text
+                               (chat-markdown--inline cell base)))
+                            row))
+                  data))
+         (widths (chat-align-column-widths visible-data))
          (widths (chat-markdown--fit-widths widths))
          (output nil))
     (cl-loop for row in rows
@@ -567,21 +608,146 @@ copied out, it works."
              do (push
                  (if (eql index separator-index)
                      (chat-markdown--render-separator row widths base)
-                   (concat "| "
-                           (chat-align-row
-                            (cl-loop for cell in row
-                                     for column from 0
-                                     collect
-                                     (chat-markdown--table-cell
-                                      cell (nth column widths) base))
-                            widths alignments)
-                           " |"))
+                   (chat-markdown--render-table-row
+                    row widths alignments base
+                    (and separator-index (< index separator-index))))
                  output))
     (mapconcat #'identity (nreverse output) "\n")))
 
+(defun chat-markdown--table-border (source shown base)
+  "Return SOURCE displayed as table border SHOWN over BASE."
+  (propertize source
+              'display shown
+              'face (chat-markdown--face 'chat-markdown-table-border base)))
+
+(defun chat-markdown--add-face (text face base)
+  "Return TEXT with FACE over BASE appended to its existing faces."
+  (let ((result (copy-sequence text)))
+    (when (> (length result) 0)
+      (add-face-text-property 0 (length result)
+                              (chat-markdown--face face base) t result))
+    result))
+
+(defun chat-markdown--render-table-row
+    (cells widths alignments base header-p)
+  "Return CELLS as one fixed-pitch table row.
+
+WIDTHS and ALIGNMENTS lay out the cells.  BASE carries the transcript
+channel and HEADER-P adds the table-header face.  The pipe characters
+stay in the string while `display' shows box-drawing borders, so copying
+the row still gives valid Markdown."
+  (chat-markdown--add-face
+   (concat
+    (chat-markdown--table-border "| " "│ " base)
+    (chat-markdown--align-visible-row
+     (cl-loop for cell in cells
+              for column from 0
+              collect (chat-markdown--table-cell
+                       cell (nth column widths) base))
+     widths alignments
+     (chat-markdown--table-border " | " " │ " base))
+    (chat-markdown--table-border " |" " │" base))
+   (if header-p 'chat-markdown-table-header 'chat-markdown-table)
+   base))
+
 (defun chat-markdown--table-cell (cell width base)
   "Return CELL rendered for a column of WIDTH over BASE."
-  (chat-markdown--inline (chat-align-truncate cell width) base))
+  (chat-markdown--truncate-visible
+   (chat-markdown--inline cell base) width))
+
+(defun chat-markdown--screen-text (text)
+  "Return the text TEXT contributes to the screen.
+
+Invisible Markdown markers contribute nothing and string-valued
+`display' properties contribute their replacement."
+  (let ((pieces nil)
+        (position 0)
+        (length (length text)))
+    (while (< position length)
+      (let* ((next (min (or (next-single-property-change
+                             position 'invisible text) length)
+                        (or (next-single-property-change
+                             position 'display text) length)))
+             (display (get-text-property position 'display text)))
+        (unless (get-text-property position 'invisible text)
+          (push (if (stringp display)
+                    display
+                  (substring-no-properties text position next))
+                pieces))
+        (setq position next)))
+    (apply #'concat (nreverse pieces))))
+
+(defun chat-markdown--visible-width (text)
+  "Return the display width of propertized TEXT."
+  (string-width (chat-markdown--screen-text text)))
+
+(defun chat-markdown--pad-visible (text width alignment)
+  "Return TEXT padded to visible WIDTH according to ALIGNMENT."
+  (let ((short (- width (chat-markdown--visible-width text))))
+    (if (<= short 0)
+        text
+      (pcase alignment
+        ('right (concat (make-string short ?\s) text))
+        ('center (let ((left (/ short 2)))
+                   (concat (make-string left ?\s) text
+                           (make-string (- short left) ?\s))))
+        (_ (concat text (make-string short ?\s)))))))
+
+(defun chat-markdown--align-visible-row
+    (cells widths alignments separator)
+  "Return CELLS aligned by visible WIDTHS and joined by SEPARATOR."
+  (let ((index -1))
+    (mapconcat
+     (lambda (cell)
+       (setq index (1+ index))
+       (chat-markdown--pad-visible cell (or (nth index widths) 0)
+                                   (nth index alignments)))
+     cells separator)))
+
+(defun chat-markdown--truncate-visible (text width)
+  "Return TEXT cut to visible WIDTH without losing hidden markers.
+
+When inline code or a link is shortened, its closing marker still has to
+survive or the copied table stops being valid Markdown."
+  (if (<= (chat-markdown--visible-width text) width)
+      text
+    (let ((room (max 0 (1- width)))
+          (taken 0)
+          (position 0)
+          (length (length text))
+          (cut nil)
+          (pieces nil))
+      (while (< position length)
+        (let* ((next (min (or (next-single-property-change
+                               position 'invisible text) length)
+                          (or (next-single-property-change
+                               position 'display text) length)))
+               (invisible (get-text-property position 'invisible text))
+               (display (get-text-property position 'display text)))
+          (cond
+           (invisible
+            (push (substring text position next) pieces))
+           (cut nil)
+           ((stringp display)
+            (let ((display-width (string-width display)))
+              (if (<= (+ taken display-width) room)
+                  (progn
+                    (push (substring text position next) pieces)
+                    (setq taken (+ taken display-width)))
+                (push "…" pieces)
+                (setq cut t))))
+           (t
+            (while (and (< position next) (not cut))
+              (let ((char-width (char-width (aref text position))))
+                (if (<= (+ taken char-width) room)
+                    (progn
+                      (push (substring text position (1+ position)) pieces)
+                      (setq taken (+ taken char-width)))
+                  (push "…" pieces)
+                  (setq cut t))
+                (setq position (1+ position))))))
+          (setq position next)))
+      (apply #'concat (nreverse pieces)))))
 
 (defun chat-markdown--fit-widths (widths)
   "Return WIDTHS reduced to fit `chat-markdown-table-max-width'.
@@ -611,15 +777,18 @@ because it does not do."
                           for column from 0
                           collect (chat-markdown--stretch-dashes
                                    cell (or (nth column widths) 3))))
-         (rule (mapconcat (lambda (width) (make-string (max 1 width) ?─))
-                          (seq-take widths (length cells))
-                          " | ")))
-    (concat "| "
-            (propertize (mapconcat #'identity dashes " | ")
-                        'display rule
-                        'face (chat-markdown--face
-                               'chat-markdown-table-separator base))
-            " |")))
+         (source (concat "| " (mapconcat #'identity dashes " | ") " |"))
+         (rule (concat
+                "├─"
+                (mapconcat (lambda (width)
+                             (make-string (max 1 width) ?─))
+                           (seq-take widths (length cells))
+                           "─┼─")
+                "─┤")))
+    (propertize source
+                'display rule
+                'face (chat-markdown--face
+                       'chat-markdown-table-separator base))))
 
 (defun chat-markdown--stretch-dashes (cell width)
   "Return separator CELL widened to WIDTH with more dashes.
@@ -727,7 +896,11 @@ change what the copied table means, not just how it looks."
                (marker (match-string 2 line))
                (rest (substring line (match-end 0))))
            (concat indent
-                   (chat-markdown--hidden marker)
+                   (propertize
+                    marker
+                    'display "▎ "
+                    'face (chat-markdown--face
+                           'chat-markdown-blockquote-border base))
                    (propertize
                     (chat-markdown--inline
                      rest (chat-markdown--face 'chat-markdown-blockquote
@@ -758,17 +931,35 @@ since it is about to change."
          (body (mapconcat #'identity body-lines "\n"))
          (coloured (and closed (chat-markdown--fontify-code body language))))
     (concat
-     ;; The fence line stays visible: it is how the reader sees which
-     ;; language a block is in.
-     (chat-markdown--put open 'chat-markdown-fence base)
+     ;; The source fence stays in the string; a labelled rail is the view.
+     ;; That keeps the language visible without making raw backticks the
+     ;; strongest visual feature of a code block.
+     (chat-markdown--put
+      open 'chat-markdown-fence base
+      'display (concat "┌ " (if (string-empty-p (or language ""))
+                                "code"
+                              language)))
      (when body-lines "\n")
      (if coloured
          (chat-markdown--over-code coloured base)
-       (chat-markdown--put body 'chat-code-block-face base))
+       (chat-markdown--code-rail
+        (chat-markdown--put body 'chat-code-block-face base) base))
      (when closed
        (concat (if body-lines "\n" "")
-               (chat-markdown--put (car (last lines))
-                                   'chat-markdown-fence base))))))
+               (chat-markdown--put
+                (car (last lines)) 'chat-markdown-fence base
+                'display "└"))))))
+
+(defun chat-markdown--code-rail (text base)
+  "Return code TEXT with a visible left rail over BASE."
+  (let* ((rail (propertize "│ " 'face
+                           (chat-markdown--face 'chat-markdown-fence base)))
+         (result (copy-sequence text)))
+    (when (> (length result) 0)
+      (add-text-properties 0 (length result)
+                           (list 'line-prefix rail 'wrap-prefix rail)
+                           result))
+    result))
 
 (defun chat-markdown--over-code (coloured base)
   "Return COLOURED code with the block face and BASE underneath.
@@ -788,7 +979,7 @@ background and its fixed pitch, which the mode does not set."
                                                      base))
                            result)
         (setq pos next)))
-    result))
+    (chat-markdown--code-rail result base)))
 
 ;; ------------------------------------------------------------------
 ;; The renderer

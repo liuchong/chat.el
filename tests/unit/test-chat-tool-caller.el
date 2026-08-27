@@ -302,6 +302,8 @@ A prompt rule without a reason reads as optional."
       (should (string-match-p "level two" note))
       (should (string-match-p "hard-wrap" note))
       (should (string-match-p "names its language" note))
+      (should (string-match-p "literal code or source" note))
+      (should (string-match-p "rendering demonstration" note))
       (should (string-match-p "two levels" note))
       (should (string-match-p "four\n?[ ]*columns" note))
       (should (string-match-p "Inline code" note))
@@ -310,6 +312,7 @@ A prompt rule without a reason reads as optional."
       ;; The reasons, which are what stop a rule reading as optional.
       (should (string-match-p "wrapped to the window" note))
       (should (string-match-p "selects syntax highlighting" note))
+      (should (string-match-p "shown as source" note))
       (should (string-match-p "does not fit a window" note))
       (should (string-match-p "not rendered\\|none of these" note)))))
 

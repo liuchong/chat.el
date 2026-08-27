@@ -1063,14 +1063,21 @@ only for tabular data.
 
 It is displayed the way Org-mode displays Org, not the way a browser
 displays HTML. The document stays plain text and becomes presentable in
-place: `#` and `**` disappear, headings take levels, code blocks are
-coloured by their actual major mode, tables line up by display width so
-Chinese cells do not skew them, bullets become `•`, links show their text.
-No preview window, no external renderer.
+place: `#` and `**` disappear, headings take levels, code blocks get a
+labelled rail and colours from their actual major mode, blockquotes keep a
+quiet left rail, bullets become `•`, and links show their text. Tables use
+one fixed-pitch metric and Unicode borders; widths come from the text that
+is actually visible, so hidden backticks, link destinations and Chinese
+cells cannot move a column boundary. No preview window, no external
+renderer.
 
 Markers are hidden rather than removed, so copying a reply gives back the
-Markdown the model wrote, stars and hashes included. `C-c C-;` shows the
+Markdown the model wrote, stars and hashes included. `C-c C-u` shows the
 markers when the source is what you want to read.
+
+A fenced `markdown` block is deliberately shown as source. A normal reply
+or a rendering demonstration must therefore not wrap the whole document in
+one; the output-format prompt states that boundary explicitly.
 
 One renderer does all of it — streaming, redraw, folding, quick answers,
 error text — from the same recorded Markdown, so a fold and reopen cannot

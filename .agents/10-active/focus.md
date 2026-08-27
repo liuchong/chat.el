@@ -157,20 +157,21 @@ alone. It is now asked for and narrowed to what a buffer displays well,
 with a reason on every restriction, since a prompt rule without one reads
 as optional.
 
-Specs 005 and 006 are written and not implemented, and both were corrected
-on review.
+Specs 005 and 006 are implemented and were corrected on review.
 
-005 is the built-in Markdown display engine, at
+005 is the built-in Markdown display engine at
 `lisp/core/chat-markdown.el`: an Org-like result from Markdown syntax
 using Emacs means only — `invisible` for markers so copying still yields
 the source, real major modes for code behind an explicit language table so
-model output cannot decide which packages load, `string-width` for table
-columns because CJK is double-width. Its governing rule is one renderer as
-a pure function of the source, the structural answer to the two paths that
-style differently today. The division it now states outright: Markdown the
-format owns full-document input and output and is the source of truth,
-this module owns only its display, and a rendering never flows back as
-data. It sits in core rather than ui on the precedent of
+model output cannot decide which packages load, and final-visible-text
+measurement plus a fixed-pitch face for table columns. Unicode borders,
+labelled code rails and blockquote rails make the document hierarchy
+visible without replacing the Markdown source. Its governing rule is one
+renderer as a pure function of the source, the structural answer to paths
+that used to style differently. The division it states outright: Markdown
+the format owns full-document input and output and is the source of truth,
+this module owns only its display, and a rendering never flows back as data.
+It sits in core rather than ui on the precedent of
 `chat-transcript.el` — pure, computes styling, never touches a buffer —
 which is also what lets a core module reach it without inverting the
 repository's strict ui → core direction.

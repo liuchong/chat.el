@@ -221,8 +221,48 @@ them, not text written in their place."
 (ert-deftest chat-markdown-a-separator-row-shows-as-a-rule ()
   (let* ((rendered (chat-markdown-render "| a |\n| --- |\n| 1 |"))
          (at (string-match "-" rendered)))
-    (should (string-match-p "\\`─+\\'"
+    (should (string-match-p "\\`├─+┤\\'"
                             (get-text-property at 'display rendered)))))
+
+(ert-deftest chat-markdown-a-table-uses-one-font-metric ()
+  "Bold headers and inline code must not move a column boundary.
+
+The arithmetic is in character columns, so every visible table row has
+to be fixed-pitch.  Otherwise a logically aligned table still drifts by
+pixels as soon as a header is bold or a cell contains inline code."
+  (let* ((rendered (chat-markdown-render
+                    "| field | value |\n| --- | --- |\n| 中文 | `code` |"))
+         (header-faces (test-markdown--faces-at rendered "field"))
+         (body-faces (test-markdown--faces-at rendered "中文")))
+    (should (memq 'chat-markdown-table-header header-faces))
+    (should (memq 'chat-markdown-table body-faces))))
+
+(ert-deftest chat-markdown-table-width-ignores-hidden-inline-markers ()
+  "Backticks and link destinations must not pull a border to the left."
+  (let* ((source "| kind | value |\n| --- | --- |\n| code | `main` |\n| link | [docs](https://example.com) |")
+         (lines (split-string (test-markdown--screen
+                               (chat-markdown-render source))
+                              "\n"))
+         (widths (mapcar #'string-width lines)))
+    (should (apply #'= widths))))
+
+(ert-deftest chat-markdown-table-truncation-keeps-inline-markers-paired ()
+  "A narrow cell remains valid Markdown after visible-width truncation."
+  (let ((chat-markdown-table-max-width 12))
+    (let ((source (substring-no-properties
+                   (chat-markdown-render
+                    "| a |\n| --- |\n| `abcdefghijk` |"))))
+      (should (string-match-p "`[^`]+…`" source)))))
+
+(ert-deftest chat-markdown-table-pipes-display-as-box-borders ()
+  "The view gets quiet Unicode borders while the source keeps pipes."
+  (let* ((rendered (chat-markdown-render "| a | b |\n| - | - |\n| 1 | 2 |"))
+         (first-pipe (string-match "|" rendered))
+         (inner-pipe (string-match "|" rendered (1+ first-pipe))))
+    (should (equal "│ " (get-text-property first-pipe 'display rendered)))
+    (should (equal " │ " (get-text-property inner-pipe 'display rendered)))
+    (should (string-match-p "| a +| b +|"
+                            (substring-no-properties rendered)))))
 
 (ert-deftest chat-markdown-a-wide-table-does-not-run-off-the-side ()
   "It is narrowed to the limit rather than left to overflow unseen."
@@ -258,6 +298,26 @@ and be wasted, since it is about to change."
          (faces (test-markdown--faces-at rendered "defun")))
     (should (memq 'chat-code-block-face faces))
     (should-not (memq 'font-lock-keyword-face faces))))
+
+(ert-deftest chat-markdown-a-fence-becomes-a-labelled-code-rail ()
+  "Backticks remain copyable but no longer dominate the document view."
+  (let* ((source "```elisp\n(message \"hi\")\n```")
+         (rendered (chat-markdown-render source))
+         (open (string-match "```elisp" rendered))
+         (body (string-match "(message" rendered))
+         (close (string-match "```" rendered (1+ open))))
+    (should (equal "┌ elisp" (get-text-property open 'display rendered)))
+    (should (equal "│ " (substring-no-properties
+                          (get-text-property body 'line-prefix rendered))))
+    (should (equal "└" (get-text-property close 'display rendered)))
+    (should (equal source (substring-no-properties rendered)))))
+
+(ert-deftest chat-markdown-a-blockquote-keeps-a-visible-rail ()
+  (let* ((source "> quoted")
+         (rendered (chat-markdown-render source))
+         (marker (string-match "> " rendered)))
+    (should (equal "▎ " (get-text-property marker 'display rendered)))
+    (should (equal source (substring-no-properties rendered)))))
 
 (ert-deftest chat-markdown-an-unknown-language-loads-nothing ()
   "A code block must not be able to decide which package gets loaded."
