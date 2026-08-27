@@ -1,8 +1,8 @@
 # Stage Plan
 
 - Type: progress
-- Attention: active
-- Status: active
+- Attention: reference
+- Status: complete
 - Scope: agent-runtime
 - Tags: stage, plan, termini, bridge, integration
 
@@ -16,25 +16,21 @@ process internals.
 
 - M0-M6 lifecycle, capability, extension, task, content and recovery contracts
 - M7 attributable memory, derived Trace reconstruction and deterministic evals
-- native Memory, Trace and evaluation inspection views
-- canonical verification at 1511/1511
+- M8 versioned App Server bridge and optional `termini.el` entry point
+- native RuntimeSession, job, tail, cancellation and attachment controls
+- deterministic offline protocol fixtures and foreground live handshake
+- canonical verification at 1539/1539
 
-## Next Steps
+## Execution Record
 
-1. Inspect the Termini repository and freeze the bridge boundary before adding
-   transport code to `chat.el`.
-2. Define versioned request, progress, cancellation, artifact and completion
-   envelopes with stable session, Turn, task and parent correlation.
-3. Add capability negotiation and deterministic handling for unsupported or
-   newer bridge contracts.
-4. Implement local bridge state independently of Emacs buffers and provider
-   request objects.
-5. Add idempotent reconnect and duplicate-delivery handling, including terminal
-   completion and cancellation races.
-6. Expose concise native dispatch, status, detail, cancel and reconnect commands
-   in `termini.el`.
-7. Build offline adapter fixtures first, then isolate opt-in live integration,
-   stress and security checks from the canonical suite.
+1. Inspected the App Server protocol and fixed the runtime ownership boundary.
+2. Added Decision 0026 and Spec 020 before transport implementation.
+3. Implemented bounded JSONL framing, correlation, capabilities and reconnect.
+4. Added RuntimeSession, message, job, tail and attachment projections.
+5. Added explicit local session binding without mirroring remote tasks.
+6. Added the optional root entry point and native session/job views.
+7. Ran deterministic fixtures, a foreground live handshake and the canonical
+   suite.
 
 ## Risks
 
@@ -47,7 +43,8 @@ process internals.
 - Artifact transfer must remain bounded and referenced rather than embedding
   large or sensitive payloads in lifecycle records.
 
-## Next Entry
+## Result
 
-Record the M8 Termini bridge decision and acceptance spec before implementation
-begins.
+The M0-M8 Agent Runtime roadmap is complete. Future transport or product work
+must preserve Decision 0026's single-owner state rule and extend the negotiated
+bridge rather than reading Termini persistence directly.

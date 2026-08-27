@@ -280,6 +280,12 @@ Acceptance:
 - the complete M0-M8 suite remains deterministic offline, with live checks
   isolated and explicitly enabled.
 
+Status: complete. The optional stdio bridge negotiates the App Server protocol,
+keeps remote state authoritative, preserves mutation identities, bounds every
+retained projection and exposes native RuntimeSession, job, tail, cancellation
+and attachment operations. A foreground live smoke is separate from the
+canonical offline suite.
+
 ## Execution Order
 
 Each phase follows the same sequence:
@@ -313,10 +319,9 @@ Every phase must preserve:
 
 ## Current Baseline
 
-M0 through M7 are complete. The runtime now adds attributable scoped memory,
-Trace reconstruction over the canonical session wire, immutable deterministic
-evaluation results and native inspection views to the earlier lifecycle,
-capability, extension, task, content and recovery contracts. Sensitive or
-out-of-scope memory never enters prompts, Trace remains a derived bounded
-projection and live evaluations stay opt-in. The next implementation stage is
-M8: the versioned Termini bridge.
+M0 through M8 are complete. The runtime provides versioned lifecycle,
+capability, extension, task, content, recovery, memory, Trace and evaluation
+contracts. The optional Termini bridge adds negotiated remote projections and
+native controls without making `chat.el` depend on a Termini executable or
+creating a second remote task store. The canonical offline baseline is
+1539/1539; live provider and App Server checks remain opt-in.

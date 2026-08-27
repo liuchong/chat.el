@@ -1250,11 +1250,31 @@ request on stdin and keep their JSONL output in
 `chat-subagent-directory`. Starting or cancelling either backend uses the
 same scoped tool and approval policy as other capabilities.
 
+## Optional Termini Control Surface
+
+The repository-root `termini.el` is an optional control surface for a local
+Termini App Server. Loading `chat.el` alone does not load this integration or
+start a process. Load the entry point explicitly, then connect:
+
+```elisp
+(load "/path/to/chat.el/termini.el")
+```
+
+The main commands are `termini-connect`, `termini-disconnect`,
+`termini-reconnect`, `termini-show-capabilities`,
+`termini-session-view-open` and `termini-job-view-open`. Session and job views
+refresh from the App Server rather than reading its persistence. Job tails,
+cancellation conflicts and attachments remain bounded, and reconnect never
+automatically replays a mutating request.
+
 ## Architecture Map
 
 | File | Responsibility |
 |------|----------------|
 | `chat.el` | Entry point and command wiring |
+| `termini.el` | Optional Termini control-surface entry point |
+| `lisp/core/chat-termini-bridge.el` | Versioned App Server protocol and bounded projections |
+| `lisp/ui/chat-termini-view.el` | RuntimeSession and job views |
 | `lisp/ui/chat-ui.el` | Chat buffer rendering and response lifecycle |
 | `lisp/ui/chat-mark.el` | Glyphs and brand colours for modes and providers |
 | `lisp/core/chat-markdown.el` | Markdown shown as a document, in the buffer |
@@ -1294,8 +1314,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 591 regression tests discovered
-- 591 passing
+- 1539 regression tests discovered
+- 1539 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

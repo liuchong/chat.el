@@ -4,11 +4,11 @@
 - Attention: entry
 - Status: active
 - Scope: project
-- Tags: current, phase, runtime, memory, traces, evaluations, termini
+- Tags: current, phase, runtime, bridge, termini
 
 ## Current Phase
 
-M0 through M7 of the Agent Runtime roadmap are complete (2026-08-28). Decision
+M0 through M8 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes the foundational contracts and Spec 014 orders their delivery through
 M8 so later features depend on runtime boundaries rather than provider, UI or
 process internals.
@@ -50,9 +50,17 @@ transcripts. Five offline scenarios cover editing, Guard, recovery, compaction
 and normalized provider events. Native views expose Memory review, Trace detail
 and evaluation run, export and comparison commands.
 
-The next implementation stage is M8: add `termini.el` through a versioned bridge
-for task dispatch, progress, cancellation, artifacts and completion while
-keeping local `chat.el` independently usable.
+Decision 0026 and M8 add the optional `termini.el` control surface over the
+versioned App Server protocol. The bridge negotiates capabilities, correlates
+JSON-RPC responses, never replays mutations after reconnect and projects
+RuntimeSessions, messages, jobs, tails and attachments without persisting a
+second remote state store. Native session and job views read only through the
+bridge. Loading `chat.el` alone neither loads the integration nor starts a
+sidecar.
+
+The canonical offline suite passes 1539/1539. A separate foreground live smoke
+negotiated protocol `2026-07-08`, read RuntimeSessions, shut down cleanly and
+left no App Server process behind.
 
 There is one chat surface (2026-08-26). Code capability is a property of
 a session rather than a second display: `chat-code-mode` is gone, and a
