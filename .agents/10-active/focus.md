@@ -8,20 +8,31 @@
 
 ## Doing Now
 
-M17 implementation is complete and its final acceptance is blocked. The unified
+M17 durable Goal Mode and M18 read-only Plan Mode are implemented. Goal is a
+versioned completion contract with scoped evidence, pause/resume/block/complete,
+bounded automatic continuation, restart/compaction recovery and independent
+links to TODO plans, notes and runtime tasks. Plan Mode is a separate persisted
+permission state: research and plan-state writes are allowed, source mutation
+and unknown effects fail closed, and approval is tied to the exact submitted
+plan revision through a user-only path. Goal and Plan Mode share the existing
+session/event/context/UI infrastructure rather than creating parallel stores.
+The canonical suite passes 1760/1760 after migration, scope-isolation,
+revision-conflict, 20-turn/two-compaction recovery, 1,000-update UI tests and
+the live-chat stability regressions recorded in the current stage log.
+
+M19 final acceptance remains blocked. The unified
 chat surface projects planning, understanding, editing, verifying, repairing
 and reviewing without moving the input point or visible window. Diagnostics
 carry closed error kinds and next actions. The 10,000-file performance gates
 pass, including a known single-file update that no longer rescans the tree.
 The fixed corpus now contains one deterministic large-repository task with
 10,000 indexed Python files, measured rather than trusted from its tag.
-Completion now requires separate immutable M9 `baseline` and M17 `current`
-campaigns, each with 30-by-5 live results and trusted provider token usage;
-those result sets are not currently available. A no-network preflight confirms
-that the current campaign harness can load the fixed 30-task manifest over M9
-revision `e4e6cbc` and declare 150 expected results after explicitly raising the
-historical checkout's inherited fixture limit to 12,000. No model was called,
-so this only closes the harness-compatibility uncertainty.
+Completion now requires separate immutable M9 `baseline` and M19 `current`
+campaigns, each with 30-by-5 live results and trusted provider token usage. The
+M9 baseline campaign is now complete at revision `e4e6cbc`: 150/150 terminal
+results, with 3 passed, 107 failed, 23 errored and 17 cancelled. The comparable
+M19 current campaign is still missing, so no paired capability or token claim is
+accepted yet.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

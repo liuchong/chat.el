@@ -34,6 +34,8 @@
 (require 'chat-workspace)
 (require 'chat-event)
 (require 'chat-work-plan)
+(require 'chat-goal)
+(require 'chat-plan-mode)
 (require 'chat-transcript)
 (require 'chat-markdown)
 (require 'chat-llm)
@@ -110,6 +112,9 @@ indistinguishable from a hung one."
 
 (defvar-local chat-ui--plan-expanded nil
   "Non-nil when the native work-plan projection shows every item.")
+
+(defvar-local chat-ui--goal-expanded nil
+  "Non-nil when the native Goal projection shows its contract details.")
 
 (defvar-local chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
@@ -223,8 +228,8 @@ of the same channel arrive.")
 (defvar-local chat-ui--live-trailers nil
   "Plist of trailing notes for the in-flight turn.
 
-Holds `:tool-summary' and `:limit-reached', which belong to the turn as a
-whole rather than to any one part of it.")
+Holds `:tool-summary', `:permission-failure' and `:limit-reached', which
+belong to the turn as a whole rather than to any one part of it.")
 
 (defun chat-ui--pending-approval-event ()
   "Return the current pending approval event when present."
@@ -635,6 +640,8 @@ design was.")
     (:name "list"     :handler chat-ui--command-list)
     (:name "save"     :handler chat-ui--command-save)
     (:name "clear"    :handler chat-ui--command-clear)
+    (:name "goal"     :handler chat-ui--command-goal)
+    (:name "plan"     :handler chat-ui--command-plan)
     (:name "wiki"     :handler chat-wiki-dispatch)
     (:name "approve"  :handler chat-ui--command-approve)
     (:name "auto"     :handler chat-ui--command-auto))
@@ -1070,6 +1077,7 @@ doubles as the answer to why a reply mentioned a file nobody named."
   (setq chat-ui--plan-start nil)
   (setq chat-ui--plan-end nil)
   (setq chat-ui--plan-expanded nil)
+  (setq chat-ui--goal-expanded nil)
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
@@ -1194,11 +1202,26 @@ Marked rather than found by searching for its own text: the text is
 translated, and a search for the English would quietly stop finding it in
 any other language, leaving the note on screen under the answer.")
 
+(defface chat-ui-role-user
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Face for the user role label."
+  :group 'chat)
+
+(defface chat-ui-role-assistant
+  '((t :inherit font-lock-function-name-face :weight bold))
+  "Face for assistant role labels."
+  :group 'chat)
+
+(defface chat-ui-role-system
+  '((t :inherit font-lock-comment-face :weight bold))
+  "Face for system role labels."
+  :group 'chat)
+
 (defconst chat-ui--role-faces
-  '((user . font-lock-keyword-face)
-    (assistant . font-lock-function-name-face)
-    (assistant-quick . font-lock-function-name-face)
-    (system . font-lock-comment-face))
+  '((user . chat-ui-role-user)
+    (assistant . chat-ui-role-assistant)
+    (assistant-quick . chat-ui-role-assistant)
+    (system . chat-ui-role-system))
   "The face each role label is drawn in.")
 
 (defun chat-ui--role-label (role)
@@ -1211,8 +1234,28 @@ any other language, leaving the note on screen under the answer.")
 
 (defun chat-ui--insert-role-label (role)
   "Insert the label for ROLE and the newline that follows it."
-  (insert (propertize (concat (chat-ui--role-label role) ":\n")
-                      'face (alist-get role chat-ui--role-faces))))
+  (let ((face (alist-get role chat-ui--role-faces)))
+    (insert (propertize (concat (chat-ui--role-label role) ":\n")
+                        'face face
+                        ;; Keep a semantic property beside the appearance.
+                        ;; If another display pass clears `face', the live
+                        ;; renderer can restore it without guessing from
+                        ;; translated label text.
+                        'chat-ui-role role
+                        'rear-nonsticky '(face chat-ui-role)))))
+
+(defun chat-ui--repair-role-faces (start end)
+  "Restore role faces carrying semantic labels between START and END."
+  (let ((position start))
+    (while (< position end)
+      (let* ((role (get-text-property position 'chat-ui-role))
+             (next (or (next-single-property-change
+                        position 'chat-ui-role nil end)
+                       end)))
+        (when role
+          (put-text-property position next 'face
+                             (alist-get role chat-ui--role-faces)))
+        (setq position next)))))
 
 (defun chat-ui--insert-part (part)
   "Insert transcript PART at point.
@@ -1289,6 +1332,18 @@ it would be counted in a fold row standing for nothing."
                                 (chat-i18n 'tools-used "Tools used: %s" summary)
                                 "\n")
                         'face 'chat-transcript-system)))
+  (when-let ((failure (plist-get chat-ui--live-trailers
+                                 :permission-failure)))
+    (insert
+     (propertize
+      (concat chat-ui-detail-indent
+              (chat-i18n
+               'permission-blocked
+               "Permission blocked %s: %s"
+               (or (plist-get failure :tool) "tool")
+               (or (plist-get failure :result-summary) "permission denied"))
+              "\n")
+      'face 'error)))
   (when (plist-get chat-ui--live-trailers :limit-reached)
     (insert (propertize
              (concat chat-ui-detail-indent
@@ -1296,6 +1351,22 @@ it would be counted in a fold row standing for nothing."
                                 "Tool loop stopped after reaching the safety limit.")
                      "\n")
              'face 'chat-transcript-system))))
+
+(defun chat-ui--permission-error-p (event)
+  "Return non-nil when tool error EVENT says an operation lacked permission."
+  (and (eq (plist-get event :type) 'tool-error)
+       (or (memq (plist-get event :error-type)
+                 '(permission permission-block access-denied))
+           (string-match-p
+            (concat "\\(?:access denied\\|permission\\|not writable"
+                    "\\|outside .*\\(?:boundary\\|root\\|workspace\\)"
+                    "\\|write .*\\(?:blocked\\|denied\\)"
+                    "\\|read .*\\(?:blocked\\|denied\\)\\)")
+            (downcase (or (plist-get event :result-summary) ""))))))
+
+(defun chat-ui--latest-permission-failure (tool-events)
+  "Return the latest permission failure from TOOL-EVENTS, or nil."
+  (seq-find #'chat-ui--permission-error-p (reverse tool-events)))
 
 (defcustom chat-ui-live-reasoning-lines 6
   "How many trailing lines of live reasoning to show while it arrives.
@@ -1410,7 +1481,8 @@ prose, and the fence that would have closed it is never reconsidered."
                  (list :content content
                        :reasoning reasoning
                        :body-start body
-                       :live-start (marker-position chat-ui--live-start)))))))
+                       :live-start (marker-position chat-ui--live-start))))
+      (chat-ui--repair-presentation-invariants))))
 
 (defun chat-ui--redraw-conversation ()
   "Redraw the whole conversation from the session record.
@@ -1708,6 +1780,22 @@ where some of it is."
             (goto-char (+ (marker-position chat-ui--input-overlay)
                           offset))))))))
 
+(defun chat-ui--repair-presentation-invariants ()
+  "Restore durable display properties after a live or full redraw.
+
+The input prompt and role colours are presentation state, not session
+data.  A completion UI, a third-party display pass or an interrupted
+rewrite may remove that state without removing the underlying input and
+messages.  Repair it from semantic markers after every response redraw so
+the buffer never stays half-usable until it is reopened."
+  (let ((inhibit-read-only t))
+    (chat-ui--render-input-prompt)
+    (when (and (markerp chat-ui--conversation-start)
+               (markerp chat-ui--messages-end))
+      (chat-ui--repair-role-faces
+       (marker-position chat-ui--conversation-start)
+       (marker-position chat-ui--messages-end)))))
+
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
   (goto-char (point-max))
@@ -1726,6 +1814,27 @@ where some of it is."
     (define-key map [mouse-1] #'chat-ui-toggle-work-plan)
     map)
   "Keymap attached to the native work-plan projection.")
+
+(defvar chat-ui-goal-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "TAB") #'chat-ui-toggle-goal)
+    (define-key map (kbd "RET") #'chat-ui-toggle-goal)
+    (define-key map [mouse-1] #'chat-ui-toggle-goal)
+    map)
+  "Keymap attached to the native Goal projection.")
+
+(defconst chat-ui--goal-event-types
+  '(goal-created goal-selected goal-progressed goal-paused goal-resumed
+    goal-blocked goal-unblocked goal-completed goal-cancelled goal-cleared
+    goal-conflicted goal-completion-refused
+    goal-continuation-budget-exhausted)
+  "Events that can change the visible Goal projection.")
+
+(defconst chat-ui--plan-mode-event-types
+  '(plan-mode-entered plan-mode-submitted plan-mode-approved
+    plan-mode-rejected plan-mode-exited plan-mode-refused
+    plan-mode-conflicted)
+  "Events that can change the visible Plan Mode projection.")
 
 (defconst chat-ui--work-plan-event-types
   '(plan-created plan-updated plan-skipped plan-item-started
@@ -1789,6 +1898,56 @@ where some of it is."
        help-echo "TAB or click to expand or collapse the work plan"
        rear-nonsticky (keymap mouse-face help-echo)))))
 
+(defun chat-ui--insert-goal-projection (projection)
+  "Insert native text for Goal PROJECTION at point."
+  (let* ((status (plist-get projection :status))
+         (summary
+          (format "Goal [%s] %d/%d · %s%s\n"
+                  status (plist-get projection :satisfied)
+                  (plist-get projection :total)
+                  (plist-get projection :objective)
+                  (if (plist-get projection :needs-attention)
+                      " · needs attention" "")))
+         (start (point)))
+    (insert (propertize summary
+                        'face (pcase status
+                                ('completed 'success)
+                                ('blocked 'warning)
+                                ('paused 'shadow)
+                                (_ 'font-lock-keyword-face))))
+    (when chat-ui--goal-expanded
+      (when-let ((stopping (plist-get projection :stopping-condition)))
+        (insert "  " (propertize "Stop: " 'face 'shadow) stopping "\n"))
+      (when-let ((checkpoint (plist-get projection :checkpoint)))
+        (insert "  " (propertize "Now: " 'face 'shadow) checkpoint "\n"))
+      (when-let ((attention (plist-get projection :needs-attention)))
+        (insert "  " (propertize "[!] " 'face 'warning) attention "\n"))
+      (when-let ((remaining (plist-get projection :remaining)))
+        (dolist (criterion remaining)
+          (insert "  " (propertize "[ ] " 'face 'shadow) criterion "\n")))
+      (when-let ((reason (plist-get projection :blocker-reason)))
+        (insert "  " (propertize "[!] " 'face 'warning) reason "\n")
+        (when-let ((condition (plist-get projection :unblock-condition)))
+          (insert "      " (propertize "Resume when: " 'face 'shadow)
+                  condition "\n"))))
+    (add-text-properties
+     start (point)
+     `(keymap ,chat-ui-goal-map mouse-face highlight
+       help-echo "TAB or click to expand or collapse the Goal"
+       rear-nonsticky (keymap mouse-face help-echo)))))
+
+(defun chat-ui--insert-plan-mode-projection (projection)
+  "Insert native text for active Plan Mode PROJECTION."
+  (when (plist-get projection :enabled)
+    (insert
+     (propertize
+      (format "Plan Mode [%s] · read-only%s\n"
+              (plist-get projection :status)
+              (if (plist-get projection :plan-id)
+                  (format " · %s" (plist-get projection :plan-id)) ""))
+      'face (if (eq (plist-get projection :status) 'ready)
+                'warning 'font-lock-keyword-face)))))
+
 (defun chat-ui--render-work-plan ()
   "Render only the native work-plan region without moving UI anchors."
   (when (and (markerp chat-ui--plan-start)
@@ -1801,6 +1960,12 @@ where some of it is."
                       (cons window
                             (copy-marker (window-start window) nil)))
                     (get-buffer-window-list (current-buffer) nil t)))
+           (plan-mode-projection
+            (and chat--current-session
+                 (chat-plan-mode-ui-projection chat--current-session)))
+           (goal-projection (and chat--current-session
+                                 (chat-goal-ui-projection
+                                  chat--current-session)))
            (projection (and chat--current-session
                             (chat-work-plan-ui-projection
                              chat--current-session))))
@@ -1809,6 +1974,10 @@ where some of it is."
                 (inhibit-modification-hooks t))
             (goto-char chat-ui--plan-start)
             (delete-region chat-ui--plan-start chat-ui--plan-end)
+            (when plan-mode-projection
+              (chat-ui--insert-plan-mode-projection plan-mode-projection))
+            (when goal-projection
+              (chat-ui--insert-goal-projection goal-projection))
             (when (and projection
                        (memq (plist-get projection :status)
                              '(active blocked)))
@@ -1831,9 +2000,20 @@ where some of it is."
   (setq chat-ui--plan-expanded (not chat-ui--plan-expanded))
   (chat-ui--render-work-plan))
 
+(defun chat-ui-toggle-goal (&optional event)
+  "Expand or collapse the native Goal view at EVENT."
+  (interactive (list last-nonmenu-event))
+  (when (and event (mouse-event-p event))
+    (mouse-set-point event))
+  (setq chat-ui--goal-expanded (not chat-ui--goal-expanded))
+  (chat-ui--render-work-plan))
+
 (defun chat-ui--observe-work-plan-event (event)
   "Refresh chat buffers whose session is affected by work-plan EVENT."
-  (when (memq (chat-event-type event) chat-ui--work-plan-event-types)
+  (when (memq (chat-event-type event)
+              (append chat-ui--work-plan-event-types
+                      chat-ui--goal-event-types
+                      chat-ui--plan-mode-event-types))
     (dolist (buffer (buffer-list))
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
@@ -1847,7 +2027,9 @@ where some of it is."
   "Project lifecycle EVENT into chat buffers for the same session."
   (let ((phase
          (unless (memq (chat-event-type event)
-                       chat-ui--work-plan-event-types)
+                       (append chat-ui--work-plan-event-types
+                               chat-ui--goal-event-types
+                               chat-ui--plan-mode-event-types))
            (chat-runtime-status-phase-for-event
             (chat-event-type event) (chat-event-payload event)))))
     (when phase
@@ -2123,6 +2305,147 @@ mode the reader cannot see."
                   "/%s cannot be a default command. Repeatable: %s"
                   request
                   (chat-ui--repeatable-command-list)))))))
+
+(defun chat-ui--goal-report (goal)
+  "Return a compact user-facing report for GOAL."
+  (if (null goal)
+      "Goal: none. Create one with /goal OBJECTIVE :: STOPPING CONDITION"
+    (let* ((projection (chat-goal-ui-projection chat--current-session))
+           (remaining (plist-get projection :remaining)))
+      (string-join
+       (delq nil
+             (list
+              (format "Goal [%s] revision %d: %s"
+                      (chat-goal-status goal) (chat-goal-revision goal)
+                      (plist-get projection :objective))
+              (and (plist-get projection :stopping-condition)
+                   (format "Stopping condition: %s"
+                           (plist-get projection :stopping-condition)))
+              (and (plist-get projection :checkpoint)
+                   (format "Current checkpoint: %s"
+                           (plist-get projection :checkpoint)))
+              (and (plist-get projection :needs-attention)
+                   (format "Needs attention: %s"
+                           (plist-get projection :needs-attention)))
+              (and remaining
+                   (format "Remaining: %s"
+                           (mapconcat #'identity remaining "; ")))
+              (and (plist-get projection :blocker-reason)
+                   (format "Blocked: %s; resume when: %s"
+                           (plist-get projection :blocker-reason)
+                           (plist-get projection :unblock-condition)))))
+       "\n"))))
+
+(defun chat-ui--command-goal (arg)
+  "Inspect or control the selected Goal according to ARG."
+  (let* ((session chat--current-session)
+         (request (string-trim (or arg "")))
+         (current (and session (chat-goal-current session))))
+    (condition-case err
+        (cond
+         ((null session)
+          (user-error "No active chat session"))
+         ((string-empty-p request)
+          (chat-ui--insert-system-message (chat-ui--goal-report current)))
+         ((member (downcase request) '("pause" "resume" "cancel" "clear"))
+          (unless current
+            (user-error "No selected Goal"))
+          (pcase (downcase request)
+            ("pause"
+             (setq current
+                   (chat-goal-pause session (chat-goal-id current)
+                                    (chat-goal-revision current))))
+            ("resume"
+             (setq current
+                   (chat-goal-resume session (chat-goal-id current)
+                                     (chat-goal-revision current))))
+            ("cancel"
+             (setq current
+                   (chat-goal-cancel session (chat-goal-id current)
+                                     (chat-goal-revision current))))
+            ("clear"
+             (chat-goal-clear session)
+             (setq current nil)))
+          (chat-ui--insert-system-message (chat-ui--goal-report current)))
+         ((string-match
+           "\\`\\(.+?\\)[[:space:]]+::[[:space:]]+\\(.+\\)\\'" request)
+          (let ((objective (string-trim (match-string 1 request)))
+                (stopping (string-trim (match-string 2 request))))
+            (setq current
+                  (chat-goal-create
+                   session objective
+                   `(((id . "outcome") (title . ,stopping)))
+                   stopping
+                   :sources '("slash-command")
+                   :project-root (chat-session-working-directory session)))
+            (chat-ui--insert-system-message (chat-ui--goal-report current))))
+         (t
+          (chat-ui--insert-system-message
+           "Usage: /goal OBJECTIVE :: STOPPING CONDITION | pause | resume | cancel | clear")))
+      ((chat-goal-invalid chat-goal-transition-invalid chat-goal-scope-mismatch
+        chat-goal-stale-revision chat-goal-evidence-invalid user-error)
+       (chat-ui--insert-system-message (error-message-string err))))))
+
+(defun chat-ui--plan-mode-report (state)
+  "Return a compact user-facing report for planning STATE."
+  (if (null state)
+      "Plan Mode: off. Use /plan on to start read-only research."
+    (format "Plan Mode [%s] revision %d: %s%s"
+            (chat-plan-mode-state-status state)
+            (chat-plan-mode-state-revision state)
+            (if (chat-plan-mode-state-enabled state) "read-only" "off")
+            (if (chat-plan-mode-state-plan-id state)
+                (format "; plan %s" (chat-plan-mode-state-plan-id state))
+              ""))))
+
+(defun chat-ui--command-plan (arg)
+  "Inspect or control independent Plan Mode according to ARG."
+  (let* ((session chat--current-session)
+         (request (string-trim (or arg "")))
+         (parts (split-string request "[[:space:]]+" t))
+         (action (downcase (or (car parts) "")))
+         (state (and session (chat-plan-mode-current session))))
+    (condition-case err
+        (cond
+         ((null session)
+          (user-error "No active chat session"))
+         ((string-empty-p request)
+          (chat-ui--insert-system-message (chat-ui--plan-mode-report state)))
+         ((member action '("on" "start" "enter"))
+          (setq state (chat-plan-mode-enter session))
+          (chat-ui--insert-system-message (chat-ui--plan-mode-report state)))
+         ((equal action "approve")
+          (unless state (user-error "Plan Mode is inactive"))
+          (setq state
+                (chat-plan-mode-approve
+                 session (chat-plan-mode-state-revision state)))
+          (chat-ui--insert-system-message (chat-ui--plan-mode-report state)))
+         ((equal action "reject")
+          (unless state (user-error "Plan Mode is inactive"))
+          (let ((feedback
+                 (string-trim
+                  (substring request (min (length request)
+                                          (length (car parts)))))))
+            (setq state
+                  (chat-plan-mode-reject
+                   session (chat-plan-mode-state-revision state) feedback))
+            (chat-ui--insert-system-message (chat-ui--plan-mode-report state))))
+         ((member action '("off" "cancel" "exit"))
+          (unless state (user-error "Plan Mode is inactive"))
+          (setq state
+                (chat-plan-mode-cancel
+                 session (chat-plan-mode-state-revision state)))
+          (chat-ui--insert-system-message (chat-ui--plan-mode-report state)))
+         (t
+          (chat-ui--insert-system-message
+           "Usage: /plan on | approve | reject FEEDBACK | cancel")))
+      ((chat-plan-mode-invalid chat-plan-mode-stale-revision user-error)
+       (chat-ui--insert-system-message (error-message-string err))))))
+
+(defun chat-ui-enter-plan-mode ()
+  "Enter read-only Plan Mode through the same path as `/plan on'."
+  (interactive)
+  (chat-ui--command-plan "on"))
 
 (defun chat-ui--command-approve (arg)
   "Report or change the approval mode according to ARG.
@@ -3054,9 +3377,6 @@ context remain typed fragments until request projection."
       tool-events
       "\n"))))
 
-(defconst chat-ui-follow-slack 80
-  "How far from the end a window may be and still be counted as at it.")
-
 (defun chat-ui-window-follows-p (window-point window-end input-start
                                               buffer-min buffer-max)
   "Return non-nil when a window at WINDOW-POINT should follow new output.
@@ -3069,15 +3389,48 @@ whole of the promise that a reader who has scrolled up is left alone: only
 a window already at the end follows, and never one whose point sits in the
 input area, where following would move the cursor out from under someone
 who is typing."
-  (and (or (null input-start) (< window-point input-start))
-       (>= window-end (max buffer-min (- buffer-max chat-ui-follow-slack)))))
+  (and (numberp window-end)
+       (or (null input-start) (< window-point input-start))
+       (>= window-end buffer-max)))
 
-(defun chat-ui--follow-live-output (ui-buffer)
+(defun chat-ui--capture-live-window-state (ui-buffer)
+  "Capture how windows showing UI-BUFFER should react to the next redraw.
+
+This must run before output is inserted.  Inferring the state afterwards
+made a manually scrolled window look close enough to the new end and
+yanked it back down."
+  (when (buffer-live-p ui-buffer)
+    (with-current-buffer ui-buffer
+      (let ((input-start (and (markerp chat-ui--input-overlay)
+                              (marker-position chat-ui--input-overlay))))
+        (mapcar
+         (lambda (window)
+           (let ((window-point (window-point window)))
+             (list :window window
+                   :follow
+                   (chat-ui-window-follows-p
+                    window-point (window-end window t) input-start
+                    (point-min) (point-max))
+                   :input-point
+                   (and input-start (>= window-point input-start))
+                   :point (copy-marker window-point t)
+                   :start (copy-marker (window-start window) t))))
+         (seq-filter #'window-live-p
+                     (get-buffer-window-list ui-buffer nil t)))))))
+
+(defun chat-ui--release-live-window-state (states)
+  "Release the markers retained by captured window STATES."
+  (dolist (state states)
+    (set-marker (plist-get state :point) nil)
+    (set-marker (plist-get state :start) nil)))
+
+(defun chat-ui--follow-live-output (ui-buffer &optional captured-state)
   "Scroll windows showing UI-BUFFER to the live response edge.
 
-Only windows already near the bottom follow, and only when their point is
-outside the input area, so typing is never interrupted and manual
-scrolling is never overridden."
+CAPTURED-STATE, when non-nil, was taken before the redraw.  Only windows
+that were exactly at the bottom then follow.  Other windows restore their
+old top line.  An input cursor that finally falls below the frame is put
+at the bottom edge instead of being recentered halfway up the window."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (let ((edge (and (markerp chat-ui--messages-end)
@@ -3085,15 +3438,33 @@ scrolling is never overridden."
             (input-start (and (markerp chat-ui--input-overlay)
                               (marker-position chat-ui--input-overlay))))
         (when edge
-          (dolist (window (get-buffer-window-list ui-buffer nil t))
-            (when (and (window-live-p window)
-                       (chat-ui-window-follows-p
-                        (window-point window)
-                        (window-end window t)
-                        input-start
-                        (point-min)
-                        (point-max)))
-              (set-window-point window edge))))))))
+          (if captured-state
+              (unwind-protect
+                  (dolist (state captured-state)
+                    (let ((window (plist-get state :window)))
+                      (when (window-live-p window)
+                        (if (plist-get state :follow)
+                            (set-window-point window edge)
+                          (set-window-start
+                           window (marker-position (plist-get state :start)) t)
+                          (set-window-point
+                           window (marker-position (plist-get state :point)))
+                          (when (and (plist-get state :input-point)
+                                     (not (pos-visible-in-window-p
+                                           (window-point window) window)))
+                            (with-selected-window window
+                              (goto-char (window-point window))
+                              (recenter -1)))))))
+                (chat-ui--release-live-window-state captured-state))
+            ;; Compatibility path for callers that only want to follow an
+            ;; already drawn edge.  Event rendering always supplies the
+            ;; pre-redraw snapshot above.
+            (dolist (window (get-buffer-window-list ui-buffer nil t))
+              (when (and (window-live-p window)
+                         (chat-ui-window-follows-p
+                          (window-point window) (window-end window t)
+                          input-start (point-min) (point-max)))
+                (set-window-point window edge)))))))))
 
 (defface chat-ui-shell-prompt-face
   '((t :inherit font-lock-comment-face :weight bold))
@@ -3278,24 +3649,28 @@ step on screen once it has been recorded."
   (ignore content-start)
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
-      (setq chat-ui--request-tool-events tool-events)
-      (chat-ui--track-tool-targets tool-events)
-      (chat-ui--maybe-announce-approval-shortcuts tool-events)
-      (when (or (and chat-request-panel-auto-show
-                     chat-ui--current-request-id)
-                (get-buffer-window
-                 (chat-request-panel--buffer-name ui-buffer) t))
-        (chat-request-panel-update
-         ui-buffer
-         chat-ui--current-request-id
-         tool-events))
-      (chat-ui--render-status-line)
-      (setq chat-ui--live-response-content (or content ""))
-      (setq chat-ui--live-trailers
-            (list :detail live-detail
-                  :tool-summary tool-summary
-                  :limit-reached tool-loop-limit-reached))
-      (chat-ui--render-live-region))))
+      (let ((window-state (chat-ui--capture-live-window-state ui-buffer)))
+        (setq chat-ui--request-tool-events tool-events)
+        (chat-ui--track-tool-targets tool-events)
+        (chat-ui--maybe-announce-approval-shortcuts tool-events)
+        (when (or (and chat-request-panel-auto-show
+                       chat-ui--current-request-id)
+                  (get-buffer-window
+                   (chat-request-panel--buffer-name ui-buffer) t))
+          (chat-request-panel-update
+           ui-buffer
+           chat-ui--current-request-id
+           tool-events))
+        (chat-ui--render-status-line)
+        (setq chat-ui--live-response-content (or content ""))
+        (setq chat-ui--live-trailers
+              (list :detail live-detail
+                    :tool-summary tool-summary
+                    :permission-failure
+                    (chat-ui--latest-permission-failure tool-events)
+                    :limit-reached tool-loop-limit-reached))
+        (chat-ui--render-live-region)
+        (chat-ui--follow-live-output ui-buffer window-state)))))
 
 (defun chat-ui--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."
@@ -3326,6 +3701,29 @@ step on screen once it has been recorded."
    "If a tool result says approval denied, do not retry the same risky tool immediately.\n"
    "If another tool is needed, call one tool as JSON.\n"
    "Otherwise answer normally."))
+
+(defun chat-ui--goal-followup-function (session)
+  "Return one bounded automatic-continuation callback for SESSION's Goal."
+  (let ((continuations 0))
+    (lambda (_processed)
+      (let ((goal (chat-goal-current session)))
+        (cond
+         ((or (null goal)
+              (not (eq (chat-goal-status goal) 'active))
+              (not (chat-goal-project-in-scope-p session goal))
+              (chat-plan-mode-active-p session))
+          nil)
+         ((>= continuations chat-goal-max-continuations-per-run)
+          (chat-goal-mark-needs-attention
+           session "Automatic continuation budget exhausted; send a message to continue.")
+          nil)
+         (t
+          (setq continuations (1+ continuations))
+          (format
+           (concat
+            "The selected Goal remains active at revision %d. Continue making concrete progress toward its stopping condition. "
+            "Do not merely restate status. Record verified progress with the Goal tools; if a real external dependency prevents progress, block the Goal with an actionable resume condition; if all required evidence is known, request deterministic completion.")
+           (chat-goal-revision goal))))))))
 
 (defcustom chat-ui-tool-loop-max-steps nil
   "Step ceiling for a chat run, or nil to follow the global budget.
@@ -3407,8 +3805,7 @@ assistant response being filled in."
                content-start
                chat-ui--live-response-content
                tool-events
-               (chat-ui--request-live-detail))
-              (chat-ui--follow-live-output ui-buffer))))
+               (chat-ui--request-live-detail)))))
          ((eq type 'stream-reasoning)
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
@@ -3422,8 +3819,7 @@ assistant response being filled in."
                content-start
                chat-ui--live-response-content
                tool-events
-               (chat-ui--request-live-detail))
-              (chat-ui--follow-live-output ui-buffer))))
+               (chat-ui--request-live-detail)))))
          ((eq type 'model-tool-call-delta)
           ;; Transport telemetry is persisted by the wire observer.  The
           ;; transcript renders completed tool activity and final text, so
@@ -3465,11 +3861,16 @@ assistant response being filled in."
           ;; so the next chunk cannot overwrite it.
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
-              (setq chat-ui--live-response-content "")
-              (setq chat-ui--live-reasoning-content "")
-              (setq chat-ui--live-trailers
-                    (list :detail (chat-ui--request-live-detail)))
-              (chat-ui--redraw-conversation))))
+              (let ((window-state
+                     (chat-ui--capture-live-window-state ui-buffer)))
+                (setq chat-ui--live-response-content "")
+                (setq chat-ui--live-reasoning-content "")
+                (setq chat-ui--live-trailers
+                      (list :detail (chat-ui--request-live-detail)
+                            :permission-failure
+                            (chat-ui--latest-permission-failure tool-events)))
+                (chat-ui--redraw-conversation)
+                (chat-ui--follow-live-output ui-buffer window-state)))))
          ((eq type 'response)
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
@@ -3480,8 +3881,7 @@ assistant response being filled in."
                content-start
                chat-ui--live-response-content
                tool-events
-               (chat-ui--request-live-detail))
-              (chat-ui--follow-live-output ui-buffer))))
+               (chat-ui--request-live-detail)))))
          ((eq type 'followup)
           (when request-id
             (chat-request-diagnostics-record
@@ -3528,6 +3928,12 @@ assistant response being filled in."
               ui-buffer
               (or (plist-get event :reason) "Unknown error"))
              (message "Error: %s" (plist-get event :reason))))
+          (when (and (eq (plist-get event :status) 'stopped)
+                     (chat-goal-current session)
+                     (eq (chat-goal-status (chat-goal-current session))
+                         'active))
+            (chat-goal-mark-needs-attention
+             session "Agent step budget exhausted; send a message to continue."))
           ;; After the status branches, and outside them, because waiting
           ;; meant waiting for an outcome and every one of these is one.
           (when (buffer-live-p ui-buffer)
@@ -3639,6 +4045,7 @@ assistant response being filled in."
                       (list :request-id request-id)))
                    :followup-request-options
                    (list :timeout chat-ui-tool-followup-timeout)
+                   :followup-fn (chat-ui--goal-followup-function session)
                    :on-event
                    (chat-ui--make-agent-event-handler
                     session msg-id ui-buffer assistant-start request-id))))
@@ -4447,10 +4854,13 @@ This is an ephemeral query - the result is displayed but not persisted."
 (defun chat-ui-cancel-response ()
   "Cancel the current agent run or in flight request."
   (interactive)
-  (if (chat-agent-active-p chat-ui--active-agent-run)
-      (progn
-        (chat-agent-cancel chat-ui--active-agent-run)
-        (message "Response cancelled"))
+  (cond
+   ((chat-agent-active-p chat-ui--active-agent-run)
+    (chat-agent-cancel chat-ui--active-agent-run)
+    (message "Response cancelled"))
+   ((or chat-ui--active-request-handle
+        (and chat-ui--active-stream-process
+             (process-live-p chat-ui--active-stream-process)))
     (when chat-ui--active-request-handle
       (chat-llm-cancel-request chat-ui--active-request-handle)
       (setq chat-ui--active-request-handle nil))
@@ -4463,9 +4873,11 @@ This is an ephemeral query - the result is displayed but not persisted."
          :process chat-ui--active-stream-process
          :summary "Cancelled by user"))
       (delete-process chat-ui--active-stream-process)
-      (setq chat-ui--active-stream-process nil)
-      (message "Response cancelled")))
-  (chat-ui--cleanup-request-state))
+      (setq chat-ui--active-stream-process nil))
+    (chat-ui--cleanup-request-state 'cancelled "Cancelled by user")
+   (message "Response cancelled"))
+   (t
+    (message "No response is currently running"))))
 
 (chat-event-add-observer #'chat-ui--observe-work-plan-event)
 (chat-event-add-observer #'chat-ui--observe-runtime-event)

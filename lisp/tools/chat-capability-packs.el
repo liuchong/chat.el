@@ -26,6 +26,8 @@
 (require 'chat-tool-forge)
 (require 'chat-work)
 (require 'chat-work-plan)
+(require 'chat-goal)
+(require 'chat-plan-mode)
 
 (defvar chat-capability-mail-drafts nil
   "Local mail draft records.  Sending is intentionally not implemented.")
@@ -45,10 +47,18 @@
     programming_work_note_archive
     programming_work_note_delete
     programming_context_inspect
+    programming_goal_create
+    programming_goal_read
+    programming_goal_list
+    programming_goal_progress
+    programming_goal_block
+    programming_goal_complete
+    programming_plan_mode_enter
     programming_plan_create
     programming_plan_read
     programming_plan_list
     programming_plan_update
+    programming_plan_submit
     programming_plan_transition
     programming_plan_resume
     programming_plan_cancel
@@ -409,6 +419,74 @@
   (or (chat-capability--current-session)
       (error "A current session is required")))
 
+(defun chat-capability-programming-goal-create
+    (objective criteria-json stopping-condition &optional constraints-json
+               non-goals-json sources-json)
+  "Create a durable Goal contract from structured JSON arguments."
+  (let ((criteria (json-parse-string
+                   criteria-json :object-type 'alist :array-type 'list
+                   :null-object nil :false-object :json-false))
+        (constraints (and constraints-json
+                          (not (string-empty-p constraints-json))
+                          (chat-capability--json-string-list
+                           constraints-json "constraints_json")))
+        (non-goals (and non-goals-json
+                        (not (string-empty-p non-goals-json))
+                        (chat-capability--json-string-list
+                         non-goals-json "non_goals_json")))
+        (sources (and sources-json
+                      (not (string-empty-p sources-json))
+                      (chat-capability--json-string-list
+                       sources-json "sources_json"))))
+    (let ((session (chat-capability--work-plan-session)))
+      (chat-goal-to-alist
+       (chat-goal-create
+        session objective criteria stopping-condition
+        :constraints constraints :non-goals non-goals :sources sources
+        :project-root (chat-session-working-directory session))))))
+
+(defun chat-capability-programming-goal-read (&optional goal-id)
+  "Read GOAL-ID or the selected Goal."
+  (let* ((session (chat-capability--work-plan-session))
+         (goal (if (and goal-id (not (string-empty-p goal-id)))
+                   (chat-goal-find session goal-id)
+                 (chat-goal-current session))))
+    (if goal (chat-goal-to-alist goal)
+      (error "Goal not found"))))
+
+(defun chat-capability-programming-goal-list ()
+  "List bounded durable Goal history for the current session."
+  (vconcat
+   (mapcar #'chat-goal-to-alist
+           (chat-goal-list (chat-capability--work-plan-session)))))
+
+(defun chat-capability-programming-goal-progress
+    (goal-id revision &optional checkpoint message criterion-id evidence-json
+             plan-id task-id)
+  "Record Goal progress using an observed REVISION."
+  (let ((evidence (and evidence-json
+                       (not (string-empty-p evidence-json))
+                       (chat-capability--json-string-list
+                        evidence-json "evidence_json"))))
+    (chat-goal-to-alist
+     (chat-goal-progress
+      (chat-capability--work-plan-session) goal-id revision
+      :checkpoint checkpoint :message message :criterion-id criterion-id
+      :evidence evidence :plan-id plan-id :task-id task-id))))
+
+(defun chat-capability-programming-goal-block
+    (goal-id revision reason unblock-condition)
+  "Block a Goal with an actionable reason and unblock condition."
+  (chat-goal-to-alist
+   (chat-goal-block (chat-capability--work-plan-session)
+                    goal-id revision reason unblock-condition)))
+
+(defun chat-capability-programming-goal-complete (goal-id revision)
+  "Complete a Goal only after deterministic evidence verification."
+  (chat-goal-to-alist
+   (chat-goal-complete
+    (chat-capability--work-plan-session) goal-id revision)))
+
 (defun chat-capability-programming-plan-create (objective items-json &optional mode)
   "Create a durable work plan from ITEMS-JSON."
   (let ((items (json-parse-string items-json :object-type 'alist
@@ -444,6 +522,17 @@
      (chat-work-plan-update-future
       (chat-capability--work-plan-session) plan-id revision items
       :objective objective))))
+
+(defun chat-capability-programming-plan-submit (plan-id planning-revision)
+  "Submit PLAN-ID for explicit user approval."
+  (chat-plan-mode-to-alist
+   (chat-plan-mode-submit
+    (chat-capability--work-plan-session) plan-id planning-revision)))
+
+(defun chat-capability-programming-plan-mode-enter ()
+  "Enter read-only Plan Mode for the current execution session."
+  (chat-plan-mode-to-alist
+   (chat-plan-mode-enter (chat-capability--work-plan-session))))
 
 (defun chat-capability-programming-plan-transition
     (plan-id revision item-id status &optional evidence-json blocker-reason)
@@ -971,6 +1060,55 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    '((:name "target_path" :type "string" :required nil))
    #'chat-capability-programming-context-inspect 'project '(read))
   (chat-capability--register-tool
+   'programming_goal_create "Programming Goal Create"
+   "Create one durable cross-turn Goal contract. A Goal requires explicit success criteria and a verifiable stopping condition; it is not a TODO list."
+   '((:name "objective" :type "string" :required t)
+     (:name "criteria_json" :type "string" :required t)
+     (:name "stopping_condition" :type "string" :required t)
+     (:name "constraints_json" :type "string" :required nil)
+     (:name "non_goals_json" :type "string" :required nil)
+     (:name "sources_json" :type "string" :required nil))
+   #'chat-capability-programming-goal-create 'project '(state))
+  (chat-capability--register-tool
+   'programming_goal_read "Programming Goal Read"
+   "Read the selected durable Goal or one known Goal id."
+   '((:name "goal_id" :type "string" :required nil))
+   #'chat-capability-programming-goal-read 'project '(read))
+  (chat-capability--register-tool
+   'programming_goal_list "Programming Goal List"
+   "List bounded durable Goal history for the current session."
+   nil #'chat-capability-programming-goal-list 'project '(read))
+  (chat-capability--register-tool
+   'programming_goal_progress "Programming Goal Progress"
+   "Record a checkpoint, known evidence, a satisfied criterion, or plan/task links using the observed Goal revision. This cannot change the Goal contract."
+   '((:name "goal_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t)
+     (:name "checkpoint" :type "string" :required nil)
+     (:name "message" :type "string" :required nil)
+     (:name "criterion_id" :type "string" :required nil)
+     (:name "evidence_json" :type "string" :required nil)
+     (:name "plan_id" :type "string" :required nil)
+     (:name "task_id" :type "string" :required nil))
+   #'chat-capability-programming-goal-progress 'project '(state))
+  (chat-capability--register-tool
+   'programming_goal_block "Programming Goal Block"
+   "Block an active Goal only for a real external or user-action dependency, with an actionable unblock condition."
+   '((:name "goal_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t)
+     (:name "reason" :type "string" :required t)
+     (:name "unblock_condition" :type "string" :required t))
+   #'chat-capability-programming-goal-block 'project '(state))
+  (chat-capability--register-tool
+   'programming_goal_complete "Programming Goal Complete"
+   "Request deterministic Goal completion. The call fails unless every required criterion has known scoped evidence and the stopping predicate passes."
+   '((:name "goal_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t))
+   #'chat-capability-programming-goal-complete 'project '(state))
+  (chat-capability--register-tool
+   'programming_plan_mode_enter "Programming Plan Mode Enter"
+   "Enter read-only Plan Mode to research and submit a structured plan. This tool cannot approve, reject, cancel, or leave Plan Mode."
+   nil #'chat-capability-programming-plan-mode-enter 'project '(state))
+  (chat-capability--register-tool
    'programming_plan_create "Programming Plan Create"
    "Create a durable ordered plan before substantial coding work."
    '((:name "objective" :type "string" :required t)
@@ -995,6 +1133,12 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "items_json" :type "string" :required t)
      (:name "objective" :type "string" :required nil))
    #'chat-capability-programming-plan-update 'project '(state))
+  (chat-capability--register-tool
+   'programming_plan_submit "Programming Plan Submit"
+   "Submit a complete pending plan for user approval while Plan Mode remains read-only. This tool cannot approve the plan."
+   '((:name "plan_id" :type "string" :required t)
+     (:name "planning_revision" :type "integer" :required t))
+   #'chat-capability-programming-plan-submit 'project '(state))
   (chat-capability--register-tool
    'programming_plan_transition "Programming Plan Transition"
    "Start, complete, block, or skip one plan item using the observed revision. Completion requires known evidence ids."

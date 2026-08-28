@@ -45,6 +45,10 @@ Copyright 2026 chat.el contributors.
 - Use optional MCP JSON-RPC stdio/HTTP primitives and isolated sub-agent backends
 - Apply code, office, and daily capability profiles so sessions expose scoped tool sets
 - Compact long conversations into durable, tool-pair-safe summaries
+- Keep a versioned Goal contract across turns, compaction and restart, with
+  scoped evidence and explicit pause, resume, block and completion states
+- Enter Plan Mode for enforced read-only research and approve only the exact
+  submitted work-plan revision before execution resumes
 - Generate custom tools and save them to disk after explicit approval
 
 ### Code Mode
@@ -175,6 +179,7 @@ Layout rules:
 | `M-x chat-view-last-raw-exchange` | Open the latest assistant request and response |
 | `M-x chat-ui-cancel-response` | Cancel the active response |
 | `M-x chat-show-current-request-status` | Show the active request diagnostics buffer |
+| `M-x chat-ui-enter-plan-mode` | Enter read-only Plan Mode through the standard state machine |
 | `M-x chat-quote-region` | Quote the active region into a chat session |
 | `M-x chat-quote-defun` | Quote the defun at point into a chat session |
 | `M-x chat-quote-near-point` | Quote nearby context around point into a chat session |
@@ -203,6 +208,13 @@ command prefix.
 | `/queue <note>`, `/flush`, `/drop` | Collect notes and send them as one |
 | `/model [name]` | Retarget this session; with no name, prompt for one |
 | `/new`, `/list`, `/save`, `/clear` | Session housekeeping |
+| `/goal` | Show the selected durable Goal and its stopping condition |
+| `/goal <objective> :: <stopping condition>` | Create and select a persistent Goal contract |
+| `/goal pause\|resume\|cancel\|clear` | Control the selected Goal without rewriting its contract |
+| `/plan on` | Enter read-only research and plan-authoring mode |
+| `/plan approve` | Approve the exact submitted plan revision and leave Plan Mode |
+| `/plan reject <feedback>` | Return the submitted plan for revision while remaining read-only |
+| `/plan cancel` | Leave Plan Mode without approving execution |
 | `/cancel` | Cancel the response in flight |
 | `\<text>` | Send text as is, even when it starts with `!` or `/` |
 
@@ -1321,8 +1333,8 @@ emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit
 
 Current baseline:
 
-- 1539 regression tests discovered
-- 1539 passing
+- 1760 regression tests discovered
+- 1760 passing
 - 0 skipped in the canonical batch suite
 
 Run provider integration tests separately:

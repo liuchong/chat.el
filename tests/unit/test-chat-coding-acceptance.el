@@ -46,7 +46,7 @@
                           (list tool verification blocked)))))))
 
 (ert-deftest chat-coding-acceptance-never-passes-a-missing-live-comparison ()
-  "Absent M9 or M17 trials produce a blocked gate, never an invented score."
+  "Absent M9 or M19 trials produce a blocked gate, never an invented score."
   (let ((gates (chat-coding-acceptance-live-gates nil nil)))
     (should (= 2 (length gates)))
     (should (seq-every-p
@@ -55,6 +55,54 @@
              gates))
     (should (eq 'blocked
                 (chat-coding-acceptance-overall-status gates)))))
+
+(defun chat-coding-acceptance-test--reliability-facts ()
+  "Return a complete passing runtime-reliability evidence object."
+  (copy-tree
+   '((runtimeReliability .
+                         ((goalContinuityRate . 1.0)
+                          (goalCompletionEvidenceRate . 1.0)
+                          (goalInvalidTransitionCount . 0)
+                          (goalScopeLeakCount . 0)
+                          (goalProjectionMedianRatio . 0.03)
+                          (planUnauthorizedMutationCount . 0)
+                          (planNonUserApprovalCount . 0)
+                          (planTransitionConsistencyRate . 1.0)
+                          (planReadyImplicitExecutionCount . 0))))))
+
+(ert-deftest chat-coding-acceptance-reliability-evidence-is-required ()
+  "Missing Goal and Plan Mode measurements block every reliability gate."
+  (let ((gates (chat-coding-acceptance-reliability-gates nil)))
+    (should (= 9 (length gates)))
+    (should (seq-every-p
+             (lambda (gate)
+               (eq 'blocked (chat-coding-acceptance-gate-status gate)))
+             gates))))
+
+(ert-deftest chat-coding-acceptance-reliability-thresholds-pass-exactly ()
+  "Complete measured evidence passes every exact Goal and Plan Mode threshold."
+  (let ((gates
+         (chat-coding-acceptance-reliability-gates
+          (chat-coding-acceptance-test--reliability-facts))))
+    (should (= 9 (length gates)))
+    (should (seq-every-p
+             (lambda (gate)
+               (eq 'passed (chat-coding-acceptance-gate-status gate)))
+             gates))))
+
+(ert-deftest chat-coding-acceptance-reliability-regressions-fail ()
+  "Measured safety regressions fail rather than becoming missing evidence."
+  (let* ((metadata (chat-coding-acceptance-test--reliability-facts))
+         (facts (alist-get 'runtimeReliability metadata)))
+    (setf (alist-get 'goalInvalidTransitionCount facts) 1
+          (alist-get 'goalProjectionMedianRatio facts) 0.031
+          (alist-get 'planNonUserApprovalCount facts) 1)
+    (let ((failed
+           (seq-filter
+            (lambda (gate)
+              (eq 'failed (chat-coding-acceptance-gate-status gate)))
+            (chat-coding-acceptance-reliability-gates metadata))))
+      (should (= 3 (length failed))))))
 
 (ert-deftest chat-coding-acceptance-record-is-immutable-and-strict ()
   "A blocked gate yields an immutable blocked Eval result."
@@ -66,6 +114,8 @@
                  :expected "evidence" :actual "missing"))
           (result (chat-coding-acceptance-record (list gate))))
      (should (eq 'blocked (chat-eval-result-status result)))
+     (should (equal "acceptance/m19"
+                    (chat-eval-result-scenario-id result)))
      (should (file-exists-p
               (expand-file-name
                (concat (chat-eval-result-id result) ".json")

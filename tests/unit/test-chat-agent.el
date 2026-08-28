@@ -138,6 +138,35 @@ car collects the messages of every request."
                   events)
                  1)))))
 
+(ert-deftest chat-agent-reasoning-only-stream-still-reaches-a-terminal-event ()
+  "A completed provider stream cannot leave the run parked on Thinking."
+  (let (callback events run)
+    (cl-letf (((symbol-function 'chat-model-request-events)
+               (lambda (_provider _messages fn _options)
+                 (setq callback fn)
+                 'reasoning-handle)))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :transport 'stream
+                   :messages (list (chat-agent-test--user-message))
+                   :on-event (lambda (event) (push event events)))))
+      (funcall callback
+               (chat-model-event-create
+                :type 'reasoning-delta
+                :payload '(:delta "仍在分析")))
+      (should-not (chat-agent-run-state-done run))
+      (funcall callback
+               (chat-model-event-create
+                :type 'completed
+                :payload '(:result (:content "" :reasoning "仍在分析"))))
+      (should (chat-agent-run-state-done run))
+      (should (eq (chat-agent-run-state-status run) 'completed))
+      (should (= 1 (seq-count
+                    (lambda (event)
+                      (eq (plist-get event :type) 'agent-end))
+                    events))))))
+
 (ert-deftest chat-agent-runs-own-isolated-read-sets ()
   "Every foreground or child run starts with an independent read set."
   (let ((calls-a (list nil))
@@ -705,6 +734,27 @@ steps spent on the question left the correction two."
       (should (string= (chat-message-content (car (last (cadr (car calls)))))
                        "continue")))))
 
+(ert-deftest chat-agent-followup-callback-can-continue-a-natural-stop ()
+  "A no-tool answer consults the caller continuation policy before finishing."
+  (let ((calls (list nil))
+        (continuations 0))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "checkpoint") (:content "done")) calls)))
+      (chat-agent-start
+       (list :model 'kimi
+             :messages (list (chat-agent-test--user-message))
+             :followup-fn
+             (lambda (_processed)
+               (when (= continuations 0)
+                 (setq continuations 1)
+                 "Continue the active objective."))
+             :on-event #'ignore)))
+    (should (= 2 (length (car calls))))
+    (should (string-match-p
+             "Continue the active objective"
+             (chat-message-content (car (last (cadr (car calls)))))))))
+
 (ert-deftest chat-agent-no-tool-steer-runs-before-default-stop ()
   "Test mid-run steering continues even when the current turn has no tools."
   (let ((calls (list nil))
@@ -1142,6 +1192,45 @@ budget chatter in the saved history."
                     (chat-agent-run-state-last-context-bundle run)))
                   2))))))
 
+(ert-deftest chat-agent-projects-goal-separately-from-plan-and-notes ()
+  "A selected Goal remains a protected request fragment across turns."
+  (chat-test-with-temp-dir
+   (let* ((chat-work-context-directory (expand-file-name "context/" temp-dir))
+          (chat-work-context--stores (make-hash-table :test 'equal))
+          (session (make-chat-session :id "goal-context-session"
+                                      :model-id 'kimi))
+          (calls (list nil))
+          run)
+     (chat-session-set-working-directory session temp-dir)
+     (chat-goal-create
+      session "Finish the cross-turn Goal"
+      '(((id . "verified") (title . "Verification passes")))
+      "The required verification evidence is known")
+     (chat-work-note-upsert
+      "goal-context-session" "next-step" "Run focused tests."
+      :kind 'next-step :scope 'session :source-id "turn:1")
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport '((:content "done")) calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi :session session
+                    :messages (list (chat-agent-test--user-message))
+                    :project-root temp-dir :context-target-path temp-dir))))
+     (let* ((fragments
+             (chat-context-bundle-fragments
+              (chat-agent-run-state-last-context-bundle run)))
+            (goal-fragment
+             (seq-find (lambda (fragment)
+                         (eq (chat-context-fragment-source-kind fragment) 'goal))
+                       fragments)))
+       (should (= 2 (length fragments)))
+       (should goal-fragment)
+       (should (eq 'protected
+                   (chat-context-fragment-residency goal-fragment)))
+       (should (string-match-p "Finish the cross-turn Goal"
+                               (chat-context-fragment-payload goal-fragment)))
+       (should (= 1 (chat-agent-run-state-goal-projection-revision run)))))))
+
 (ert-deftest chat-agent-runs-with-an-unlimited-budget ()
   "An unlimited ceiling is a symbol, and the loop must not compare it as a number."
   (let ((calls (list nil))
@@ -1405,6 +1494,55 @@ per piece for that to stop being true."
        (should (eq :tool (chat-message-role tool-result)))
        (should (string-match-p "Plan required"
                                (chat-message-content tool-result)))))))
+
+(ert-deftest chat-agent-plan-mode-refuses-write-before-plan-and-checkpoint-gates ()
+  "Plan Mode is an execution boundary even when a work-plan item is active."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (chat-llm-providers '((kimi :context-window 100000)))
+         (chat-approval-required-effects nil)
+         (session (chat-session-create "Read-only planning" 'kimi))
+         (calls (list nil))
+         (executions 0)
+         run)
+     (chat-session-metadata-set session 'code-enabled t)
+     (chat-work-plan-create
+      session "Plan"
+      '(((id . "change") (title . "Change")
+         (acceptance . "Focused test passes"))))
+     (let ((plan (chat-work-plan-current session nil)))
+       (chat-work-plan-transition-item
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+        "change" 'in-progress))
+     (chat-plan-mode-enter session)
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'mutating-demo :name "Mutating Demo" :language 'elisp
+       :effects '(write)
+       :compiled-function (lambda () (cl-incf executions) "changed")
+       :is-active t :usage-count 0))
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport
+                 '((:content "" :tool-calls
+                             ((:id "write-1" :name "mutating-demo"
+                               :arguments nil)))
+                   (:content "I will keep researching."))
+                 calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi :session session
+                    :messages (list (chat-agent-test--user-message))))))
+     (should (= executions 0))
+     (let ((tool-result (car (last (cadr (car calls))))))
+       (should (string-match-p "Plan Mode is read-only"
+                               (chat-message-content tool-result))))
+     (should
+      (seq-some
+       (lambda (message)
+         (and (plist-get (chat-message-metadata message) :ephemeral)
+              (string-match-p "read-only research boundary"
+                              (chat-message-content message))))
+       (car (car calls)))))))
 
 (ert-deftest chat-agent-active-plan-allows-write-and-projects-active-slice ()
   "An active plan admits the write and appears only in request context."

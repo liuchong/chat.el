@@ -282,13 +282,66 @@
   "The programming profile exposes every durable plan operation."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
     (chat-capability-register-tools)
-    (dolist (id '(programming_plan_create programming_plan_read
+    (dolist (id '(programming_plan_mode_enter
+                  programming_plan_create programming_plan_read
                   programming_plan_list
-                  programming_plan_update programming_plan_transition
+                  programming_plan_update programming_plan_submit
+                  programming_plan_transition
                   programming_plan_resume programming_plan_cancel
                   programming_plan_skip programming_plan_mode))
       (should (chat-tool-forge-get id))
       (should (memq id chat-capability-programming-tools)))))
+
+(ert-deftest chat-capability-registers-bounded-goal-tool-surface ()
+  "The Agent can advance Goals but cannot pause, resume or clear them."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (dolist (id '(programming_goal_create programming_goal_read
+                  programming_goal_list programming_goal_progress
+                  programming_goal_block programming_goal_complete))
+      (should (chat-tool-forge-get id))
+      (should (memq id chat-capability-programming-tools)))
+    (dolist (id '(programming_goal_pause programming_goal_resume
+                  programming_goal_clear programming_goal_replace))
+      (should-not (chat-tool-forge-get id))
+      (should-not (memq id chat-capability-programming-tools)))))
+
+(ert-deftest chat-capability-goal-tools-use-the-execution-session ()
+  "Goal state follows the explicit execution session and structured contract."
+  (chat-test-with-temp-dir
+   (let ((ambient (make-chat-session :id "ambient-goal"))
+         (execution (make-chat-session :id "execution-goal")))
+     (chat-session-set-working-directory execution temp-dir)
+     (let ((chat--current-session ambient)
+           (chat-tool-caller-current-session execution)
+           (chat-tool-caller-current-state-session execution))
+       (let ((record
+              (chat-capability-programming-goal-create
+               "Finish Goal mode"
+               "[{\"id\":\"tests\",\"title\":\"Tests pass\"}]"
+               "All required tests have known evidence"
+               "[\"Preserve compatibility\"]")))
+         (should (equal "active" (cdr (assoc 'status record))))))
+     (should (chat-goal-current execution))
+     (should-not (chat-goal-current ambient)))))
+
+(ert-deftest chat-capability-agent-can-enter-but-not-approve-plan-mode ()
+  "The Agent entry tool shares state with slash/UI and exposes no approval tool."
+  (chat-test-with-temp-dir
+   (let ((ambient (make-chat-session :id "ambient-plan-mode"))
+         (execution (make-chat-session :id "execution-plan-mode")))
+     (let ((chat--current-session ambient)
+           (chat-tool-caller-current-session execution)
+           (chat-tool-caller-current-state-session execution))
+       (let ((record (chat-capability-programming-plan-mode-enter)))
+         (should (equal "researching" (cdr (assoc 'status record))))))
+     (should (chat-plan-mode-active-p execution))
+     (should-not (chat-plan-mode-current ambient))
+     (dolist (id '(programming_plan_mode_approve
+                   programming_plan_mode_reject
+                   programming_plan_mode_cancel))
+       (should-not (chat-tool-forge-get id))
+       (should-not (memq id chat-capability-programming-tools))))))
 
 (ert-deftest chat-capability-internal-work-state-does-not-require-approval ()
   "Plan and note bookkeeping is session state, not an external write."
@@ -299,8 +352,14 @@
                   programming_work_note_supersede
                   programming_work_note_archive
                   programming_work_note_delete
+                  programming_goal_create
+                  programming_goal_progress
+                  programming_goal_block
+                  programming_goal_complete
+                  programming_plan_mode_enter
                   programming_plan_create
                   programming_plan_update
+                  programming_plan_submit
                   programming_plan_transition
                   programming_plan_resume
                   programming_plan_cancel

@@ -36,6 +36,7 @@
 (require 'chat-command-gate)
 (require 'chat-execution)
 (require 'chat-event)
+(require 'chat-goal)
 (require 'chat-session)
 (require 'chat-task)
 (require 'chat-tool-caller)
@@ -560,16 +561,19 @@ anything."
   (chat-work--state-get (chat-work--state) 'todos))
 
 (defun chat-work-goal-add (title)
-  "Add a session-local goal with TITLE."
-  (chat-work--record-add 'goals title))
+  "Refuse legacy goal creation from incomplete TITLE."
+  (ignore title)
+  (error "work_goal_add is retired; use programming_goal_create with success criteria and a stopping condition"))
 
 (defun chat-work-goal-update (id status)
-  "Update goal ID to STATUS."
-  (chat-work--record-update 'goals id status))
+  "Refuse legacy status mutation for ID and STATUS."
+  (ignore id status)
+  (error "work_goal_update is retired; use the revision-checked Goal lifecycle tools"))
 
 (defun chat-work-goal-list ()
-  "List session-local goal records."
-  (chat-work--state-get (chat-work--state) 'goals))
+  "List durable Goal records through the canonical Goal store."
+  (when-let ((session (chat-work--current-session)))
+    (mapcar #'chat-goal-to-alist (chat-goal-list session))))
 
 (defun chat-work--json-get (object key)
   "Return KEY from decoded JSON OBJECT with string or symbol keys."
@@ -1029,12 +1033,12 @@ DECISION is `approve' or `reject' when the workflow awaits approval."
    nil #'chat-work-todo-list '(read))
   (chat-work--register-tool
    'work_goal_add "Work Goal Add"
-   "Add a session-local goal record."
+   "Retired compatibility entry; use programming_goal_create."
    '((:name "title" :type "string" :required t))
    #'chat-work-goal-add '(write))
   (chat-work--register-tool
    'work_goal_update "Work Goal Update"
-   "Update a session-local goal status."
+   "Retired compatibility entry; use revision-checked Goal lifecycle tools."
    '((:name "id" :type "string" :required t)
      (:name "status" :type "string" :required t))
    #'chat-work-goal-update '(write))

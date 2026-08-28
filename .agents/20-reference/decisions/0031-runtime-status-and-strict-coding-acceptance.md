@@ -36,7 +36,7 @@ calls notify an atomic known-path update that rebuilds only affected relations.
 Both paths keep the last complete revision readable while work is pending.
 
 Final coding acceptance remains in the existing immutable Eval store.  One
-typed gate set combines the 10,000-file benchmark with compatible M9 and M17
+typed gate set combines the 10,000-file benchmark with compatible M9 and M19
 live results.  Any failed gate makes the result failed; otherwise any missing
 gate makes it blocked.  Missing baseline, usage or large-repository evidence is
 never converted to zero, success or an estimate.
@@ -52,6 +52,6 @@ and after one compatibility cycle has recorded that removal condition.
 
 Status is stable during streaming, errors are retryable without reading source,
 and a known single-file update no longer scales with repository size.  A final
-acceptance record can be reproduced from a clean checkout, but M17 cannot be
+acceptance record can be reproduced from a clean checkout, but M19 cannot be
 marked complete until both 30-task configurations have five compatible trials
 per task and a fixed large-repository token fixture exists.

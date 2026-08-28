@@ -25,6 +25,8 @@
 (require 'chat-context-budget)
 (require 'chat-work-context)
 (require 'chat-work-plan)
+(require 'chat-goal)
+(require 'chat-plan-mode)
 (require 'chat-event)
 (require 'chat-checkpoint)
 (require 'chat-tool-caller)
@@ -299,6 +301,13 @@ on screen, where the marker would be noise.  It belongs on the wire only."
                         :target-path target-path))
          (notes (and session-id
                      (chat-work-note-fragments session-id context)))
+         (goal-fragment
+          (and session
+               (chat-goal-context-fragment
+                session
+                (chat-agent-run-state-goal-projection-revision run))))
+         (plan-mode-fragment
+          (and session (chat-plan-mode-context-fragment session)))
          (plan-fragment
           (and session
                (chat-work-plan-context-fragment
@@ -311,12 +320,18 @@ on screen, where the marker would be noise.  It belongs on the wire only."
                   (chat-context-allocation-tokens 'project-notes window))))
          (bundle
           (chat-context-bundle-build
-           (append (chat-agent-run-state-context-fragments run) notes
+           (append (chat-agent-run-state-context-fragments run)
+                   (and goal-fragment (list goal-fragment))
+                   (and plan-mode-fragment (list plan-mode-fragment)) notes
                    (and plan-fragment (list plan-fragment)))
            :session-id session-id :turn-id turn-id :task-id task-id
            :project-root project-root :target-path target-path
            :max-chars (min chat-work-context-max-projection-chars max-chars))))
     (setf (chat-agent-run-state-last-context-bundle run) bundle)
+    (when goal-fragment
+      (setf (chat-agent-run-state-goal-projection-revision run)
+            (cdr (assq 'revision
+                       (chat-context-fragment-metadata goal-fragment)))))
     (when plan-fragment
       (setf (chat-agent-run-state-work-plan-projection-revision run)
             (cdr (assq 'revision
@@ -748,7 +763,7 @@ need approval carry exclusive accesses and therefore remain serialized."
               (blocked (chat-agent--hook-until
                         'chat-plugin-before-tool-call-functions
                         run call))
-              plan-refusal)
+              plan-mode-refusal plan-refusal)
          (puthash index (list :call call :accesses accesses :handle nil)
                   running)
          (cond
@@ -762,6 +777,10 @@ need approval carry exclusive accesses and therefore remain serialized."
                     (or (plist-get blocked :reason)
                         "Tool execution was blocked")
                     t))
+          ((setq plan-mode-refusal
+                 (chat-plan-mode-check-call
+                  (chat-agent-run-state-session run) call))
+           (funcall complete-fn index call plan-mode-refusal t))
           ((setq plan-refusal
                  (chat-work-plan-check-call
                   (chat-agent-run-state-session run) call))
@@ -930,7 +949,9 @@ TRUNCATED is non-nil when tool calls were refused for length."
                   (append (chat-agent-run-state-messages run) queued))
             (chat-agent--emit run 'followup :message (car queued))
             (chat-agent--turn run))
-        (chat-agent--finish run 'completed nil))))
+        (if (chat-agent--queue-followup run processed)
+            (chat-agent--turn run)
+          (chat-agent--finish run 'completed nil)))))
    (t
     (chat-agent--queue-followup run processed)
     (chat-agent--turn run))))
@@ -1008,7 +1029,8 @@ Tool results already live on the transcript as :tool messages."
                       :content text
                       :timestamp (current-time))))
         (chat-agent--append-message run message)
-        (chat-agent--emit run 'followup :message message)))))
+        (chat-agent--emit run 'followup :message message)
+        message))))
 
 (defun chat-agent--tool-result-lines (tool-calls tool-results)
   "Format TOOL-CALLS and TOOL-RESULTS into readable lines."

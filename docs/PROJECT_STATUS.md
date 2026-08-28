@@ -26,17 +26,21 @@ native tree/detail view. Typed image and file content now persists through a
 content-addressed attachment store, capability preflight and provider-specific
 wire adapters. Checkpoints, owned worktrees, execution backends, attributable
 memory, derived Trace reconstruction, deterministic evaluations and the optional
-versioned App Server bridge are implemented. M9-M16 of the active M9-M17
+versioned App Server bridge are implemented. M9-M18 of the active M9-M19
 coding-reliability roadmap are complete: isolated real-task evaluation,
 versioned edits, semantic code intelligence, automatic verification and
 scoped structured work context, plus durable evidence-linked TODO plans with a
 native progress UI, capability-tested execution isolation, independent typed
-review and conflict-safe coding children. M17 runtime phases, actionable
+review and conflict-safe coding children. Durable Goal contracts now survive
+turns, compaction and restart with scoped evidence and explicit lifecycle
+control. Independent Plan Mode enforces read-only research until the user
+approves the exact submitted work-plan revision. M19 runtime phases, actionable
 diagnostics, strict acceptance aggregation and the 10,000-file performance path
 are implemented. Live coding Eval now writes each run to a fresh versioned
 campaign with immutable configuration and completion records, and acceptance
-rejects mixed campaigns. Final acceptance remains blocked until comparable
-M9/M17 live result sets with trusted token usage exist. The fixed corpus now
+rejects mixed campaigns. The immutable M9 baseline is complete with 150/150
+results; final acceptance remains blocked until the comparable M19 current
+campaign and paired trusted-token comparison exist. The fixed corpus now
 includes a measured 10,000-indexed-file large-repository task.
 
 ## Implemented Areas
@@ -109,6 +113,8 @@ includes a measured 10,000-indexed-file large-repository task.
 - revisioned session work notes with key, kind and tag indexes across restart
 - request-only projection of project rules, code context and applicable active notes
 - bounded request-only projection of the active durable work-plan slice and newly added evidence
+- protected bounded projection of the selected Goal contract, plus an independent
+  Plan Mode instruction fragment that survives compaction and reload
 
 ### Durable Sessions
 
@@ -161,7 +167,11 @@ includes a measured 10,000-indexed-file large-repository task.
 - cancellable background process tasks with persisted state, logs, and
   terminal notifications
 - bounded output reads and explicit task stop support
-- session-local plan, TODO, and goal records
+- versioned durable Goal contracts with scoped evidence, optimistic revisions,
+  pause/resume/block/complete transitions and bounded history
+- independent persisted Plan Mode with read-only tool gating and exact-revision
+  user approval
+- session-local compatibility records for legacy plan and TODO callers
 - ordered conditional workflows with approval checkpoints, per-step
   persistence, failure pause, cancellation, and durable resume
 - work tools registered with owner and effect metadata
@@ -203,8 +213,8 @@ includes a measured 10,000-indexed-file large-repository task.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1701 regression tests discovered
-- 1701 passing
+- 1760 regression tests discovered
+- 1760 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -214,7 +224,7 @@ includes a measured 10,000-indexed-file large-repository task.
 - primary-loop MCP and nested-agent end-to-end paths: 2 passing
 - five built-in offline Eval scenarios passing
 - 10,000-file performance gates passing: 31.0ms maximum wall slice and
-  111.3ms warm query p95 in the recorded M17 environment
+  111.3ms warm query p95 in the recorded M19 environment
 
 ### Stability Highlights
 
@@ -364,6 +374,10 @@ includes a measured 10,000-indexed-file large-repository task.
 
 ## Recommended Next Work
 
+- finish the isolated M9 historical 30-by-5 live campaign, then run the M19
+  current campaign with the same frozen provider/model/capability identity
+- record the immutable comparison, trusted usage sample and failure taxonomy;
+  do not mark M19 complete before every strict acceptance gate passes
 - make true provider streaming and fallback behavior share one transport abstraction
 - extend the reading workflow from code mode into other surfaces only when the shared capture model stays intact
 - consider a current-file reading command after the new region, defun, and near-point captures settle
@@ -391,6 +405,8 @@ includes a measured 10,000-indexed-file large-repository task.
 | `lisp/plugin/chat-plugin.el` | plugin host |
 | `lisp/ui/chat-ui.el` | UI and response lifecycle |
 | `lisp/core/chat-session.el` | persistence |
+| `lisp/core/chat-goal.el` | durable Goal contracts and lifecycle |
+| `lisp/core/chat-plan-mode.el` | read-only planning permission state |
 | `lisp/llm/chat-llm.el` | provider abstraction |
 | `lisp/core/chat-stream.el` | stream parsing |
 | `lisp/tools/chat-tool-caller.el` | tool protocol |

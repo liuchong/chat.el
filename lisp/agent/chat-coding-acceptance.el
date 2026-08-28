@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 
-;; Strict M17 acceptance aggregation and a reproducible repository benchmark.
+;; Strict M19 acceptance aggregation and a reproducible repository benchmark.
 ;; Source Eval records, lifecycle facts, and repo maps remain authoritative.
 
 ;;; Code:
@@ -447,7 +447,7 @@
       (list
        (chat-coding-acceptance-gate-create
         :name "live-eval-comparison" :status 'blocked
-        :expected "M9 and M17 result sets"
+        :expected "M9 and M19 result sets"
         :actual "missing"
         :evidence "Run 30 tasks five times for both comparable configurations.")
        (chat-coding-acceptance--large-repo-token-gate baseline current))
@@ -538,6 +538,92 @@
         :actual (chat-coding-acceptance--median usage))
        (chat-coding-acceptance--large-repo-token-gate baseline current)))))
 
+(defun chat-coding-acceptance--reliability-gate
+    (name expected actual valid-p passed-p &optional evidence)
+  "Return a strict reliability gate for NAME.
+
+VALID-P distinguishes absent or malformed evidence from a measured failure.
+PASSED-P is considered only when VALID-P is non-nil."
+  (chat-coding-acceptance-gate-create
+   :name name
+   :status (cond ((not valid-p) 'blocked)
+                 (passed-p 'passed)
+                 (t 'failed))
+   :expected expected
+   :actual actual
+   :evidence (unless valid-p evidence)))
+
+(defun chat-coding-acceptance-reliability-gates (metadata)
+  "Return Goal and Plan Mode gates from bounded acceptance METADATA.
+
+The evidence contract lives under `runtimeReliability'.  Missing or malformed
+measurements block final acceptance; measured values outside the exact limits
+fail it."
+  (let* ((facts (chat-coding-acceptance--field metadata 'runtimeReliability))
+         (goal-continuity
+          (chat-coding-acceptance--field facts 'goalContinuityRate))
+         (goal-completion
+          (chat-coding-acceptance--field facts 'goalCompletionEvidenceRate))
+         (goal-invalid
+          (chat-coding-acceptance--field facts 'goalInvalidTransitionCount))
+         (goal-leaks
+          (chat-coding-acceptance--field facts 'goalScopeLeakCount))
+         (goal-prompt
+          (chat-coding-acceptance--field facts 'goalProjectionMedianRatio))
+         (plan-mutations
+          (chat-coding-acceptance--field facts 'planUnauthorizedMutationCount))
+         (plan-approvals
+          (chat-coding-acceptance--field facts 'planNonUserApprovalCount))
+         (plan-consistency
+          (chat-coding-acceptance--field facts 'planTransitionConsistencyRate))
+         (plan-implicit
+          (chat-coding-acceptance--field facts 'planReadyImplicitExecutionCount))
+         (rate-p (lambda (value)
+                   (and (numberp value) (<= 0.0 value) (<= value 1.0))))
+         (count-p (lambda (value)
+                    (and (integerp value) (>= value 0)))))
+    (list
+     (chat-coding-acceptance--reliability-gate
+      "goal-continuity" "100%" goal-continuity
+      (funcall rate-p goal-continuity)
+      (and (numberp goal-continuity) (= goal-continuity 1.0))
+      "Measure one Goal across 20 turns, two compactions, reload, and restart.")
+     (chat-coding-acceptance--reliability-gate
+      "goal-completion-evidence" "100%" goal-completion
+      (funcall rate-p goal-completion)
+      (and (numberp goal-completion) (= goal-completion 1.0))
+      "Measure required criteria, stopping predicate, and scoped evidence resolution.")
+     (chat-coding-acceptance--reliability-gate
+      "goal-invalid-transitions" 0 goal-invalid
+      (funcall count-p goal-invalid) (equal goal-invalid 0)
+      "Count illegal completion, paused auto-advance, and Agent resume attempts.")
+     (chat-coding-acceptance--reliability-gate
+      "goal-scope-leaks" 0 goal-leaks
+      (funcall count-p goal-leaks) (equal goal-leaks 0)
+      "Count Goal content disclosed outside its canonical project scope.")
+     (chat-coding-acceptance--reliability-gate
+      "goal-projection-token-budget" "median <=3%" goal-prompt
+      (funcall rate-p goal-prompt)
+      (and (numberp goal-prompt) (<= goal-prompt 0.03))
+      "Record the median Goal projection/input-token ratio.")
+     (chat-coding-acceptance--reliability-gate
+      "plan-mode-unauthorized-mutations" 0 plan-mutations
+      (funcall count-p plan-mutations) (equal plan-mutations 0)
+      "Count successful source, shell, child, repair, merge, permission, and unknown effects.")
+     (chat-coding-acceptance--reliability-gate
+      "plan-mode-non-user-approvals" 0 plan-approvals
+      (funcall count-p plan-approvals) (equal plan-approvals 0)
+      "Count approvals accepted from any source other than the user path.")
+     (chat-coding-acceptance--reliability-gate
+      "plan-mode-transition-consistency" "100%" plan-consistency
+      (funcall rate-p plan-consistency)
+      (and (numberp plan-consistency) (= plan-consistency 1.0))
+      "Measure submit, reject, approve, restore, and plan identity consistency.")
+     (chat-coding-acceptance--reliability-gate
+      "plan-mode-ready-implicit-execution" 0 plan-implicit
+      (funcall count-p plan-implicit) (equal plan-implicit 0)
+      "Count executions triggered merely by restoring a ready plan."))))
+
 (defun chat-coding-acceptance--gate-check (gate)
   "Convert acceptance GATE to an immutable Eval check."
   (chat-eval-check
@@ -567,10 +653,10 @@
                (seq-every-p #'chat-coding-acceptance-gate-p gates))
     (error "Acceptance requires typed gates"))
   (chat-eval-record-result
-   :scenario-id "acceptance/m17"
-   :scenario-revision 1
+   :scenario-id "acceptance/m19"
+   :scenario-revision 2
    :category "coding/acceptance"
-   :fixture-id "m9-m17-roadmap"
+   :fixture-id "m9-m19-roadmap"
    :fixture-digest
    (secure-hash
     'sha256
@@ -776,7 +862,7 @@ is removed before the callback runs."
   "Record a strict comparison of live results in two directories."
   (interactive
    (list (read-directory-name "M9 baseline results: ")
-         (read-directory-name "M17 current results: ")))
+         (read-directory-name "M19 current results: ")))
   (let* ((baseline
           (chat-coding-acceptance-load-result-directory baseline-directory))
          (current
@@ -831,16 +917,16 @@ is removed before the callback runs."
     (&optional baseline-directory current-directory metadata)
   "Run and record the strict final acceptance gate set.
 
-BASELINE-DIRECTORY and CURRENT-DIRECTORY contain immutable M9 and M17 live
+BASELINE-DIRECTORY and CURRENT-DIRECTORY contain immutable M9 and M19 live
 Eval results.  Missing directories remain explicit blocked gates.  METADATA
-adds bounded externally verified facts such as the canonical test count."
+adds bounded externally verified facts, including `runtimeReliability'."
   (interactive
    (list
     (let ((value
            (read-string "M9 baseline results directory (blank if missing): ")))
       (unless (string-empty-p value) value))
     (let ((value
-           (read-string "M17 current results directory (blank if missing): ")))
+           (read-string "M19 current results directory (blank if missing): ")))
       (unless (string-empty-p value) value))))
   (let* ((benchmark (chat-coding-acceptance-benchmark-sync))
          (baseline
@@ -860,7 +946,8 @@ adds bounded externally verified facts such as the canonical test count."
                     baseline-directory baseline "baseline")
                    (chat-coding-acceptance--campaign-directory-gate
                     current-directory current "current"))
-                  (chat-coding-acceptance-live-gates baseline current)))
+                  (chat-coding-acceptance-live-gates baseline current)
+                  (chat-coding-acceptance-reliability-gates metadata)))
          (result
           (chat-coding-acceptance-record
            gates

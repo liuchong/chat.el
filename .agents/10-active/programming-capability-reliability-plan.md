@@ -4,7 +4,7 @@
 - Attention: active
 - Status: active
 - Scope: coding-agent-reliability
-- Tags: coding, evaluation, code-intelligence, editing, verification, context, planning, sandbox, review
+- Tags: coding, evaluation, code-intelligence, editing, verification, context, goal, planning, sandbox, review
 
 ## 1. 文档目的
 
@@ -16,7 +16,8 @@
 4. 修改后的自动验证和有限修复；
 5. 可替换的执行隔离后端；
 6. 独立代码审查和多 Agent 协作；
-7. 性能、可观测性、兼容性和最终验收。
+7. 跨轮持久 Goal 模式和独立只读 Plan 模式；
+8. 性能、可观测性、兼容性和最终验收。
 
 本文不以工具数量、界面项目数量或模型输出观感作为成功标准。最终判断只看固定任务集上的可重复结果、确定性测试、安全性证据和运行指标。
 
@@ -35,6 +36,10 @@
 - **live campaign**：一次独立、不可追加、不可复用的 live Eval 运行目录。开始前固定 role、provider/model、profile、transport、approval mode、manifest digest、implementation revision、重复次数和预期结果数；结束后写入独立 completion record。trial 不得跨 campaign 混合。
 - **large-repo task**：task manifest 明确带有 `large-repo` tag，并使用不少于 10,000 个受索引文件的固定 fixture；不得在看到结果后临时改变该分类。
 - **百分点**：成功率的绝对差，例如 70% 到 85% 为提高 15 个百分点，不是相对提高 15%。
+- **goal**：跨多轮保持不变的目标合同，定义 objective、success criteria、constraints、stopping condition、verification evidence 和生命周期。Goal 回答“为什么做、什么证据证明已经完成”，不是执行步骤列表。
+- **work plan / TODO**：实现某个 Goal 或普通任务的一版可替换执行路径，定义有依赖关系的步骤、当前项和步骤证据。Plan 回答“接下来怎么做”，不得修改 Goal 的完成定义。
+- **Plan Mode**：只读研究、方案编写和人工审批的交互权限模式。它限制可调用工具和允许写入的状态，不等于 Goal，也不等于 `chat-work-plan` 数据对象。
+- **runtime task**：`chat-task` 管理的一次可调度执行单元。一个 Goal 可跨多个 runtime task 和多版 work plan；task 结束不代表 Goal 完成。
 
 ## 2. 当前基线
 
@@ -66,6 +71,8 @@
 | G6 | execution backend 抽象已有但隔离后端不足 | 命令审批不能替代 OS 级文件和网络隔离 |
 | G7 | 缺少只读、结构化、独立上下文的 Review Agent | 自己修改后自己确认，漏判和确认偏差较高 |
 | G8 | 多 Agent 已能运行但缺少面向代码变更的合并合同 | 并行任务可能重复编辑或在合并时互相覆盖 |
+| G9 | 现有 goal 只有 title/status 普通记录，没有目标合同和生命周期 | 无法跨轮可靠推进、判定完成或在压缩后恢复 |
+| G10 | 现有 planning 标志不约束工具权限，也没有方案审批合同 | “计划中”仍可能修改源码，Plan 与执行边界不可信 |
 
 ## 3. 最终目标
 
@@ -82,7 +89,10 @@
 9. 命令运行在声明了文件、网络、环境和时间权限的 execution backend 中；后端能力不足时必须显式降级或拒绝。
 10. Review Agent 默认只读，输出结构化、可定位、去重并带证据的发现，不直接修改代码。
 11. 所有关键行为进入现有 session event、Trace、task、checkpoint 和 Eval 体系，不创建第二套事实来源。
-12. 最终能力由固定任务集重复测量，并满足第 13 节全部验收门槛。
+12. Goal 作为跨轮持久目标状态机，支持暂停、恢复、阻塞、完成和清除；完成必须满足停止条件并绑定已知证据，压缩和重启后仍可续接。
+13. Goal、work plan/TODO、工作笔记和 runtime task 分层联动；一项 Goal 可更换多版 Plan，Plan 和 task 不得静默改写 Goal。
+14. Plan Mode 使用独立权限门只允许研究、提问、工作笔记和计划产物，用户批准后才转换到执行模式。
+15. 最终能力由固定任务集重复测量，并满足第 13 节全部验收门槛。
 
 ## 4. 非目标
 
@@ -102,7 +112,12 @@
 User objective
       |
       v
-Coding task planner
+Durable Goal contract ------------------> stop condition / evidence / lifecycle
+      |
+      +--> Plan Mode gate --------------> read-only research / plan approval
+      |
+      v
+Coding task planner / TODO
       |
       +--> Work context store -------> scoped notes / rules / artifacts
       |
@@ -134,7 +149,9 @@ Session events + Trace + Eval result
 - 工作区归属只写 `chat-workspace`。
 - 回滚证据只写 `chat-checkpoint`。
 - 命令状态只写 `chat-execution`。
-- 运行中目标、规则、工作笔记和计划只写版本化 work-context / work-plan 合同；prompt 和 UI 只是投影。
+- 跨轮目标及其完成证据只写版本化 Goal 合同；旧 `work.goals` 只作为迁移输入，不再作为运行时事实来源。
+- 执行路径只写版本化 work-plan/TODO 合同；Plan Mode 只写 session planning-state 和待审批 plan ID。
+- 规则和工作笔记只写版本化 work-context 合同；prompt 和 UI 只是上述状态的有界投影。
 - Eval 结果只写不可变 `chat-eval-result`。
 - repo map、符号索引和 LSP 结果都是可重建缓存，不具有用户数据权威性。
 
@@ -303,6 +320,73 @@ source、scope、status、revision 和 timestamps。
 blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确定性单步任务以
 枚举 reason 跳过建表，任何多文件修改、child task 或 repair loop 都必须先有计划。
 
+### 6.8 跨轮持久 Goal
+
+新增独立 `chat-goal` 合同；不得复用 `chat-task`、`chat-work-plan` 或早期
+`work.goals` 的 title/status 记录冒充 Goal：
+
+```elisp
+(cl-defstruct chat-goal
+  schema-version id revision session-id project-root
+  objective success-criteria constraints non-goals sources
+  stopping-condition verification-spec status
+  current-checkpoint evidence progress-log blocker-reason unblock-condition
+  plan-ids active-plan-id task-ids
+  created-at updated-at paused-at blocked-at completed-at
+  metadata)
+```
+
+状态集固定为 `active|paused|blocked|completed|cancelled`。每个 session 最多一个
+selected Goal；历史 Goal 有界保留。状态转换必须满足：
+
+- create 需要非空 objective 和 stopping condition；success criteria、constraints、
+  sources 和 verification spec 均为有界结构化字段；
+- Agent 只能增加 checkpoint、progress、evidence、task/plan link，不能通过工具静默
+  改写 objective、stopping condition、constraints 或 success criteria；这些字段只允许
+  用户操作或带 user-authority 的显式 replacement 修改；
+- pause/resume/clear 是用户控制操作。paused 不自动推进，也不被 Agent 自行恢复；
+- blocked 必须提供 blocker reason 和可操作 unblock condition；解除后从原 revision 的
+  后继状态恢复，不丢 checkpoint、plan、note 和 evidence；
+- completed 必须引用已知且 session/task/project scope 匹配的 evidence，并由确定性
+  predicate 证明全部 required success criteria 和 stopping condition 已满足；模型自述
+  “完成”不是证据；
+- cancelled 和 completed 为终态；clear 只取消 selected 引用并保留审计历史，不物理删除；
+- 所有 mutation 使用 expected revision，旧 Agent step 不得覆盖用户更新或新 step；
+- active Goal 在每个请求中以 protected objective fragment 重建，只投影目标、停止条件、
+  当前 checkpoint、已验证 evidence 摘要、剩余条件和 blocker，不重复注入完整日志；
+- Goal 可关联多版 work plan 和多个 runtime task。plan 完成只产生 Goal progress，task
+  completed/failed 只产生执行证据，二者都不得自动把 Goal 标为 completed；
+- 每次上下文压缩、session reload 和 Emacs restart 后，Goal identity、revision、状态、
+  checkpoint、阻塞与证据集合必须等价恢复。
+
+Goal Mode 的自动推进受独立 turn/runtime budget、用户 pause/cancel、approval、Goal
+状态和现有 Agent step budget 共同限制。达到运行预算时 Goal 保持 active 并进入明确的
+needs-attention 投影，不伪装为完成，也不无限重启 Agent run。
+
+### 6.9 独立 Plan Mode
+
+新增 session-scoped `chat-plan-mode-state`，至少包含 `enabled`、`status`、`revision`、
+`plan-id`、`plan-revision`、`entered-at`、`updated-at`、`approved-at` 和有界 feedback。状态为
+`researching|ready|approved|rejected|cancelled`，与 `chat-work-plan.status` 分开。
+
+规则：
+
+- 进入 Plan Mode 后，tool boundary 只允许 read-only filesystem/code-intel/search、
+  只读外部查询、clarification、结构化工作笔记、Goal read/progress 和 plan
+  create/read/update/submit；源码写入、命令执行、child coding task、repair、merge 和
+  destructive/state-widening tool 必须 fail closed；
+- plan artifact 仍使用 `chat-work-plan` 单一事实来源，Plan Mode 只保存当前待审批 plan
+  的 ID 和审批状态，不复制计划正文；
+- `submit` 只能把完整、合法、无活动执行项的计划置为 ready；用户可 approve、reject
+  或带 feedback 返回 researching。只有 approve 会退出 Plan Mode 并允许执行；
+- approve 必须重新校验 `plan-id + plan-revision` 与提交时完全一致；ready 后计划有任何
+  修改都必须退回 researching 并重新 submit，不能批准漂移后的内容；
+- keyboard、slash command、Agent tool 和 session restore 都必须走同一状态机；UI 明确
+  显示 Plan Mode，不能只靠 prompt 文案约束；
+- Goal 可在 Plan Mode 前已存在，也可由用户在研究后创建；批准 Plan 不得创建、修改或
+  完成 Goal，除非用户另行显式确认 Goal 合同；
+- Plan Mode 状态跨 session reload 保存；恢复时仍保持只读，不因进程重启自动批准。
+
 ## 7. 施工阶段
 
 阶段编号延续已完成的 M0-M8。每个阶段必须遵循：先测试合同，再实现；阶段测试和规范测试全部通过后立即提交；未满足退出条件不得开始依赖它的下一阶段。
@@ -313,7 +397,7 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 不可变结果和隔离 campaign 合同已经完成；本机没有留存固定
 provider/model/capability identity 的 live 结果集。因此“基线基础设施完成”不等于
 “可比较 M9 live baseline 已存在”，最终验收必须按相同的五次重复重新运行 M9
-与 M17。固定任务集中已有一个 `large-repo` task；其版本化生成描述符物化
+与 M19。固定任务集中已有一个 `large-repo` task；其版本化生成描述符物化
 10,001 个文件，其中 10,000 个为可索引 Python 源文件，结果记录实际文件数和
 生成器摘要。
 
@@ -754,7 +838,108 @@ merge gate；合并后重新运行 M12 verification。决策与验收证据见 D
 - 无冲突并行任务可以安全合并并通过验证。
 - 有冲突任务 100% 被调度器或合并门识别，不发生静默覆盖。
 
-### M17：产品化、性能与最终验收
+### M17：跨轮持久 Goal 模式
+
+#### 目标
+
+把目标从提示词和普通记录提升为可持久化、可暂停/恢复、可验证完成、可审计阻塞并能
+在压缩后续接的独立状态机，同时与 TODO、工作笔记、task 和验证证据有机联动。
+
+#### 修改范围
+
+- 新增 `lisp/core/chat-goal.el`，实现 schema、迁移、状态机、revision、evidence 和
+  protected context projection。
+- 在 programming capability pack 增加 goal create/read/progress/block/complete 工具；
+  兼容 `work_goal_*` 入口但不保留第二套事实来源。
+- 在 Agent context selection、turn continuation 和 session event 中接入 Goal。
+- 在聊天 UI 增加稳定的 Goal 摘要、折叠详情和 `/goal` 控制命令。
+- 增加 unit、integration、e2e、restart/compaction、UI stability 和 Eval 测试。
+
+#### 实施步骤
+
+1. 冻结 schema、字段上限、状态转换、terminal/selected 规则和 expected revision 冲突。
+2. 冻结 user-authority 字段；Agent 工具不能修改 objective、success criteria、constraints、
+   non-goals、stopping condition 和 verification spec。
+3. 复用 work-plan evidence resolver，验证 evidence 存在、scope 匹配且 predicate 成功；
+   complete 缺任一 required criterion 或证据时 fail closed。
+4. Goal 创建或选择后绑定 session/project；每次 plan create/update 和 runtime task 生命周期
+   只写 link/progress event，不隐式改变 Goal 状态。
+5. 活动 Goal 生成 protected objective fragment，包含 revision、checkpoint、remaining、
+   blocker 和增量 evidence；work notes 和 plan fragment 仍保持独立区域。
+6. 普通模型回答不能让 active Goal 消失。Agent 可在 turn budget 内继续；预算耗尽、需要
+   用户输入、审批或真实外部条件时留下 needs-attention/blocked 事实并停止自动推进。
+7. `/goal <objective>` 创建时必须同时取得 stopping condition；`/goal` 查看，`pause`、
+   `resume`、`clear` 走用户控制状态机。所有命令支持窄窗口和无图形终端。
+8. 迁移早期 `work.goals`：缺 stopping condition 的 legacy active 记录转为 paused，明确
+   要求用户补全，不把旧 title 猜测成可验证完成条件。
+9. UI 在输入区上方显示 `Goal status · checkpoint · evidence/criteria`，详情展示目标、停止
+   条件、剩余项、阻塞与关联 plan；更新保持 point/window-start/手工滚动位置。
+10. Trace 记录 created/selected/progress/paused/resumed/blocked/unblocked/completed/
+    cancelled/cleared/revision-conflict 和 continuation-budget-exhausted。
+
+#### 必测场景
+
+- 目标跨 20 个 user/model turns、两次 compaction、session reload 和 Emacs restart 后等价。
+- pause 后 Agent 不能继续推进或自行 resume；resume 保留 plan/note/evidence/checkpoint。
+- 无 stopping condition、未知 evidence、scope 错误、required criterion 未满足、陈旧 revision
+  和模型直接自述完成全部拒绝。
+- plan 完成、task completed/failed、验证通过中的任一单独发生都不会误完成 Goal。
+- blocked 必须有 reason + unblock condition；解除后可继续并保留完整进度。
+- Goal 可依次关联至少三版 Plan，旧 Plan 历史可查且新 Plan 不改变 Goal 合同。
+- 连续 1,000 次 Goal/Plan/streaming 交错更新不移动输入 point 或 window-start。
+- legacy goal 迁移不丢 title/id，且缺合同的活动记录全部安全转 paused。
+
+#### 退出条件
+
+- Goal 状态、revision、links、checkpoint 和 evidence 在 restart/compaction 后一致率 100%。
+- 非法完成、越权改目标、paused 自动推进和跨 session/project 泄漏均为 0。
+- 所有 completed Goal 的 stopping condition 与 required criteria 证据可解析率 100%。
+- Goal protected projection 的中位 prompt 开销不超过输入 token 的 3%。
+
+### M18：独立 Plan Mode 与审批转换
+
+#### 目标
+
+提供真正受工具权限约束的只读研究模式，在用户批准一版结构化计划前不修改源码或启动
+执行任务，并保证 Plan Mode 与 Goal、TODO plan、approval mode 概念互不混淆。
+
+#### 修改范围
+
+- 新增 `lisp/core/chat-plan-mode.el`，保存 session planning state 和审批转换。
+- 在 Agent tool boundary 增加 mode-aware allow/deny gate，复用 tool effect metadata。
+- 扩展 work-plan 工具，增加 submit/approve/reject 合同和审批事件。
+- 在聊天 UI 增加 `/plan`、状态栏模式标识、待审批计划和 feedback 流程。
+- 增加权限矩阵、恢复、审批、UI、Agent loop 和 E2E 测试。
+
+#### 实施步骤
+
+1. 冻结 researching/ready/approved/rejected/cancelled 状态和 revision 转换。
+2. 建立显式 allowlist + effect deny gate；未知 effect 在 Plan Mode 一律拒绝。
+3. 只允许 plan/work-note 专用状态写入；文件写、shell/compile、coding child、repair、merge、
+   approval widening 和 forged write tool 全部在执行前拒绝。
+4. submit 验证 plan schema、依赖 DAG、acceptance 和无执行中 item，再进入 ready。
+5. approve/reject 只能由用户控制路径调用；reject feedback 有界保存并返回 researching。
+6. approve 退出 Plan Mode，但不自动完成 item、Goal 或执行命令；下一次正常 Agent turn 才按
+   既有 approval、Goal、work-plan、checkpoint 和 execution gate 执行。
+7. session reload 恢复 enabled/status/plan ID；ready 状态保持等待，不自动批准。
+8. UI 明确显示模式和审批状态，模式切换保持输入、point、窗口和未发送草稿。
+
+#### 必测场景
+
+- 每类 read/write/state/outbound/destructive/unknown effect tool 的允许或拒绝矩阵。
+- 通过自然语言、slash command 和 Agent tool 进入模式时结果一致。
+- Plan Mode 中尝试 source edit、shell、child task、动态 forged write tool 均 100% 拒绝。
+- submit 非法 plan、Agent 自批、陈旧 revision、ready 后改 plan 和 restore 后隐式执行均拒绝。
+- reject + feedback 可修订并再次 submit；approve 后正常执行 gate 恢复。
+- Goal 不存在、active、paused、blocked 四种情况下 Plan Mode 行为符合独立合同。
+
+#### 退出条件
+
+- Plan Mode 中源码/项目状态越权修改数为 0，未知工具 fail closed 率 100%。
+- 审批转换、恢复和 plan ID 一致率 100%，Agent 自行 approve 次数为 0。
+- 普通聊天、Goal Mode、work-plan enforcement 和 approval/Guard 现有行为无回归。
+
+### M19：产品化、性能与最终验收
 
 实施状态（2026-08-28）：runtime phase、可操作诊断、已知路径增量 repo map、
 10,000 文件基准和严格不可变验收聚合已经完成。性能门槛通过；30-by-5 live
@@ -776,7 +961,7 @@ revision `e4e6cbc` 已通过当前 harness 的无网络 30-task/150-result 契�
 3. 为 stale write、semantic backend、verification 和 sandbox 增加可操作错误说明。
 4. 更新用户文档、配置示例、帮助命令和故障排查。
 5. 对 10,000 文件 fixture 做索引、增量更新、查询、上下文构建和内存测试。
-6. 对 30 个 live coding tasks 各执行 5 次最终基准；M9 与 M17 分别使用 fresh `baseline` / `current` campaign，禁止复用目录。
+6. 对 30 个 live coding tasks 各执行 5 次最终基准；M9 与 M19 分别使用 fresh `baseline` / `current` campaign，禁止复用目录。
 7. 对每个失败分类复核：模型能力、上下文遗漏、工具错误、验证错误、权限阻塞或基础设施错误。
 8. 运行全部 unit、integration、e2e、offline eval 和平台隔离测试。
 9. 生成不可变验收结果和与 M9 基线的比较报告。
@@ -790,8 +975,8 @@ revision `e4e6cbc` 已通过当前 harness 的无网络 30-task/150-result 契�
 | 层级 | 内容 | 是否进入 canonical suite |
 |---|---|---|
 | Unit | 数据合同、digest、scope、排序、解析、状态机、错误类型、UI 纯投影 | 是 |
-| Integration | Agent loop + scoped context + plan gate + file gate + checkpoint + execution + verifier | 是，外部依赖缺失时只允许明确 skip |
-| E2E | 临时 Git fixture 中完成计划、编辑、压缩恢复、验证、review | 是，必须确定性 |
+| Integration | Agent loop + Goal + scoped context + Plan Mode + plan gate + file gate + checkpoint + execution + verifier | 是，外部依赖缺失时只允许明确 skip |
+| E2E | 临时 Git fixture 中跨轮推进 Goal、审批计划、编辑、压缩恢复、验证、review | 是，必须确定性 |
 | Offline Eval | 五个现有合同及新增非模型 coding contracts | 是 |
 | Live Eval | 固定模型执行 30 个真实任务 | 否，单独命令 |
 | Spike | 平台隔离、外部服务和语言服务器可行性 | 否，正式实现前运行 |
@@ -868,6 +1053,20 @@ docs(files): record M10 evidence
 - 旧 task 没有 plan 时可查看和取消；仅在它再次执行 mutation 时触发 plan-required。
 - UI 只从 public plan API 和 events 投影，不把折叠状态写回 runtime 事实。
 
+### 10.7 Goal 与 Plan Mode
+
+- 早期 `work.goals` 只作为一次性迁移输入；保留 id/title，缺少 stopping condition、
+  verification 和 success criteria 的非终态记录统一迁为 paused，并显示需要用户补全合同，
+  不得猜测完成条件或继续自动推进。
+- 旧 `work_goal_list` 入口只读投影新 `chat-goal` API；缺少 success criteria、stopping
+  condition 和 expected revision 的 `work_goal_add/update` 明确拒绝，不再写旧记录。
+- 迁移成功后 session 中只以 `chat-goal` schema 为事实来源，旧字段写入迁移标记并停止
+  双写；重复加载和重复迁移必须幂等。
+- 早期 `work.plan` enabled 标志没有工具权限语义，恢复时不得据此自动进入或批准新 Plan
+  Mode；只有显式用户命令可以创建新的 planning state。
+- 新 Goal 或 Plan Mode 状态不存在时按 inactive 加载，不能改变普通聊天、既有 work plan、
+  approval、Guard 和 task 的行为。
+
 ## 11. 可观测性与审计
 
 新增或规范化以下事件，不改变现有 event 总线：
@@ -881,6 +1080,8 @@ docs(files): record M10 evidence
 - `context-bundle-built/fragment-selected/fragment-omitted`；
 - `work-note-created/updated/archived/deleted/conflicted`；
 - `work-plan-created/item-started/item-completed/item-blocked/completed/skipped`；
+- `goal-created/selected/progressed/paused/resumed/blocked/unblocked/completed/cancelled/cleared/conflicted`；
+- `plan-mode-entered/submitted/approved/rejected/exited/refused/conflicted`；
 - `review-started/finding/completed`；
 - `workspace-merge-started/completed/conflicted`。
 
@@ -893,6 +1094,8 @@ Trace 至少新增：
 - context scope refusal、dependency cycle 和 truncation 数；
 - work note query/hit/conflict 数；
 - plan item、blocked、skipped、无计划 mutation refusal 和停滞数；
+- Goal continuation、budget exhausted、completion refusal、evidence 和状态转换数；
+- Plan Mode 按 effect 分类的 allow/refusal、submit、approval 和 restore 数；
 - stale write refusal 数；
 - verification step、失败和 retry 数；
 - review finding 按 severity 计数；
@@ -911,6 +1114,10 @@ Trace 至少新增：
 | 工作笔记把猜测固化成规则 | authority 固定、source/provenance 可见、note 不得升级 instruction |
 | AGENTS 依赖泄漏或循环 | canonical root、scope matching、cycle/depth/count/byte limit |
 | TODO 变成提示词负担或形式主义 | 只投影 active slice、简单任务可审计 skip、token 与成功率门禁 |
+| Goal 变成无限循环或不可控成本 | 独立 continuation/turn/runtime budget；预算耗尽保持 active 并明确 needs-attention |
+| Goal 被模型自述误判为完成 | required criteria、stopping predicate 和已知 scoped evidence 三重确定性门禁 |
+| Goal、旧 goal 与 Plan 双写分裂事实 | 一次性幂等迁移、兼容 wrapper 单向路由、禁止运行时双写 |
+| Plan Mode 只靠提示词约束 | tool boundary 显式 allowlist + effect gate；未知工具 fail closed，审批只接受用户路径 |
 | UI 进度更新打断输入 | runtime/UI 分离、保留 point/window、批量事件和 1,000 次更新测试 |
 | sandbox 能力被高估 | 先 spike，capability 与实际测试绑定，不可用就明确 blocked |
 | Review 产生大量低价值意见 | typed finding、证据门槛、severity/precision Eval 和去重 |
@@ -919,7 +1126,7 @@ Trace 至少新增：
 
 ## 13. 最终验收标准
 
-以下条件必须全部满足，M17 才能标记 complete。
+以下条件必须全部满足，M19 才能标记 complete。
 
 ### 13.0 指标计算
 
@@ -980,6 +1187,14 @@ Trace 至少新增：
 - completed plan item 的 evidence 可解析率 100%，UI 与 durable plan 状态一致率 100%。
 - 计划 UI 1,000 次更新不移动输入 point、用户 window-start 或产生残留 timer。
 - plan + active work note 的中位 prompt 开销不超过输入 token 的 5%。
+- Goal 跨 20 轮、两次 compaction、session reload 和 Emacs restart 后 identity、revision、
+  status、checkpoint、blocker、plan/task links 和 evidence 等价率 100%。
+- completed Goal 的 required criteria、stopping predicate 和 scoped evidence 可解析率 100%；
+  非法完成、paused 自动推进、Agent 自行 resume 和跨 scope 泄漏均为 0。
+- Plan Mode 中 source write、shell/compile、child task、repair、merge、权限扩大和未知 effect
+  工具的成功执行数为 0；用户之外的 approve 成功数为 0。
+- Plan Mode submit/reject/approve、session restore 和 plan ID 一致率 100%；ready 恢复后不会
+  隐式执行。Goal protected projection 的中位开销不超过输入 token 的 3%。
 
 ### 13.7 Review 与协作
 
@@ -1001,17 +1216,38 @@ Trace 至少新增：
 
 1. commit 和配置快照；
 2. 环境、Emacs 版本、backend capability；
-3. M9 基线与 M17 结果对比；
+3. M9 基线与 M19 结果对比；
 4. 每个任务类别及语言的成功率；
 5. token、延迟、tool error、retry 和 approval 分布；
 6. semantic corpus 指标；
 7. stale write、安全隔离和进程清理结果；
-8. context scope/compaction continuity 和 plan adherence/UI stability；
+8. context scope/compaction continuity、Goal lifecycle/evidence、Plan Mode permission/approval、
+   plan adherence 和 UI stability；
 9. Review precision/recall；
 10. canonical suite 完整计数；
 11. 失败任务分类和仍然存在的风险。
 
 报告不得只给总分，也不得删除失败样本。任何未达到门槛的项目必须使总状态为 failed 或 blocked，不能用平均分掩盖。
+
+最终聚合器从顶层 metadata 的 `runtimeReliability` 对象读取以下确定字段。比例使用
+`0.0..1.0`，计数使用非负整数；字段缺失、类型错误或超出定义域时对应 gate 为
+`blocked`，有效测量未达到阈值时为 `failed`：
+
+| 字段 | 来源 | 通过条件 |
+|---|---|---|
+| `goalContinuityRate` | 20 轮、两次 compaction、reload、restart 连续性场景 | `1.0` |
+| `goalCompletionEvidenceRate` | completed Goal criteria、stopping predicate、scoped evidence 解析 | `1.0` |
+| `goalInvalidTransitionCount` | 非法完成、paused 自动推进、Agent resume 定向测试 | `0` |
+| `goalScopeLeakCount` | canonical project、symlink 和跨 scope 投影测试 | `0` |
+| `goalProjectionMedianRatio` | Goal projection tokens / 全部输入 tokens 的样本中位数 | `<= 0.03` |
+| `planUnauthorizedMutationCount` | source、shell、child、repair、merge、权限扩大和 unknown effect 矩阵 | `0` |
+| `planNonUserApprovalCount` | 非用户 approve 来源矩阵 | `0` |
+| `planTransitionConsistencyRate` | submit、reject、approve、restore 和 plan identity 场景 | `1.0` |
+| `planReadyImplicitExecutionCount` | ready restore 场景 | `0` |
+
+这些字段必须来自同一 implementation revision 上保存的定向测试或测量记录，不能由最终
+聚合器推测或用默认零补齐。最终不可变结果使用 `acceptance/m19` scenario，并把原始
+`runtimeReliability` 对象连同各 gate 一并保存。
 
 ## 15. 开工顺序
 
@@ -1026,10 +1262,12 @@ M9 baseline
   -> M14 durable TODO plans and native UI
   -> M15 execution isolation
   -> M16 review and coding multi-agent
-  -> M17 rollout and acceptance
+  -> M17 durable Goal mode
+  -> M18 read-only Plan Mode and approval
+  -> M19 rollout and acceptance
 ```
 
 M10 可以在 M9 基线建立后与 M11 的后端合同设计并行调查，但共享的 Agent loop、
 tool caller 和 context 文件不得并行修改。M12 依赖 M10 和 M11；M14 依赖 M13；
-M16 依赖 M12、M14 和 M15。最终默认开启任何能力前，必须先在 live Eval 中证明
-不降低成功率。
+M16 依赖 M12、M14 和 M15；M17 依赖 M13、M14 和 M16；M18 依赖 M14 和 M17；
+M19 依赖前述全部阶段。最终默认开启任何能力前，必须先在 live Eval 中证明不降低成功率。

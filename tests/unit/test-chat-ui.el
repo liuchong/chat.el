@@ -363,6 +363,17 @@ one that was asked."
     (should (string-match-p "Tool Result 1: 3 matches" text))
     (should (string-match-p "Tool Error 2: Access denied" text))))
 
+(ert-deftest chat-ui-permission-failure-remains-explicit-in-the-transcript ()
+  "A polished final answer cannot hide that the requested write was denied."
+  (chat-ui-auto-test--with-session
+    (chat-ui--render-response-state
+     (current-buffer) chat-ui--live-start "I finished the task."
+     '((:type tool-error :index 1 :tool "files_write"
+              :result-summary "Access denied outside the session workspace")))
+    (should (string-match-p
+             "Permission blocked files_write: Access denied"
+             (buffer-substring-no-properties (point-min) (point-max))))))
+
 (ert-deftest chat-ui-get-response-sync-attaches-request-diagnostics ()
   "Test chat UI passes a request id into the async request path."
   (chat-test-with-temp-dir
@@ -1044,7 +1055,7 @@ becomes the key that picks a candidate.  TAB is still bound to
   "Every command named in the help text has a handler."
   (dolist (name '("cancel" "help" "model" "send" "quick" "?" "cmd" "!"
                   "queue" "flush" "drop" "cd" "pwd" "new" "list" "save"
-                  "clear" "auto"))
+                  "clear" "goal" "plan" "auto"))
     (let ((handler (chat-ui--command-handler name)))
       (should handler)
       (should (fboundp handler)))))
@@ -1937,6 +1948,19 @@ prompt and no way back short of reopening the session."
     (chat-ui--render-input-prompt)
     (should (string-suffix-p "cmd> " (chat-ui-auto-test--drawn-prompt)))))
 
+(ert-deftest chat-ui-live-output-repairs-a-missing-prompt-with-typed-input ()
+  "The prompt cannot stay invisible while the input itself remains editable."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-max))
+    (insert "still typing")
+    (let ((end (marker-position chat-ui--input-overlay))
+          (inhibit-read-only t))
+      (delete-region (line-beginning-position) end))
+    (chat-ui--render-response-state
+     (current-buffer) chat-ui--live-start "answer" nil)
+    (should (chat-ui--input-prompt-bounds))
+    (should (equal "still typing" (chat-ui--input-text)))))
+
 (ert-deftest chat-ui-sending-leaves-the-prompt-alone-when-it-is-intact ()
   "The common case must not churn the buffer on every RET."
   (chat-ui-auto-test--with-session
@@ -2290,6 +2314,16 @@ recorded Markdown."
     (should (string-match-p "## Title" (buffer-string)))
     (should (string-match-p "\\*\\*bold\\*\\*" (buffer-string)))))
 
+(ert-deftest chat-ui-role-colour-is-recoverable-from-semantic-state ()
+  "Role labels retain enough identity to restore a lost face property."
+  (with-temp-buffer
+    (chat-ui--insert-role-label 'assistant)
+    (remove-text-properties (point-min) (point-max) '(face nil))
+    (should-not (get-text-property (point-min) 'face))
+    (chat-ui--repair-role-faces (point-min) (point-max))
+    (should (eq (get-text-property (point-min) 'face)
+                'chat-ui-role-assistant))))
+
 (ert-deftest chat-ui-request-state-is-buffer-local-per-session ()
   "Test two chat buffers keep independent active run state."
   (with-temp-buffer
@@ -2318,6 +2352,37 @@ recorded Markdown."
                  (lambda (_w pos) (setq moved pos))))
         (chat-ui--follow-live-output (current-buffer))
         (should-not moved)))))
+
+(ert-deftest chat-ui-following-requires-the-exact-pre-render-edge ()
+  "Being merely close to the bottom is still a manual reading position."
+  (should-not (chat-ui-window-follows-p 900 999 nil 1 1000))
+  (should (chat-ui-window-follows-p 900 1000 nil 1 1000))
+  (should-not (chat-ui-window-follows-p 1000 1000 900 1 1000)))
+
+(ert-deftest chat-ui-live-output-preserves-a-real-manual-scroll-anchor ()
+  "Appending live output keeps the same historical line at the window top."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (dotimes (index 200)
+        (insert (format "history-%03d\n" index)))
+      (setq chat-ui--messages-end (copy-marker (point-max)))
+      (setq chat-ui--input-overlay (copy-marker (point-max) t))
+      (goto-char (point-min))
+      (forward-line 19)
+      (set-window-start (selected-window) (point))
+      (forward-line 5)
+      (set-window-point (selected-window) (point))
+      (let ((state (chat-ui--capture-live-window-state (current-buffer))))
+        (goto-char (marker-position chat-ui--messages-end))
+        (insert "new-output-1\nnew-output-2\n")
+        (set-marker chat-ui--messages-end (point))
+        (chat-ui--follow-live-output (current-buffer) state))
+      (should (equal "history-019"
+                     (save-excursion
+                       (goto-char (window-start (selected-window)))
+                       (buffer-substring-no-properties
+                        (line-beginning-position) (line-end-position))))))))
 
 (ert-deftest chat-ui-follow-live-output-follows-edge-window ()
   "Test a window near the bottom edge follows the response edge."

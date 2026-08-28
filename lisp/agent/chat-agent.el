@@ -22,6 +22,7 @@
 (require 'chat-agent-profile)
 (require 'chat-llm)
 (require 'chat-task)
+(require 'chat-goal)
 
 (defun chat-agent-active-p (run)
   "Return non-nil while RUN is still in flight."
@@ -93,6 +94,8 @@
            :metadata '((adapter . "agent"))
            :child-policy 'cancel)))
     (chat-task-transition task 'running)
+    (when session
+      (chat-goal-link-task session (chat-task-id task)))
     task))
 
 (defun chat-agent-start (config)

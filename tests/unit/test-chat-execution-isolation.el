@@ -143,7 +143,8 @@
            (let ((compile
                   (chat-execution-start
                    (chat-execution-isolation-test--request
-                    project (list "/usr/bin/clang" source "-o" binary) 'build)
+                    project (list "/usr/bin/clang" source "-o" binary)
+                    'build nil 10)
                    :buffer output :stderr errors)))
              (chat-execution-isolation-test--wait compile 10)
              (ert-info ((concat (with-current-buffer output (buffer-string))
@@ -153,8 +154,8 @@
              (let ((run
                     (chat-execution-start
                      (chat-execution-isolation-test--request
-                      project (list binary) 'inspect))))
-               (chat-execution-isolation-test--wait run)
+                      project (list binary) 'inspect nil 10))))
+               (chat-execution-isolation-test--wait run 12)
                (should (eq 'completed (chat-execution-record-status run))))
          (when (buffer-live-p output) (kill-buffer output))
          (when (buffer-live-p errors) (kill-buffer errors))))))))

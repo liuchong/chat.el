@@ -575,6 +575,16 @@ changes, which is what keeps a piece's cost proportional to the tail."
       (should (<= 0 stable (length source)))
       (should (stringp (substring source 0 stable))))))
 
+(ert-deftest chat-markdown-a-long-live-tail-keeps-inline-emphasis ()
+  "Streaming degradation must not expose emphasis markers mid-answer."
+  (let* ((chat-markdown-streaming-tail-max-chars 20)
+         (source (concat (make-string 30 ?x) "\n\n**现状诊断**：继续"))
+         (rendered (chat-markdown-render-tail source)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (memq 'bold (test-markdown--faces-at rendered "现状诊断")))
+    (should (equal (concat (make-string 30 ?x) "\n\n现状诊断：继续")
+                   (test-markdown--visible rendered)))))
+
 ;; ------------------------------------------------------------------
 ;; Where it sits, and what it may call
 ;; ------------------------------------------------------------------

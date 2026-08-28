@@ -357,9 +357,9 @@ paints and reports no window worth painting into."
   "Someone already at the end does want the new output."
   (should (chat-ui-window-follows-p 4900 5000 nil 1 5000)))
 
-(ert-deftest chat-ui-a-window-just-short-of-the-end-still-follows ()
-  "Exactly at the end is too strict; a line or two of slack is not."
-  (should (chat-ui-window-follows-p 4900 4950 nil 1 5000))
+(ert-deftest chat-ui-a-window-just-short-of-the-end-does-not-follow ()
+  "Even one line above the end is an explicit manual reading position."
+  (should-not (chat-ui-window-follows-p 4900 4950 nil 1 5000))
   (should-not (chat-ui-window-follows-p 4900 4800 nil 1 5000)))
 
 (ert-deftest chat-ui-a-cursor-in-the-input-area-is-never-moved ()

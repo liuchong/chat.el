@@ -51,6 +51,8 @@
    ("列表" . "list")
    ("保存" . "save")
    ("清理" . "clear")
+   ("目标" . "goal")
+   ("规划" . "plan")
    ("知识库" . "wiki")
    ("审批" . "approve")
    ("自动" . "auto")))
@@ -81,6 +83,15 @@
   /list                 - 列出所有会话
   /save                 - 保存当前会话
   /clear                - 丢掉本会话的对话内容，会话本身保留
+  /goal                 - 查看持久目标及其停止条件
+  /goal <目标> :: <停止条件>
+                        - 为当前会话创建可跨轮恢复的 Goal
+  /goal pause|resume|cancel|clear
+                        - 显式控制 Goal 的暂停、恢复、取消和清除
+  /plan on              - 进入只读 Plan Mode，调研并形成执行计划
+  /plan approve         - 批准已提交计划并退出 Plan Mode
+  /plan reject <意见>   - 带反馈退回计划继续修订
+  /plan cancel          - 不批准计划并退出 Plan Mode
   M-x chat-session-tree-open - 以树形浏览已保存会话
   M-x chat-ui-checkpoint-list - 查看当前会话可恢复的检查点
   M-x chat-ui-checkpoint-create - 手动建立一个检查点
@@ -108,11 +119,12 @@
 按键：
   RET                   - 发送
   S-RET                 - 换行但不发送
-  C-g                   - 取消当前请求
+  C-g / C-c C-c         - 取消当前请求
   C-c C-n / C-c C-l     - 新建会话 / 列出会话
   C-c C-m               - 切换模型
   C-c C-e / C-c C-g     - 编辑上一条消息 / 重新生成上一条回复
   C-c C-s / C-c C-p     - 请求状态 / 请求面板
+  C-c C-z               - 进入只读 Plan Mode
   C-c C-o / C-c C-y     - 添加文件 / 粘贴剪贴板图片
   C-c C-x                - 移除待发送附件
   C-c C-t               - 切换本会话的自动批准
@@ -235,6 +247,7 @@ Wiki（/wiki <子命令>）：
    (part-tool-result . "工具结果")
    (part-progress . "过程")
    (tools-used . "用到的工具：%s")
+   (permission-blocked . "权限阻止了 %s：%s")
    (tool-loop-stopped . "工具调用达到安全上限，已停止。")
 
    ;; Status line.

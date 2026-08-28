@@ -9,19 +9,21 @@
 ## Current Phase
 
 The completed M0-M8 Agent Runtime foundation is now followed by the active
-M9-M17 coding reliability roadmap. The new work is governed by
+M9-M19 coding reliability roadmap. The new work is governed by
 `.agents/10-active/programming-capability-reliability-plan.md`: establish an
 isolated real-task Eval baseline first, then add runtime-owned versioned edits,
 semantic code intelligence and repo mapping, project verification with bounded
 repair, structured working context and scoped rules, durable TODO plans with a
 native progress UI, tested execution isolation, read-only review and
-conflict-safe coding subagents. M9-M16 implementations are complete. M17 has
+conflict-safe coding subagents. M9-M18 implementations are complete, including
+durable Goal contracts and independent read-only Plan Mode. M19 has
 productized phase status, actionable diagnostics, strict acceptance and the
-10,000-file performance path, but final acceptance is blocked by missing
-comparable M9/M17 live token evidence. Live runs use fresh immutable
-baseline/current campaign directories and acceptance rejects mixed
-configuration or implementation revisions. The fixed 30-task corpus includes
-one versioned `large-repo` task with 10,000 indexed source files. No
+10,000-file performance path. The immutable M9 baseline is complete with all
+150 expected terminal results; final acceptance is blocked by the missing
+comparable M19 current campaign and paired trusted-token evidence. Live runs
+use fresh immutable baseline/current campaign directories and acceptance
+rejects mixed configuration or implementation revisions. The fixed 30-task
+corpus includes one versioned `large-repo` task with 10,000 indexed source files. No
 capability becomes a default until the fixed task set shows that it does not
 reduce success, safety or responsiveness.
 

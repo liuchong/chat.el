@@ -166,6 +166,18 @@
   (should (commandp 'chat-set-model))
   (should (eq (lookup-key chat-mode-map (kbd "C-c C-m")) 'chat-set-model)))
 
+(ert-deftest chat-plan-mode-key-enters-through-the-public-ui-command ()
+  (should (commandp 'chat-ui-enter-plan-mode))
+  (should (eq (lookup-key chat-mode-map (kbd "C-c C-z"))
+              'chat-ui-enter-plan-mode)))
+
+(ert-deftest chat-cancel-has-the-conventional-chat-buffer-key ()
+  "A running response can be stopped without first consulting help."
+  (should (eq (lookup-key chat-mode-map (kbd "C-g"))
+              'chat-ui-cancel-response))
+  (should (eq (lookup-key chat-mode-map (kbd "C-c C-c"))
+              'chat-ui-cancel-response)))
+
 (defconst chat-test--help-key-regexp
   "\\bC-c \\(?:C-SPC\\|C-[a-zA-Z]\\|[a-zA-Z]\\)\\(?:\\s-\\|$\\)"
   "Matches a whole prefixed key sequence, not a prefix of one.

@@ -135,28 +135,40 @@
        (insert-file-contents source)
        (should (string= (buffer-string) document))))))
 
-(ert-deftest chat-work-session-records-persist-in-session-metadata ()
-  "Test plan, TODO, and goal records are session-local and durable."
+(ert-deftest chat-work-session-records-persist-and-legacy-goals-migrate ()
+  "Plan and TODO state persists while legacy goals migrate to one store."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (chat-tool-caller-current-session
            (chat-session-create "Work Records" 'kimi))
           (session-id (chat-session-id chat-tool-caller-current-session)))
      (chat-work-plan-enter "Investigate")
-     (let ((todo (chat-work-todo-add "Write tests"))
-           (goal (chat-work-goal-add "Ship stage")))
+     (let ((todo (chat-work-todo-add "Write tests")))
        (chat-work-todo-update (cdr (assoc 'id todo)) "done")
-       (chat-work-goal-update (cdr (assoc 'id goal)) "active"))
+       (let ((work (copy-tree (chat-work--state))))
+         (chat-session-metadata-set
+          chat-tool-caller-current-session 'work
+          (cons '(goals . [((id . "legacy-goal")
+                            (title . "Ship stage")
+                            (status . "active"))])
+                (assq-delete-all 'goals work)))))
+     (should-error (chat-work-goal-add "Incomplete contract"))
+     (should-error (chat-work-goal-update "legacy-goal" "active"))
+     (let ((goals (chat-work-goal-list)))
+       (should (= (length goals) 1))
+       (should (string= (cdr (assoc 'status (car goals))) "paused")))
      (chat-session-save chat-tool-caller-current-session)
      (let* ((loaded (chat-session-load session-id))
             (work (chat-work--normalize-json
-                   (cdr (assoc 'work (chat-session-metadata loaded))))))
+                   (cdr (assoc 'work (chat-session-metadata loaded)))))
+            (goal (car (chat-goal-list loaded))))
        (should (string= (cdr (assoc 'title (cdr (assoc 'plan work))))
                         "Investigate"))
        (should (string= (cdr (assoc 'status (car (cdr (assoc 'todos work)))))
                         "done"))
-       (should (string= (cdr (assoc 'status (car (cdr (assoc 'goals work)))))
-                        "active"))))))
+       (should-not (cdr (assoc 'goals work)))
+       (should (eq (chat-goal-status goal) 'paused))
+       (should (chat-goal--get (chat-goal-metadata goal) 'legacy))))))
 
 (ert-deftest chat-work-workflow-records-are-declarative-and-cancellable ()
   "Test workflow records store JSON steps without evaluating Lisp."

@@ -117,6 +117,8 @@ Returns the list of files that were loaded."
   (require 'chat-memory)
   (require 'chat-work-context)
 (require 'chat-work-plan)
+(require 'chat-goal)
+(require 'chat-plan-mode)
 (require 'chat-project)
 (require 'chat-stream)
 (require 'chat-context)
@@ -275,6 +277,15 @@ Sessions:
   /list                 - List all sessions
   /save                 - Save current session
   /clear                - Discard this conversation, keeping the session
+  /goal                 - Show the durable objective and its stopping condition
+  /goal <objective> :: <condition>
+                        - Create a persistent Goal for this session
+  /goal pause|resume|cancel|clear
+                        - Control the Goal lifecycle explicitly
+  /plan on              - Enter read-only Plan Mode for research and planning
+  /plan approve         - Approve the submitted plan and leave Plan Mode
+  /plan reject <note>   - Return the plan for revision with feedback
+  /plan cancel          - Cancel Plan Mode without approving the plan
   M-x chat-session-tree-open - Browse saved sessions as a tree
   M-x chat-ui-checkpoint-list - Inspect recoverable session checkpoints
   M-x chat-ui-checkpoint-create - Create an explicit checkpoint
@@ -305,11 +316,12 @@ punctuation.
 Keys:
   RET                   - Send
   S-RET                 - New line without sending
-  C-g                   - Cancel the current request
+  C-g / C-c C-c         - Cancel the current request
   C-c C-n / C-c C-l     - New session / list sessions
   C-c C-m               - Switch model
   C-c C-e / C-c C-g     - Edit last message / regenerate last response
   C-c C-s / C-c C-p     - Request status / request panel
+  C-c C-z               - Enter read-only Plan Mode
   C-c C-o / C-c C-y     - Attach a file / paste a clipboard image
   C-c C-x                - Remove a staged attachment
   C-c C-t               - Toggle auto-approval for this session
@@ -685,6 +697,10 @@ somewhere else is the same as advice that is wrong."
     (define-key map (kbd "S-RET") 'chat-ui-insert-newline)
     (define-key map (kbd "C-j") 'chat-ui-insert-newline)
     (define-key map (kbd "C-g") 'chat-ui-cancel-response)
+    ;; `C-c C-c' is the conventional "stop what this mode is doing" key.
+    ;; Keep `C-g' as the shortest route, but do not make cancellation depend
+    ;; on the reader having first opened the help buffer.
+    (define-key map (kbd "C-c C-c") 'chat-ui-cancel-response)
     ;; Completion is the point of the command and path tables; without a
     ;; key it was reachable only through `M-x'.
     (define-key map (kbd "TAB") 'completion-at-point)
@@ -699,6 +715,7 @@ somewhere else is the same as advice that is wrong."
     ;; Watching a run.
     (define-key map (kbd "C-c C-s") 'chat-show-current-request-status)
     (define-key map (kbd "C-c C-p") 'chat-ui-toggle-request-panel)
+    (define-key map (kbd "C-c C-z") 'chat-ui-enter-plan-mode)
     ;; Typed attachments stay beside the draft until a recorded send owns
     ;; them.  Preview remains an M-x command because it prompts for any
     ;; staged or recorded attachment rather than acting on point.

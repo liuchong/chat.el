@@ -35,6 +35,8 @@
 (declare-function chat-execution-record-request "chat-execution" (record))
 (declare-function chat-execution-request-session-id "chat-execution" (request))
 (declare-function chat-execution-request-task-id "chat-execution" (request))
+(declare-function chat-goal-link-plan "chat-goal"
+                  (session plan-id &optional message))
 
 (defgroup chat-work-plan nil
   "Durable plans for substantial Agent work."
@@ -69,7 +71,8 @@
 (defconst chat-work-plan-skip-reasons
   '(answer-only read-only single-bounded-action))
 (defconst chat-work-plan--internal-tool-prefixes
-  '("programming_plan_" "programming_work_note_" "programming_context_"))
+  '("programming_goal_" "programming_plan_" "programming_work_note_"
+    "programming_context_"))
 (defconst chat-work-plan--governed-tools
   '("programming_verification_run" "work_task_start" "work_workflow_start"
     "agent_spawn" "child_agent_start"))
@@ -341,6 +344,14 @@
         (evidenceIds . ,(vconcat (or (chat-work-plan-item-evidence item) nil)))))
     extra)))
 
+(defun chat-work-plan--notify-goal (session plan event)
+  "Record PLAN lifecycle EVENT in SESSION's selected Goal, if active."
+  (when (fboundp 'chat-goal-link-plan)
+    (chat-goal-link-plan
+     session (chat-work-plan-id plan)
+     (format "Work plan lifecycle event: %s at revision %d."
+             event (chat-work-plan-revision plan)))))
+
 (defun chat-work-plan--active-task-id (session)
   "Return SESSION's foreground task id."
   (or (chat-session-metadata-get session 'activeTaskId)
@@ -382,6 +393,7 @@
         (signal 'chat-work-plan-invalid '("an active plan already exists"))))
     (chat-work-plan--replace session plan)
     (chat-work-plan--emit 'plan-created plan)
+    (chat-work-plan--notify-goal session plan 'created)
     plan))
 
 (defun chat-work-plan-find (session plan-id)
@@ -410,7 +422,8 @@
       (chat-work-plan--metadata-set plan 'runtimeId chat-work-plan--runtime-id)
       (chat-work-plan--replace session plan)
       (chat-work-plan--emit 'plan-item-blocked plan item
-                            '((reason . "interrupted")))))
+                            '((reason . "interrupted")))
+      (chat-work-plan--notify-goal session plan 'interrupted)))
   plan)
 
 (defun chat-work-plan-current (session &optional recover)
@@ -603,6 +616,7 @@
        (when blocker-reason '((hasReason . t))))
       (when (eq (chat-work-plan-status plan) 'completed)
         (chat-work-plan--emit 'plan-completed plan))
+      (chat-work-plan--notify-goal session plan status)
       plan)))
 
 (defun chat-work-plan-resume (session plan-id expected-revision)
@@ -625,6 +639,7 @@
     (chat-work-plan--metadata-set plan 'runtimeId chat-work-plan--runtime-id)
     (chat-work-plan--replace session plan)
     (chat-work-plan--emit 'plan-resumed plan)
+    (chat-work-plan--notify-goal session plan 'resumed)
     plan))
 
 (defun chat-work-plan-cancel (session plan-id expected-revision)
@@ -640,6 +655,7 @@
           (chat-work-plan-updated-at plan) (chat-work-plan--now))
     (chat-work-plan--replace session plan)
     (chat-work-plan--emit 'plan-cancelled plan)
+    (chat-work-plan--notify-goal session plan 'cancelled)
     plan))
 
 (cl-defun chat-work-plan-update-future
@@ -678,6 +694,7 @@ Started, completed, blocked and skipped items are immutable history."
        'plan-updated plan nil
        `((preservedItemCount . ,(length fixed))
          (futureItemCount . ,(length future))))
+      (chat-work-plan--notify-goal session plan 'updated)
       plan)))
 
 (cl-defun chat-work-plan-skip
@@ -709,6 +726,7 @@ Started, completed, blocked and skipped items are immutable history."
     (chat-work-plan--emit 'plan-skipped plan nil
                           `((reason . ,(symbol-name reason))
                             (toolName . ,tool-name)))
+    (chat-work-plan--notify-goal session plan 'skipped)
     plan))
 
 (defun chat-work-plan--internal-call-p (name)

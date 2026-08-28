@@ -23,6 +23,8 @@
 - Plan history can consume context or stale evidence can be repeated every turn.
 - A platform sandbox API can disappear or change behavior after an OS update.
 - Compiler shims can hide filesystem and environment requirements from argv inspection.
+- A durable Goal can loop indefinitely, leak across project scope or be marked complete from model prose.
+- Plan Mode can become prompt-only ceremony if a tool bypasses its execution-boundary effect gate.
 
 ## Mitigations
 
@@ -41,6 +43,8 @@
 - Project only the bounded active slice and evidence added after the prior revision.
 - Probe isolation in the foreground at startup and report unavailable rather than falling back.
 - Resolve measured tool shims to real binaries and derive SDK paths without widening write roots.
+- Bound Goal continuation, preserve scope on every projection/mutation and require known scoped evidence for deterministic completion.
+- Gate every tool call while Plan Mode is active, fail closed on unknown effects and bind approval to the exact submitted plan revision.
 
 ## Governing Plan
 

@@ -1446,14 +1446,15 @@ is a tail that would be redrawn from the start on every piece."
   :group 'chat-markdown)
 
 (defun chat-markdown-render-tail (tail &optional base-face)
-  "Return TAIL rendered over BASE-FACE, or plainly faced when too long.
+  "Return TAIL rendered over BASE-FACE with bounded streaming detail.
 
 For the streaming path, which redraws the unfinished block each time
-something arrives.  Degrading rather than rendering keeps that bounded;
-the block is rendered properly once it finishes, which is when its
-styling stops changing anyway."
+something arrives.  A long unfinished block skips block layout but keeps
+the linear inline renderer, so emphasis such as **status** does not turn
+back into raw source while the model is still answering.  The complete
+block receives full layout once it finishes."
   (if (> (length tail) chat-markdown-streaming-tail-max-chars)
-      (if base-face (propertize tail 'face base-face) tail)
+      (chat-markdown--inline tail base-face)
     (chat-markdown-render tail base-face)))
 
 (defun chat-markdown--block-finished-p (kind lines end count)
