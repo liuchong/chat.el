@@ -1,50 +1,46 @@
 # Stage Plan
 
 - Type: progress
-- Attention: reference
-- Status: complete
-- Scope: agent-runtime
-- Tags: stage, plan, termini, bridge, integration
+- Attention: active
+- Status: active
+- Scope: coding-agent-reliability
+- Tags: stage, plan, coding, evaluation, verification, safety
 
 ## Goal
 
-Deliver M8: a versioned `termini.el` bridge between the local Agent Runtime and
-the Termini platform without making either side depend on the other's UI or
-process internals.
+Deliver M9-M15 as an evidence-driven improvement of coding task success,
+without replacing the completed M0-M8 runtime contracts or creating parallel
+session, task, event, checkpoint, workspace, execution, Trace or Eval stores.
 
-## Completed
+The detailed design, construction order, test matrix and acceptance thresholds
+are in `programming-capability-reliability-plan.md`.
+
+## Completed Foundation
 
 - M0-M6 lifecycle, capability, extension, task, content and recovery contracts
 - M7 attributable memory, derived Trace reconstruction and deterministic evals
 - M8 versioned App Server bridge and optional `termini.el` entry point
-- native RuntimeSession, job, tail, cancellation and attachment controls
-- deterministic offline protocol fixtures and foreground live handshake
-- canonical verification at 1539/1539
+- current canonical verification at 1567/1567
 
-## Execution Record
+## Active Stages
 
-1. Inspected the App Server protocol and fixed the runtime ownership boundary.
-2. Added Decision 0026 and Spec 020 before transport implementation.
-3. Implemented bounded JSONL framing, correlation, capabilities and reconnect.
-4. Added RuntimeSession, message, job, tail and attachment projections.
-5. Added explicit local session binding without mirroring remote tasks.
-6. Added the optional root entry point and native session/job views.
-7. Ran deterministic fixtures, a foreground live handshake and the canonical
-   suite.
+1. M9: isolated real coding Eval baseline
+2. M10: runtime-owned file read set and stale-write refusal
+3. M11: semantic code-intelligence facade and deterministic repo map
+4. M12: project verification plans and bounded repair
+5. M13: capability-tested execution isolation backends
+6. M14: read-only Review Agent and conflict-safe coding subagents
+7. M15: rollout, performance verification and final acceptance
 
-## Risks
+## Immediate Next Action
 
-- A bridge can accidentally become a second task database instead of an
-  adapter over runtime-owned state.
-- Retries can duplicate remote work unless request identity and terminal
-  idempotence are explicit before transport implementation.
-- Reconnect can confuse stale progress with current state if revisions and
-  ordering are absent.
-- Artifact transfer must remain bounded and referenced rather than embedding
-  large or sensitive payloads in lifecycle records.
+Start M9 by freezing the 30-task manifest contract, fixture ownership rules,
+deterministic judges and immutable result projection before running a model.
+No later default may be enabled until its effect is measurable against that
+baseline.
 
-## Result
+## Stage Gate
 
-The M0-M8 Agent Runtime roadmap is complete. Future transport or product work
-must preserve Decision 0026's single-owner state rule and extend the negotiated
-bridge rather than reading Termini persistence directly.
+A stage is complete only when its own exit criteria, relevant regression tests
+and the canonical suite pass. Commit it immediately as one independently
+verifiable stage and record the commands, measurements and remaining work.

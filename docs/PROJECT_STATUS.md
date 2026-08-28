@@ -11,7 +11,7 @@ Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/too
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
-The Agent Runtime roadmap is active. M0 through M5 are complete: a versioned
+The Agent Runtime roadmap M0 through M8 is complete: a versioned
 lifecycle event contract now unifies runtime hooks and session-scoped audit for
 turns, prompts, tools, permissions, compaction, background tasks and child
 agents. Model capabilities now resolve from explicit versioned facts, and
@@ -22,7 +22,12 @@ background commands, workflows and subagents now share one durable task state
 machine, bounded resource scheduler, parent/child cancellation contract and
 native tree/detail view. Typed image and file content now persists through a
 content-addressed attachment store, capability preflight and provider-specific
-wire adapters. M6 adds checkpoints, worktrees and execution backends next.
+wire adapters. Checkpoints, owned worktrees, execution backends, attributable
+memory, derived Trace reconstruction, deterministic evaluations and the optional
+versioned App Server bridge are implemented. The active M9-M15 roadmap now
+targets measured coding reliability: real-task evaluation, versioned edits,
+semantic code intelligence, automatic verification, execution isolation,
+read-only review and conflict-safe coding subagents.
 
 ## Implemented Areas
 
@@ -172,8 +177,8 @@ wire adapters. M6 adds checkpoints, worktrees and execution backends next.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1466 regression tests discovered
-- 1466 passing
+- 1567 regression tests discovered
+- 1567 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

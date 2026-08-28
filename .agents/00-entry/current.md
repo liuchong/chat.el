@@ -8,6 +8,15 @@
 
 ## Current Phase
 
+The completed M0-M8 Agent Runtime foundation is now followed by the active
+M9-M15 coding reliability roadmap. The new work is governed by
+`.agents/10-active/programming-capability-reliability-plan.md`: establish an
+isolated real-task Eval baseline first, then add runtime-owned versioned edits,
+semantic code intelligence and repo mapping, project verification with bounded
+repair, tested execution isolation, read-only review and conflict-safe coding
+subagents. No capability becomes a default until the fixed task set shows that
+it does not reduce success, safety or responsiveness.
+
 M0 through M8 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes the foundational contracts and Spec 014 orders their delivery through
 M8 so later features depend on runtime boundaries rather than provider, UI or
@@ -58,7 +67,7 @@ second remote state store. Native session and job views read only through the
 bridge. Loading `chat.el` alone neither loads the integration nor starts a
 sidecar.
 
-The canonical offline suite passes 1539/1539. A separate foreground live smoke
+The canonical offline suite passes 1567/1567. A separate foreground live smoke
 negotiated protocol `2026-07-08`, read RuntimeSessions, shut down cleanly and
 left no App Server process behind.
 
@@ -142,7 +151,7 @@ behaviour in ways that cannot be measured from here. JSON keys, tool
 names, patch envelopes and fence languages are never translated at either
 setting, since a parser matches them literally.
 
-Canonical suite: 1511 tests passing.
+Canonical suite: 1567 tests passing.
 
 The prompt says which provider it will reach, not just which command
 holds the line (spec 007). An unclaimed line carries the provider's mark
