@@ -42,6 +42,11 @@
   :type 'number
   :group 'chat-repo-map)
 
+(defcustom chat-repo-map-query-cache-size 64
+  "Maximum warm query results retained for one repository revision."
+  :type 'integer
+  :group 'chat-repo-map)
+
 (defcustom chat-repo-map-score-weights
   '((query-path . 80)
     (query-symbol . 120)
@@ -67,7 +72,7 @@
   path digest size language symbols imports test-p skipped-reason updated-at)
 
 (cl-defstruct chat-repo-map
-  root revision entries adjacency state callbacks last-result)
+  root revision entries adjacency query-cache state callbacks last-result)
 
 (defvar chat-repo-map--cache (make-hash-table :test 'equal))
 
@@ -89,6 +94,7 @@
                 :root root :revision "empty"
                 :entries (make-hash-table :test 'equal)
                 :adjacency (make-hash-table :test 'equal)
+                :query-cache (make-hash-table :test 'equal)
                 :state 'cold :callbacks nil)))
           (puthash root created chat-repo-map--cache)
           created))))
@@ -212,9 +218,14 @@ function removes CALLBACK from the waiter list."
             (edges-rebuilt 0)
             (slice-count 0)
             (max-slice-ms 0.0)
+            (max-slice-wall-ms 0.0)
+            (max-slice-gc-ms 0.0)
+            max-slice-phase
             timer)
         (cl-labels
             ((finish ()
+               (when-let ((cache (chat-repo-map-query-cache map)))
+                 (clrhash cache))
                (setf (chat-repo-map-entries map) entries
                      (chat-repo-map-adjacency map) adjacency
                      (chat-repo-map-revision map) (chat-repo-map--revision entries)
@@ -225,7 +236,10 @@ function removes CALLBACK from the waiter list."
                             :files (hash-table-count entries)
                             :changed changed :removed removed :skipped skipped
                             :edges-rebuilt edges-rebuilt
-                            :slices slice-count :max-slice-ms max-slice-ms)))
+                            :slices slice-count :max-slice-ms max-slice-ms
+                            :max-slice-wall-ms max-slice-wall-ms
+                            :max-slice-gc-ms max-slice-gc-ms
+                            :max-slice-phase max-slice-phase)))
                  (setf (chat-repo-map-last-result map)
                        (plist-put result :completed-at (float-time)))
                  (let ((callbacks (nreverse (chat-repo-map-callbacks map))))
@@ -298,22 +312,31 @@ function removes CALLBACK from the waiter list."
                  ('stems
                   (setq phase 'edges
                         phase-queue nil)
-                  (maphash (lambda (path _)
-                             (puthash (chat-repo-map--stem path) t changed-stems))
-                           changed-paths)
-                  (maphash (lambda (path _)
-                             (puthash (chat-repo-map--stem path) t changed-stems))
-                           removed-paths)
-                  (maphash (lambda (path entry)
-                             (when (affected-path-p path entry)
-                               (push path phase-queue)))
-                           entries)
-                  (setq phase-queue (sort phase-queue #'string<)))
+                  (if (= changed (hash-table-count entries))
+                      ;; A cold build changed every entry, so every edge is
+                      ;; affected.  Scanning all entries again to prove that
+                      ;; made the phase-transition slice exceed its UI budget.
+                      (setq phase-queue (hash-table-keys entries))
+                    (maphash (lambda (path _)
+                               (puthash (chat-repo-map--stem path) t changed-stems))
+                             changed-paths)
+                    (maphash (lambda (path _)
+                               (puthash (chat-repo-map--stem path) t changed-stems))
+                             removed-paths)
+                    (maphash (lambda (path entry)
+                               (when (affected-path-p path entry)
+                                 (push path phase-queue)))
+                             entries)
+                    (setq phase-queue (sort phase-queue #'string<))))
                  ('edges (setq phase 'done))))
              (step ()
                (let* ((started (float-time))
+                      (cpu-started (float-time (current-cpu-time)))
+                      (gc-started (float-time gc-elapsed))
+                      (slice-phase phase)
                       (deadline (+ started (/ chat-repo-map-slice-milliseconds 1000.0)))
-                      (processed 0))
+                      (processed 0)
+                      cpu-ms gc-ms)
                  (cl-incf slice-count)
                  (while (and (< (float-time) deadline)
                              (< processed chat-repo-map-max-items-per-slice)
@@ -326,8 +349,21 @@ function removes CALLBACK from the waiter list."
                       (if phase-queue (build-stem (pop phase-queue)) (advance-phase)))
                      ('edges
                       (if phase-queue (resolve-edges (pop phase-queue)) (advance-phase)))))
-                 (setq max-slice-ms
-                       (max max-slice-ms (* 1000.0 (- (float-time) started))))
+                 (setq gc-ms (* 1000.0 (- (float-time gc-elapsed) gc-started))
+                       cpu-ms
+                       (max 0.0
+                            (- (* 1000.0
+                                  (- (float-time (current-cpu-time))
+                                     cpu-started))
+                               gc-ms))
+                       max-slice-gc-ms (max max-slice-gc-ms gc-ms))
+                 (when (> cpu-ms max-slice-ms)
+                   (setq max-slice-ms cpu-ms
+                         max-slice-phase slice-phase))
+                 (setq
+                       max-slice-wall-ms
+                       (max max-slice-wall-ms
+                            (* 1000.0 (- (float-time) started))))
                  (if (eq phase 'done)
                      (finish)
                    (setq timer (run-at-time 0 nil #'step))))))
@@ -366,6 +402,34 @@ function removes CALLBACK from the waiter list."
           (split-string (downcase (or query "")) "[^[:alnum:]_]+" t)))
         #'string<))
 
+(defun chat-repo-map--canonical-set (paths)
+  "Return a canonical-path set for PATHS."
+  (let ((set (make-hash-table :test 'equal)))
+    (dolist (path paths set)
+      (when-let ((canonical (chat-repo-map--canonical-candidate path)))
+        (puthash canonical t set)))))
+
+(defun chat-repo-map--prepare-request (request)
+  "Return REQUEST with query-wide ranking inputs computed once."
+  (let* ((prepared (copy-sequence request))
+         (focus (chat-repo-map--canonical-candidate
+                 (plist-get request :focus-file))))
+    (setq prepared
+          (plist-put prepared :prepared-query-terms
+                     (chat-repo-map--query-terms
+                      (plist-get request :query))))
+    (setq prepared (plist-put prepared :prepared-focus focus))
+    (setq prepared
+          (plist-put prepared :prepared-focus-stem
+                     (and focus (chat-repo-map--stem focus))))
+    (setq prepared
+          (plist-put prepared :prepared-changed
+                     (chat-repo-map--canonical-set
+                      (or (plist-get request :changed-files) nil))))
+    (plist-put prepared :prepared-diagnostics
+               (chat-repo-map--canonical-set
+                (or (plist-get request :diagnostic-paths) nil)))))
+
 (defun chat-repo-map--score-entry (map entry request)
   "Return score and reasons for ENTRY in MAP under REQUEST."
   (let* ((path (chat-repo-map-entry-path entry))
@@ -374,13 +438,11 @@ function removes CALLBACK from the waiter list."
           (downcase
            (mapconcat #'chat-code-symbol-name
                       (chat-repo-map-entry-symbols entry) " ")))
-         (terms (chat-repo-map--query-terms (plist-get request :query)))
-         (focus (chat-repo-map--canonical-candidate
-                 (plist-get request :focus-file)))
-         (changed (delq nil (mapcar #'chat-repo-map--canonical-candidate
-                                    (or (plist-get request :changed-files) nil))))
-         (diagnostics (delq nil (mapcar #'chat-repo-map--canonical-candidate
-                                        (or (plist-get request :diagnostic-paths) nil))))
+         (terms (plist-get request :prepared-query-terms))
+         (focus (plist-get request :prepared-focus))
+         (focus-stem (plist-get request :prepared-focus-stem))
+         (changed (plist-get request :prepared-changed))
+         (diagnostics (plist-get request :prepared-diagnostics))
          (score 0)
          reasons)
     (dolist (term terms)
@@ -396,15 +458,15 @@ function removes CALLBACK from the waiter list."
     (when (and focus (member path (gethash focus (chat-repo-map-adjacency map))))
       (cl-incf score (chat-repo-map--weight 'focus-adjacent))
       (push 'focus-adjacent reasons))
-    (when (member path changed)
+    (when (gethash path changed)
       (cl-incf score (chat-repo-map--weight 'changed))
       (push 'changed reasons))
-    (when (member path diagnostics)
+    (when (gethash path diagnostics)
       (cl-incf score (chat-repo-map--weight 'diagnostic))
       (push 'diagnostic reasons))
     (when (and focus
                (not (string= path focus))
-               (string= (chat-repo-map--stem path) (chat-repo-map--stem focus))
+               (string= (chat-repo-map--stem path) focus-stem)
                (or (chat-repo-map-entry-test-p entry)
                    (chat-repo-map--test-file-p focus)))
       (cl-incf score (chat-repo-map--weight 'test-relation))
@@ -413,6 +475,56 @@ function removes CALLBACK from the waiter list."
                       (/ (chat-repo-map-entry-size entry) 1024)))
     (cons score (sort (delete-dups reasons)
                       (lambda (a b) (string< (symbol-name a) (symbol-name b)))))))
+
+(defun chat-repo-map--query-uncached (map request)
+  "Rank MAP entries according to prepared REQUEST."
+  (let ((candidates nil)
+        (prepared-request (chat-repo-map--prepare-request request))
+        (budget (or (plist-get request :token-budget) 4000))
+        (limit (or (plist-get request :limit) 10))
+        (used 0)
+        (selected nil)
+        (excluded 0)
+        (seen (make-hash-table :test 'equal)))
+    (maphash
+     (lambda (_path entry)
+       (unless (chat-repo-map-entry-skipped-reason entry)
+         (let ((score (chat-repo-map--score-entry
+                       map entry prepared-request)))
+           (push (list :path (chat-repo-map-entry-path entry)
+                       :score (car score)
+                       :reasons (cdr score)
+                       :token-cost (max 1 (/ (chat-repo-map-entry-size entry) 4))
+                       :language (chat-repo-map-entry-language entry)
+                       :symbols (mapcar #'chat-code-symbol-name
+                                        (chat-repo-map-entry-symbols entry)))
+                 candidates))))
+     (chat-repo-map-entries map))
+    (setq candidates
+          (sort candidates
+                (lambda (a b)
+                  (if (= (plist-get a :score) (plist-get b :score))
+                      (string< (plist-get a :path) (plist-get b :path))
+                    (> (plist-get a :score) (plist-get b :score))))))
+    (dolist (item candidates)
+      (let ((path (plist-get item :path))
+            (cost (plist-get item :token-cost)))
+        (if (or (>= (length selected) limit)
+                (gethash path seen)
+                (> (+ used cost) budget))
+            (cl-incf excluded)
+          (puthash path t seen)
+          (cl-incf used cost)
+          (push item selected))))
+    (list :status (if selected 'ok 'empty)
+          :revision (chat-repo-map-revision map)
+          :items (nreverse selected)
+          :diagnostics `((state . ,(chat-repo-map-state map))
+                         (token-budget . ,budget)
+                         (token-used . ,used)
+                         (excluded . ,excluded)
+                         (truncation-reason . ,(and (> excluded 0)
+                                                   'budget-or-limit))))))
 
 (defun chat-repo-map-query (root request)
   "Rank warm repo map entries for ROOT according to REQUEST.
@@ -423,51 +535,21 @@ REQUEST accepts `:query', `:focus-file', `:changed-files',
     (if (or (null map) (eq (chat-repo-map-state map) 'cold))
         (list :status 'unavailable :revision "none" :items nil
               :diagnostics '((reason . cold-cache)))
-      (let ((candidates nil)
-            (budget (or (plist-get request :token-budget) 4000))
-            (limit (or (plist-get request :limit) 10))
-            (used 0)
-            (selected nil)
-            (excluded 0)
-            (seen (make-hash-table :test 'equal)))
-        (maphash
-         (lambda (_path entry)
-           (unless (chat-repo-map-entry-skipped-reason entry)
-             (let ((score (chat-repo-map--score-entry map entry request)))
-               (push (list :path (chat-repo-map-entry-path entry)
-                           :score (car score)
-                           :reasons (cdr score)
-                           :token-cost (max 1 (/ (chat-repo-map-entry-size entry) 4))
-                           :language (chat-repo-map-entry-language entry)
-                           :symbols (mapcar #'chat-code-symbol-name
-                                            (chat-repo-map-entry-symbols entry)))
-                     candidates))))
-         (chat-repo-map-entries map))
-        (setq candidates
-              (sort candidates
-                    (lambda (a b)
-                      (if (= (plist-get a :score) (plist-get b :score))
-                          (string< (plist-get a :path) (plist-get b :path))
-                        (> (plist-get a :score) (plist-get b :score))))))
-        (dolist (item candidates)
-          (let ((path (plist-get item :path))
-                (cost (plist-get item :token-cost)))
-            (if (or (>= (length selected) limit)
-                    (gethash path seen)
-                    (> (+ used cost) budget))
-                (cl-incf excluded)
-              (puthash path t seen)
-              (cl-incf used cost)
-              (push item selected))))
-        (list :status (if selected 'ok 'empty)
-              :revision (chat-repo-map-revision map)
-              :items (nreverse selected)
-              :diagnostics `((state . ,(chat-repo-map-state map))
-                             (token-budget . ,budget)
-                             (token-used . ,used)
-                             (excluded . ,excluded)
-                             (truncation-reason . ,(and (> excluded 0)
-                                                       'budget-or-limit))))))))
+      (let* ((cache (or (chat-repo-map-query-cache map)
+                        (setf (chat-repo-map-query-cache map)
+                              (make-hash-table :test 'equal))))
+             (key (secure-hash
+                   'sha256
+                   (prin1-to-string
+                    (list (chat-repo-map-revision map) request))))
+             (cached (gethash key cache)))
+        (if cached
+            (copy-tree cached)
+          (when (>= (hash-table-count cache) chat-repo-map-query-cache-size)
+            (clrhash cache))
+          (let ((result (chat-repo-map--query-uncached map request)))
+            (puthash key (copy-tree result) cache)
+            result))))))
 
 (provide 'chat-repo-map)
 ;;; chat-repo-map.el ends here

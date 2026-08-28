@@ -126,7 +126,8 @@
      (setq result (chat-test-repo-map--refresh temp-dir 30.0))
      (should result)
      (should (= (plist-get result :files) 10000))
-     (should (<= (plist-get result :max-slice-ms) 50.0))
+     (ert-info ((format "refresh result: %S" result))
+       (should (<= (plist-get result :max-slice-ms) 50.0)))
      (dotimes (_ 20)
        (let ((started (float-time)))
          (chat-repo-map-query
