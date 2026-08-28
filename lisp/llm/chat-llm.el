@@ -543,6 +543,79 @@ does not authorize adding a provider-specific request field."
                    (list "-H" (format "%s: %s" (car header) (cdr header))))
                  headers)))
 
+(defun chat-llm--curl-config-escape (value)
+  "Escape VALUE for one double-quoted curl config argument."
+  (let ((text (format "%s" value)))
+    (setq text (replace-regexp-in-string "\\\\" "\\\\\\\\" text t t))
+    (setq text (replace-regexp-in-string "\"" "\\\\\"" text t t))
+    (setq text (replace-regexp-in-string "\r" "\\\\r" text t t))
+    (setq text (replace-regexp-in-string "\n" "\\\\n" text t t))
+    (setq text (replace-regexp-in-string "\t" "\\\\t" text t t))
+    text))
+
+(defun chat-llm--curl-config-option (name value)
+  "Return curl config option NAME with quoted VALUE."
+  (format "%s = \"%s\"\n" name (chat-llm--curl-config-escape value)))
+
+(defun chat-llm--curl-post-config (url headers &optional stream include)
+  "Return a curl config for posting to URL with HEADERS.
+
+STREAM requests disable output buffering.  INCLUDE requests retain response
+headers for the non-streaming HTTP parser.  Authentication belongs in this
+config, never in the process command line."
+  (when (string-match-p "[\r\n]" url)
+    (error "Request URL contains a newline"))
+  (dolist (header headers)
+    (when (or (string-match-p "[\r\n]" (format "%s" (car header)))
+              (string-match-p "[\r\n]" (format "%s" (cdr header))))
+      (error "Request header contains a newline")))
+  (concat
+   "silent\nshow-error\n"
+   (when stream "no-buffer\n")
+   (when include "include\n")
+   (chat-llm--curl-config-option "request" "POST")
+   (mapconcat
+    (lambda (header)
+      (chat-llm--curl-config-option
+       "header" (format "%s: %s" (car header) (cdr header))))
+    headers "")
+   (chat-llm--curl-config-option "url" url)))
+
+(defun chat-llm--make-curl-config-file (config)
+  "Write CONFIG to a private temporary file and return its path."
+  (let ((file (make-temp-file "chat-curl-" nil ".conf")))
+    (condition-case err
+        (progn
+          (let ((coding-system-for-write 'utf-8-unix))
+            (write-region config nil file nil 'silent))
+          (set-file-modes file #o600)
+          file)
+      (error
+       (when (file-exists-p file)
+         (delete-file file))
+       (signal (car err) (cdr err))))))
+
+(defun chat-llm--delete-curl-config-file (file)
+  "Delete private curl config FILE when it still exists."
+  (when (and (stringp file) (file-exists-p file))
+    (condition-case err
+        (delete-file file)
+      (file-error
+       (chat-log "[CURL] Failed to delete private config: %s"
+                 (error-message-string err))))))
+
+(defun chat-llm--cleanup-curl-config (process)
+  "Delete PROCESS's private curl config and clear its reference."
+  (when process
+    (let ((file (process-get process 'chat-curl-config-file)))
+      (process-put process 'chat-curl-config-file nil)
+      (chat-llm--delete-curl-config-file file))))
+
+(defun chat-llm--send-curl-body (process body)
+  "Send request BODY to curl PROCESS and close its input pipe."
+  (process-send-string process (encode-coding-string body 'utf-8))
+  (process-send-eof process))
+
 (defun chat-llm--post-sync (url headers body timeout-secs)
   "Make synchronous POST request to URL with TIMEOUT-SECS.
 
@@ -673,23 +746,19 @@ ERROR receives a string message."
   "Make asynchronous POST request to URL with curl.
 SUCCESS receives RAW-BODY and STATUS-CODE.
 ERROR receives a string message."
-  (let* ((request-buffer (generate-new-buffer " *chat-llm-curl*"))
-         (user-agent (chat-llm--header-value headers "User-Agent"))
-         (curl-args
-          (append
-           (list "-s" "-S" "-i"
-                 "-X" "POST")
-           (chat-llm--curl-args-for-headers
-            (if user-agent
-                (assoc-delete-all "User-Agent" headers)
-              headers))
-           (list "--data-binary" body)
-           (when user-agent
-             (list "-A" user-agent))
-           (list url)))
+  (let* ((curl (or (executable-find "curl")
+                   (error "curl executable not found in PATH")))
+         (request-buffer (generate-new-buffer " *chat-llm-curl*"))
+         (curl-config (chat-llm--curl-post-config url headers nil t))
+         (curl-config-file (chat-llm--make-curl-config-file curl-config))
+         (curl-command
+          (list curl "--config" curl-config-file
+                "--data-binary" "@-"))
+         (process nil)
          (sentinel
           (lambda (proc event)
             (when (memq (process-status proc) '(exit signal))
+              (chat-llm--cleanup-curl-config proc)
               (let ((response-buffer (process-buffer proc)))
                 (when (buffer-live-p response-buffer)
                   (with-current-buffer response-buffer
@@ -737,14 +806,22 @@ ERROR receives a string message."
           timeout-secs))))
     (condition-case err
         (progn
-          (make-process
-           :name "chat-llm-curl"
-           :buffer request-buffer
-           :command (cons "curl" curl-args)
-           :noquery t
-           :sentinel sentinel)
+          (setq process
+                (make-process
+                 :name "chat-llm-curl"
+                 :buffer request-buffer
+                 :command curl-command
+                 :coding 'binary
+                 :connection-type 'pipe
+                 :noquery t
+                 :sentinel sentinel))
+          (process-put process 'chat-curl-config-file curl-config-file)
+          (chat-llm--send-curl-body process body)
           request-buffer)
       (error
+       (when (and process (process-live-p process))
+         (delete-process process))
+       (chat-llm--delete-curl-config-file curl-config-file)
        (when (buffer-live-p request-buffer)
          (kill-buffer request-buffer))
        (signal (car err) (cdr err))))))

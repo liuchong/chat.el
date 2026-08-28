@@ -77,7 +77,8 @@ that terminate visible work."
     ((or 'instruction-graph-observed 'context-bundle-built
          'fragment-selected 'fragment-omitted 'code-intel-query-started
          'code-intel-query-completed 'code-intel-query-failed
-         'repo-map-updated 'file-observed 'stream-chunk 'stream-reasoning)
+         'repo-map-updated 'file-observed 'stream-chunk 'stream-reasoning
+         'model-retry)
      'understanding)
     ((or 'file-version-refused 'workspace-created 'workspace-reconciled
          'workspace-merge-started 'workspace-merge-completed

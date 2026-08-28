@@ -106,6 +106,38 @@ car collects the messages of every request."
        (chat-agent--complete-result run nil '(:cancelled t) nil)))
     (should (equal finished (list run 'cancelled nil)))))
 
+(ert-deftest chat-agent-retries-transient-model-errors-before-payload ()
+  "A connection-stage failure retries without duplicating model output."
+  (let (callbacks events run)
+    (cl-letf (((symbol-function 'chat-model-request-events)
+               (lambda (_provider _messages callback _options)
+                 (push callback callbacks)
+                 (intern (format "model-handle-%d" (length callbacks))))))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :transport 'stream
+                   :messages (list (chat-agent-test--user-message))
+                   :on-event (lambda (event) (push event events)))))
+      (funcall
+       (car callbacks)
+       (chat-model-event-create
+        :type 'error
+        :payload '(:message "exited abnormally with code 35")))
+      (should (= (length callbacks) 2))
+      (funcall
+       (car callbacks)
+       (chat-model-event-create
+        :type 'completed
+        :payload '(:result (:content "recovered" :reasoning ""))))
+      (should (chat-agent-run-state-done run))
+      (should (eq (chat-agent-run-state-status run) 'completed))
+      (should (= (seq-count
+                  (lambda (event)
+                    (eq (plist-get event :type) 'model-retry))
+                  events)
+                 1)))))
+
 (ert-deftest chat-agent-runs-own-isolated-read-sets ()
   "Every foreground or child run starts with an independent read set."
   (let ((calls-a (list nil))
@@ -1324,7 +1356,8 @@ per piece for that to stop being true."
                 ((symbol-function 'chat-checkpoint-complete-tool)
                  (lambda (&rest _args) (cl-incf complete-count)))
                 ((symbol-function 'chat-tool-caller-execute-async)
-                 (lambda (_call _session _observer success _error &optional _context)
+                 (lambda (_call _session _observer success _error
+                          &optional _context _state-session)
                    (funcall success tool-result)
                    'done)))
         (chat-agent-start

@@ -46,6 +46,9 @@ model knows content is missing."
 (defvar chat-tool-caller-current-session nil
   "Session whose tool overlay is used for provider tool exposure.")
 
+(defvar chat-tool-caller-current-state-session nil
+  "Canonical session that owns durable state for the current tool call.")
+
 (defvar chat-tool-caller-current-execution-context nil
   "Correlation plist for the tool call currently being executed.")
 
@@ -133,11 +136,17 @@ model knows content is missing."
         (let ((name (plist-get param :name))
               (type (or (plist-get param :type) "string"))
               (desc (or (plist-get param :description) ""))
-              (enum (plist-get param :enum)))
+              (enum (plist-get param :enum))
+              (items (plist-get param :items))
+              (min-items (plist-get param :min-items)))
           (push (cons name
                       (append `((type . ,type) (description . ,desc))
                               (when enum
-                                `((enum . ,(vconcat enum))))))
+                                `((enum . ,(vconcat enum))))
+                              (when items
+                                `((items . ,items)))
+                              (when min-items
+                                `((minItems . ,min-items)))))
                 properties)
           (when (plist-get param :required)
             (push name required))))
@@ -653,9 +662,7 @@ merely mentions JSON in prose has not."
     ("number" (numberp value))
     ("boolean" (memq value '(t :json-false)))
     ("array" (or (vectorp value)
-                 (null value)
-                 (and (listp value)
-                      (not (consp (car-safe value))))))
+                 (proper-list-p value)))
     ("object" (or (hash-table-p value)
                   (null value)
                   (and (listp value)
@@ -949,7 +956,8 @@ process before returning."
            (funcall error-callback text)))))))
 
 (defun chat-tool-caller-execute-async
-    (call session observer success error-callback &optional execution-context)
+    (call session observer success error-callback
+          &optional execution-context state-session)
   "Execute CALL and invoke SUCCESS or ERROR-CALLBACK.
 
 The one place live tool execution is authorized, and it happens before the
@@ -965,6 +973,7 @@ outcome the assistant should read and route around, and reporting it as a
 tool fault gets it the wrong wording and the wrong handling from the agent
 loop."
   (let* ((chat-tool-caller-current-execution-context execution-context)
+         (chat-tool-caller-current-state-session (or state-session session))
          (tool (chat-tool-caller-call-tool call))
          (name (plist-get call :name))
          (arguments (plist-get call :arguments))
@@ -999,7 +1008,9 @@ loop."
                ;; an HTTP response, by which time the bindings above are
                ;; gone.
                (let ((chat-tool-caller-current-execution-context
-                      execution-context))
+                      execution-context)
+                     (chat-tool-caller-current-state-session
+                      (or state-session actual-session)))
                  (chat-tool-caller--with-execution-context actual-session
                    (cond
                     ((not consent)
@@ -1086,7 +1097,8 @@ than trusting its caller, and under `guarded' with a guard available it
 refuses: there is nowhere in a synchronous function to wait for a verdict,
 and falling back to the rules the guard was configured to replace would be
 a silent downgrade of the mode."
-  (let* ((name (plist-get call :name))
+  (let* ((chat-tool-caller-current-state-session session)
+         (name (plist-get call :name))
          (arguments (plist-get call :arguments))
          (tool-id (intern name))
          (tool (chat-tool-caller-call-tool call))

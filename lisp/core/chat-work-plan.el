@@ -76,6 +76,9 @@
 (defconst chat-work-plan--single-bounded-tools
   '("files_write" "files_replace" "files_patch")
   "Tools eligible for a single-bounded-action skip.")
+(defconst chat-work-plan--single-bounded-followup-tools
+  '("programming_compile_task" "programming_verification_run")
+  "Verification tools allowed after a bounded mutation consumes its skip.")
 
 (define-error 'chat-work-plan-invalid "Invalid work plan")
 (define-error 'chat-work-plan-stale-revision "Stale work plan revision")
@@ -704,7 +707,8 @@ Started, completed, blocked and skipped items are immutable history."
     (chat-work-plan-validate plan)
     (chat-work-plan--replace session plan)
     (chat-work-plan--emit 'plan-skipped plan nil
-                          `((reason . ,(symbol-name reason))))
+                          `((reason . ,(symbol-name reason))
+                            (toolName . ,tool-name)))
     plan))
 
 (defun chat-work-plan--internal-call-p (name)
@@ -731,8 +735,19 @@ Started, completed, blocked and skipped items are immutable history."
     (and skip
          (equal (chat-work-plan--get skip 'reason) "single-bounded-action")
          (= (or (chat-work-plan--get skip 'consumedCount) 0) 0)
-         (equal (chat-work-plan--get skip 'toolName)
-                (plist-get call :name)))))
+         (member (chat-work-plan--get skip 'toolName)
+                 chat-work-plan--single-bounded-tools)
+         (member (plist-get call :name)
+                 chat-work-plan--single-bounded-tools))))
+
+(defun chat-work-plan--skip-allows-followup-p (plan call)
+  "Return non-nil when PLAN's consumed bounded skip covers verification CALL."
+  (let ((skip (chat-work-plan-skip plan)))
+    (and skip
+         (equal (chat-work-plan--get skip 'reason) "single-bounded-action")
+         (= (or (chat-work-plan--get skip 'consumedCount) 0) 1)
+         (member (plist-get call :name)
+                 chat-work-plan--single-bounded-followup-tools))))
 
 (defun chat-work-plan--in-progress-item (plan)
   "Return PLAN's single in-progress item, if any."
@@ -764,7 +779,9 @@ An allowed single-action skip is consumed atomically before execution."
              (chat-work-plan--applies-to-active-task-p session plan)
              (chat-work-plan--in-progress-item plan))
         nil)
-       ((and plan (chat-work-plan--skip-allows-call-p plan call))
+       ((and plan
+             (chat-work-plan--applies-to-active-task-p session plan)
+             (chat-work-plan--skip-allows-call-p plan call))
         (let* ((copy (chat-work-plan--clone plan))
                (skip (copy-tree (chat-work-plan-skip copy))))
           (setcdr (assoc 'consumedCount skip) 1)
@@ -774,6 +791,13 @@ An allowed single-action skip is consumed atomically before execution."
                 (chat-work-plan-updated-at copy) (chat-work-plan--now))
           (chat-work-plan--replace session copy)
           (chat-work-plan--emit 'plan-skip-consumed copy))
+        nil)
+       ((and plan
+             (chat-work-plan--applies-to-active-task-p session plan)
+             (chat-work-plan--skip-allows-followup-p plan call))
+        (chat-work-plan--emit
+         'plan-skip-followup plan nil
+         `((toolName . ,(plist-get call :name))))
         nil)
        (t
         (chat-event-emit

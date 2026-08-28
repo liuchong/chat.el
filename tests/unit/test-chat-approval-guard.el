@@ -423,6 +423,38 @@ code matches against."
                       "git stash drop"))
       (should (string-match-p (regexp-quote anchor) prompt)))))
 
+(ert-deftest chat-approval-guard-policy-covers-bounded-project-edits ()
+  "Ordinary project edits have positive policy evidence to cite."
+  (let ((prompt (chat-approval-guard--system-prompt)))
+    (should (string-match-p
+             "create or edit ordinary project files inside the project"
+             prompt))
+    (should (string-match-p "except credentials" prompt))))
+
+(ert-deftest chat-approval-guard-target-paths-ignore-source-text ()
+  "Slash-containing search and replacement text is not a filesystem path."
+  (chat-test-with-temp-dir
+   (let* ((workspace (expand-file-name "workspace/" temp-dir))
+          (env (list :directory workspace :project-root workspace))
+          (paths
+           (chat-approval-guard--target-paths
+            'files_replace
+            '(("path" . "sample.py")
+              ("search" . "return left / right")
+              ("replace" . "return ratio / scale"))
+            env)))
+     (make-directory workspace t)
+     (should paths)
+     (should-not (seq-find
+                  (lambda (entry)
+                    (member (plist-get entry :argument)
+                            '("search" "replace")))
+                  paths))
+     (dolist (entry paths)
+       (should (string-prefix-p (file-truename workspace)
+                                (file-truename
+                                 (plist-get entry :resolved))))))))
+
 ;;; Model selection
 
 (ert-deftest chat-approval-guard-picks-the-dedicated-model-first ()

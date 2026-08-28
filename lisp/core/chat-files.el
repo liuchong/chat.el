@@ -1997,7 +1997,23 @@ Returns total size, line count, and file type distribution."
    "Patch File"
    "Apply legacy atomic search and replace patches to a file"
    '((:name "path" :type "string" :required t)
-     (:name "patches" :type "array" :required t)
+     (:name "patches" :type "array" :required t :min-items 1
+      :items ((type . "object")
+              (properties .
+               (("search" . ((type . "string")
+                              (description . "Exact text or regular expression to find")))
+                ("replace" . ((type . "string")
+                               (description . "Replacement text")))
+                ("line" . ((type . "integer")
+                            (description . "Optional one-based line constraint")))
+                ("count" . ((type . "integer")
+                             (description . "Optional exact replacement count")))
+                ("regexp" . ((type . "boolean")
+                              (description . "Treat search as a regular expression")))
+                ("all" . ((type . "boolean")
+                           (description . "Replace every match")))))
+              (required . ["search" "replace"])
+              (additionalProperties . :json-false)))
      (:name "expected_version" :type "string"))
    (lambda (path patches &optional expected-version)
      (chat-files-patch path patches expected-version)))
@@ -2067,7 +2083,17 @@ This describes available file operations to the AI."
    (list :name "files_patch"
          :description "Apply multiple legacy search/replace patches atomically"
          :parameters '((:name "path" :type "string" :required t)
-                       (:name "patches" :type "array" :required t)
+                       (:name "patches" :type "array" :required t :min-items 1
+                        :items ((type . "object")
+                                (properties .
+                                 (("search" . ((type . "string")))
+                                  ("replace" . ((type . "string")))
+                                  ("line" . ((type . "integer")))
+                                  ("count" . ((type . "integer")))
+                                  ("regexp" . ((type . "boolean")))
+                                  ("all" . ((type . "boolean")))))
+                                (required . ["search" "replace"])
+                                (additionalProperties . :json-false)))
                        (:name "expected_version" :type "string")))
    (list :name "apply_patch"
          :description "Apply codex-style patch text to one or more files"

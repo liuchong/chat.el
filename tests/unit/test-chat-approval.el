@@ -496,5 +496,22 @@
      (should (equal scope
                     (chat-approval--normalize-directory
                      (expand-file-name "docs" temp-dir)))))))
+
+(ert-deftest chat-approval-directory-scope-uses-the-call-session ()
+  "A delayed approval event resolves relative paths in its own workspace."
+  (chat-test-with-temp-dir
+   (let* ((workspace (expand-file-name "workspace/" temp-dir))
+          (elsewhere (expand-file-name "elsewhere/" temp-dir))
+          (session (make-chat-session :id "approval-workspace")))
+     (make-directory workspace t)
+     (make-directory elsewhere t)
+     (chat-session-set-working-directory session workspace)
+     (let ((default-directory elsewhere))
+       (should
+        (equal
+         (chat-approval--directory-scope
+          'files_write '(("path" . "src/sample.py")) session)
+         (chat-approval--normalize-directory
+          (expand-file-name "src/" workspace))))))))
 (provide 'test-chat-approval)
 ;;; test-chat-approval.el ends here

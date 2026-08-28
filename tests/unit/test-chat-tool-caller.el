@@ -723,6 +723,56 @@ being a thing the reader could do when the two surfaces merged."
         (should (equal (cdr (assoc 'enum property))
                        ["one" "two"]))))))
 
+(ert-deftest chat-tool-caller-files-patch-schema-describes-object-items ()
+  "The provider sees the nested patch contract instead of an untyped array."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-files-register-built-in-tools)
+    (let* ((tools (chat-tool-caller-provider-tools))
+           (definition
+            (seq-find
+             (lambda (item)
+               (string= (cdr (assoc 'name (cdr (assoc 'function item))))
+                        "files_patch"))
+             (append tools nil)))
+           (schema (cdr (assoc 'parameters
+                               (cdr (assoc 'function definition)))))
+           (patches (cdr (assoc "patches" (cdr (assoc 'properties schema)))))
+           (items (cdr (assoc 'items patches)))
+           (item-properties (cdr (assoc 'properties items))))
+      (should (equal (cdr (assoc 'type items)) "object"))
+      (should (equal (cdr (assoc 'minItems patches)) 1))
+      (should (assoc "search" item-properties))
+      (should (assoc "replace" item-properties))
+      (should (eq (cdr (assoc 'additionalProperties items)) :json-false)))))
+
+(ert-deftest chat-tool-caller-executes-files-patch-with-kimi-json-shape ()
+  "A JSON array of patch objects remains an array through tool execution."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "target.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (chat-approval-always-approve-directories
+           (list (chat-approval--normalize-directory temp-dir)))
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (arguments
+           (let ((json-object-type 'alist)
+                 (json-array-type 'list)
+                 (json-key-type 'string))
+             (json-read-from-string
+              (format
+               "{\"path\":%s,\"patches\":[{\"search\":\"alpha\",\"replace\":\"beta\"}]}"
+               (json-encode-string path))))))
+     (with-temp-file path (insert "alpha\n"))
+     (chat-files-register-built-in-tools)
+     (chat-files-read path)
+     (let ((result
+            (chat-tool-caller-execute
+             (list :name "files_patch" :arguments arguments))))
+       (should (string-match-p ":status success" result))
+       (should (string= (with-temp-buffer
+                          (insert-file-contents path)
+                          (buffer-string))
+                        "beta\n"))))))
+
 (ert-deftest chat-tool-caller-zero-arg-provider-schema-is-empty-object ()
   "Test zero-argument tools use an empty object schema."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))

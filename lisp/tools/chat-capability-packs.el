@@ -141,10 +141,19 @@
 
 (defun chat-capability--current-session ()
   "Return the current chat session for interactive profile commands."
-  (or (and (boundp 'chat--current-session) chat--current-session)
+  (or (and (boundp 'chat-tool-caller-current-state-session)
+           chat-tool-caller-current-state-session)
       (and (boundp 'chat-tool-caller-current-session)
            chat-tool-caller-current-session)
+      (and (boundp 'chat--current-session) chat--current-session)
       (error "No current chat session")))
+
+(defun chat-capability--project-directory (&optional directory)
+  "Return explicit DIRECTORY or the current session's project directory."
+  (let* ((session (ignore-errors (chat-capability--current-session)))
+         (project (and session (chat-session-working-directory session))))
+    (file-name-as-directory
+     (expand-file-name (or directory project default-directory)))))
 
 ;;;###autoload
 (defun chat-capability-profile-code (&optional session)
@@ -216,7 +225,8 @@
 
 (defun chat-capability-programming-compile-task (command &optional directory)
   "Start compile/test COMMAND as a background task."
-  (chat-work-task-start command (or directory default-directory)))
+  (chat-work-task-start command
+                        (chat-capability--project-directory directory)))
 
 (defun chat-capability--json-string-list (value label)
   "Decode VALUE as a JSON string list named LABEL."
@@ -918,7 +928,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "value_json" :type "string" :required t)
      (:name "expected_revision" :type "integer" :required nil)
      (:name "tags_json" :type "string" :required nil))
-   #'chat-capability-programming-work-note-upsert 'project '(write))
+   #'chat-capability-programming-work-note-upsert 'project '(state))
   (chat-capability--register-tool
    'programming_work_note_query "Programming Work Note Query"
    "Query active structured notes for the current task."
@@ -930,7 +940,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    "Resolve a current work note using its observed revision."
    '((:name "note_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t))
-   #'chat-capability-programming-work-note-resolve 'project '(write))
+   #'chat-capability-programming-work-note-resolve 'project '(state))
   (chat-capability--register-tool
    'programming_work_note_supersede "Programming Work Note Supersede"
    "Supersede a work note with a distinct revisioned replacement."
@@ -942,19 +952,19 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
             :enum ("fact" "decision" "constraint" "hypothesis" "artifact"
                    "blocker" "next-step" "note"))
      (:name "tags_json" :type "string" :required nil))
-   #'chat-capability-programming-work-note-supersede 'project '(write))
+   #'chat-capability-programming-work-note-supersede 'project '(state))
   (chat-capability--register-tool
    'programming_work_note_archive "Programming Work Note Archive"
    "Archive a current work note using its observed revision."
    '((:name "note_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t))
-   #'chat-capability-programming-work-note-archive 'project '(write))
+   #'chat-capability-programming-work-note-archive 'project '(state))
   (chat-capability--register-tool
    'programming_work_note_delete "Programming Work Note Delete"
    "Delete a current work note using its observed revision."
    '((:name "note_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t))
-   #'chat-capability-programming-work-note-delete 'project '(write))
+   #'chat-capability-programming-work-note-delete 'project '(state))
   (chat-capability--register-tool
    'programming_context_inspect "Programming Context Inspect"
    "Inspect scoped project instruction sources and dependency diagnostics."
@@ -967,7 +977,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "items_json" :type "string" :required t)
      (:name "mode" :type "string" :required nil
       :enum ("auto" "required" "off")))
-   #'chat-capability-programming-plan-create 'project '(write))
+   #'chat-capability-programming-plan-create 'project '(state))
   (chat-capability--register-tool
    'programming_plan_read "Programming Plan Read"
    "Read the selected durable plan or one known plan id."
@@ -984,7 +994,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "revision" :type "integer" :required t)
      (:name "items_json" :type "string" :required t)
      (:name "objective" :type "string" :required nil))
-   #'chat-capability-programming-plan-update 'project '(write))
+   #'chat-capability-programming-plan-update 'project '(state))
   (chat-capability--register-tool
    'programming_plan_transition "Programming Plan Transition"
    "Start, complete, block, or skip one plan item using the observed revision. Completion requires known evidence ids."
@@ -995,19 +1005,19 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
       :enum ("in-progress" "completed" "blocked" "skipped"))
      (:name "evidence_json" :type "string" :required nil)
      (:name "blocker_reason" :type "string" :required nil))
-   #'chat-capability-programming-plan-transition 'project '(write))
+   #'chat-capability-programming-plan-transition 'project '(state))
   (chat-capability--register-tool
    'programming_plan_resume "Programming Plan Resume"
    "Explicitly resume a blocked or interrupted plan."
    '((:name "plan_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t))
-   #'chat-capability-programming-plan-resume 'project '(write))
+   #'chat-capability-programming-plan-resume 'project '(state))
   (chat-capability--register-tool
    'programming_plan_cancel "Programming Plan Cancel"
    "Cancel a durable plan using the observed revision."
    '((:name "plan_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t))
-   #'chat-capability-programming-plan-cancel 'project '(write))
+   #'chat-capability-programming-plan-cancel 'project '(state))
   (chat-capability--register-tool
    'programming_plan_skip "Programming Plan Skip"
    "Audit an allowed simple-task skip. A single bounded mutation must name files_write, files_replace, or files_patch."
@@ -1015,7 +1025,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
       :enum ("answer-only" "read-only" "single-bounded-action"))
      (:name "tool_name" :type "string" :required nil)
      (:name "action_facts_json" :type "string" :required nil))
-   #'chat-capability-programming-plan-skip 'project '(write))
+   #'chat-capability-programming-plan-skip 'project '(state))
   (chat-capability--register-tool
    'programming_plan_mode "Programming Plan Mode"
    "Read or explicitly set auto, required, or off plan enforcement."

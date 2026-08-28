@@ -202,7 +202,11 @@
      (description . ,(or (plist-get param :description) ""))
      (required . ,(if (plist-get param :required) t :json-false)))
    (when-let ((enum (plist-get param :enum)))
-     `((enum . ,(vconcat enum))))))
+     `((enum . ,(vconcat enum))))
+   (when-let ((items (plist-get param :items)))
+     `((items . ,items)))
+   (when-let ((min-items (plist-get param :min-items)))
+     `((minItems . ,min-items)))))
 
 (defun chat-tool-forge--parameters-to-json (parameters)
   "Convert PARAMETERS to a JSON array for persistence."
@@ -220,13 +224,21 @@
         (required (or (cdr (assoc "required" param))
                       (cdr (assoc 'required param))))
         (enum (or (cdr (assoc "enum" param))
-                  (cdr (assoc 'enum param)))))
+                  (cdr (assoc 'enum param))))
+        (items (or (cdr (assoc "items" param))
+                   (cdr (assoc 'items param))))
+        (min-items (or (cdr (assoc "minItems" param))
+                       (cdr (assoc 'minItems param)))))
     (append
      (list :name name :type type)
      (when (and description (not (string-empty-p description)))
        (list :description description))
      (when enum
        (list :enum (if (vectorp enum) (append enum nil) enum)))
+     (when items
+       (list :items items))
+     (when min-items
+       (list :min-items min-items))
      (list :required (and required (not (eq required :json-false)))))))
 
 (defun chat-tool-forge--parameters-from-json (parameters)

@@ -491,10 +491,24 @@ single pending piece becomes the delta without being copied."
                           :text (car published)
                           :content (cdr published))))))
 
-(defun chat-agent--dispatch-model (run stream)
-  "Dispatch RUN through the unified model runtime using STREAM when non-nil."
+(defun chat-agent--transient-model-error-p (message)
+  "Return non-nil when MESSAGE describes a retryable transport failure."
+  (and (stringp message)
+       (string-match-p
+        (concat
+         "\\(?:exited abnormally with code "
+         "\\(?:6\\|7\\|18\\|28\\|35\\|52\\|55\\|56\\|92\\)\\b"
+         "\\|connection reset\\|connection refused\\|temporary failure"
+         "\\|timed? out\\)")
+        (downcase message))))
+
+(defun chat-agent--dispatch-model (run stream &optional retry-attempt)
+  "Dispatch RUN through the unified model runtime using STREAM when non-nil.
+RETRY-ATTEMPT counts transport retries for this one model turn."
   (let ((content (chat-agent--stream-text-create))
         (reasoning (chat-agent--stream-text-create))
+        (received-payload nil)
+        (attempt (or retry-attempt 0))
         (request-messages
          (prog1 (chat-agent--request-messages run)
            (chat-log-timing-mark "budget"))))
@@ -508,18 +522,22 @@ single pending piece becomes the delta without being copied."
           (let ((payload (chat-model-event-payload event)))
             (pcase (chat-model-event-type event)
               ('text-delta
+               (setq received-payload t)
                (when stream
                  (chat-agent--publish-model-delta
                   run 'stream-chunk content (plist-get payload :delta))))
               ('reasoning-delta
+               (setq received-payload t)
                (when stream
                  (chat-agent--publish-model-delta
                   run 'stream-reasoning reasoning
                   (plist-get payload :delta))))
               ('tool-call-delta
+               (setq received-payload t)
                (chat-agent--emit run 'model-tool-call-delta
                                  :delta payload))
               ('usage
+               (setq received-payload t)
                (chat-agent--emit run 'model-usage :usage payload))
               ('completed
                (let ((result (plist-get payload :result)))
@@ -536,8 +554,17 @@ single pending piece becomes the delta without being copied."
                  (chat-agent--handle-result run result)))
               ('error
                (let ((message (plist-get payload :message)))
-                 (chat-agent--emit run 'error :message message)
-                 (chat-agent--finish run 'error message)))))))
+                 (if (and (not received-payload)
+                          (< attempt chat-agent-model-transport-retries)
+                          (chat-agent--transient-model-error-p message))
+                     (progn
+                       (chat-agent--emit
+                        run 'model-retry :attempt (1+ attempt)
+                        :message (truncate-string-to-width
+                                  message 256 nil nil t))
+                       (chat-agent--dispatch-model run stream (1+ attempt)))
+                   (chat-agent--emit run 'error :message message)
+                   (chat-agent--finish run 'error message))))))))
       (plist-put (chat-agent--options-for-turn run) :stream stream)))))
 
 (defun chat-agent--collect-tool-calls (result content)
@@ -772,7 +799,8 @@ need approval carry exclusive accesses and therefore remain serialized."
                           :turn-id (chat-agent-run-state-turn run)
                           :task-id (chat-agent-run-state-task-id run)
                           :run-id (chat-agent-run-state-run-id run)
-                          :read-set (chat-agent-run-state-read-set run)))))
+                          :read-set (chat-agent-run-state-read-set run))
+                         (chat-agent-run-state-session run))))
                    (when-let* ((job (gethash index running)))
                      (puthash index (plist-put job :handle handle) running))))
              (error

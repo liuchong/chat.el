@@ -71,7 +71,9 @@ Uses OpenAI-compatible format."
       ;; chat-ui 固定传 0.7，照传过去每个请求都会失败。
       (temperature . 1)
       (max_tokens . ,max-tokens)
-      ,@(when stream `((stream . ,stream)))
+      ,@(when stream
+          `((stream . ,stream)
+            (stream_options . ((include_usage . t)))))
       ,@(when-let ((tools (plist-get options :tools)))
           `((tools . ,tools)
             (tool_choice . "auto"))))))

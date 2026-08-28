@@ -260,7 +260,15 @@
      (chat-work-plan-skip session 'single-bounded-action
                           :tool-name "files_write"
                           :action-facts '((path . "one.txt")))
-     (should-not (chat-work-plan-check-call session call))
+     (should-not
+      (chat-work-plan-check-call
+       session '(:name "files_patch" :arguments nil)))
+     (should-not
+      (chat-work-plan-check-call
+       session '(:name "programming_compile_task" :arguments nil)))
+     (should-not
+      (chat-work-plan-check-call
+       session '(:name "programming_verification_run" :arguments nil)))
      (should (stringp (chat-work-plan-check-call session call)))
      (chat-work-plan-create session "Write"
                             '(((id . "write") (title . "Write"))))

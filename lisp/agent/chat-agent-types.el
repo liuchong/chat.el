@@ -15,6 +15,7 @@
 ;;   turn-start  turn-ended  turn-failed
 ;;   stream-chunk
 ;;   stream-reasoning  stream-result  model-tool-call-delta  model-usage
+;;   model-retry
 ;;   tool-batch-start  tool-event  tool-batch-end
 ;;   message-appended  truncated  response  followup  steering
 ;;   prepared-next-turn  error  agent-end
@@ -30,6 +31,11 @@
 (defcustom chat-agent-native-tools t
   "When non-nil, advertise tools through the provider tool-calling API."
   :type 'boolean
+  :group 'chat)
+
+(defcustom chat-agent-model-transport-retries 2
+  "Maximum retries for a model transport failure before any payload arrives."
+  :type 'integer
   :group 'chat)
 
 (defconst chat-agent-truncated-tool-result-text

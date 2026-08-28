@@ -3431,6 +3431,10 @@ assistant response being filled in."
           nil)
          ((eq type 'model-usage)
           nil)
+         ((eq type 'model-retry)
+          ;; Runtime projection keeps the visible phase active while the
+          ;; bounded wire record explains why this model request restarted.
+          nil)
          ((eq type 'tool-event)
           (setq tool-events (append tool-events
                                     (list (plist-get event :event))))

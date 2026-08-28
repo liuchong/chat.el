@@ -69,6 +69,23 @@
                   (string-prefix-p "message" candidate))
                 candidates))))))
 
+(ert-deftest chat-capability-compile-task-defaults-to-session-project ()
+  "An omitted directory cannot make verification drift into the host process cwd."
+  (chat-test-with-temp-dir
+   (let* ((session (make-chat-session :id "compile-session"))
+          (chat-tool-caller-current-state-session session)
+          (default-directory "/")
+          captured)
+     (chat-session-set-working-directory session temp-dir)
+     (cl-letf (((symbol-function 'chat-work-task-start)
+                (lambda (command directory)
+                  (setq captured (cons command directory))
+                  'started)))
+       (should (eq (chat-capability-programming-compile-task "make test")
+                   'started))
+       (should (equal captured
+                      (cons "make test" (file-name-as-directory temp-dir))))))))
+
 (ert-deftest chat-capability-web-reader-renders-html-with-shr ()
   "Test the shared web tool returns rendered page text."
   (cl-letf (((symbol-function 'url-retrieve-synchronously)
@@ -248,6 +265,19 @@
       (should-not (member "programming_completion_at_point" names))
       (should-not (member "daily_message_draft_buffer" names)))))
 
+(ert-deftest chat-capability-state-tools-prefer-the-execution-session ()
+  "Async tool state belongs to its explicit session, not the ambient buffer."
+  (let ((ambient (make-chat-session :id "ambient"))
+        (execution (make-chat-session :id "execution")))
+    (let ((chat--current-session ambient)
+          (chat-tool-caller-current-session execution)
+          (chat-tool-caller-current-state-session execution))
+      (chat-capability-programming-plan-create
+       "Execution plan"
+       "[{\"id\":\"step\",\"title\":\"Run in execution session\"}]"))
+    (should (chat-work-plan-current execution))
+    (should-not (chat-work-plan-current ambient))))
+
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
@@ -259,6 +289,27 @@
                   programming_plan_skip programming_plan_mode))
       (should (chat-tool-forge-get id))
       (should (memq id chat-capability-programming-tools)))))
+
+(ert-deftest chat-capability-internal-work-state-does-not-require-approval ()
+  "Plan and note bookkeeping is session state, not an external write."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (dolist (id '(programming_work_note_upsert
+                  programming_work_note_resolve
+                  programming_work_note_supersede
+                  programming_work_note_archive
+                  programming_work_note_delete
+                  programming_plan_create
+                  programming_plan_update
+                  programming_plan_transition
+                  programming_plan_resume
+                  programming_plan_cancel
+                  programming_plan_skip))
+      (should-not (chat-approval-tool-required-p
+                   (chat-tool-forge-get id))))
+    ;; Changing enforcement can weaken the task contract and stays gated.
+    (should (chat-approval-tool-required-p
+             (chat-tool-forge-get 'programming_plan_mode)))))
 
 (provide 'test-chat-capability-packs)
 ;;; test-chat-capability-packs.el ends here

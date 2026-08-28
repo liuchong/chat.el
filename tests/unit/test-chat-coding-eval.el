@@ -126,6 +126,40 @@
                    (chat-coding-eval--model-name
                     'coding-eval-provider "model-v3")))))
 
+(ert-deftest chat-coding-eval-agent-binds-code-root-and-counts-tool-events ()
+  "Live Eval uses its workspace as project context and records real events."
+  (chat-test-with-temp-dir
+   (let* ((task (chat-coding-eval-test--task temp-dir nil))
+          config metadata)
+     (cl-letf (((symbol-function 'chat-agent-start)
+                (lambda (value) (setq config value) nil)))
+       (funcall (chat-coding-eval-agent-executor 'eval-provider "model")
+                task temp-dir
+                (lambda (_status _content value) (setq metadata value))))
+     (let ((session (plist-get config :session))
+           (on-event (plist-get config :on-event)))
+       (should (chat-code-session-p session))
+       (should (equal (file-name-as-directory temp-dir)
+                      (file-name-as-directory
+                       (chat-code-session-project-root session))))
+       (funcall on-event
+                '(:type tool-event
+                  :event (:type approval-guard-pending)))
+       (funcall on-event
+                '(:type tool-event :event (:type approval)))
+       (funcall on-event
+                '(:type tool-event :event (:type tool-error)))
+       (funcall on-event
+                '(:type model-usage
+                  :usage (:input-tokens 11 :output-tokens 4 :total-tokens 15)))
+       (funcall on-event
+                '(:type agent-end :status completed :content "done"
+                  :steps 1 :tool-calls nil :tool-results nil)))
+     (should (= 1 (alist-get 'toolErrorCount metadata)))
+     (should (= 2 (alist-get 'approvalCount metadata)))
+     (should (= 15 (plist-get (alist-get 'tokenUsage metadata)
+                              :total-tokens))))))
+
 (ert-deftest chat-coding-eval-campaign-is-isolated-and-immutable ()
   "A live campaign records one reproducible configuration in a fresh directory."
   (chat-test-with-temp-dir

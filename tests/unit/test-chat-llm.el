@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'test-helper)
 (require 'chat-llm)
+(require 'chat-llm-kimi-code)
 (require 'chat-request-diagnostics)
 
 ;; ------------------------------------------------------------------
@@ -241,6 +242,62 @@ catalogue of everything the package was built against."
                   'curl-handle))
       (should (eq captured-dispatch 'curl)))))
 
+(ert-deftest chat-llm-curl-transport-keeps-secrets-and-body-out-of-argv ()
+  "The OS process list must not expose authorization or request content."
+  (let ((stand-in (start-process "chat-curl-config-test" nil "true"))
+        command sent-body config-file result-buffer)
+    (unwind-protect
+        (cl-letf (((symbol-function 'executable-find)
+                   (lambda (_program) "/usr/bin/curl"))
+                  ((symbol-function 'make-process)
+                   (lambda (&rest args)
+                     (setq command (plist-get args :command))
+                     stand-in))
+                  ((symbol-function 'process-send-string)
+                   (lambda (_process value) (setq sent-body value)))
+                  ((symbol-function 'process-send-eof) #'ignore))
+          (setq result-buffer
+                (chat-llm--post-async-curl
+                 "https://example.invalid/v1"
+                 '(("Authorization" . "Bearer secret-token")
+                   ("Content-Type" . "application/json"))
+                 "{\"private\":\"request body\"}"
+                 #'ignore #'ignore 5))
+          (setq config-file (nth 2 command))
+          (should (equal (append (seq-take command 2) (seq-drop command 3))
+                         '("/usr/bin/curl" "--config"
+                           "--data-binary" "@-")))
+          (should-not (string-match-p "secret-token"
+                                      (mapconcat #'identity command " ")))
+          (should-not (string-match-p "request body"
+                                      (mapconcat #'identity command " ")))
+          (should (= (logand (file-modes config-file) #o777) #o600))
+          (let ((config (with-temp-buffer
+                          (insert-file-contents config-file)
+                          (buffer-string))))
+            (should (string-match-p "Bearer secret-token" config))
+            (should-not (string-match-p "request body" config)))
+          (should (string-match-p "request body" sent-body)))
+      (when (and stand-in (process-live-p stand-in))
+        (delete-process stand-in))
+      (chat-llm--delete-curl-config-file config-file)
+      (when (buffer-live-p result-buffer)
+        (kill-buffer result-buffer)))))
+
+(ert-deftest chat-llm-curl-config-cleanup-removes-private-file ()
+  "Terminal and cancellation paths remove their private curl config."
+  (let* ((file (chat-llm--make-curl-config-file "silent\n"))
+         (process (start-process "chat-curl-cleanup-test" nil "true")))
+    (unwind-protect
+        (progn
+          (process-put process 'chat-curl-config-file file)
+          (chat-llm--cleanup-curl-config process)
+          (should-not (file-exists-p file))
+          (should-not (process-get process 'chat-curl-config-file)))
+      (when (process-live-p process)
+        (delete-process process))
+      (chat-llm--delete-curl-config-file file))))
+
 (ert-deftest chat-llm-post-async-installs-timeout-timer ()
   "Test async transport installs a timeout timer for request handles."
   (let (captured-timeout handle)
@@ -380,6 +437,15 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
                       messages '(:temperature 0.7))))
     (should (equal (alist-get 'temperature default) 1))
     (should (equal (alist-get 'temperature overridden) 1))))
+
+(ert-deftest chat-llm-kimi-code-stream-requests-usage ()
+  "Live streamed evaluations ask the endpoint for trusted token counts."
+  (let* ((messages (list (make-chat-message :role :user :content "Hello")))
+         (request (chat-llm-kimi-code--build-request
+                   messages '(:stream t)))
+         (options (alist-get 'stream_options request)))
+    (should (eq t (alist-get 'stream request)))
+    (should (eq t (alist-get 'include_usage options)))))
 
 (ert-deftest chat-llm-ark-registers-both-protocols ()
   "Test Ark registers OpenAI and Anthropic compatible providers."

@@ -54,6 +54,8 @@
 (declare-function chat-session-id "chat-session" (session))
 (declare-function chat-files--resolved-path "chat-files" (path))
 (declare-function chat-files--tool-target-paths "chat-files" (tool-id arguments))
+(declare-function chat-tool-caller--execution-directory
+                  "chat-tool-caller" (&optional session))
 (declare-function chat-command-gate-explain "chat-command-gate" (refusal))
 ;; The guard is an optional collaborator, reached through `fboundp'.  It
 ;; requires this module, so it cannot be required back; and a guard that is
@@ -484,19 +486,24 @@ than a rule the guard weighs."
                   (string= common "/"))
         common))))
 
-(defun chat-approval--tool-target-directories (tool-id arguments)
-  "Return canonical target directories for TOOL-ID and ARGUMENTS."
-  (condition-case nil
-      (when-let ((paths (chat-files--tool-target-paths tool-id arguments)))
-        (delete-dups
-         (mapcar #'file-name-directory paths)))
-    (error nil)))
+(defun chat-approval--tool-target-directories (tool-id arguments &optional session)
+  "Return canonical target directories for TOOL-ID and ARGUMENTS in SESSION."
+  (let ((default-directory
+         (or (and session
+                  (fboundp 'chat-tool-caller--execution-directory)
+                  (chat-tool-caller--execution-directory session))
+             default-directory)))
+    (condition-case nil
+        (when-let ((paths (chat-files--tool-target-paths tool-id arguments)))
+          (delete-dups
+           (mapcar #'file-name-directory paths)))
+      (error nil))))
 
-(defun chat-approval--directory-scope (tool-id arguments)
-  "Return the directory scope for TOOL-ID and ARGUMENTS, or nil."
+(defun chat-approval--directory-scope (tool-id arguments &optional session)
+  "Return the directory scope for TOOL-ID and ARGUMENTS in SESSION, or nil."
   (when (chat-approval--write-file-tool-p tool-id)
     (chat-approval--common-directory
-     (chat-approval--tool-target-directories tool-id arguments))))
+     (chat-approval--tool-target-directories tool-id arguments session))))
 
 (defun chat-approval-tool-required-p (tool-or-id &optional call)
   "Return non-nil when TOOL-OR-ID requires approval for CALL.
@@ -620,10 +627,10 @@ would let them disagree and would make the mode decoration."
      '("C-c C-c command"))
    '("C-c C-d deny")))
 
-(defun chat-approval--event-context (tool-id arguments)
-  "Return shared event context for TOOL-ID and ARGUMENTS."
+(defun chat-approval--event-context (tool-id arguments &optional session)
+  "Return shared event context for TOOL-ID and ARGUMENTS in SESSION."
   (let ((command (chat-approval--command-from-arguments arguments))
-        (directory (chat-approval--directory-scope tool-id arguments)))
+        (directory (chat-approval--directory-scope tool-id arguments session)))
     (append
      (list :risk (chat-approval--risk-level tool-id))
      (list :actions (chat-approval--action-hints tool-id directory))
@@ -633,7 +640,7 @@ would let them disagree and would make the mode decoration."
        (list :command command)))))
 
 (defun chat-approval--lifecycle-payload
-    (tool-id arguments mode &optional consent reason decision-event)
+    (tool-id arguments mode &optional consent reason decision-event session)
   "Return bounded approval facts for lifecycle persistence."
   (let ((command (chat-approval--command-from-arguments arguments)))
     (delq
@@ -645,7 +652,7 @@ would let them disagree and would make the mode decoration."
       (when command
         (cons 'command (chat-approval--summarize-value command)))
       (when-let* ((directory
-                   (chat-approval--directory-scope tool-id arguments)))
+                   (chat-approval--directory-scope tool-id arguments session)))
         (cons 'directory directory))
       (when consent (cons 'consent (format "%s" consent)))
       (when decision-event
@@ -681,7 +688,8 @@ would let them disagree and would make the mode decoration."
    :task-id (plist-get call :id)
    :source 'approval
    :subject call
-   :payload (chat-approval--lifecycle-payload tool-id arguments mode)))
+   :payload (chat-approval--lifecycle-payload
+             tool-id arguments mode nil nil nil session)))
 
 (defun chat-approval--emit-lifecycle-resolution
     (tool-id arguments mode session call consent reason decision-event)
@@ -694,7 +702,7 @@ would let them disagree and would make the mode decoration."
    :subject call
    :payload
    (chat-approval--lifecycle-payload
-    tool-id arguments mode consent reason decision-event)))
+    tool-id arguments mode consent reason decision-event session)))
 
 (defun chat-approval--set-pending-decision (decision)
   "Set pending approval DECISION and exit the minibuffer when active."
@@ -744,9 +752,9 @@ would let them disagree and would make the mode decoration."
   (local-set-key (kbd "C-c C-c") #'chat-approval-allow-command)
   (local-set-key (kbd "C-c C-d") #'chat-approval-deny))
 
-(defun chat-approval--prompt-for-decision (tool-id arguments)
-  "Prompt for TOOL-ID with ARGUMENTS and return a decision symbol."
-  (let* ((directory (chat-approval--directory-scope tool-id arguments))
+(defun chat-approval--prompt-for-decision (tool-id arguments &optional session)
+  "Prompt for TOOL-ID with ARGUMENTS in SESSION and return a decision symbol."
+  (let* ((directory (chat-approval--directory-scope tool-id arguments session))
          (chat-approval--pending-request
           (list :tool-id tool-id
                 :arguments arguments
@@ -782,10 +790,10 @@ would let them disagree and would make the mode decoration."
    (chat-approval-decision-function
     (funcall chat-approval-decision-function tool-id arguments session))
    (t
-    (chat-approval--prompt-for-decision tool-id arguments))))
+    (chat-approval--prompt-for-decision tool-id arguments session))))
 
-(defun chat-approval--decision-grant (tool-id arguments decision)
-  "Return the grant DECISION asks for on TOOL-ID with ARGUMENTS, or nil.
+(defun chat-approval--decision-grant (tool-id arguments decision &optional session)
+  "Return the grant DECISION asks for on TOOL-ID with ARGUMENTS in SESSION.
 
 The five allowing decisions differ in two dimensions only: what they
 cover, and how long they last.  `allow-session' covers exactly what
@@ -794,7 +802,7 @@ of on disk.  It used to switch the whole session to automatic approval, so
 approving one command stopped every later tool from asking -- the option
 said \"this\" and did \"everything\"."
   (let ((command (cdr (assoc "command" arguments)))
-        (directory (chat-approval--directory-scope tool-id arguments)))
+        (directory (chat-approval--directory-scope tool-id arguments session)))
     (pcase decision
       ('allow-tool
        (make-chat-approval-grant :tool tool-id :scope 'tool :source 'runtime))
@@ -820,7 +828,8 @@ said \"this\" and did \"everything\"."
     ('allow-once t)
     ('deny nil)
     ((or 'allow-session 'allow-tool 'allow-command 'allow-directory)
-     (if-let ((grant (chat-approval--decision-grant tool-id arguments decision)))
+     (if-let ((grant (chat-approval--decision-grant
+                      tool-id arguments decision session)))
          (progn (chat-approval-add-grant grant session) t)
        ;; Nothing to remember, because the call had no command or no
        ;; directory to name.  The person still said yes, so this call runs.
@@ -836,12 +845,14 @@ said \"this\" and did \"everything\"."
     ('allow-session 'session)
     (_ nil)))
 
-(defun chat-approval--notify-whitelist-update (observer tool-id decision arguments)
+(defun chat-approval--notify-whitelist-update
+    (observer tool-id decision arguments &optional session)
   "Tell OBSERVER what DECISION recorded for TOOL-ID with ARGUMENTS."
   (when-let* ((scope (chat-approval--grant-scope decision))
               (pattern (pcase decision
                          ('allow-directory
-                          (chat-approval--directory-scope tool-id arguments))
+                          (chat-approval--directory-scope
+                           tool-id arguments session))
                          (_ (or (chat-approval--command-from-arguments arguments)
                                 (symbol-name tool-id))))))
     (chat-approval--notify
@@ -871,7 +882,7 @@ not happen is for it to look the same from outside."
                       :decision 'guarded-fallback
                       :degraded t
                       :approved t)
-                (chat-approval--event-context tool-id arguments)))
+                (chat-approval--event-context tool-id arguments session)))
        'rule)
       (`(deny . ,reason)
        (chat-approval--notify
@@ -882,7 +893,7 @@ not happen is for it to look the same from outside."
                       :degraded t
                       :approved nil
                       :reason reason)
-                (chat-approval--event-context tool-id arguments)))
+                (chat-approval--event-context tool-id arguments session)))
        nil)
       (_
        ;; No rule had an opinion.  With no guard and nobody to ask, running
@@ -897,7 +908,7 @@ not happen is for it to look the same from outside."
                       :approved nil
                       :reason (concat "no guard model is configured and no "
                                       "fallback rule allowed this call"))
-                (chat-approval--event-context tool-id arguments)))
+                (chat-approval--event-context tool-id arguments session)))
        nil))))
 
 (defconst chat-approval--fell-through '--fell-through
@@ -934,7 +945,7 @@ than the one they are used to tune."
                      :tool (symbol-name tool-id)
                      :decision 'dangerous-mode
                      :approved t)
-               (chat-approval--event-context tool-id arguments)))
+               (chat-approval--event-context tool-id arguments session)))
       'dangerous)
      ((not chat-approval-enabled) 'rule)
      ((not (chat-approval-tool-required-p tool call)) 'rule)
@@ -949,13 +960,14 @@ than the one they are used to tune."
                        :scope (chat-approval-grant-scope grant))
                  (when (eq (chat-approval-grant-scope grant) 'directory)
                    (list :directory (chat-approval-grant-pattern grant)))
-                 (chat-approval--event-context tool-id arguments)))
+                 (chat-approval--event-context tool-id arguments session)))
         'grant))
      (t chat-approval--fell-through))))
 
 (defun chat-approval--ask-a-person (tool-id arguments session observer)
   "Ask about TOOL-ID with ARGUMENTS in SESSION and return the consent, or nil."
-  (let ((directory (chat-approval--directory-scope tool-id arguments)))
+  (let ((directory (chat-approval--directory-scope
+                    tool-id arguments session)))
     (cond
      ((chat-approval--allow-noninteractive-p) 'rule)
      ((chat-approval--deny-noninteractive-p) nil)
@@ -968,12 +980,12 @@ than the one they are used to tune."
                 :tool (symbol-name tool-id)
                 :prompt prompt
                 :options (chat-approval--decision-options tool-id directory))
-          (chat-approval--event-context tool-id arguments)))
+          (chat-approval--event-context tool-id arguments session)))
         (let* ((decision (chat-approval--decide tool-id arguments session))
                (approved (chat-approval--apply-decision
                           tool-id arguments decision session)))
           (chat-approval--notify-whitelist-update
-           observer tool-id decision arguments)
+           observer tool-id decision arguments session)
           (chat-approval--notify
            observer
            (append
@@ -981,7 +993,7 @@ than the one they are used to tune."
                   :tool (symbol-name tool-id)
                   :decision decision
                   :approved approved)
-            (chat-approval--event-context tool-id arguments)))
+            (chat-approval--event-context tool-id arguments session)))
           (and approved 'human)))))))
 
 ;;; The guard branch
@@ -1024,7 +1036,7 @@ the exact command; and a refusal of this same call earlier in the session."
                        :decision 'floor
                        :approved nil
                        :reason floor)
-                 (chat-approval--event-context tool-id arguments)))
+                 (chat-approval--event-context tool-id arguments session)))
         ;; No verdict: the floor spends no model call, so there is no sample
         ;; here either.  Recording one would put calls in the log that the
         ;; guard never sees.
@@ -1037,7 +1049,7 @@ the exact command; and a refusal of this same call earlier in the session."
                      :tool (symbol-name tool-id)
                      :decision 'command-gate
                      :approved t)
-               (chat-approval--event-context tool-id arguments)))
+               (chat-approval--event-context tool-id arguments session)))
       (funcall callback 'rule nil nil))
      ((chat-approval--remembered-refusal session tool-id arguments)
       (let ((remembered (chat-approval--remembered-refusal
@@ -1049,7 +1061,7 @@ the exact command; and a refusal of this same call earlier in the session."
                        :decision 'guard-remembered
                        :approved nil
                        :reason remembered)
-                 (chat-approval--event-context tool-id arguments)))
+                 (chat-approval--event-context tool-id arguments session)))
         ;; No new verdict, so no new sample: this is the same call the log
         ;; already holds one for.
         (funcall callback nil remembered nil)))
@@ -1082,7 +1094,7 @@ certain answer less certain."
    observer
    (append (list :type 'approval-guard-pending
                  :tool (symbol-name tool-id))
-           (chat-approval--event-context tool-id arguments)))
+           (chat-approval--event-context tool-id arguments session)))
   (chat-approval-guard-request
    tool (list :arguments arguments) session
    (lambda (verdict)
@@ -1109,7 +1121,7 @@ certain answer less certain."
                       (chat-approval-guard-verdict-confidence verdict)
                       :model (chat-approval-guard-verdict-model verdict)
                       :elapsed (chat-approval-guard-verdict-elapsed verdict))
-                (chat-approval--event-context tool-id arguments)))
+                (chat-approval--event-context tool-id arguments session)))
        ;; `guard' rather than `rule', and it sits beside `human' in
        ;; `chat-approval-command-consent-p'.  A verdict the tool then
        ;; refuses anyway would make the guard decoration, and the gate's
@@ -1223,7 +1235,7 @@ forget and no mode has its own idea of what gets sampled."
                       :reference (and reference t)
                       :reference-kind reference-kind)
                 (chat-approval--event-context
-                 tool-id (plist-get call :arguments)))))))
+                 tool-id (plist-get call :arguments) session))))))
         ;; Fire and forget.  The verdict changes nothing, so nothing waits
         ;; for it -- which is what lets this stay on under `manual' without
         ;; costing the user any latency.
@@ -1272,7 +1284,8 @@ to the rules the guard exists to replace.  Callers on the live path use
                              :reason
                              (concat "this entry point cannot consult the "
                                      "guard; call it asynchronously"))
-                       (chat-approval--event-context tool-id arguments)))
+                       (chat-approval--event-context
+                        tool-id arguments session)))
               nil)
              ((eq mode 'guarded)
               (chat-approval--authorize-by-rules

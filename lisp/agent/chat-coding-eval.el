@@ -15,6 +15,7 @@
 (require 'chat-llm)
 (require 'chat-session)
 (require 'chat-agent)
+(require 'chat-code)
 (require 'chat-model-capabilities)
 
 (defconst chat-coding-eval-schema-version 1)
@@ -1075,6 +1076,7 @@ The returned plist contains :directory, :result-metadata and :descriptor."
            (stale-writes 0)
            run)
       (chat-session-set-working-directory session workspace)
+      (chat-code-enable session workspace)
       (setf (chat-session-approval-mode session) chat-coding-eval-approval-mode)
       (setq
        run
@@ -1096,10 +1098,16 @@ The returned plist contains :directory, :result-metadata and :descriptor."
          (lambda (event)
            (when (plist-member event :usage)
              (setq usage (plist-get event :usage)))
-           (pcase (plist-get event :type)
-             ((or 'tool-error 'execution-error) (cl-incf tool-errors))
-             ((or 'approval-requested 'approval-decided) (cl-incf approvals))
-             ('stale-file (cl-incf stale-writes)))
+           (let ((type (plist-get event :type))
+                 (tool-type (and (eq (plist-get event :type) 'tool-event)
+                                 (plist-get (plist-get event :event) :type))))
+             (when (memq (or tool-type type) '(tool-error execution-error))
+               (cl-incf tool-errors))
+             (when (memq (or tool-type type)
+                         '(approval-guard-pending approval-pending approval))
+               (cl-incf approvals))
+             (when (eq (or tool-type type) 'stale-file)
+               (cl-incf stale-writes)))
            (when (eq (plist-get event :type) 'agent-end)
              (funcall
               done

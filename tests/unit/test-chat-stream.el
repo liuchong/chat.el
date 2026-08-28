@@ -286,30 +286,52 @@ with the heap the parent has accumulated."
               (chat-log-timings t)
               (chat-stream--curl "/usr/bin/curl")
               (buffers nil)
+              command
+              sent-body
               ;; Made before the stub is installed: a stub that reaches
               ;; for `start-process' lands back in itself.
               (stand-in (start-process "chat-stream-timing" nil "true")))
-          (cl-letf (((symbol-function 'chat-llm--make-headers)
-                     (lambda (&rest _) '(("Authorization" . "Bearer x"))))
-                    ((symbol-function 'make-process)
-                     (lambda (&rest args)
-                       (push (plist-get args :buffer) buffers)
-                       stand-in)))
+          (cl-letf
+              (((symbol-function 'chat-llm-get-provider)
+                (lambda (&rest _) '(:model "test")))
+               ((symbol-function 'chat-llm--request-url)
+                (lambda (&rest _) "https://example.invalid/chat"))
+               ((symbol-function 'chat-llm--make-headers)
+                (lambda (&rest _) '(("Authorization" . "Bearer x"))))
+               ((symbol-function 'chat-llm--build-request)
+                (lambda (&rest _) '(:messages [])))
+               ((symbol-function 'make-process)
+                (lambda (&rest args)
+                  (push (plist-get args :buffer) buffers)
+                  (setq command (plist-get args :command))
+                  stand-in))
+               ((symbol-function 'process-send-string)
+                (lambda (_process body)
+                  (setq sent-body body)))
+               ((symbol-function 'process-send-eof) #'ignore))
             (chat-log-timing-start)
             (chat-stream-request
              'deepseek
-             (list (make-chat-message :id "u" :role :user :content "hi"))
+             nil
              #'ignore)
             (chat-log-timing-report "stream send"))
           (dolist (buffer buffers)
-            (when (buffer-live-p buffer) (kill-buffer buffer)))
-          (when (process-live-p stand-in) (delete-process stand-in))
+            (when (buffer-live-p buffer)
+              (kill-buffer buffer)))
+          (when (process-live-p stand-in)
+            (delete-process stand-in))
+          (chat-llm--delete-curl-config-file (nth 2 command))
           (let ((logged (with-temp-buffer
                           (insert-file-contents log-file)
                           (buffer-string))))
             (dolist (phase '("headers" "build" "encode" "log" "spawn"
                              "diagnostics"))
-              (should (string-match-p (concat phase " [0-9]+") logged)))))
+              (should (string-match-p (concat phase " [0-9]+") logged))))
+          (should (equal (append (seq-take command 2) (seq-drop command 3))
+                         '("/usr/bin/curl" "--config"
+                           "--data-binary" "@-")))
+          (should (string-match-p "messages" sent-body))
+          (should-not (member "Authorization: Bearer x" command)))
       (delete-file log-file))))
 
 (ert-deftest chat-stream-curl-is-looked-for-once ()

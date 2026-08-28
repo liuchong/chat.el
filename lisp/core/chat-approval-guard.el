@@ -214,6 +214,9 @@ whatever these say."
            " find in query-only form).")
    (concat "ALLOW: build, test and lint commands that write only into the"
            " project's own build output directories.")
+   (concat "ALLOW: create or edit ordinary project files inside the project"
+           " and the configured write directories, except credentials,"
+           " version control metadata, and this approval mechanism.")
    (concat "DENY: writing or deleting outside the directories writes are"
            " confined to.")
    (concat "DENY: modifying version control refs, history or remotes"
@@ -959,6 +962,16 @@ guard holding the floor's decision."
            (string-prefix-p "../" value)
            (string-match-p "/" value))))
 
+(defun chat-approval-guard--path-argument-p (name)
+  "Return non-nil when argument NAME conventionally carries a path."
+  (let ((normalized (downcase (format "%s" name))))
+    (or (member normalized
+                '("cwd" "dir" "directory" "directories" "file" "files"
+                  "path" "paths" "project-root" "project_root" "root"))
+        (string-match-p
+         "\\(?:^\\|[_-]\\)\\(?:dir\\|directory\\|file\\|path\\|root\\)s?\\'"
+         normalized))))
+
 (defun chat-approval-guard--target-paths (tool-id arguments env)
   "Return the paths TOOL-ID with ARGUMENTS refers to, under ENV.
 
@@ -968,15 +981,18 @@ it hits, and one shown only the resolved path cannot see that the call was
 written to look local."
   (let ((paths nil))
     (when (fboundp 'chat-files--tool-target-paths)
-      (dolist (path (condition-case nil
-                        (chat-files--tool-target-paths tool-id arguments)
-                      (error nil)))
+      (dolist (path
+               (let ((default-directory
+                      (or (plist-get env :directory) default-directory)))
+                 (condition-case nil
+                     (chat-files--tool-target-paths tool-id arguments)
+                   (error nil))))
         (push (list :argument "path" :given path :resolved path) paths)))
     (dolist (entry arguments)
       (let ((name (car entry))
             (value (cdr entry)))
-        (when (and (chat-approval-guard--path-like-p value)
-                   (not (equal name "command")))
+        (when (and (chat-approval-guard--path-argument-p name)
+                   (chat-approval-guard--path-like-p value))
           (push (list :argument name
                       :given value
                       :resolved (chat-approval-guard--resolve value env))

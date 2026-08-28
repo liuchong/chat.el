@@ -314,30 +314,17 @@ Returns the process object."
          (_ (chat-log-timing-mark "headers"))
          (body (chat-llm--build-request provider messages opts))
          (_ (chat-log-timing-mark "build"))
-         ;; Get User-Agent from resolved headers
-         (user-agent (or (cdr (assoc "User-Agent" headers))
-                         "chat.el/1.0"))
          ;; Encode body for curl (handle multibyte characters)
          (body-str (json-encode body))
          (body-encoded (if (multibyte-string-p body-str)
                            (encode-coding-string body-str 'utf-8)
                          body-str))
          (_ (chat-log-timing-mark "encode"))
-         ;; Create curl command
-         (curl-args (let ((base-args (list "-s" "-N"
-                                           "-X" "POST"))
-                          (header-args
-                           (chat-llm--curl-args-for-headers
-                            (if user-agent
-                                (assoc-delete-all "User-Agent" headers)
-                              headers)))
-                          (ua-args (when user-agent
-                                     (list "-A" user-agent))))
-                      (append base-args
-                              header-args
-                              (list "-d" body-encoded)
-                              ua-args
-                              (list url))))
+         (curl (chat-stream--ensure-curl))
+         (curl-config (chat-llm--curl-post-config url headers t nil))
+         (curl-config-file (chat-llm--make-curl-config-file curl-config))
+         (curl-command (list curl "--config" curl-config-file
+                             "--data-binary" "@-"))
          ;; Buffer for accumulating partial lines
          (buffer (generate-new-buffer " *chat-stream*"))
          (content-buffer "")
@@ -347,47 +334,52 @@ Returns the process object."
     (with-current-buffer buffer
       (setq-local chat-stream--partial-line ""))
     
-    ;; Check curl is available
-    (chat-stream--ensure-curl)
-
     ;; Log request metadata without leaking user content or secrets.  One
     ;; line rather than four: each `chat-log' call opens the file, appends
     ;; and closes it, and this happens while the reader is waiting.
-    (chat-log "[REQUEST] %s | %d bytes | %d messages | args %S"
+    (chat-log "[REQUEST] %s | %d bytes | %d messages | transport private-config+stdin-body"
               url
               (string-bytes body-encoded)
-              (length messages)
-              (chat-stream--redact-curl-args-for-log curl-args))
+              (length messages))
     (chat-log-timing-mark "log")
     (condition-case err
-        (setq process (make-process
-                      :name "chat-stream"
-                      :buffer buffer
-                      :command (cons "curl" curl-args)
-                      :filter (lambda (proc string)
-                               (chat-stream--handle-output
-                                proc string provider callback reasoning-callback
-                                payload-callback))
-                      :sentinel (lambda (proc event)
-                                 (chat-log "[STREAM] Process event: %s" event)
-                                 (when (string-match-p "finished\\|exited" event)
-                                   ;; Flush the trailing partial line: HTTP
-                                   ;; error bodies and final SSE chunks may
-                                   ;; lack a final newline.
-                                   (when (buffer-live-p (process-buffer proc))
-                                     (with-current-buffer (process-buffer proc)
-                                       (when (and (stringp chat-stream--partial-line)
-                                                  (not (string-empty-p chat-stream--partial-line)))
-                                         (chat-stream--handle-output
-                                          proc
-                                          (concat chat-stream--partial-line "\n")
-                                          provider
-                                          callback
-                                          reasoning-callback
-                                          payload-callback))))
-                                   (kill-buffer buffer)))
-                      :stderr (get-buffer-create "*chat-stream-err*")))
+        (progn
+          (setq process (make-process
+                         :name "chat-stream"
+                         :buffer buffer
+                         :command curl-command
+                         :coding 'binary
+                         :connection-type 'pipe
+                         :filter (lambda (proc string)
+                                  (chat-stream--handle-output
+                                   proc string provider callback reasoning-callback
+                                   payload-callback))
+                         :sentinel (lambda (proc event)
+                                    (chat-log "[STREAM] Process event: %s" event)
+                                    (when (memq (process-status proc) '(exit signal))
+                                      (chat-llm--cleanup-curl-config proc)
+                                      (when (buffer-live-p (process-buffer proc))
+                                        ;; HTTP error bodies and final SSE chunks
+                                        ;; may lack a final newline.
+                                        (when (eq (process-status proc) 'exit)
+                                          (with-current-buffer (process-buffer proc)
+                                            (when (and (stringp chat-stream--partial-line)
+                                                       (not (string-empty-p chat-stream--partial-line)))
+                                              (chat-stream--handle-output
+                                               proc
+                                               (concat chat-stream--partial-line "\n")
+                                               provider
+                                               callback
+                                               reasoning-callback
+                                               payload-callback))))
+                                        (kill-buffer (process-buffer proc)))))
+                         :stderr (get-buffer-create "*chat-stream-err*")))
+          (process-put process 'chat-curl-config-file curl-config-file)
+          (chat-llm--send-curl-body process body-encoded))
       (error
+       (when (and process (process-live-p process))
+         (delete-process process))
+       (chat-llm--delete-curl-config-file curl-config-file)
        (when request-id
          (chat-request-diagnostics-record
           request-id
