@@ -12,11 +12,18 @@
 (require 'seq)
 (require 'subr-x)
 (require 'chat-eval)
+(require 'chat-llm)
 (require 'chat-session)
 (require 'chat-agent)
 (require 'chat-model-capabilities)
 
 (defconst chat-coding-eval-schema-version 1)
+
+(defconst chat-coding-eval-fixture-generator-schema-version 1)
+
+(defconst chat-coding-eval--indexed-source-pattern
+  "\\.\\(?:el\\|py\\|js\\|mjs\\|cjs\\|ts\\|tsx\\|go\\|rs\\)\\'"
+  "Source extensions used by the fixed coding Eval corpus.")
 
 (defcustom chat-coding-eval-workspace-directory
   (expand-file-name "coding-eval/" temporary-file-directory)
@@ -27,7 +34,7 @@
   "Whether terminal coding evaluations remove their workspaces."
   :type 'boolean :group 'chat)
 
-(defcustom chat-coding-eval-max-fixture-files 2000
+(defcustom chat-coding-eval-max-fixture-files 12000
   "Maximum number of files accepted in one evaluation fixture."
   :type 'integer :group 'chat)
 
@@ -58,11 +65,13 @@
 (cl-defstruct (chat-coding-eval-task
                (:constructor chat-coding-eval-task-create-record))
   schema-version id revision category language description fixture-id
-  fixture-directory prompt allowed-paths timeout-seconds judges tags)
+  fixture-directory prompt allowed-paths timeout-seconds judges tags
+  fixture-generator fixture-generator-digest)
 
 (cl-defstruct (chat-coding-eval-run-state
                (:constructor chat-coding-eval-run-state-create-record))
   task fixture-digest fixture-revision workspace workspace-id baseline
+  fixture-file-count fixture-indexed-file-count
   started-at setup-duration-ms agent-duration-ms judge-started-at
   judge-duration-ms answer metadata
   changed-files out-of-scope-files checks executor-cancel process timer
@@ -84,6 +93,109 @@
        (not (string-prefix-p "~" path))
        (not (member ".." (split-string path "/" t)))
        (equal path (directory-file-name (file-name-unquote path)))))
+
+(defun chat-coding-eval--read-generator (relative manifest-directory)
+  "Read and validate generator RELATIVE to MANIFEST-DIRECTORY."
+  (when relative
+    (unless (chat-coding-eval--safe-relative-path-p relative)
+      (error "Coding evaluation fixture generator path is unsafe"))
+    (let* ((root (file-name-as-directory (file-truename manifest-directory)))
+           (file (expand-file-name relative root)))
+      (unless (and (file-regular-p file)
+                   (not (file-symlink-p file))
+                   (string-prefix-p root (file-truename file)))
+        (error "Coding evaluation fixture generator does not exist: %s"
+               relative))
+      (let* ((json-object-type 'alist)
+             (json-array-type 'list)
+             (json-key-type 'symbol)
+             (generator (json-read-file file)))
+        (chat-coding-eval--validate-generator generator)
+        (cons generator (chat-coding-eval--file-digest file))))))
+
+(defun chat-coding-eval--validate-generator (generator)
+  "Validate deterministic fixture GENERATOR and return it."
+  (let ((version (alist-get 'schemaVersion generator))
+        (kind (alist-get 'kind generator))
+        (count (alist-get 'generatedFiles generator))
+        (path-template (alist-get 'pathTemplate generator))
+        (content-template (alist-get 'contentTemplate generator))
+        (bucket-size (or (alist-get 'bucketSize generator) 100)))
+    (unless (= (or version 0)
+               chat-coding-eval-fixture-generator-schema-version)
+      (error "Unsupported coding evaluation fixture generator schema"))
+    (unless (equal kind "source-tree")
+      (error "Unsupported coding evaluation fixture generator kind: %s" kind))
+    (unless (and (integerp count) (> count 0)
+                 (<= count chat-coding-eval-max-fixture-files))
+      (error "Coding evaluation generated file count is invalid"))
+    (unless (and (integerp bucket-size) (> bucket-size 0))
+      (error "Coding evaluation generator bucket size is invalid"))
+    (unless (and (stringp path-template)
+                 (string-match-p (regexp-quote "{{index}}") path-template))
+      (error "Coding evaluation generator path requires {{index}}"))
+    (unless (and (stringp content-template)
+                 (<= (string-bytes content-template) 4096))
+      (error "Coding evaluation generator content is invalid"))
+    generator))
+
+(defun chat-coding-eval--render-generator-template
+    (template index bucket-size)
+  "Render TEMPLATE for INDEX grouped by BUCKET-SIZE."
+  (let ((rendered
+         (replace-regexp-in-string
+          (regexp-quote "{{index}}") (number-to-string index)
+          template t t)))
+    (replace-regexp-in-string
+     (regexp-quote "{{bucket}}")
+     (number-to-string (/ index bucket-size)) rendered t t)))
+
+(defun chat-coding-eval--materialize-generator (task workspace)
+  "Materialize TASK's deterministic fixture generator in WORKSPACE."
+  (when-let* ((generator (chat-coding-eval-task-fixture-generator task)))
+    (let ((count (alist-get 'generatedFiles generator))
+          (path-template (alist-get 'pathTemplate generator))
+          (content-template (alist-get 'contentTemplate generator))
+          (bucket-size (or (alist-get 'bucketSize generator) 100)))
+      (dotimes (index count)
+        (let* ((relative
+                (chat-coding-eval--render-generator-template
+                 path-template index bucket-size))
+               (content
+                (chat-coding-eval--render-generator-template
+                 content-template index bucket-size))
+               (file (expand-file-name relative workspace)))
+          (unless (chat-coding-eval--safe-relative-path-p relative)
+            (error "Generated fixture path is unsafe: %s" relative))
+          (when (file-exists-p file)
+            (error "Generated fixture path collides with base fixture: %s"
+                   relative))
+          (make-directory (file-name-directory file) t)
+          (write-region content nil file nil 'silent))))))
+
+(defun chat-coding-eval-task-declared-file-count (task)
+  "Return the deterministic declared fixture file count for TASK."
+  (+ (length (chat-coding-eval--fixture-files
+              (chat-coding-eval-task-fixture-directory task)))
+     (or (alist-get 'generatedFiles
+                    (chat-coding-eval-task-fixture-generator task))
+         0)))
+
+(defun chat-coding-eval-task-declared-indexed-file-count (task)
+  "Return the declared indexed source-file count for TASK."
+  (+ (cl-count-if
+      (lambda (file)
+        (string-match-p chat-coding-eval--indexed-source-pattern file))
+      (chat-coding-eval--fixture-files
+       (chat-coding-eval-task-fixture-directory task)))
+     (let* ((generator (chat-coding-eval-task-fixture-generator task))
+            (count (or (alist-get 'generatedFiles generator) 0))
+            (path-template (alist-get 'pathTemplate generator)))
+       (if (and path-template
+                (string-match-p chat-coding-eval--indexed-source-pattern
+                                path-template))
+           count
+         0))))
 
 (defun chat-coding-eval--validate-judge (judge)
   "Validate one task JUDGE and return it."
@@ -138,14 +250,24 @@
   (unless (and (listp (chat-coding-eval-task-judges task))
                (chat-coding-eval-task-judges task))
     (error "Coding evaluation task requires judges"))
+  (unless (and (listp (chat-coding-eval-task-tags task))
+               (seq-every-p #'stringp (chat-coding-eval-task-tags task)))
+    (error "Coding evaluation task tags must be strings"))
+  (when (member "large-repo" (chat-coding-eval-task-tags task))
+    (unless (>= (chat-coding-eval-task-declared-indexed-file-count task) 10000)
+      (error "Large-repo coding evaluation fixture requires 10,000 indexed files")))
   (mapc #'chat-coding-eval--validate-judge
         (chat-coding-eval-task-judges task))
   task)
 
 (defun chat-coding-eval--task-from-json (data manifest-directory)
   "Decode task DATA relative to MANIFEST-DIRECTORY."
-  (chat-coding-eval--validate-task
-   (chat-coding-eval-task-create-record
+  (let ((generator
+         (chat-coding-eval--read-generator
+          (chat-coding-eval--json-value data 'fixtureGenerator)
+          manifest-directory)))
+    (chat-coding-eval--validate-task
+     (chat-coding-eval-task-create-record
     :schema-version (or (chat-coding-eval--json-value data 'schemaVersion)
                         chat-coding-eval-schema-version)
     :id (chat-coding-eval--json-value data 'id)
@@ -161,8 +283,10 @@
     :allowed-paths (chat-coding-eval--json-value data 'allowedPaths)
     :timeout-seconds (or (chat-coding-eval--json-value data 'timeoutSeconds)
                          120)
-    :judges (chat-coding-eval--json-value data 'judges)
-    :tags (chat-coding-eval--json-value data 'tags))))
+      :judges (chat-coding-eval--json-value data 'judges)
+      :tags (or (chat-coding-eval--json-value data 'tags) nil)
+      :fixture-generator (car generator)
+      :fixture-generator-digest (cdr generator)))))
 
 (defun chat-coding-eval-load-suite (manifest)
   "Load, validate and return tasks from JSON MANIFEST."
@@ -192,7 +316,8 @@
 (defun chat-coding-eval-suite-coverage (tasks)
   "Return category and language counts for TASKS."
   (let ((categories (make-hash-table :test 'equal))
-        (languages (make-hash-table :test 'equal)))
+        (languages (make-hash-table :test 'equal))
+        (tags (make-hash-table :test 'equal)))
     (dolist (task tasks)
       (puthash (chat-coding-eval-task-category task)
                (1+ (gethash (chat-coding-eval-task-category task)
@@ -201,7 +326,9 @@
       (puthash (chat-coding-eval-task-language task)
                (1+ (gethash (chat-coding-eval-task-language task)
                             languages 0))
-               languages))
+               languages)
+      (dolist (tag (chat-coding-eval-task-tags task))
+        (puthash tag (1+ (gethash tag tags 0)) tags)))
     `((taskCount . ,(length tasks))
       (categories . ,(let (items)
                        (maphash (lambda (key value)
@@ -214,7 +341,13 @@
                                  (push (cons key value) items))
                                languages)
                       (sort items (lambda (left right)
-                                    (string< (car left) (car right)))))))))
+                                    (string< (car left) (car right))))))
+      (tags . ,(let (items)
+                 (maphash (lambda (key value)
+                            (push (cons key value) items))
+                          tags)
+                 (sort items (lambda (left right)
+                               (string< (car left) (car right)))))))))
 
 (defun chat-coding-eval--fixture-files (directory)
   "Return validated regular files below DIRECTORY in stable order."
@@ -405,6 +538,15 @@
              `((taskId . ,(chat-coding-eval-task-id task))
                (language . ,(chat-coding-eval-task-language task))
                (taskTags . ,(chat-coding-eval-task-tags task))
+               (fixtureFileCount .
+                                 ,(chat-coding-eval-run-state-fixture-file-count
+                                   state))
+               (fixtureIndexedFileCount .
+                                        ,(chat-coding-eval-run-state-fixture-indexed-file-count
+                                          state))
+               (fixtureGeneratorDigest .
+                                       ,(chat-coding-eval-task-fixture-generator-digest
+                                         task))
                (fixtureRevision .
                                 ,(chat-coding-eval-run-state-fixture-revision
                                   state))
@@ -597,11 +739,20 @@ function.  ON-COMPLETE receives the immutable result and run state."
            :cleanup-p cleanup)))
     (condition-case setup-error
         (progn
-          (setf (chat-coding-eval-run-state-fixture-digest state)
-                (chat-coding-eval-fixture-digest
-                 (chat-coding-eval-task-fixture-directory task)))
           (copy-directory (chat-coding-eval-task-fixture-directory task)
                           workspace nil nil t)
+          (chat-coding-eval--materialize-generator task workspace)
+          (let ((fixture-files (chat-coding-eval--fixture-files workspace)))
+            (setf (chat-coding-eval-run-state-fixture-file-count state)
+                  (length fixture-files)
+                  (chat-coding-eval-run-state-fixture-indexed-file-count state)
+                  (cl-count-if
+                   (lambda (file)
+                     (string-match-p chat-coding-eval--indexed-source-pattern
+                                     file))
+                   fixture-files)
+                  (chat-coding-eval-run-state-fixture-digest state)
+                  (chat-coding-eval-fixture-digest workspace)))
           (setf (chat-coding-eval-run-state-fixture-revision state)
                 (chat-coding-eval--initialize-repository workspace)
                 (chat-coding-eval-run-state-baseline state)
@@ -733,13 +884,20 @@ ON-COMPLETE receives results in execution order and the suite state."
       (maxOutputTokens .
                        ,(chat-model-capabilities-max-output-tokens facts)))))
 
-(defun chat-coding-eval-agent-executor (model)
-  "Return a live Agent executor using MODEL."
-  (lambda (task workspace done)
-    (let* ((session
+(defun chat-coding-eval--model-name (provider requested)
+  "Resolve REQUESTED model name for PROVIDER."
+  (or requested
+      (plist-get (chat-llm-get-provider-config provider) :model)
+      (user-error "Provider %s has no configured model" provider)))
+
+(defun chat-coding-eval-agent-executor (provider &optional model-name)
+  "Return a live Agent executor using PROVIDER and MODEL-NAME."
+  (let ((resolved-model (chat-coding-eval--model-name provider model-name)))
+    (lambda (task workspace done)
+      (let* ((session
             (chat-session-create
              (format "Evaluation: %s" (chat-coding-eval-task-id task))
-             model (symbol-name model)))
+             provider resolved-model))
            (prompt
             (format
              (concat "%s\n\nWork only inside the current workspace. "
@@ -747,7 +905,7 @@ ON-COMPLETE receives results in execution order and the suite state."
                      "Finish with a concise answer describing the result.")
              (chat-coding-eval-task-prompt task)
              (string-join (chat-coding-eval-task-allowed-paths task) ", ")))
-           (capabilities (chat-coding-eval--capability-snapshot model))
+           (capabilities (chat-coding-eval--capability-snapshot provider))
            usage
            (tool-errors 0)
            (approvals 0)
@@ -759,7 +917,7 @@ ON-COMPLETE receives results in execution order and the suite state."
        run
        (chat-agent-start
         (list
-         :model model
+         :model provider
          :messages
          (list (make-chat-message
                 :id (chat-session-new-message-id "coding-eval")
@@ -784,8 +942,12 @@ ON-COMPLETE receives results in execution order and the suite state."
               done
               (plist-get event :status)
               (or (plist-get event :content) "")
-              `((model . ,(symbol-name model))
+              `((provider . ,(symbol-name provider))
+                (model . ,resolved-model)
                 (modelCapabilitySnapshot . ,capabilities)
+                (profile . "code")
+                (transport . "stream")
+                (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
                 (tokenUsage . ,usage)
                 (sessionId . ,(chat-session-id session))
                 (runtimeTaskId . ,(and run
@@ -801,21 +963,30 @@ ON-COMPLETE receives results in execution order and the suite state."
                 (approvalCount . ,approvals)
                 (staleWriteCount . ,stale-writes)
                 (verificationRetryCount . 0))))))))
-      (lambda () (chat-agent-cancel run)))))
+        (lambda () (chat-agent-cancel run))))))
 
-(defun chat-coding-eval-run-live (model repetitions &optional manifest)
-  "Run the development coding suite with MODEL for REPETITIONS."
+(defun chat-coding-eval-run-live
+    (provider repetitions &optional manifest model-name)
+  "Run the coding suite with PROVIDER for REPETITIONS.
+
+MODEL-NAME defaults to PROVIDER's registered model."
   (interactive
-   (list (intern (read-string "Evaluation model: "
-                              (symbol-name chat-default-model)))
-         (read-number "Repetitions: " 3)
-         chat-coding-eval-default-manifest))
+   (let* ((provider
+           (intern (read-string "Evaluation provider: "
+                                (symbol-name chat-default-model))))
+          (default-model (chat-coding-eval--model-name provider nil)))
+     (list provider
+           (read-number "Repetitions: " 3)
+           chat-coding-eval-default-manifest
+           (read-string "Model name: " default-model))))
   (let ((file (or manifest chat-coding-eval-default-manifest)))
     (unless (and file (file-exists-p file))
       (user-error "No coding evaluation manifest is available"))
+    (unless (chat-llm-provider-configured-p provider)
+      (user-error "Evaluation provider is not configured: %s" provider))
     (chat-coding-eval-run-suite
      (chat-coding-eval-load-suite file)
-     (chat-coding-eval-agent-executor model)
+     (chat-coding-eval-agent-executor provider model-name)
      :repetitions repetitions
      :on-result
      (lambda (result repetition _state)

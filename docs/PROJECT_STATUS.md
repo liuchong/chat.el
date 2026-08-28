@@ -34,7 +34,8 @@ native progress UI, capability-tested execution isolation, independent typed
 review and conflict-safe coding children. M17 runtime phases, actionable
 diagnostics, strict acceptance aggregation and the 10,000-file performance path
 are implemented. Final acceptance remains blocked until comparable M9/M17 live
-result sets and a fixed large-repository token fixture exist.
+result sets with trusted token usage exist. The fixed corpus now includes a
+measured 10,000-indexed-file large-repository task.
 
 ## Implemented Areas
 
@@ -200,8 +201,8 @@ result sets and a fixed large-repository token fixture exist.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1692 regression tests discovered
-- 1692 passing
+- 1697 regression tests discovered
+- 1697 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

@@ -211,10 +211,15 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 ```
 
 在 Emacs 中，`M-x chat-coding-acceptance-run-performance` 会把性能门槛写成
-不可变 Eval。最终 live 验收先用 `M-x chat-coding-eval-run-live` 分别生成
-M9 和 M17 的 30 task x 5 结果集，再运行
+不可变 Eval。最终 live 验收先用 `M-x chat-coding-eval-run-live` 固定 provider、
+具体 model 和五次重复，分别生成 M9 和 M17 的 30 task x 5 结果集，再运行
 `M-x chat-coding-acceptance-run-final`。缺失任一结果集、可信 token usage 或固定
 large-repo 样本时，结果为 `blocked`，不会被当成通过。
+
+固定 manifest 保持 30 个任务的语言和类别平衡，其中 `python-locate` 是
+`large-repo` task。版本化生成描述符在隔离 workspace 内物化 10,000 个可索引
+Python 源文件；结果保存实际 indexed-file count 和生成器 digest。验收器同时检查
+这两个证据，不能只添加 tag 冒充大型仓库。
 
 当文件写工具触发审批时，原生审批提示除了单次、session、tool 级放行外，还会在可判定目录范围时提供 directory 级放行。
 这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。

@@ -45,11 +45,13 @@
     },
 
     {
-      "id": "python-locate", "revision": 1, "category": "locate-explain", "language": "python",
-      "description": "Locate a user lookup implementation.", "fixtureId": "python-sample-v1", "fixture": "python",
-      "prompt": "Find the function that looks up a user by identifier and explain its missing-user result. Do not edit files.",
-      "allowedPaths": ["sample.py"], "timeoutSeconds": 120,
-      "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "find_user"}, {"type": "no-change", "name": "read-only"}]
+      "id": "python-locate", "revision": 2, "category": "locate-explain", "language": "python",
+      "description": "Locate an account-status lookup in a large source tree.",
+      "fixtureId": "python-large-v1", "fixture": "python-large",
+      "fixtureGenerator": "generators/python-large.json", "tags": ["large-repo"],
+      "prompt": "Find the function that resolves an account status by identifier and explain its missing-account result. Do not edit files.",
+      "allowedPaths": ["src/account_status.py"], "timeoutSeconds": 120,
+      "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "resolve_account_status"}, {"type": "no-change", "name": "read-only"}]
     },
     {
       "id": "python-single-fix", "revision": 1, "category": "single-file-fix", "language": "python",

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-tree",
+  "generatedFiles": 9998,
+  "bucketSize": 100,
+  "pathTemplate": "packages/package_{{bucket}}/module_{{index}}.py",
+  "contentTemplate": "def generated_value_{{index}}():\n    return {{index}}\n"
+}

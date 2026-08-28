@@ -311,7 +311,9 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 实施状态（2026-08-28）：runner、30-task manifest、fixture、确定性 judge 和
 不可变结果合同已经完成；本机没有留存固定 provider/model/capability identity 的
 live 结果集。因此“基线基础设施完成”不等于“可比较 M9 live baseline 已存在”，
-最终验收必须按相同的五次重复重新运行 M9 与 M17。
+最终验收必须按相同的五次重复重新运行 M9 与 M17。固定任务集中已有一个
+`large-repo` task；其版本化生成描述符物化 10,001 个文件，其中 10,000 个为
+可索引 Python 源文件，结果记录实际文件数和生成器摘要。
 
 #### 目标
 
@@ -752,7 +754,8 @@ merge gate；合并后重新运行 M12 verification。决策与验收证据见 D
 
 实施状态（2026-08-28）：runtime phase、可操作诊断、已知路径增量 repo map、
 10,000 文件基准和严格不可变验收聚合已经完成。性能门槛通过；30-by-5 live
-对比和 large-repo token 门槛因证据缺失保持 blocked。实现决策见 Decision 0031，
+对比和 large-repo token usage 对照因真实模型结果缺失保持 blocked。固定
+large-repo task 已完成并通过实际物化集成测试。实现决策见 Decision 0031，
 实测和解锁步骤见 `stage-2026-08-28-productized-coding-acceptance.md`。
 
 #### 目标

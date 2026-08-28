@@ -20,6 +20,8 @@
   verification error, permission block and infrastructure
 - standalone 10,000-file benchmark covering cold index, single-file update,
   warm query, context build, heap delta and cleanup
+- fixed large-repository live task with deterministic workspace materialization
+  and measured indexed-file evidence
 
 ## Performance Evidence
 
@@ -45,8 +47,8 @@ repo-map cache entry were removed before completion.
 
 ## Verification Evidence
 
-- focused repo-map and acceptance tests: 15/15 passed
-- canonical unit suite: 1692/1692 passed, zero skipped and zero unexpected
+- focused coding Eval and acceptance tests: 22/22 passed
+- canonical unit suite: 1697/1697 passed, zero skipped and zero unexpected
 - integration: deterministic coding fixtures and work platform passed 2/2;
   two online-provider checks explicitly skipped because credentials are absent
 - deterministic end-to-end: 2/2 passed
@@ -56,26 +58,35 @@ repo-map cache entry were removed before completion.
 - source reader, parenthesis and `git diff --check` checks passed with no
   compiled artifact
 
+## Large-Repository Evidence
+
+The fixed `python-locate` task revision 2 has the `large-repo` tag. Its
+versioned generator digest is
+`a39472ea1e2cd4810a2416ca435bdc29371580065999ccf24924bee4801581bd`.
+Each isolated run materializes 10,001 files, of which 10,000 match the indexed
+source corpus. The resulting fixture digest is
+`c10e4eb54a654f78c0c2c573cad8715fb9df8c530443b3675a2fbb8f039d04f0`.
+Two integration repetitions passed deterministic judging, actual count checks
+and workspace cleanup.
+
 ## Blocking Evidence
 
 No immutable M9 live result set exists on this machine, and no configured
-provider credentials are available for a compatible replay.  The fixed manifest
-also has no tagged large-repository coding task.  Therefore the required M9 and
-M17 30-by-5 comparison and the 15 percent large-repository token reduction gate
-are blocked.  They are not reported as failed model trials and are not replaced
-with synthetic data.
+provider credentials are available for a compatible replay. Therefore the
+required M9 and M17 30-by-5 comparison and the 15 percent large-repository token
+reduction gate remain blocked by missing live token evidence. They are not
+reported as failed model trials and are not replaced with synthetic data.
 
 Immutable final acceptance record
-`eval-20260828T074339110734000-d73d5c` preserves the passing performance
+`eval-20260828T080109731698000-0f7eaf` preserves the passing performance
 gates, the final test metadata and both blocked evidence gates. Its overall
 status is `blocked`.
 
 ## Unblock Procedure
 
-1. Add a fixed, versioned, at least 10,000-file coding fixture with a
-   `large-repo` task tag and deterministic judge.
-2. Freeze provider, model, capability snapshot, profile and task revisions.
-3. Run `M-x chat-coding-eval-run-live` with five repetitions for the M9
+1. Configure one provider and freeze provider, concrete model, capability
+   snapshot, profile and task revisions.
+2. Run `M-x chat-coding-eval-run-live` with five repetitions for the M9
    configuration and again for M17.
-4. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
-5. Mark M17 complete only if the immutable aggregate result is `passed`.
+3. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
+4. Mark M17 complete only if the immutable aggregate result is `passed`.

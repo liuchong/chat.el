@@ -46,6 +46,19 @@
                    (mapcar #'cdr (alist-get 'categories coverage))))
     (should (equal '(6 6 6 6 6)
                    (mapcar #'cdr (alist-get 'languages coverage))))
+    (should (equal '(("large-repo" . 1))
+                   (alist-get 'tags coverage)))
+    (let ((large
+           (seq-find
+            (lambda (task)
+              (member "large-repo" (chat-coding-eval-task-tags task)))
+            tasks)))
+      (should large)
+      (should (= 10000
+                 (chat-coding-eval-task-declared-indexed-file-count large)))
+      (should (= 10001 (chat-coding-eval-task-declared-file-count large)))
+      (should (= 64 (length
+                     (chat-coding-eval-task-fixture-generator-digest large)))))
     (dolist (task tasks)
       (let ((left (chat-coding-eval-fixture-digest
                    (chat-coding-eval-task-fixture-directory task)))
@@ -53,6 +66,65 @@
                     (chat-coding-eval-task-fixture-directory task))))
         (should (= 64 (length left)))
         (should (equal left right))))))
+
+(ert-deftest chat-coding-eval-generator-materializes-bounded-source-files ()
+  "A generator creates deterministic files and records their measured count."
+  (chat-coding-eval-test-with-runtime
+   (let* ((fixture (expand-file-name "fixture/" temp-dir))
+          (generator
+           '((schemaVersion . 1) (kind . "source-tree")
+             (generatedFiles . 3) (bucketSize . 2)
+             (pathTemplate . "pkg/{{bucket}}/item_{{index}}.py")
+             (contentTemplate . "VALUE = {{index}}\n")))
+          (task
+           (chat-coding-eval-task-create-record
+            :schema-version chat-coding-eval-schema-version
+            :id "generated" :revision 1 :category "locate-explain"
+            :language "python" :description "generated"
+            :fixture-id "generated-v1" :fixture-directory fixture
+            :fixture-generator generator :fixture-generator-digest "digest"
+            :prompt "Inspect the generated files." :allowed-paths '("base.py")
+            :timeout-seconds 2 :tags nil
+            :judges '(((type . "no-change") (name . "unchanged")))))
+          result)
+     (make-directory fixture t)
+     (write-region "BASE = 1\n" nil (expand-file-name "base.py" fixture))
+     (chat-coding-eval-run
+      task
+      (lambda (_task workspace done)
+        (should (file-exists-p (expand-file-name "pkg/1/item_2.py" workspace)))
+        (funcall done 'completed "inspected" nil))
+      :on-complete (lambda (value _state) (setq result value)))
+     (should result)
+     (should (eq 'passed (chat-eval-result-status result)))
+     (should (= 4 (alist-get 'fixtureFileCount
+                             (chat-eval-result-metadata result))))
+     (should (= 4 (alist-get 'fixtureIndexedFileCount
+                             (chat-eval-result-metadata result)))))))
+
+(ert-deftest chat-coding-eval-generator-refuses-path-escape ()
+  "Rendered generator paths cannot escape the disposable workspace."
+  (chat-test-with-temp-dir
+   (let ((task
+          (chat-coding-eval-task-create-record
+           :fixture-generator
+           '((generatedFiles . 1) (bucketSize . 1)
+             (pathTemplate . "../item_{{index}}.py")
+             (contentTemplate . "VALUE = 1\n")))))
+     (should-error
+      (chat-coding-eval--materialize-generator task temp-dir)))))
+
+(ert-deftest chat-coding-eval-model-name-uses-provider-registration ()
+  "Live Eval separates provider identity from its concrete model name."
+  (let ((chat-llm-providers (copy-sequence chat-llm-providers)))
+    (chat-llm-register-provider
+     'coding-eval-provider :name "Eval" :model "model-v2" :api-key "test")
+    (should (equal "model-v2"
+                   (chat-coding-eval--model-name
+                    'coding-eval-provider nil)))
+    (should (equal "model-v3"
+                   (chat-coding-eval--model-name
+                    'coding-eval-provider "model-v3")))))
 
 (ert-deftest chat-coding-eval-rejects-unsafe-allowed-and-judge-paths ()
   "Fixture policy rejects traversal before an executor can run."
@@ -73,7 +145,7 @@
   (chat-coding-eval-test-with-runtime
    (let* ((task (seq-find
                  (lambda (item)
-                   (equal "python-locate"
+                   (equal "elisp-locate"
                           (chat-coding-eval-task-id item)))
                  (chat-coding-eval-load-suite
                   chat-coding-eval-test-manifest)))
@@ -82,7 +154,9 @@
            (chat-coding-eval-run
             task
             (lambda (_task _workspace done)
-              (funcall done 'completed "find_user returns None" '((model . "fake"))))
+              (funcall done 'completed
+                       "sample-find-user reports a missing user"
+                       '((model . "fake"))))
             :on-complete (lambda (value _state) (setq result value))))
      (should result)
      (should (eq 'passed (chat-eval-result-status result)))

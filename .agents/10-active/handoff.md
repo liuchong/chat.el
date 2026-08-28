@@ -16,7 +16,7 @@
 
 - M17 runtime status, diagnostics, performance runner and strict gate code are complete
 - Keep M17 blocked until both comparable 30-by-5 live result sets exist
-- Add a fixed tagged large-repository task before evaluating its token gate
+- The fixed tagged large-repository task now materializes 10,000 indexed files
 - Reproduce the aggregate with `M-x chat-coding-acceptance-run-final`
 
 ## Avoid

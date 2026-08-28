@@ -15,6 +15,10 @@
      :category "coding/test" :fixture-id "fixture"
      :fixture-digest "digest" :status status :checks checks
      :metadata `((taskId . ,(or task-id "demo")) (taskTags . ,tags)
+                 (fixtureIndexedFileCount .
+                                          ,(if (member "large-repo" tags)
+                                               10000
+                                             1))
                  (outOfScopeFiles . nil)
                  (executor . ,executor)))))
 
@@ -84,6 +88,25 @@
            (list baseline) (list current))))
     (should (eq 'passed (chat-coding-acceptance-gate-status gate)))))
 
+(ert-deftest chat-coding-acceptance-large-repo-gate-rejects-small-fixtures ()
+  "A large-repo label cannot substitute for measured indexed fixture size."
+  (let* ((check (chat-eval-check "judge" t t t))
+         (baseline
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((tokenUsage . ((input_tokens . 1000)))) '("large-repo")))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((tokenUsage . ((input_tokens . 800)))) '("large-repo"))))
+    (setf (alist-get 'fixtureIndexedFileCount
+                     (chat-eval-result-metadata current))
+          9999)
+    (let ((gate
+           (chat-coding-acceptance--large-repo-token-gate
+            (list baseline) (list current))))
+      (should (eq 'failed (chat-coding-acceptance-gate-status gate))))))
+
 (ert-deftest chat-coding-acceptance-rejects-mixed-trial-identities ()
   "Every repeat in a task group must share one comparison identity."
   (let* ((check (chat-eval-check "judge" t t t))
@@ -99,6 +122,25 @@
     (should-not
      (chat-coding-acceptance--compatible-identities-p
       (list baseline) (list current-a current-b)))))
+
+(ert-deftest chat-coding-acceptance-rejects-mixed-runtime-profiles ()
+  "Provider, model and runtime profile are part of comparison identity."
+  (let* ((check (chat-eval-check "judge" t t t))
+         (baseline
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((provider . fixed) (model . model-v1)
+             (profile . "code") (transport . "stream")
+             (approvalMode . "guarded"))))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((provider . fixed) (model . model-v1)
+             (profile . "review") (transport . "stream")
+             (approvalMode . "guarded")))))
+    (should-not
+     (chat-coding-acceptance--compatible-identities-p
+      (list baseline) (list current)))))
 
 (ert-deftest chat-coding-acceptance-sample-gate-requires-valid-trials ()
   "Infrastructure-invalid trials do not satisfy the exact 30-by-5 sample."

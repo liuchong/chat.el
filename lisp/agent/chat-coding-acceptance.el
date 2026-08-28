@@ -140,8 +140,12 @@
      (chat-coding-acceptance--task-id result)
      (chat-eval-result-scenario-revision result)
      (chat-eval-result-fixture-digest result)
+     (chat-coding-acceptance--field executor 'provider)
      (chat-coding-acceptance--field executor 'model)
-     (chat-coding-acceptance--field executor 'modelCapabilitySnapshot))))
+     (chat-coding-acceptance--field executor 'modelCapabilitySnapshot)
+     (chat-coding-acceptance--field executor 'profile)
+     (chat-coding-acceptance--field executor 'transport)
+     (chat-coding-acceptance--field executor 'approvalMode))))
 
 (defun chat-coding-acceptance--compatible-identities-p (baseline current)
   "Return non-nil when BASELINE and CURRENT have comparable task identities."
@@ -220,6 +224,13 @@
                (chat-eval-result-metadata result) 'taskTags)
               nil)))
 
+(defun chat-coding-acceptance--fixture-indexed-file-count (result)
+  "Return trusted indexed fixture-file count from RESULT."
+  (let ((value (chat-coding-acceptance--field
+                (chat-eval-result-metadata result)
+                'fixtureIndexedFileCount)))
+    (and (integerp value) value)))
+
 (defun chat-coding-acceptance--large-repo-token-gate (baseline current)
   "Return the large-repository token gate for BASELINE and CURRENT."
   (let* ((baseline-large
@@ -242,8 +253,17 @@
          (current-usage
           (delq nil (mapcar #'chat-coding-acceptance--input-tokens
                             current-large)))
+         (invalid-fixtures
+          (seq-remove
+           (lambda (result)
+             (let ((count
+                    (chat-coding-acceptance--fixture-indexed-file-count
+                     result)))
+               (and count (>= count 10000))))
+           (append baseline-large current-large)))
          (complete
           (and baseline-large current-large
+               (null invalid-fixtures)
                (= (length baseline-large) (length baseline-usage))
                (= (length current-large) (length current-usage))
                (seq-every-p (lambda (value)
@@ -256,21 +276,29 @@
     (chat-coding-acceptance-gate-create
      :name "live-eval-large-repo-token-budget"
      :status
-     (if (not complete)
-         'blocked
-       (if (<= current-median (* 0.85 baseline-median))
-           'passed
-         'failed))
+     (cond
+      (invalid-fixtures 'failed)
+      ((not complete) 'blocked)
+      ((<= current-median (* 0.85 baseline-median)) 'passed)
+      (t 'failed))
      :expected "large-repo median input tokens reduced >=15%"
      :actual
-     (if complete
-         (format "baseline=%s current=%s" baseline-median current-median)
+     (cond
+      (invalid-fixtures
+       (format "invalid indexed fixture samples=%d"
+               (length invalid-fixtures)))
+      (complete
+       (format "baseline=%s current=%s" baseline-median current-median))
+      (t
        (format "baseline=%d/%d current=%d/%d usage samples"
                (length baseline-usage) (length baseline-large)
-               (length current-usage) (length current-large)))
+               (length current-usage) (length current-large))))
      :evidence
-     (unless complete
-       "Add fixed large-repo tagged trials with trusted usage for both configurations."))))
+     (cond
+      (invalid-fixtures
+       "Large-repo trials must record at least 10,000 indexed fixture files.")
+      ((not complete)
+       "Add fixed large-repo tagged trials with trusted usage for both configurations.")))))
 
 (defun chat-coding-acceptance--median (values)
   "Return median of numeric VALUES."

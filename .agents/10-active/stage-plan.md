@@ -36,11 +36,11 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-Produce the missing comparable live evidence: add the fixed large-repository
-task, freeze one provider/model/capability identity, run both M9 and M17 over 30
-tasks five times, then record the strict immutable aggregate result.  Do not
-mark M17 complete while either result set or the large-repository token sample
-is absent.
+Produce the missing comparable live evidence: freeze one
+provider/model/capability identity, run both M9 and M17 over the fixed 30 tasks
+five times, then record the strict immutable aggregate result. The corpus now
+includes a versioned task with 10,000 measured indexed files. Do not mark M17
+complete while either result set or its trusted token sample is absent.
 
 ## Stage Gate
 

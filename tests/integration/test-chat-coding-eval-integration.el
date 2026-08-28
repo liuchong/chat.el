@@ -30,7 +30,7 @@
       :on-complete
       (lambda (values _state)
         (setq results values completed t))))
-     (let ((deadline (+ (float-time) 10)))
+     (let ((deadline (+ (float-time) 60)))
        (while (and (not completed) (< (float-time) deadline))
          (accept-process-output nil 0.01)))
      (ert-info ((format "pending=%d results=%d current=%S"
@@ -49,6 +49,23 @@
                             (alist-get 'fixtureRevision
                                        (chat-eval-result-metadata result))))))
               results))
+     (let ((large-results
+            (seq-filter
+             (lambda (result)
+               (equal "python-locate"
+                      (alist-get 'taskId
+                                 (chat-eval-result-metadata result))))
+             results)))
+       (should (= 2 (length large-results)))
+       (should
+        (seq-every-p
+         (lambda (result)
+           (let ((metadata (chat-eval-result-metadata result)))
+             (and (= 10001 (alist-get 'fixtureFileCount metadata))
+                  (= 10000 (alist-get 'fixtureIndexedFileCount metadata))
+                  (= 64 (length
+                         (alist-get 'fixtureGeneratorDigest metadata))))))
+         large-results)))
      (should-not
       (directory-files chat-coding-eval-workspace-directory nil "-[[:alnum:]]+\\'")))))
 
