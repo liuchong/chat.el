@@ -778,7 +778,7 @@ both arrive from the same place."
    (let* ((chat-session-directory temp-dir)
           (chat-project-instructions-max-chars 4000)
           (session (chat-session-create "Code Session" 'kimi))
-          captured-prompt)
+          captured-prompt captured-context)
      (write-region "Always run the linter.\n" nil
                    (expand-file-name "AGENTS.md" temp-dir))
      (chat-session-metadata-set session 'code-enabled t)
@@ -794,16 +794,30 @@ both arrive from the same place."
                  ((symbol-function 'chat-context-code-to-string)
                   (lambda (_context) "Project files: main.el"))
                  ((symbol-function 'chat-code-lsp-available-p) #'ignore))
-         (chat-ui--prepare-messages-with-tools nil))
+         (chat-ui--prepare-messages-with-tools nil)
+         (setq captured-context (chat-ui--code-context session)))
        ;; The coding rules replace the generic assistant preamble.
        (should (string-match-p "Editing protocol" captured-prompt))
        (should-not (string-match-p "You are a helpful AI assistant"
                                    captured-prompt))
-       ;; The project context the session was pointed at.
-       (should (string-match-p "Project files: main.el" captured-prompt))
-       ;; And the project's own instructions, which the separate code
-       ;; path never read.
-       (should (string-match-p "Always run the linter" captured-prompt))))))
+       ;; Code context remains typed until the Agent request boundary.
+       (should-not (string-match-p "Project files: main.el" captured-prompt))
+       (should
+        (seq-some
+         (lambda (fragment)
+           (and (eq (chat-context-fragment-kind fragment) 'code)
+                (string-match-p "Project files: main.el"
+                                (chat-context-fragment-payload fragment))))
+         captured-context))
+       ;; Project rules remain typed and are projected by the Agent request
+       ;; boundary instead of being merged into this generic prompt.
+       (should-not (string-match-p "Always run the linter" captured-prompt))
+       (should
+        (seq-some
+         (lambda (fragment)
+           (string-match-p "Always run the linter"
+                           (chat-context-fragment-payload fragment)))
+         (chat-ui--project-context session)))))))
 
 (ert-deftest chat-ui-prepare-messages-leaves-a-plain-session-alone ()
   "A session without code capability keeps the generic preamble."

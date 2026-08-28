@@ -1053,6 +1053,63 @@ budget chatter in the saved history."
       (should-not (chat-agent-test--budget-notes
                    (chat-agent-run-state-messages run))))))
 
+(ert-deftest chat-agent-rebuilds-scoped-context-without-persisting-projections ()
+  "Rules and notes survive reload but request projections stay ephemeral."
+  (chat-test-with-temp-dir
+   (let* ((chat-work-context-directory (expand-file-name "context/" temp-dir))
+          (chat-work-context--stores (make-hash-table :test 'equal))
+          (session (make-chat-session :id "context-session" :model-id 'kimi))
+          (instruction
+           (chat-context-fragment-create
+            :id "rule-1" :kind 'instruction :authority 'project
+            :source-kind 'agents-file :source-id "AGENTS.md"
+            :scope 'directory :scope-id temp-dir :priority 1
+            :residency 'protected :budget-policy 'preserve
+            :payload "Keep the table aligned." :status 'active))
+          (calls (list nil))
+          run)
+     (chat-session-set-working-directory session temp-dir)
+     (chat-work-note-upsert
+      "context-session" "next-step" "Run the focused tests."
+      :kind 'next-step :scope 'session :source-id "turn:1")
+     ;; Simulate a fresh Emacs process: durable bytes, not the process cache,
+     ;; are the source used for the request.
+     (clrhash chat-work-context--stores)
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport '((:content "done")) calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi :session session
+                    :messages (list (chat-agent-test--user-message))
+                    :project-root temp-dir :context-target-path temp-dir
+                    :context-fragments (list instruction)))))
+     (let* ((sent (car (car calls)))
+            (context-messages
+             (seq-filter
+              (lambda (message)
+                (plist-get (chat-message-metadata message) :ephemeral))
+              sent)))
+       (should (= (length context-messages) 2))
+       (should (seq-some
+                (lambda (message)
+                  (string-match-p "Keep the table aligned"
+                                  (chat-message-content message)))
+                context-messages))
+       (should (seq-some
+                (lambda (message)
+                  (string-match-p "Run the focused tests"
+                                  (chat-message-content message)))
+                context-messages))
+       (should-not
+        (seq-some
+         (lambda (message)
+           (plist-get (chat-message-metadata message) :ephemeral))
+         (chat-agent-run-state-messages run)))
+       (should (= (length
+                   (chat-context-bundle-fragments
+                    (chat-agent-run-state-last-context-bundle run)))
+                  2))))))
+
 (ert-deftest chat-agent-runs-with-an-unlimited-budget ()
   "An unlimited ceiling is a symbol, and the loop must not compare it as a number."
   (let ((calls (list nil))

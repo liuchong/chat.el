@@ -126,6 +126,117 @@ outrank the cap or the declaration means nothing."
          (chat-project-agents-file-names '("NO_SUCH_FILE.md")))
      (should-not (chat-project-instructions b)))))
 
+(ert-deftest chat-project-instruction-graph-keeps-directory-scopes ()
+  "Nested AGENTS sources apply only to their own subtree."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir)))
+     (with-temp-file (expand-file-name "AGENTS.md" root) (insert "root"))
+     (with-temp-file (expand-file-name "AGENTS.md" a) (insert "nested"))
+     (chat-project-cache-clear)
+     (let* ((graph (chat-project-instruction-graph b))
+            (fragments (plist-get graph :fragments))
+            (inside (chat-context-bundle-build
+                     fragments :project-root root
+                     :target-path (expand-file-name "a/b/file.el" root)))
+            (sibling (chat-context-bundle-build
+                      fragments :project-root root
+                      :target-path (expand-file-name "sibling/file.el" root))))
+       (should (= (length (chat-context-bundle-fragments inside)) 2))
+       (should (= (length (chat-context-bundle-fragments sibling)) 1))
+       (should (string-match-p
+                "root"
+                (chat-context-fragment-payload
+                 (car (chat-context-bundle-fragments sibling)))))))))
+
+(ert-deftest chat-project-instruction-graph-loads-explicit-dependencies ()
+  "A hidden JSON directive loads one attributable project-local dependency."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (agents-dir (expand-file-name ".agents" root)))
+     (make-directory agents-dir)
+     (with-temp-file (expand-file-name "rules.md" agents-dir)
+       (insert "dependent rule"))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "<!-- chat-agents: {\"include\":[\".agents/rules.md\"]} -->\nroot"))
+     (chat-project-cache-clear)
+     (let* ((graph (chat-project-instruction-graph b))
+            (fragments (plist-get graph :fragments)))
+       (should (= (length fragments) 2))
+       (should (= (length (plist-get graph :edges)) 1))
+       (should (seq-some
+                (lambda (fragment)
+                  (string-match-p "dependent rule"
+                                  (chat-context-fragment-payload fragment)))
+                fragments))
+       (should-not (plist-get graph :diagnostics))))))
+
+(ert-deftest chat-project-instruction-dependency-inherits-declaring-scope ()
+  "An included file cannot gain a wider scope from its own path."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (shared (expand-file-name ".agents/shared.md" a)))
+     (make-directory (file-name-directory shared) t)
+     (with-temp-file shared (insert "nested-only dependency"))
+     (with-temp-file (expand-file-name "AGENTS.md" a)
+       (insert "<!-- chat-agents: {\"include\":[\".agents/shared.md\"]} -->\nlocal"))
+     (chat-project-cache-clear)
+     (let* ((graph (chat-project-instruction-graph b))
+            (dependency
+             (seq-find
+              (lambda (fragment)
+                (equal (chat-context-fragment-source-path fragment)
+                       (file-truename shared)))
+              (plist-get graph :fragments))))
+       (should dependency)
+       (should (equal (chat-context-fragment-scope-id dependency)
+                      (file-name-as-directory (file-truename a))))
+       (should-not
+        (chat-context-scope-matches-p
+         (chat-context-fragment-scope dependency)
+         (chat-context-fragment-scope-id dependency)
+         (list :target-path (expand-file-name "sibling/file.el" root))))))))
+
+(ert-deftest chat-project-instruction-graph-refuses-escape-and-diagnoses-cycle ()
+  "Dependencies cannot leave the project or recurse without a diagnostic."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (agents-dir (expand-file-name ".agents" root)))
+     (make-directory agents-dir)
+     (with-temp-file (expand-file-name "loop.md" agents-dir)
+       (insert "<!-- chat-agents: {\"include\":[\"../AGENTS.md\"]} -->\nloop"))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "<!-- chat-agents: {\"include\":[\".agents/loop.md\",\"../outside.md\"]} -->"))
+     (chat-project-cache-clear)
+     (let ((diagnostics
+            (plist-get (chat-project-instruction-graph b) :diagnostics)))
+       (should (seq-some (lambda (item)
+                           (eq (plist-get item :type) 'include-refused))
+                         diagnostics))
+       (should (seq-some (lambda (item)
+                           (eq (plist-get item :type)
+                               'include-cycle-or-duplicate))
+                         diagnostics))))))
+
+(ert-deftest chat-project-instruction-cache-notices-dependency-change ()
+  "Dependency stamps participate in cache invalidation."
+  (chat-project-test--with-tree
+   (let ((chat-project-global-agents-file
+          (expand-file-name "no-such-global.md" temp-dir))
+         (dependency (expand-file-name "rules.md" root)))
+     (with-temp-file dependency (insert "first dependency"))
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "<!-- chat-agents: {\"include\":[\"rules.md\"]} -->"))
+     (chat-project-cache-clear)
+     (should (string-match-p "first dependency" (chat-project-instructions b)))
+     (with-temp-file dependency (insert "second dependency"))
+     (set-file-times dependency (time-add (current-time) 2))
+     (should (string-match-p "second dependency"
+                             (chat-project-instructions b))))))
+
 ;; ------------------------------------------------------------------
 ;; Caching
 ;; ------------------------------------------------------------------
@@ -229,21 +340,22 @@ outrank the cap or the declaration means nothing."
      (should-not (string-match-p "a rules" (chat-project-instructions root)))
      (should (string-match-p "a rules" (chat-project-instructions b))))))
 
-(ert-deftest chat-ui-prepare-messages-includes-project-instructions ()
-  "Test plain chat injects project instructions into the system prompt."
+(ert-deftest chat-ui-project-context-keeps-project-instructions-typed ()
+  "Project instructions stay attributable until request projection."
   (chat-project-test--with-tree
    (let ((chat-project-global-agents-file
           (expand-file-name "no-such-global.md" temp-dir)))
      (with-temp-file (expand-file-name "AGENTS.md" root)
        (insert "plain chat rules"))
-     (let ((default-directory b)
-           captured-prompt)
-       (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
-                  (lambda (prompt &optional _step-limit _session)
-                    (setq captured-prompt prompt)
-                    prompt)))
-         (chat-ui--prepare-messages-with-tools nil))
-       (should (string-match-p "plain chat rules" captured-prompt))))))
+     (let* ((default-directory b)
+            (session (make-chat-session :id "typed-project")))
+       (chat-session-set-working-directory session b)
+       (let ((fragments (chat-ui--project-context session)))
+         (should (= (length fragments) 1))
+         (should (eq (chat-context-fragment-kind (car fragments)) 'instruction))
+         (should (string-match-p "plain chat rules"
+                                 (chat-context-fragment-payload
+                                  (car fragments)))))))))
 
 (ert-deftest chat-context-code-optimize-terminates-without-removable-sources ()
   "Test the context optimizer stops when nothing can be removed."

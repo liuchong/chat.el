@@ -23,6 +23,7 @@
 (require 'chat-session)
 (require 'chat-transcript)
 (require 'chat-context-budget)
+(require 'chat-work-context)
 (require 'chat-event)
 (require 'chat-checkpoint)
 (require 'chat-tool-caller)
@@ -279,14 +280,79 @@ on screen, where the marker would be noise.  It belongs on the wire only."
             (setq base (plist-put base :tools tools))))))
     base))
 
+(defun chat-agent--context-selection (run)
+  "Return RUN's request-time scoped context bundle."
+  (let* ((session (chat-agent-run-state-session run))
+         (session-id (and session (chat-session-id session)))
+         (task-id (chat-agent-run-state-task-id run))
+         (project-root
+          (or (chat-agent-run-state-project-root run)
+              (and session (chat-session-working-directory session))))
+         (target-path
+          (or (chat-agent-run-state-context-target-path run)
+              (and session (chat-session-working-directory session))
+              project-root))
+         (turn-id (chat-agent--turn-number run))
+         (context (list :session-id session-id :turn-id turn-id
+                        :task-id task-id :project-root project-root
+                        :target-path target-path))
+         (notes (and session-id
+                     (chat-work-note-fragments session-id context)))
+         (window (chat-context-window-for-model
+                  (chat-agent-run-state-model run)))
+         (max-chars
+          (* 4 (+ (chat-context-allocation-tokens 'resident-rules window)
+                  (chat-context-allocation-tokens 'project-notes window))))
+         (bundle
+          (chat-context-bundle-build
+           (append (chat-agent-run-state-context-fragments run) notes)
+           :session-id session-id :turn-id turn-id :task-id task-id
+           :project-root project-root :target-path target-path
+           :max-chars (min chat-work-context-max-projection-chars max-chars))))
+    (setf (chat-agent-run-state-last-context-bundle run) bundle)
+    (chat-agent--emit
+     run 'context-bundle :digest (chat-context-bundle-digest bundle)
+     :selected-count (length (chat-context-bundle-fragments bundle))
+     :omitted-count (length (chat-context-bundle-omitted bundle)))
+    bundle))
+
+(defun chat-agent--context-message (fragment)
+  "Serialize one typed context FRAGMENT for a provider request."
+  (make-chat-message
+   :id (concat "request-context:" (chat-context-fragment-id fragment))
+   :role :system
+   :content (chat-context-bundle-render
+             (chat-context-bundle-create :fragments (list fragment)))
+   :timestamp (current-time)
+   :metadata
+   (list :ephemeral t :context-fragment-id (chat-context-fragment-id fragment)
+         :context-kind (chat-context-fragment-kind fragment)
+         :context-authority (chat-context-fragment-authority fragment)
+         :context-scope (chat-context-fragment-scope fragment)
+         :context-source-id (chat-context-fragment-source-id fragment)
+         :context-digest (chat-context-fragment-digest fragment))))
+
+(defun chat-agent--insert-context-messages (messages bundle)
+  "Insert BUNDLE projections after the leading system MESSAGES."
+  (pcase-let ((`(,systems ,rest)
+               (chat-context--partition-system-messages messages)))
+    (append systems
+            (mapcar #'chat-agent--context-message
+                    (chat-context-bundle-fragments bundle))
+            rest)))
+
 (defun chat-agent--request-messages (run)
-  "Return the context for this turn of RUN, with any budget reminder.
+  "Return request context for RUN with scoped fragments and reminders.
 
 The reminder is appended here rather than stored on the run: it describes
 the step about to happen, so keeping it would leave a trail of stale
 counts in the transcript and repeat them in every later request.  It goes
-last because that is where a short instruction is actually noticed."
-  (let* ((messages (chat-agent-run-state-messages run))
+last because that is where a short instruction is actually noticed.
+Context fragments are also request-only: durable notes and rules remain typed
+state and are rebuilt after compaction instead of entering the transcript."
+  (let* ((bundle (chat-agent--context-selection run))
+         (messages (chat-agent--insert-context-messages
+                    (chat-agent-run-state-messages run) bundle))
          (context (chat-context-budget-state
                    messages (chat-agent-run-state-model run)))
          (reminders

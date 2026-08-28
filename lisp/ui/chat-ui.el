@@ -2658,36 +2658,55 @@ binding nobody has found yet."
      target)))
 
 (defun chat-ui--code-capability-prompt (session)
-  "Return the coding prompt and context for SESSION, or nil.
+  "Return the coding system prompt for SESSION, or nil.
 
 Code capability is a property of the session, so this is the whole of
-what a coding session adds to a request: its rules, the project context
-it was pointed at, and whatever the language server can say about the
-file in focus.  Nothing else about the request differs, which is why
-there is no second request path to hold it."
+what a coding session adds to the system instruction.  Project and code
+context remain typed fragments until request projection."
   (when (and session
              (fboundp 'chat-code-session-p)
              (chat-code-session-p session))
-    (let* ((prompt (and (fboundp 'chat-code--compose-system-prompt)
-                        (chat-code--compose-system-prompt)))
-           (context-object
-            (and (fboundp 'chat-context-code-build)
-                 (ignore-errors (chat-context-code-build session))))
-           (context (and context-object
-                         (chat-context-code-to-string context-object))))
-      (when (and chat-ui--current-request-id
-                 context-object
-                 (fboundp 'chat-code-context-diagnostics))
-        (chat-request-diagnostics-record
-         chat-ui--current-request-id
-         'code-context-built
-         :diagnostics (chat-code-context-diagnostics context-object)
-         :summary "Prepared versioned coding context"))
-      (string-join (delq nil (list prompt
-                                   (and context
-                                        (not (string-empty-p context))
-                                        context)))
-                   "\n\n"))))
+    (and (fboundp 'chat-code--compose-system-prompt)
+         (chat-code--compose-system-prompt))))
+
+(defun chat-ui--code-context (session)
+  "Return SESSION's current code context as typed fragments."
+  (when (and session
+             (fboundp 'chat-code-session-p)
+             (chat-code-session-p session)
+             (fboundp 'chat-context-code-build)
+             (fboundp 'chat-context-code-to-string))
+    (when-let* ((context-object
+                 (ignore-errors (chat-context-code-build session)))
+                (payload (chat-context-code-to-string context-object))
+                ((not (string-empty-p payload))))
+      (let* ((root (or (chat-session-working-directory session)
+                       default-directory))
+             (diagnostics
+              (and chat-ui--current-request-id
+                   (fboundp 'chat-code-context-diagnostics)
+                   (chat-code-context-diagnostics context-object))))
+        (when chat-ui--current-request-id
+          (chat-request-diagnostics-record
+           chat-ui--current-request-id
+           'code-context-built
+           :diagnostics diagnostics
+           :summary "Prepared versioned coding context"))
+        (list
+         (chat-context-fragment-create
+          :id (format "code-context:%s"
+                      (secure-hash 'sha256 (format "%s\0%s" root payload)))
+          :kind 'code :authority 'runtime :source-kind 'code-context
+          :source-id (format "code-context:%s" root)
+          :source-path root :scope 'project :scope-id root :priority 40
+          :residency 'compactable :budget-policy 'trim :payload payload
+          :status 'active
+          :metadata `((diagnosticCount . ,(length diagnostics)))))))))
+
+(defun chat-ui--standing-context (session)
+  "Return attributable standing context fragments for SESSION."
+  (append (chat-ui--project-context session)
+          (chat-ui--code-context session)))
 
 (defun chat-ui--current-model-supports-tools-p ()
   "Return nil only when the current model explicitly lacks tool support."
@@ -2713,17 +2732,9 @@ there is no second request path to hold it."
                             (chat-i18n-prompt 'assistant-persona
                                               "You are a helpful AI assistant.")))
            (target-note (chat-ui--followup-target-note))
-           (instructions (and (fboundp 'chat-project-instructions)
-                              (chat-project-instructions default-directory)))
            (prompt (cond
-                    ((and target-note instructions)
-                     (format "%s\n\n%s\n\n;; Project instructions:\n%s"
-                             base-prompt target-note instructions))
                     (target-note
                      (format "%s\n\n%s" base-prompt target-note))
-                    (instructions
-                     (format "%s\n\n;; Project instructions:\n%s"
-                             base-prompt instructions))
                     (t
                      base-prompt)))
            (system-prompt (chat-tool-caller-build-system-prompt
@@ -2737,6 +2748,28 @@ there is no second request path to hold it."
              :content system-prompt
              :timestamp (current-time))
             messages))))
+
+(defun chat-ui--project-context (session)
+  "Return scoped project context fragments for SESSION."
+  (when (fboundp 'chat-project-instruction-graph)
+    (let* ((target (or (chat-session-working-directory session)
+                       default-directory))
+           (graph (ignore-errors (chat-project-instruction-graph target))))
+      (when (and graph (fboundp 'chat-event-publish))
+        (chat-event-publish
+         (chat-event-create
+          :type 'instruction-graph-observed
+          :session-id (chat-session-id session) :source 'project-context
+          :payload
+          `((sourceCount . ,(length (plist-get graph :source-files)))
+            (fragmentCount . ,(length (plist-get graph :fragments)))
+            (diagnosticCount . ,(length (plist-get graph :diagnostics)))
+            (diagnosticTypes
+             . ,(vconcat
+                 (delete-dups
+                  (mapcar (lambda (item) (plist-get item :type))
+                          (plist-get graph :diagnostics)))))))))
+      (plist-get graph :fragments))))
 
 (defun chat-ui--format-tool-results (tool-results)
   "Format TOOL-RESULTS for display."
@@ -3359,6 +3392,10 @@ assistant response being filled in."
                    :profile (plist-get (chat-session-tool-config session)
                                        :profile)
                    :project-root (chat-ui--path-completion-root)
+                   :context-target-path
+                   (or (chat-session-working-directory session)
+                       default-directory)
+                   :context-fragments (chat-ui--standing-context session)
                    :transport transport
                    :max-steps chat-ui-tool-loop-max-steps
                    :transform-context-fn

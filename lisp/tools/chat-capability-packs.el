@@ -37,6 +37,13 @@
     programming_verification_plan
     programming_verification_run
     programming_verification_read_result
+    programming_work_note_upsert
+    programming_work_note_query
+    programming_work_note_resolve
+    programming_work_note_supersede
+    programming_work_note_archive
+    programming_work_note_delete
+    programming_context_inspect
     web_eww_read
     files_read files_read_lines files_list files_grep open_file
     files_write files_replace files_patch apply_patch
@@ -250,6 +257,115 @@
   (if-let* ((result (chat-code-verify-get verification-id)))
       (chat-code-verify-result-data result)
     (error "Unknown verification result: %s" verification-id)))
+
+(defun chat-capability--work-context-identity ()
+  "Return current session and task identity for work-context tools."
+  (let* ((session (chat-capability--current-session))
+         (context (and (boundp 'chat-tool-caller-current-execution-context)
+                       chat-tool-caller-current-execution-context)))
+    (list :session-id (chat-session-id session)
+          :task-id (plist-get context :task-id)
+          :turn-id (plist-get context :turn-id)
+          :project-root (chat-session-working-directory session))))
+
+(defun chat-capability-programming-work-note-upsert
+    (key kind value-json &optional expected-revision tags-json)
+  "Create or update one structured working note."
+  (require 'chat-work-context)
+  (let* ((identity (chat-capability--work-context-identity))
+         (session-id (plist-get identity :session-id))
+         (task-id (plist-get identity :task-id))
+         (value (json-parse-string value-json :object-type 'alist
+                                   :array-type 'list :null-object nil
+                                   :false-object :json-false))
+         (tags (mapcar #'intern
+                       (chat-capability--json-string-list tags-json "tags_json"))))
+    (chat-work-note-to-alist
+     (chat-work-note-upsert
+      session-id key value :expected-revision expected-revision
+      :task-id task-id :kind (intern kind) :tags tags
+      :scope (if task-id 'task 'session) :scope-id (or task-id session-id)
+      :source-kind 'agent
+      :source-id (format "turn:%s" (or (plist-get identity :turn-id) "unknown"))))))
+
+(defun chat-capability-programming-work-note-query (&optional kind tag)
+  "Query current session working notes by optional KIND and TAG."
+  (require 'chat-work-context)
+  (let* ((identity (chat-capability--work-context-identity))
+         (notes (chat-work-note-list
+                 (plist-get identity :session-id)
+                 :task-id (plist-get identity :task-id)
+                 :kind (and kind (not (string-empty-p kind)) (intern kind))
+                 :tag (and tag (not (string-empty-p tag)) (intern tag))
+                 :status 'active)))
+    (vconcat (mapcar #'chat-work-note-to-alist notes))))
+
+(defun chat-capability-programming-work-note-archive (note-id revision)
+  "Archive NOTE-ID at REVISION."
+  (require 'chat-work-context)
+  (let ((identity (chat-capability--work-context-identity)))
+    (chat-work-note-to-alist
+     (chat-work-note-set-status
+      (plist-get identity :session-id) note-id revision 'archived))))
+
+(defun chat-capability-programming-work-note-resolve (note-id revision)
+  "Resolve NOTE-ID at REVISION."
+  (require 'chat-work-context)
+  (let ((identity (chat-capability--work-context-identity)))
+    (chat-work-note-to-alist
+     (chat-work-note-resolve
+      (plist-get identity :session-id) note-id revision))))
+
+(defun chat-capability-programming-work-note-supersede
+    (note-id revision key value-json &optional kind tags-json)
+  "Replace NOTE-ID with a distinct note derived from VALUE-JSON."
+  (require 'chat-work-context)
+  (let* ((identity (chat-capability--work-context-identity))
+         (value (json-parse-string value-json :object-type 'alist
+                                   :array-type 'list :null-object nil
+                                   :false-object :json-false))
+         (tags (mapcar #'intern
+                       (chat-capability--json-string-list tags-json "tags_json"))))
+    (chat-work-note-to-alist
+     (chat-work-note-supersede
+      (plist-get identity :session-id) note-id revision key value
+      :kind (and kind (not (string-empty-p kind)) (intern kind))
+      :tags tags :source-kind 'agent
+      :source-id (format "turn:%s"
+                         (or (plist-get identity :turn-id) "unknown"))))))
+
+(defun chat-capability-programming-work-note-delete (note-id revision)
+  "Delete NOTE-ID at REVISION."
+  (require 'chat-work-context)
+  (let ((identity (chat-capability--work-context-identity)))
+    `((id . ,note-id)
+      (deleted . ,(chat-work-note-delete
+                   (plist-get identity :session-id) note-id revision)))))
+
+(defun chat-capability-programming-context-inspect (&optional target-path)
+  "Inspect scoped project instruction sources for TARGET-PATH."
+  (require 'chat-project)
+  (let* ((identity (chat-capability--work-context-identity))
+         (project (or (plist-get identity :project-root) default-directory))
+         (candidate (expand-file-name (or target-path project)))
+         (target (if (file-regular-p candidate)
+                     (file-name-directory candidate)
+                   candidate)))
+    (unless (chat-work-context--inside-p target project)
+      (error "Context target is outside the current project: %s" target))
+    (let ((graph (chat-project-instruction-graph target)))
+      `((projectRoot . ,(plist-get graph :project-root))
+        (sources . ,(vconcat
+                      (mapcar
+                       (lambda (fragment)
+                         `((id . ,(chat-context-fragment-id fragment))
+                           (path . ,(chat-context-fragment-source-path fragment))
+                           (scope . ,(symbol-name
+                                      (chat-context-fragment-scope fragment)))
+                           (scopeId . ,(chat-context-fragment-scope-id fragment))
+                           (digest . ,(chat-context-fragment-digest fragment))))
+                       (plist-get graph :fragments))))
+        (diagnostics . ,(vconcat (plist-get graph :diagnostics)))))))
 
 (defun chat-capability-programming-completion-at-point
     (path line column &optional limit)
@@ -666,6 +782,58 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    "Read the structured evidence for a verification run."
    '((:name "verification_id" :type "string" :required t))
    #'chat-capability-programming-verification-read-result 'project '(read))
+  (chat-capability--register-tool
+   'programming_work_note_upsert "Programming Work Note Upsert"
+   "Create or revision-update a scoped structured note for the current work."
+   '((:name "key" :type "string" :required t)
+     (:name "kind" :type "string" :required t
+            :enum ("fact" "decision" "constraint" "hypothesis" "artifact"
+                   "blocker" "next-step" "note"))
+     (:name "value_json" :type "string" :required t)
+     (:name "expected_revision" :type "integer" :required nil)
+     (:name "tags_json" :type "string" :required nil))
+   #'chat-capability-programming-work-note-upsert 'project '(write))
+  (chat-capability--register-tool
+   'programming_work_note_query "Programming Work Note Query"
+   "Query active structured notes for the current task."
+   '((:name "kind" :type "string" :required nil)
+     (:name "tag" :type "string" :required nil))
+   #'chat-capability-programming-work-note-query 'project '(read))
+  (chat-capability--register-tool
+   'programming_work_note_resolve "Programming Work Note Resolve"
+   "Resolve a current work note using its observed revision."
+   '((:name "note_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t))
+   #'chat-capability-programming-work-note-resolve 'project '(write))
+  (chat-capability--register-tool
+   'programming_work_note_supersede "Programming Work Note Supersede"
+   "Supersede a work note with a distinct revisioned replacement."
+   '((:name "note_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t)
+     (:name "key" :type "string" :required t)
+     (:name "value_json" :type "string" :required t)
+     (:name "kind" :type "string" :required nil
+            :enum ("fact" "decision" "constraint" "hypothesis" "artifact"
+                   "blocker" "next-step" "note"))
+     (:name "tags_json" :type "string" :required nil))
+   #'chat-capability-programming-work-note-supersede 'project '(write))
+  (chat-capability--register-tool
+   'programming_work_note_archive "Programming Work Note Archive"
+   "Archive a current work note using its observed revision."
+   '((:name "note_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t))
+   #'chat-capability-programming-work-note-archive 'project '(write))
+  (chat-capability--register-tool
+   'programming_work_note_delete "Programming Work Note Delete"
+   "Delete a current work note using its observed revision."
+   '((:name "note_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t))
+   #'chat-capability-programming-work-note-delete 'project '(write))
+  (chat-capability--register-tool
+   'programming_context_inspect "Programming Context Inspect"
+   "Inspect scoped project instruction sources and dependency diagnostics."
+   '((:name "target_path" :type "string" :required nil))
+   #'chat-capability-programming-context-inspect 'project '(read))
   (chat-capability--register-tool
    'web_eww_read "Web EWW Read"
    "Retrieve and render an HTTP(S) page with the Emacs web stack."

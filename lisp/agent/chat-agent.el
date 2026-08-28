@@ -105,6 +105,10 @@ CONFIG is a plist with these keys:
   :session         session passed to tool execution
   :profile         optional agent profile id
   :project-root    root used for trusted project extension discovery
+  :context-target-path
+                   target path used for scoped context selection
+  :context-fragments
+                   typed standing context retained until request projection
   :track-task      non-nil records this run as a durable runtime task
   :task-id         optional stable id for the tracked task
   :parent-task-id  optional parent id for the tracked task
@@ -152,6 +156,9 @@ Events are delivered synchronously through :on-event.  The final
               :task-id (and task (chat-task-id task))
               :run-id (or (plist-get config :run-id)
                           (chat-session-new-message-id "agent-run"))
+              :project-root (plist-get config :project-root)
+              :context-target-path (plist-get config :context-target-path)
+              :context-fragments (plist-get config :context-fragments)
               :transport (or (plist-get config :transport) 'sync)
               :on-event
               (lambda (event)

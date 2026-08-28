@@ -11,7 +11,7 @@
 ;;
 ;; Event types delivered through :on-event:
 ;;
-;;   agent-start  profile-resolved  context-transformed
+;;   agent-start  profile-resolved  context-transformed  context-bundle
 ;;   turn-start  turn-ended  turn-failed
 ;;   stream-chunk
 ;;   stream-reasoning  stream-result  model-tool-call-delta  model-usage
@@ -42,6 +42,7 @@
                (:constructor chat-agent--run-create)
                (:copier nil))
   model messages session execution-session profile transport task-id run-id
+  project-root context-target-path context-fragments last-context-bundle
   on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options

@@ -6,6 +6,8 @@
 
 Copyright 2026 chat.el contributors.
 
+<!-- chat-agents: {"include":[".agents/00-entry/current.md",".agents/00-entry/read-order.md",".agents/10-active/focus.md",".agents/10-active/risks.md"]} -->
+
 ## First Principles
 
 ### Safety First

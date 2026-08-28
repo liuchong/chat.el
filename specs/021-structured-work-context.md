@@ -1,6 +1,6 @@
 # Structured Work Context And Scoped Instructions
 
-Status: planned
+Status: implemented
 Date: 2026-08-28
 Roadmap: coding reliability M13
 
@@ -43,7 +43,9 @@ working state, never an instruction merely because an Agent wrote it.
 path, the ordered selected fragments, omitted-fragment diagnostics, token
 measurements and a deterministic bundle digest.
 
-The runtime keeps fragments separate. A transport adapter may serialize them
+The runtime keeps standing-context fragments separate. Transcript history and
+the current objective remain typed `chat-message` records; native tool schemas
+remain structured request options. A transport adapter may serialize fragments
 to provider messages only after scope filtering, authority ordering, budget
 selection and diagnostics have completed. A serializer must preserve source
 labels and cannot merge an Agent note into an instruction message.
@@ -104,7 +106,8 @@ The loader enforces:
 - maximum 64 source files;
 - maximum 256 KiB source bytes before normal context budgeting;
 - one read per unique digest during a bundle build;
-- cache invalidation on source set, digest or configuration change.
+- cache invalidation on source set, file modification stamp or graph
+  configuration change; explicit cache clear handles preserved timestamps.
 
 Unsupported or malformed directives leave the ordinary Markdown content
 available as instructions but do not load dependencies. A dependency failure
@@ -137,17 +140,18 @@ injected every turn.
 
 ## Compaction And Recovery
 
-Before compaction the runtime checkpoints the bundle identity and active work
-slice. After compaction it rebuilds that slice from typed state, not from the
-summary wording. The following cannot be lost merely because history was
-compacted:
+Each request emits the selected bundle identity and rebuilds the active work
+slice from durable typed state, not from summary wording. Existing transcript
+compaction continues to own conversation summaries. The following cannot be
+lost merely because history was compacted:
 
 - current objective and user constraints;
 - active project instructions and resident spans;
-- current plan item;
 - unresolved blockers;
 - accepted decisions and next step;
 - verification state needed to avoid a false completion claim.
+
+The current plan item joins this projection when Spec 022 is implemented.
 
 Restart loads the work-context schema without starting tasks or processes.
 Malformed future schemas fail before rewrite. Missing state means an empty work
@@ -156,17 +160,17 @@ context and does not alter an old session.
 ## Public Operations
 
 - build and inspect a context bundle;
-- explain why a fragment was selected, shadowed, compacted, trimmed or omitted;
+- explain why a fragment was selected or omitted by status, scope or budget;
 - list/query/get/upsert/resolve/supersede/archive/delete work notes;
 - list the project instruction graph and its diagnostics;
 - project the bounded active work slice for one Agent turn.
 
 ## Events And Trace
 
-Events include bundle build, fragment selection/omission, instruction graph
-diagnostics and note lifecycle/conflict transitions. Payloads contain IDs,
-scope, digest, status, counts and bounded reasons, never complete prompts or
-sensitive note values.
+Events include aggregate bundle build, instruction graph diagnostics and note
+lifecycle/conflict transitions. Per-fragment selection and omission reasons
+remain on the inspectable bundle. Payloads contain IDs, scope, digest, status,
+counts and bounded reasons, never complete prompts or sensitive note values.
 
 Trace reports candidate/selected/token counts, scope refusals, dependency
 cycles, truncations and note query/hit/conflict counts.
@@ -178,8 +182,9 @@ cycles, truncations and note query/hit/conflict counts.
 - include cycles, traversal and symlink escape are refused deterministically;
 - Agent notes cannot obtain instruction authority;
 - stale note revisions are refused without changing durable bytes;
-- objective, blocker, decision, next step and plan identity survive compaction
-  and restart;
+- blocker, decision and next-step notes survive compaction and restart;
+- code context and every applicable project instruction remain separately
+  attributable until request projection;
 - every selected and omitted fragment has an inspectable reason;
 - 8K, 32K and 128K bundle selection is deterministic and bounded;
 - legacy string prompt callers retain their behavior through adapters;

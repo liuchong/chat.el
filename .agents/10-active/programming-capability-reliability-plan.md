@@ -573,6 +573,19 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 - request diagnostics 能解释每个 fragment 为什么进入、被遮蔽或被裁剪。
 - legacy string API 行为兼容，canonical suite 零 unexpected result。
 
+#### 完成记录（2026-08-28）
+
+- 已落地 typed fragment、bundle 与 revisioned work note；scope、authority、
+  residency、budget reason 和 provenance 在 provider 投影前保持独立。
+- AGENTS discovery 生成目录作用域规则图，显式 include 受 canonical project
+  root、cycle、depth、file count 和 byte budget 约束，失败以 diagnostics 可见。
+- project instructions、code context 和 active work notes 在每个 Agent step
+  重新筛选，投影消息带 ephemeral metadata，不进入 transcript 或 session。
+- note 工具覆盖 upsert/query/resolve/supersede/archive/delete；stale revision
+  fail closed，事件不记录敏感 value。
+- 定向 context/project/agent/capability/UI/wire 测试通过；canonical 验收结果
+  记录在本阶段提交及项目状态中。
+
 ### M14：持久 TODO 计划合同与聊天 UI
 
 #### 目标

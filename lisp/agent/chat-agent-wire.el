@@ -116,6 +116,11 @@ a run that worked into a run that failed while being watched."
         (and run (chat-agent-run-execution-session run))))
       ('context-transformed
        (list (cons 'message_count (plist-get event :message-count))))
+      ('context-bundle
+       (list (cons 'digest (chat-agent-wire--short
+                            (plist-get event :digest)))
+             (cons 'selected_count (plist-get event :selected-count))
+             (cons 'omitted_count (plist-get event :omitted-count))))
       ;; The turn's start time, which is what makes the delay before the
       ;; first chunk a subtraction between two records rather than a
       ;; number someone has to remember to measure.

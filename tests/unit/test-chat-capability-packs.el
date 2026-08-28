@@ -173,11 +173,61 @@
       (should (memq 'write (chat-forged-tool-effects tool))))
     (dolist (id '(programming_verification_plan
                   programming_verification_run
-                  programming_verification_read_result))
+                  programming_verification_read_result
+                  programming_work_note_query
+                  programming_context_inspect))
       (let ((tool (chat-tool-forge-get id)))
         (should tool)
         (should (eq (chat-forged-tool-owner tool) 'capability-packs))
         (should (equal (chat-forged-tool-effects tool) '(read)))))))
+
+(ert-deftest chat-capability-work-note-tools-use-current-task-identity ()
+  "Work-note tools persist typed values and enforce observed revisions."
+  (chat-test-with-temp-dir
+   (let* ((chat-work-context-directory (expand-file-name "context/" temp-dir))
+          (chat-work-context--stores (make-hash-table :test 'equal))
+          (session (make-chat-session :id "capability-context"))
+          (chat--current-session session)
+          (chat-tool-caller-current-execution-context
+           '(:task-id "task-7" :turn-id 3)))
+     (chat-session-set-working-directory session temp-dir)
+     (let ((created
+            (chat-capability-programming-work-note-upsert
+             "decision.format" "decision" "{\"choice\":\"native\"}"
+             nil "[\"rendering\"]")))
+       (should (= (cdr (assoc 'revision created)) 1))
+       (should (equal (cdr (assoc 'taskId created)) "task-7"))
+       (should (= (length
+                   (chat-capability-programming-work-note-query
+                    "decision" "rendering"))
+                  1))
+       (should-error
+        (chat-capability-programming-work-note-upsert
+         "decision.format" "decision" "{\"choice\":\"stale\"}" nil nil)
+        :type 'chat-work-context-stale-revision)
+       (let ((updated
+              (chat-capability-programming-work-note-upsert
+               "decision.format" "decision" "{\"choice\":\"typed\"}" 1 nil)))
+         (should (= (cdr (assoc 'revision updated)) 2)))))))
+
+(ert-deftest chat-capability-context-inspect-reports-sources-and-diagnostics ()
+  "Context inspection returns bounded identities rather than prompt bodies."
+  (chat-test-with-temp-dir
+   (let* ((chat-project-global-agents-file
+           (expand-file-name "no-global.md" temp-dir))
+          (session (make-chat-session :id "inspect"))
+          (chat--current-session session))
+     (chat-session-set-working-directory session temp-dir)
+     (with-temp-file (expand-file-name "AGENTS.md" temp-dir)
+       (insert "Scoped rule"))
+     (chat-project-cache-clear)
+     (let* ((result (chat-capability-programming-context-inspect temp-dir))
+            (sources (append (cdr (assoc 'sources result)) nil))
+            (source (car sources)))
+       (should (= (length sources) 1))
+       (should (string-suffix-p "AGENTS.md" (cdr (assoc 'path source))))
+       (should (stringp (cdr (assoc 'digest source))))
+       (should-not (assoc 'payload source))))))
 
 (ert-deftest chat-capability-profile-filters-provider-tool-schemas ()
   "Test profile overlays control the tools advertised to providers."

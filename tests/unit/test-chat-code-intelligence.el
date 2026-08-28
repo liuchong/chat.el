@@ -217,7 +217,7 @@
      (while (null refreshed) (accept-process-output nil 0.005))
      (with-temp-buffer
        (setq-local chat-ui--current-request-id request-id)
-       (should (stringp (chat-ui--code-capability-prompt session))))
+       (should (chat-ui--code-context session)))
      (setq trace (chat-request-diagnostics-get request-id)
            event (seq-find
                   (lambda (candidate)
