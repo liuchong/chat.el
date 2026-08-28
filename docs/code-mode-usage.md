@@ -276,8 +276,29 @@ request panel 现在也会把 directory 级审批范围直接显示出来，方�
 |------|------|
 | `chat-code-git-diff` | 显示 git diff |
 | `chat-code-git-commit-suggest` | 获取 AI 建议的提交信息 |
-| `chat-code-git-review` | AI 审查代码变更 |
+| `chat-code-git-review` | 在独立只读上下文中审查代码变更 |
 | `chat-code-git-pre-commit` | 运行提交前检查 |
+
+`chat-code-git-review` 不继承编辑 Agent 的推理记录。它只接收目标、base revision、
+有界 diff、相关 repo map 和验证证据，并把输出解析为带路径、行号、级别和证据的
+finding。结果显示在 `*chat-code-review*` 中，按 `RET` 跳转到对应源码行。
+
+可调配置：
+
+```elisp
+;; 送入审查模型的 diff 和证据上限。
+(setq chat-code-review-diff-limit 120000)
+(setq chat-code-review-evidence-limit 24000)
+
+;; critical/high finding 默认由第二个只读 Agent 复核。
+(setq chat-code-review-verify-high-severity t)
+```
+
+代码型子 Agent 使用 `chat-code-collaboration-declare` 声明目标、允许路径、资源、
+profile/model、预算和完成证据，再由 `chat-code-collaboration-start` 调度。写路径重叠
+的 child 不会并行；不重叠的 child 使用各自的 session-owned worktree。只有通过
+base、路径所有权、父工作区漂移和 patch 检查的结果才可由
+`chat-code-collaboration-merge` 合并，合并后会重新运行项目 required verification。
 
 ### 代码智能命令
 

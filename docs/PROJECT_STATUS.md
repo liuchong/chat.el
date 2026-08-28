@@ -24,12 +24,13 @@ native tree/detail view. Typed image and file content now persists through a
 content-addressed attachment store, capability preflight and provider-specific
 wire adapters. Checkpoints, owned worktrees, execution backends, attributable
 memory, derived Trace reconstruction, deterministic evaluations and the optional
-versioned App Server bridge are implemented. M9-M14 of the active M9-M17
+versioned App Server bridge are implemented. M9-M16 of the active M9-M17
 coding-reliability roadmap are complete: isolated real-task evaluation,
 versioned edits, semantic code intelligence, automatic verification and
 scoped structured work context, plus durable evidence-linked TODO plans with a
-native progress UI. Execution isolation, read-only review, conflict-safe coding
-subagents and final acceptance remain.
+native progress UI, capability-tested execution isolation, independent typed
+review and conflict-safe coding children. Product rollout, final performance
+evidence and acceptance remain.
 
 ## Implemented Areas
 
@@ -170,6 +171,10 @@ subagents and final acceptance remain.
 - in-process nested kernel runs with isolated child sessions, depth limits,
   budgets, cancellation, and parent-safe summaries
 - external subprocess-agent JSONL protocol with captured output and cancellation
+- read-only independent review sessions with typed, source-navigable findings
+- declared coding-child path ownership, hierarchical scheduler locks and owned worktrees
+- merge refusal for stale base, ownership drift, parent drift and patch conflicts
+- bounded parent summaries and mandatory post-merge verification evidence
 
 ### Capability Packs
 

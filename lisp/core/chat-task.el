@@ -216,12 +216,29 @@
    (lambda (a)
      (seq-some
       (lambda (b)
-        (and (equal (chat-task--resource-key a)
-                    (chat-task--resource-key b))
+        (and (chat-task--resource-keys-overlap-p
+              (chat-task--resource-key a)
+              (chat-task--resource-key b))
              (or (eq (chat-task--resource-mode a) 'write)
                  (eq (chat-task--resource-mode b) 'write))))
       right))
    left))
+
+(defun chat-task--resource-keys-overlap-p (left right)
+  "Return non-nil when resource keys LEFT and RIGHT address the same scope.
+
+Keys beginning with `path:' are hierarchical.  A directory path conflicts
+with every descendant, while unrelated siblings remain parallel."
+  (if (and (string-prefix-p "path:" left)
+           (string-prefix-p "path:" right))
+      (let* ((a (directory-file-name (substring left 5)))
+             (b (directory-file-name (substring right 5)))
+             (a-prefix (file-name-as-directory a))
+             (b-prefix (file-name-as-directory b)))
+        (or (equal a b)
+            (string-prefix-p a-prefix b)
+            (string-prefix-p b-prefix a)))
+    (equal left right)))
 
 (defun chat-task--event-text (value)
   "Return VALUE as bounded event text."

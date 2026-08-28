@@ -189,43 +189,12 @@ MAX-LINES limits the diff output."
 ;; ------------------------------------------------------------------
 
 (defun chat-code-git-review-changes ()
-  "Review staged or unstaged changes with AI."
+  "Review staged or unstaged changes with the typed read-only reviewer."
   (interactive)
   (unless (chat-code-git--has-changes-p)
     (error "No changes to review"))
-  (let* ((diff (or (chat-code-git-get-diff t)
-                  (chat-code-git-get-diff)))
-         (prompt (format "Review these code changes:\n\n```diff\n%s\n```\n\nProvide feedback on:\n1. Code quality\n2. Potential bugs\n3. Suggestions for improvement"
-                        diff))
-         (buffer (get-buffer-create "*chat-git-review*")))
-    (with-current-buffer buffer
-      (erase-buffer)
-      (insert "Reviewing changes...\n"))
-    (pop-to-buffer buffer)
-    ;; Send to AI
-    (chat-model-request-result
-     chat-default-model
-     (list (make-chat-message
-            :id "system"
-            :role :system
-            :content "You are a code reviewer. Provide constructive feedback on code changes."
-            :timestamp (current-time))
-           (make-chat-message
-            :id "user"
-            :role :user
-            :content prompt
-            :timestamp (current-time)))
-     (lambda (response)
-       (with-current-buffer buffer
-         (erase-buffer)
-         (insert (format "Code Review\n%s\n\n" (make-string 40 ?=)))
-         (insert (plist-get response :content))
-         (insert "\n\n")
-         (insert (propertize "[q] Quit\n" 'face '(:weight bold)))))
-     (lambda (err)
-       (with-current-buffer buffer
-         (insert (format "Error: %s\n" err))))
-     '(:temperature 0.5))))
+  (require 'chat-code-review)
+  (chat-code-review-current-changes))
 
 ;; ------------------------------------------------------------------
 ;; Pre-commit Check

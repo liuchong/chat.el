@@ -90,8 +90,10 @@
 
 (defconst chat-capability-review-tools
   '(programming_git_status
+    programming_review_diff
+    programming_review_repo_map
     programming_flymake_diagnostics
-    programming_completion_at_point
+    programming_verification_read_result
     files_read files_read_lines files_list files_grep open_file
     emacs_buffers emacs_read_buffer emacs_imenu emacs_xref emacs_project)
   "Read-only tools exposed by the review profile.")
@@ -196,6 +198,21 @@
                                (current-buffer))))
                  diagnostics)
          "\n")))))
+
+(defun chat-capability-programming-review-diff
+    (project-root &optional base-revision)
+  "Return a bounded read-only diff for PROJECT-ROOT from BASE-REVISION."
+  (require 'chat-code-review)
+  (chat-code-review-read-diff project-root base-revision))
+
+(defun chat-capability-programming-review-repo-map
+    (project-root query &optional changed-files-json)
+  "Return bounded repo-map evidence for QUERY in PROJECT-ROOT."
+  (require 'chat-code-review)
+  (chat-code-review-read-repo-map
+   project-root query
+   (chat-capability--json-string-list changed-files-json
+                                      "changed_files_json")))
 
 (defun chat-capability-programming-compile-task (command &optional directory)
   "Start compile/test COMMAND as a background task."
@@ -847,6 +864,19 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    'programming_flymake_diagnostics "Programming Flymake Diagnostics"
    "Return Flymake diagnostics for the current buffer."
    nil #'chat-capability-programming-flymake-diagnostics 'project '(read))
+  (chat-capability--register-tool
+   'programming_review_diff "Programming Review Diff"
+   "Read a bounded project diff from an explicit base revision."
+   '((:name "project_root" :type "string" :required t)
+     (:name "base_revision" :type "string" :required nil))
+   #'chat-capability-programming-review-diff 'project '(read))
+  (chat-capability--register-tool
+   'programming_review_repo_map "Programming Review Repo Map"
+   "Read ranked repository-map evidence without mutating the project."
+   '((:name "project_root" :type "string" :required t)
+     (:name "query" :type "string" :required t)
+     (:name "changed_files_json" :type "string" :required nil))
+   #'chat-capability-programming-review-repo-map 'project '(read))
   (chat-capability--register-tool
    'programming_compile_task "Programming Compile Task"
    "Start a compile or test command as a background task."

@@ -272,11 +272,17 @@ summary string or alist.  This helper provides isolated child-session
          subagent)))))
 
 (defun chat-subagent-start-agent
-    (name prompt parent-session success error-callback &optional budget)
-  "Start nested agent NAME for PROMPT and report through callbacks."
+    (name prompt parent-session success error-callback &optional budget options)
+  "Start nested agent NAME for PROMPT and report through callbacks.
+
+OPTIONS may declare `:profile', `:model', `:project-root' and
+`:base-revision'.  A project root creates a session-owned worktree before the
+agent starts."
   (let* ((depth (1+ (chat-subagent--session-depth parent-session)))
          (_ (chat-subagent--ensure-depth depth parent-session))
          (id (chat-subagent--id))
+         (profile (plist-get options :profile))
+         (model (plist-get options :model))
          (message
           (make-chat-message
            :id (chat-session-new-message-id "subagent-user")
@@ -286,6 +292,19 @@ summary string or alist.  This helper provides isolated child-session
          (child-session
           (chat-subagent--child-session
            name (list message) parent-session depth id))
+         (_profile
+          (when profile
+            (chat-session-set-tool-config child-session
+                                          (list :profile profile))))
+         (_model
+          (when model
+            (setf (chat-session-model-id child-session) model)))
+         (workspace
+          (when-let* ((root (plist-get options :project-root)))
+            (require 'chat-workspace)
+            (chat-workspace-enable-worktree
+             child-session root
+             :revision (plist-get options :base-revision))))
          (subagent
           (make-chat-subagent
            :id id
@@ -310,6 +329,8 @@ summary string or alist.  This helper provides isolated child-session
        :model (chat-session-model-id child-session)
        :messages (list message)
        :session child-session
+       :profile profile
+       :project-root (chat-session-working-directory child-session)
        :transport 'stream
        :max-steps (chat-subagent-budget subagent)
        :on-event
@@ -338,7 +359,10 @@ summary string or alist.  This helper provides isolated child-session
          (chat-subagent--finish subagent 'failed message)
          (funcall error-callback message))))
     (setf (chat-subagent-run subagent) run)
-    (list :cancel
+    (list :subagent subagent
+          :child-session child-session
+          :workspace workspace
+          :cancel
           (lambda ()
             (when (and run (chat-agent-active-p run))
               (chat-agent-cancel run))))))

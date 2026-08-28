@@ -701,6 +701,13 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 
 ### M16：独立 Review Agent 与代码型多 Agent 协作
 
+**实施状态：完成（2026-08-28）。** 实现位于
+`lisp/code/chat-code-review.el` 与 `lisp/code/chat-code-collaboration.el`。
+Review 使用独立 child session 和只读 profile；finding parser 强制路径、行号、
+证据与去重合同。代码 child 使用层级路径资源、session-owned worktree 和拒绝冲突的
+merge gate；合并后重新运行 M12 verification。决策与验收证据见 Decision 0030 和
+`stage-2026-08-28-independent-review-and-coding-collaboration.md`。
+
 #### 目标
 
 用独立上下文检查变更，并让并行 Agent 在明确资源和 worktree 所有权下协作。

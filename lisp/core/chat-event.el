@@ -36,9 +36,11 @@
     checkpoint-created checkpoint-file-captured checkpoint-updated
     checkpoint-rolled-back
     workspace-created workspace-reconciled workspace-release-refused
-    workspace-released
+    workspace-released workspace-merge-started workspace-merge-completed
+    workspace-merge-conflicted
     execution-started execution-ended execution-interrupted
-    execution-retry-refused)
+    execution-retry-refused
+    review-started review-finding review-completed)
   "Canonical lifecycle event types.
 
 Other diagnostic event types may travel through the same bus.  This list

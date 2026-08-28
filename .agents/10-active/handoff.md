@@ -14,10 +14,10 @@
 
 ## Continue With
 
-- M15 capability-tested execution isolation is complete and independently tested
-- Continue with M16 review and coding collaboration from `programming-capability-reliability-plan.md`
-- Build the read-only Review Agent before adding coding child roles and merge behavior
-- Keep child path ownership, scheduler resources, worktree base and completion evidence explicit
+- M16 independent review and conflict-safe coding collaboration are complete
+- Continue with M17 rollout, performance verification and final acceptance
+- Keep review findings evidence-bearing and child outcomes bounded
+- Preserve path ownership, base revision and post-merge verification as merge gates
 
 ## Avoid
 

@@ -31,15 +31,15 @@ are in `programming-capability-reliability-plan.md`.
 5. M13: structured work context, scoped instructions and working notes (complete)
 6. M14: durable TODO plans and native chat progress UI (complete)
 7. M15: capability-tested execution isolation backends (complete)
-8. M16: read-only Review Agent and conflict-safe coding subagents (active)
-9. M17: rollout, performance verification and final acceptance
+8. M16: read-only Review Agent and conflict-safe coding subagents (complete)
+9. M17: rollout, performance verification and final acceptance (active)
 
 ## Immediate Next Action
 
-Implement M16's independent read-only Review Agent first, then add child coding
-roles with declared paths, scheduler resources, session-owned worktrees and a
-conflict-refusing merge gate. Reuse M12 verification, M14 plans and M15 execution
-policies; do not introduce parallel task, event, checkpoint or workspace stores.
+Implement M17 rollout and acceptance: expose runtime phases on the unified chat
+surface, add actionable status diagnostics, document the completed coding
+contracts, run the 10,000-file benchmark and execute the final repeated coding
+Eval comparison without introducing parallel runtime stores.
 
 ## Stage Gate
 

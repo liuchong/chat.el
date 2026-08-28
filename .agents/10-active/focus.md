@@ -8,13 +8,13 @@
 
 ## Doing Now
 
-M15 is complete. Execution policies now bind canonical read/write roots, explicit
-environment, controlled network, backend timeout and process-tree cleanup to
-measured backend facts. Darwin isolation is selected only after a foreground
-deny-default probe; unavailable or mismatched capabilities block without local
-fallback. M16 is active: add independent read-only review, then conflict-safe
-coding child roles over existing task, workspace, checkpoint and verification
-contracts.
+M16 is complete. Independent review now runs in a fresh read-only child context,
+parses strict evidence-bearing findings, records session audit facts and offers
+a native jump-to-source view. Coding children declare path ownership, scheduler
+resources, profile/model, budget and evidence; nonconflicting children use owned
+worktrees while the merge gate refuses stale base, ownership drift, parent path
+drift and patch conflicts before applying bytes, then reruns verification. M17
+is active: productize runtime phases, complete performance and final acceptance.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a
