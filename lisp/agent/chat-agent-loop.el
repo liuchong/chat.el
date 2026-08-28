@@ -680,7 +680,9 @@ need approval carry exclusive accesses and therefore remain serialized."
                                (chat-session-id
                                 (chat-agent-run-state-session run)))
                           :turn-id (chat-agent-run-state-turn run)
-                          :task-id (chat-agent-run-state-task-id run)))))
+                          :task-id (chat-agent-run-state-task-id run)
+                          :run-id (chat-agent-run-state-run-id run)
+                          :read-set (chat-agent-run-state-read-set run)))))
                    (when-let* ((job (gethash index running)))
                      (puthash index (plist-put job :handle handle) running))))
              (error

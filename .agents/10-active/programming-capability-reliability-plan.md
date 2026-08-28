@@ -353,6 +353,17 @@ Review Agent 只能输出以下结构化记录：
 - Agent 路径不存在未检测的陈旧写入。
 - 现有 patch 原子性测试全部继续通过。
 
+#### 完成记录（2026-08-28）
+
+- 状态：completed。
+- 完整读取和行读取返回全文件 SHA-256 版本；运行时以 canonical path 保存带 session、turn、run 和观察时间的 `chat-file-observation`。
+- 每个 Agent run 创建独立 read set，异步审批回调恢复同一个执行上下文；普通 Lisp API 在没有 read set 时保持兼容。
+- write、replace、insert、legacy patch、multi-file patch、move 和 delete 在 Agent 路径强制校验观察版本；模型提供的 `expected_version` 只能匹配运行时已有观察。
+- multi-file patch 在规划完成后、第一次落盘前整体复检；checkpoint 与版本层共用文件 digest 实现，不复制文件正文。
+- `file-not-read`、`stale-file` 和 `version-mismatch` 进入 tool error event，现有 Trace 继续投影该事件。
+- 15 个 read set、竞态、run 隔离和 typed error 定向测试全部通过；覆盖未读写入、外部修改、未保存 buffer、新建竞争、提交前漂移、move、delete、delete-then-add 和 move chain。
+- 文件工具回归 155/155 通过；Agent 与工具调用回归 91/91 通过；canonical suite 1590/1590 通过；integration 2/2 通过，2 个凭证依赖测试按既有条件 skip。
+
 ### M11：统一语义代码智能与 repo map
 
 #### 目标

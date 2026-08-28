@@ -777,10 +777,15 @@ being a thing the reader could do when the two surfaces merged."
 (ert-deftest chat-tool-caller-restores-execution-context-after-async-approval ()
   "A delayed guard verdict keeps the task correlation of the original call."
   (chat-test-with-temp-dir
-   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
-         (context '(:session-id "session-1" :turn-id 7 :task-id "task-2"))
+   (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (read-set (make-hash-table :test 'equal))
+         (context (list :session-id "session-1" :turn-id 7
+                        :task-id "task-2" :read-set read-set))
          decision
          observed
+         observed-read-set
+         observed-enforcement
+         observed-observation-context
          result)
      (chat-tool-forge-register
       (make-chat-forged-tool
@@ -792,6 +797,10 @@ being a thing the reader could do when the two surfaces merged."
        :compiled-function
        (lambda ()
          (setq observed chat-execution-current-context)
+         (setq observed-read-set chat-files-current-read-set)
+         (setq observed-enforcement chat-files-enforce-read-set)
+         (setq observed-observation-context
+               chat-files-current-observation-context)
          "ok")
        :is-active t
        :usage-count 0))
@@ -808,7 +817,35 @@ being a thing the reader could do when the two surfaces merged."
      (should decision)
      (funcall decision t 'guard)
      (should (equal observed context))
+     (should (eq observed-read-set read-set))
+     (should observed-enforcement)
+     (should (equal observed-observation-context context))
      (should (string= result "ok")))))
+
+(ert-deftest chat-tool-caller-publishes-typed-file-consistency-errors ()
+  "File consistency failures retain a stable type in observer events."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         events
+         (tool
+          (make-chat-forged-tool
+           :id 'stale-tool
+           :name "Stale Tool"
+           :description "Signal a stale file"
+           :language 'elisp
+           :parameters nil
+           :compiled-function
+           (lambda ()
+             (signal 'chat-files-stale-file '("stale-file: demo.txt")))
+           :is-active t
+           :usage-count 0)))
+    (chat-tool-forge-register tool)
+    (let ((result
+           (chat-tool-caller--execute-authorized
+            tool '(:name "stale-tool" :arguments nil) nil
+            (lambda (event) (push event events)) t)))
+      (should (string-match-p "stale-file" result))
+      (should (eq (plist-get (car events) :type) 'tool-error))
+      (should (eq (plist-get (car events) :error-type) 'stale-file)))))
 
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

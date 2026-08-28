@@ -150,6 +150,8 @@ Events are delivered synchronously through :on-event.  The final
               :execution-session (plist-get config :execution-session)
               :profile (plist-get config :profile-resolved)
               :task-id (and task (chat-task-id task))
+              :run-id (or (plist-get config :run-id)
+                          (chat-session-new-message-id "agent-run"))
               :transport (or (plist-get config :transport) 'sync)
               :on-event
               (lambda (event)
@@ -172,6 +174,7 @@ Events are delivered synchronously through :on-event.  The final
               :followup-request-options
               (plist-get config :followup-request-options)
               :queue-mode (or (plist-get config :queue-mode) 'fifo)
+              :read-set (make-hash-table :test 'equal)
               :native-tools (if (plist-member config :native-tools)
                                 (plist-get config :native-tools)
                               chat-agent-native-tools))))

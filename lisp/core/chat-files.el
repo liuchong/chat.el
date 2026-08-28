@@ -53,6 +53,35 @@ would produce a run that keeps trying and cannot say why it fails."
   :type '(repeat string)
   :group 'chat-files)
 
+(define-error 'chat-files-consistency-error
+  "Agent file consistency check failed")
+(define-error 'chat-files-file-not-read
+  "File must be read before it is modified"
+  'chat-files-consistency-error)
+(define-error 'chat-files-stale-file
+  "File changed after it was read"
+  'chat-files-consistency-error)
+(define-error 'chat-files-version-mismatch
+  "Requested file version does not match the observed version"
+  'chat-files-consistency-error)
+
+(cl-defstruct
+    (chat-file-observation
+     (:constructor chat-file-observation-create
+                   (&key path kind digest size observed-at session-id
+                         turn-id run-id version)))
+  "One immutable-in-practice file state observed by an Agent run."
+  path kind digest size observed-at session-id turn-id run-id version)
+
+(defvar chat-files-current-read-set nil
+  "Run-local hash table of canonical paths to observed file versions.")
+
+(defvar chat-files-enforce-read-set nil
+  "When non-nil, existing files must be observed before modification.")
+
+(defvar chat-files-current-observation-context nil
+  "Correlation plist attached to observations made by the current run.")
+
 ;; ------------------------------------------------------------------
 ;; Security and Validation
 ;; ------------------------------------------------------------------
@@ -139,6 +168,146 @@ Returns nil when TOOL-ID does not point at specific files."
 ;; Basic File Operations
 ;; ------------------------------------------------------------------
 
+(defun chat-files--digest-file (path)
+  "Return the SHA-256 digest of the literal bytes at PATH."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally path)
+    (secure-hash 'sha256 (current-buffer))))
+
+(defun chat-files--version-token (kind digest)
+  "Return a stable public token for KIND and DIGEST."
+  (if digest
+      (format "%s:sha256:%s" kind digest)
+    (symbol-name kind)))
+
+(defun chat-files--path-version (path &optional include-buffer)
+  "Return a version record for canonical PATH.
+When INCLUDE-BUFFER is non-nil, an unsaved visiting buffer is reported
+as a distinct state so it can never be overwritten silently."
+  (let ((buffer (and include-buffer (find-buffer-visiting path))))
+    (cond
+     ((and (buffer-live-p buffer)
+           (buffer-modified-p buffer))
+      (let ((digest (with-current-buffer buffer
+                      (secure-hash 'sha256
+                                   (buffer-substring-no-properties
+                                    (point-min) (point-max))))))
+        (list :schema-version 1
+              :kind 'modified-buffer
+              :digest digest
+              :size (with-current-buffer buffer (buffer-size))
+              :version (chat-files--version-token 'modified-buffer digest)
+              :path path)))
+     ((file-directory-p path)
+      (list :schema-version 1 :kind 'directory :digest nil
+            :size nil :version "directory" :path path))
+     ((file-exists-p path)
+      (let ((digest (chat-files--digest-file path)))
+        (list :schema-version 1
+              :kind 'file
+              :digest digest
+              :size (file-attribute-size (file-attributes path))
+              :version (chat-files--version-token 'file digest)
+              :path path)))
+     (t
+      (list :schema-version 1 :kind 'absent :digest nil
+            :size 0 :version "absent" :path path)))))
+
+(defun chat-files--same-version-p (left right)
+  "Return non-nil when version records LEFT and RIGHT identify one state."
+  (and left right
+       (eq (if (chat-file-observation-p left)
+               (chat-file-observation-kind left)
+             (plist-get left :kind))
+           (if (chat-file-observation-p right)
+               (chat-file-observation-kind right)
+             (plist-get right :kind)))
+       (equal (if (chat-file-observation-p left)
+                  (chat-file-observation-digest left)
+                (plist-get left :digest))
+              (if (chat-file-observation-p right)
+                  (chat-file-observation-digest right)
+                (plist-get right :digest)))))
+
+(defun chat-files--observation-plist (observation)
+  "Return public plist projection of OBSERVATION."
+  (list :schema-version 1
+        :path (chat-file-observation-path observation)
+        :kind (chat-file-observation-kind observation)
+        :digest (chat-file-observation-digest observation)
+        :size (chat-file-observation-size observation)
+        :observed-at (chat-file-observation-observed-at observation)
+        :session-id (chat-file-observation-session-id observation)
+        :turn-id (chat-file-observation-turn-id observation)
+        :run-id (chat-file-observation-run-id observation)
+        :version (chat-file-observation-version observation)))
+
+(defun chat-files--record-observation (path &optional version)
+  "Record and return PATH's disk VERSION in the current read set."
+  (let* ((canonical (chat-files--resolved-path path))
+         (state (or version (chat-files--path-version canonical nil)))
+         (observed
+          (chat-file-observation-create
+           :path canonical
+           :kind (plist-get state :kind)
+           :digest (plist-get state :digest)
+           :size (plist-get state :size)
+           :observed-at (round (* 1000 (float-time)))
+           :session-id (plist-get chat-files-current-observation-context
+                                  :session-id)
+           :turn-id (plist-get chat-files-current-observation-context :turn-id)
+           :run-id (plist-get chat-files-current-observation-context :run-id)
+           :version (plist-get state :version))))
+    (when (hash-table-p chat-files-current-read-set)
+      (puthash canonical observed chat-files-current-read-set))
+    observed))
+
+(defun chat-files--signal-consistency (type path message)
+  "Signal consistency error TYPE for PATH with MESSAGE."
+  (signal type (list (format "%s: %s" message path))))
+
+(defun chat-files--validate-observed-version (path &optional expected-version)
+  "Validate PATH against the current run's read set.
+EXPECTED-VERSION, when supplied by a caller, must match the version that
+the runtime itself observed.  It cannot create an observation."
+  (when chat-files-enforce-read-set
+    (unless (hash-table-p chat-files-current-read-set)
+      (error "File consistency enforcement requires a run-local read set"))
+    (let* ((missing (make-symbol "missing"))
+           (observed (gethash path chat-files-current-read-set missing))
+           (current (chat-files--path-version path t)))
+      ;; A missing destination is observed by the runtime at write time.  This
+      ;; permits new files while retaining a state that can be revalidated.
+      (when (and (eq observed missing)
+                 (eq (plist-get current :kind) 'absent))
+        (setq observed (chat-files--record-observation path current)))
+      (when (eq observed missing)
+        (chat-files--signal-consistency
+         'chat-files-file-not-read path "file-not-read"))
+      (when (and expected-version
+                 (not (equal expected-version
+                             (chat-file-observation-version observed))))
+        (chat-files--signal-consistency
+         'chat-files-version-mismatch path "version-mismatch"))
+      (when (eq (plist-get current :kind) 'modified-buffer)
+        (chat-files--signal-consistency
+         'chat-files-stale-file path "stale-file (unsaved visiting buffer)"))
+      (unless (chat-files--same-version-p observed current)
+        (chat-files--signal-consistency
+         'chat-files-stale-file path "stale-file"))
+      observed)))
+
+(defun chat-files--refresh-observation (path)
+  "Refresh PATH in the current read set after a successful mutation."
+  (chat-files--record-observation
+   path (chat-files--path-version path nil)))
+
+(defun chat-files--validate-paths (paths)
+  "Validate every canonical path in PATHS before any mutation begins."
+  (dolist (path (delete-dups (copy-sequence paths)))
+    (chat-files--validate-observed-version path)))
+
 ;;;###autoload
 (defun chat-files-read (path &optional offset limit encoding)
   "Read content of file at PATH.
@@ -158,12 +327,16 @@ Returns a plist with :content, :size, :lines, :encoding."
         (delete-region 1 (min (1+ offset) (point-max))))
       (when limit
         (delete-region (min (1+ limit) (point-max)) (point-max)))
-      (let ((content (buffer-string)))
+      (let* ((content (buffer-string))
+             (version (chat-files--record-observation
+                       safe-path (chat-files--path-version safe-path nil))))
         (list :content content
               :size (length content)
               :lines (count-lines (point-min) (point-max))
               :encoding coding-system
-              :path safe-path)))))
+              :path safe-path
+              :version (chat-file-observation-version version)
+              :version-info (chat-files--observation-plist version))))))
 
 ;;;###autoload
 (defun chat-files-read-lines (path &optional start-line num-lines)
@@ -191,11 +364,15 @@ Returns a plist with :lines (list of strings), :start, :end, :total-lines."
                  (line-end-position))
                 lines)
           (forward-line 1))
-        (list :lines (nreverse lines)
+        (let ((version (chat-files--record-observation
+                        safe-path (chat-files--path-version safe-path nil))))
+          (list :lines (nreverse lines)
               :start start
               :end end
               :total-lines total
-              :path safe-path)))))
+              :path safe-path
+              :version (chat-file-observation-version version)
+              :version-info (chat-files--observation-plist version)))))))
 
 ;;;###autoload
 (defun chat-files-exists-p (path)
@@ -250,17 +427,25 @@ Returns a list of plists with :name, :path, :size, :mtime, :type."
 ;; ------------------------------------------------------------------
 
 ;;;###autoload
-(defun chat-files-move (source dest &optional overwrite)
+(defun chat-files-move (source dest &optional overwrite expected-source-version expected-dest-version)
   "Move or rename file from SOURCE to DEST.
 If OVERWRITE is non-nil, overwrite existing file at DEST."
   (let ((safe-source (chat-files--safe-path-p source))
         (safe-dest (chat-files--safe-path-p dest)))
+    (chat-files--validate-observed-version safe-source expected-source-version)
+    (chat-files--validate-observed-version safe-dest expected-dest-version)
     (when (and (file-exists-p safe-dest) (not overwrite))
       (error "Destination exists and overwrite is nil: %s" safe-dest))
+    (chat-files--validate-observed-version safe-source expected-source-version)
+    (chat-files--validate-observed-version safe-dest expected-dest-version)
     (rename-file safe-source safe-dest overwrite)
-    (list :source safe-source
-          :destination safe-dest
-          :operation 'move)))
+    (let ((source-version (chat-files--refresh-observation safe-source))
+          (dest-version (chat-files--refresh-observation safe-dest)))
+      (list :source safe-source
+            :destination safe-dest
+            :operation 'move
+            :source-version (chat-file-observation-version source-version)
+            :version (chat-file-observation-version dest-version)))))
 
 ;;;###autoload
 (defun chat-files-copy (source dest &optional overwrite)
@@ -276,16 +461,19 @@ If OVERWRITE is non-nil, overwrite existing file at DEST."
           :operation 'copy)))
 
 ;;;###autoload
-(defun chat-files-delete (path &optional recursive)
+(defun chat-files-delete (path &optional recursive expected-version)
   "Delete file or directory at PATH.
 If RECURSIVE is non-nil and PATH is a directory, delete recursively."
   (let ((safe-path (chat-files--safe-path-p path)))
+    (chat-files--validate-observed-version safe-path expected-version)
     (if (file-directory-p safe-path)
         (delete-directory safe-path recursive)
       (delete-file safe-path))
-    (list :path safe-path
-          :operation 'delete
-          :recursive recursive)))
+    (let ((version (chat-files--refresh-observation safe-path)))
+      (list :path safe-path
+            :operation 'delete
+            :recursive recursive
+            :version (chat-file-observation-version version)))))
 
 ;;;###autoload
 (defun chat-files-mkdir (path &optional parents)
@@ -479,25 +667,33 @@ Returns a plist with :slices (list of :content, :start, :end)."
 ;; ------------------------------------------------------------------
 
 ;;;###autoload
-(defun chat-files-write (path content &optional append encoding)
+(defun chat-files-write (path content &optional append encoding expected-version)
   "Write CONTENT to file at PATH.
 If APPEND is non-nil, append to existing content.
 ENCODING specifies the file encoding (default utf-8)."
   (let ((safe-path (chat-files--safe-path-p path))
         (coding-system (or encoding 'utf-8)))
     (chat-files--ensure-direct-edit-path safe-path)
+    (chat-files--validate-observed-version safe-path expected-version)
     (make-directory (file-name-directory safe-path) t)
     (with-temp-buffer
       (when (and append (file-exists-p safe-path))
         (insert-file-contents safe-path))
       (goto-char (point-max))
       (insert content)
-      (let ((coding-system-for-write coding-system))
-        (write-region (point-min) (point-max) safe-path)))
-    (list :path safe-path
-          :operation (if append 'append 'write)
-          :bytes-written (length content)
-          :encoding coding-system)))
+      (let ((observed (chat-files--validate-observed-version
+                       safe-path expected-version))
+            (coding-system-for-write coding-system))
+        (write-region (point-min) (point-max) safe-path nil nil nil
+                      (and observed
+                           (eq (chat-file-observation-kind observed) 'absent)
+                           'excl))))
+    (let ((version (chat-files--refresh-observation safe-path)))
+      (list :path safe-path
+            :operation (if append 'append 'write)
+            :bytes-written (length content)
+            :encoding coding-system
+            :version (chat-file-observation-version version)))))
 
 (defun chat-files--line-number-at-position (content position)
   "Return the 1-based line number for POSITION within CONTENT."
@@ -563,7 +759,10 @@ the empty string."
 (defun chat-files--normalize-edit-error (err)
   "Re-signal ERR inside the stable direct-edit error family."
   (let ((message (error-message-string err)))
-    (if (string-prefix-p "Edit failed:" message)
+    (if (or (memq (car err) '(chat-files-file-not-read
+                              chat-files-stale-file
+                              chat-files-version-mismatch))
+            (string-prefix-p "Edit failed:" message))
         (signal (car err) (cdr err))
       (chat-files--signal-edit-error "%s" message))))
 
@@ -740,7 +939,7 @@ matches at any level."
      extra)))
 
 ;;;###autoload
-(defun chat-files-replace (path search replace &optional all expected-count regexp line-hint)
+(defun chat-files-replace (path search replace &optional all expected-count regexp line-hint expected-version)
   "Replace SEARCH pattern with REPLACE text in file at PATH.
 SEARCH is matched literally unless REGEXP is non-nil.
 When ALL is non-nil, replace all matches.
@@ -748,32 +947,37 @@ When EXPECTED-COUNT is non-nil, require exactly that many matches.
 When LINE-HINT is non-nil, only consider matches on that line."
   (chat-files--with-edit-errors
     (let* ((safe-path (chat-files--safe-path-p path))
+           (_ (chat-files--validate-observed-version safe-path expected-version))
            (original-content (chat-files--read-edit-target-content safe-path))
            (result (chat-files--replace-content
                     original-content search replace all expected-count regexp line-hint))
            (new-content (plist-get result :content)))
+      (chat-files--validate-observed-version safe-path expected-version)
       (with-temp-file safe-path
         (insert new-content))
-      (chat-files--with-diff
-       safe-path
-       original-content
-       new-content
-       'replace
-       (append
-        (list :replacements-made (plist-get result :replacements-made)
-              :search search
-              :replace replace)
-        (let ((mode (plist-get result :match-mode)))
-          (and mode
-               (not (eq mode 'exact))
-               (list :match-mode mode))))))))
+      (let ((version (chat-files--refresh-observation safe-path)))
+        (chat-files--with-diff
+         safe-path
+         original-content
+         new-content
+         'replace
+         (append
+          (list :replacements-made (plist-get result :replacements-made)
+                :search search
+                :replace replace
+                :version (chat-file-observation-version version))
+          (let ((mode (plist-get result :match-mode)))
+            (and mode
+                 (not (eq mode 'exact))
+                 (list :match-mode mode)))))))))
 
 ;;;###autoload
-(defun chat-files-insert-at (path position text)
+(defun chat-files-insert-at (path position text &optional expected-version)
   "Insert TEXT at POSITION in file at PATH.
 POSITION can be :beginning, :end, a line number, or a character position."
   (chat-files--with-edit-errors
     (let ((safe-path (chat-files--safe-path-p path)))
+      (chat-files--validate-observed-version safe-path expected-version)
       (with-temp-buffer
         (insert (chat-files--read-edit-target-content safe-path))
         (cond
@@ -789,14 +993,17 @@ POSITION can be :beginning, :end, a line number, or a character position."
           (chat-files--signal-edit-error
            "insert position must be :beginning, :end, or a positive integer")))
         (insert text)
+        (chat-files--validate-observed-version safe-path expected-version)
         (write-region (point-min) (point-max) safe-path))
-      (list :path safe-path
-            :operation 'insert
-            :position position
-            :bytes-inserted (length text)))))
+      (let ((version (chat-files--refresh-observation safe-path)))
+        (list :path safe-path
+              :operation 'insert
+              :position position
+              :bytes-inserted (length text)
+              :version (chat-file-observation-version version))))))
 
 ;;;###autoload
-(defun chat-files-patch (path patches)
+(defun chat-files-patch (path patches &optional expected-version)
   "Apply multiple patches to file at PATH.
 PATCHES is a list of plists with:
   :search - text/pattern to find
@@ -809,6 +1016,7 @@ PATCHES is a list of plists with:
 All patches are applied atomically."
   (chat-files--with-edit-errors
     (let* ((safe-path (chat-files--safe-path-p path))
+           (_ (chat-files--validate-observed-version safe-path expected-version))
            (original-content (chat-files--read-edit-target-content safe-path))
            (content original-content))
       (dolist (patch patches)
@@ -828,12 +1036,15 @@ All patches are applied atomically."
                  :content))))
       (when (string= content original-content)
         (error "Patch failed: patch sequence would not change file content"))
+      (chat-files--validate-observed-version safe-path expected-version)
       (with-temp-file safe-path
         (insert content))
-      (append
-       (chat-files--with-diff safe-path original-content content 'patch)
-       (list :patches-applied (length patches)
-             :status 'success)))))
+      (let ((version (chat-files--refresh-observation safe-path)))
+        (append
+         (chat-files--with-diff safe-path original-content content 'patch)
+         (list :patches-applied (length patches)
+               :status 'success
+               :version (chat-file-observation-version version)))))))
 
 (defun chat-files--split-content-lines (content)
   "Return CONTENT as a plist with line data."
@@ -1119,7 +1330,10 @@ All patches are applied atomically."
       (funcall fn)
     (error
      (let ((message (error-message-string err)))
-       (if (string-prefix-p "apply_patch verification failed:" message)
+       (if (or (memq (car err) '(chat-files-file-not-read
+                                 chat-files-stale-file
+                                 chat-files-version-mismatch))
+               (string-prefix-p "apply_patch verification failed:" message))
            (signal (car err) (cdr err))
          (error "apply_patch verification failed: %s" message))))))
 
@@ -1475,8 +1689,10 @@ built in implementation otherwise."
     (_
      (error "apply_patch verification failed: unsupported operation"))))
 
-(defun chat-files--commit-planned-file-states (states)
-  "Commit planned file STATES to disk."
+(defun chat-files--commit-planned-file-states (states &optional consistency-paths)
+  "Commit planned file STATES to disk.
+CONSISTENCY-PATHS are revalidated as one set before the first write."
+  (chat-files--validate-paths consistency-paths)
   (maphash
    (lambda (path state)
      (if (plist-get state :exists)
@@ -1486,7 +1702,24 @@ built in implementation otherwise."
              (insert (or (plist-get state :content) ""))))
        (when (file-exists-p path)
          (delete-file path))))
-   states))
+   states)
+  (maphash (lambda (path _state)
+             (chat-files--refresh-observation path))
+           states))
+
+(defun chat-files--apply-patch-consistency-paths (operations)
+  "Return canonical source and destination paths touched by OPERATIONS."
+  (let (paths)
+    (dolist (operation operations)
+      (push (chat-files--safe-path-p
+             (expand-file-name (plist-get operation :path)
+                               default-directory))
+            paths)
+      (when-let ((move-to (plist-get operation :move-to)))
+        (push (chat-files--safe-path-p
+               (expand-file-name move-to default-directory))
+              paths)))
+    (delete-dups (nreverse paths))))
 
 (defun chat-files-apply-patch (path-or-patch &optional patches)
   "Apply PATCHES to PATH-OR-PATCH or parse codex patch text."
@@ -1495,11 +1728,14 @@ built in implementation otherwise."
     (chat-files--with-apply-patch-errors
      (lambda ()
        (let* ((operations (chat-files--parse-apply-patch path-or-patch))
+              (consistency-paths
+               (chat-files--apply-patch-consistency-paths operations))
               (states (make-hash-table :test 'equal))
               results)
+         (chat-files--validate-paths consistency-paths)
          (dolist (operation operations)
            (push (chat-files--plan-apply-patch-operation operation states) results))
-         (chat-files--commit-planned-file-states states)
+         (chat-files--commit-planned-file-states states consistency-paths)
          (list :operations (nreverse results)
                :status 'success
                :diff (mapconcat (lambda (result)
@@ -1681,7 +1917,7 @@ Returns total size, line count, and file type distribution."
   (chat-files--register-built-in-tool
    'files_read
    "Read File"
-   "Read content from a file"
+   "Read content and a version token from a file before editing it"
    '((:name "path" :type "string" :required t)
      (:name "offset" :type "integer")
      (:name "limit" :type "integer"))
@@ -1690,7 +1926,7 @@ Returns total size, line count, and file type distribution."
   (chat-files--register-built-in-tool
    'files_read_lines
    "Read File Lines"
-   "Read a line range from a file"
+   "Read a line range and the whole-file version token before editing it"
    '((:name "path" :type "string" :required t)
      (:name "start_line" :type "integer")
      (:name "num_lines" :type "integer"))
@@ -1735,12 +1971,13 @@ Returns total size, line count, and file type distribution."
   (chat-files--register-built-in-tool
    'files_write
    "Write File"
-   "Write content to a file"
+   "Write content; existing files must have been read in this run"
    '((:name "path" :type "string" :required t)
      (:name "content" :type "string" :required t)
-     (:name "append" :type "boolean"))
-   (lambda (path content &optional append)
-     (chat-files-write path content append)))
+     (:name "append" :type "boolean")
+     (:name "expected_version" :type "string"))
+   (lambda (path content &optional append expected-version)
+     (chat-files-write path content append nil expected-version)))
   (chat-files--register-built-in-tool
    'files_replace
    "Replace File Text"
@@ -1751,17 +1988,19 @@ Returns total size, line count, and file type distribution."
      (:name "all" :type "boolean")
      (:name "expected_count" :type "integer")
      (:name "regexp" :type "boolean")
-     (:name "line_hint" :type "integer"))
-   (lambda (path search replace &optional all expected-count regexp line-hint)
-     (chat-files-replace path search replace all expected-count regexp line-hint)))
+     (:name "line_hint" :type "integer")
+     (:name "expected_version" :type "string"))
+   (lambda (path search replace &optional all expected-count regexp line-hint expected-version)
+     (chat-files-replace path search replace all expected-count regexp line-hint expected-version)))
   (chat-files--register-built-in-tool
    'files_patch
    "Patch File"
    "Apply legacy atomic search and replace patches to a file"
    '((:name "path" :type "string" :required t)
-     (:name "patches" :type "array" :required t))
-   (lambda (path patches)
-     (chat-files-patch path patches)))
+     (:name "patches" :type "array" :required t)
+     (:name "expected_version" :type "string"))
+   (lambda (path patches &optional expected-version)
+     (chat-files-patch path patches expected-version)))
   (chat-files--register-built-in-tool
    'apply_patch
    "Apply Patch"
@@ -1780,12 +2019,12 @@ Returns total size, line count, and file type distribution."
 This describes available file operations to the AI."
   (list
    (list :name "files_read"
-         :description "Read content of a file"
+         :description "Read content and a version token before editing"
          :parameters '((:name "path" :type "string" :required t)
                        (:name "offset" :type "integer")
                        (:name "limit" :type "integer")))
    (list :name "files_read_lines"
-         :description "Read specific line range from a file"
+         :description "Read a line range and the whole-file version token"
          :parameters '((:name "path" :type "string" :required t)
                        (:name "start_line" :type "integer")
                        (:name "num_lines" :type "integer")))
@@ -1810,10 +2049,11 @@ This describes available file operations to the AI."
                        (:name "pattern" :type "string")
                        (:name "recursive" :type "boolean")))
    (list :name "files_write"
-         :description "Write content to a file"
+         :description "Write content after reading an existing file in this run"
          :parameters '((:name "path" :type "string" :required t)
                        (:name "content" :type "string" :required t)
-                       (:name "append" :type "boolean")))
+                       (:name "append" :type "boolean")
+                       (:name "expected_version" :type "string")))
    (list :name "files_replace"
          :description "Replace exact text or regex matches in a file"
          :parameters '((:name "path" :type "string" :required t)
@@ -1822,11 +2062,13 @@ This describes available file operations to the AI."
                        (:name "all" :type "boolean")
                        (:name "expected_count" :type "integer")
                        (:name "regexp" :type "boolean")
-                       (:name "line_hint" :type "integer")))
+                       (:name "line_hint" :type "integer")
+                       (:name "expected_version" :type "string")))
    (list :name "files_patch"
          :description "Apply multiple legacy search/replace patches atomically"
          :parameters '((:name "path" :type "string" :required t)
-                       (:name "patches" :type "array" :required t)))
+                       (:name "patches" :type "array" :required t)
+                       (:name "expected_version" :type "string")))
    (list :name "apply_patch"
          :description "Apply codex-style patch text to one or more files"
          :parameters '((:name "patch" :type "string" :required t)))))

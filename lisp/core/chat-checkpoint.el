@@ -16,6 +16,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'chat-event)
+(require 'chat-files)
 (require 'chat-session)
 
 (declare-function chat-code-session-project-root "chat-code" (session))
@@ -159,10 +160,7 @@
 
 (defun chat-checkpoint--file-digest (file)
   "Return SHA-256 digest for regular FILE bytes."
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    (insert-file-contents-literally file)
-    (secure-hash 'sha256 (current-buffer))))
+  (chat-files--digest-file file))
 
 (defun chat-checkpoint--path-state (path)
   "Return the recoverable current state of PATH."

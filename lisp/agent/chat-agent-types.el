@@ -41,7 +41,7 @@
 (cl-defstruct (chat-agent-run-state
                (:constructor chat-agent--run-create)
                (:copier nil))
-  model messages session execution-session profile transport task-id
+  model messages session execution-session profile transport task-id run-id
   on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options
@@ -64,6 +64,7 @@
   (followup-queue nil)
   (queue-mode 'fifo)
   (cancel-functions nil)
+  read-set
   (native-tools t))
 
 (defun chat-agent-run-execution-session (run)

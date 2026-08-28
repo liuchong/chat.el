@@ -51,6 +51,14 @@ model knows content is missing."
 
 (defvar chat-execution-current-context nil)
 
+(defun chat-tool-caller--condition-error-type (err)
+  "Return the stable public error type represented by ERR, or nil."
+  (pcase (car-safe err)
+    ('chat-files-file-not-read 'file-not-read)
+    ('chat-files-stale-file 'stale-file)
+    ('chat-files-version-mismatch 'version-mismatch)
+    (_ nil)))
+
 ;; Bound buffer-locally by the chat surface, which loads after this.
 (defvar chat--current-session)
 
@@ -869,6 +877,12 @@ boundary the floor relies on is wider than anyone asked for."
   `(let* ((chat-tool-caller-current-session ,session)
           (chat-execution-current-context
            chat-tool-caller-current-execution-context)
+          (chat-files-current-read-set
+           (plist-get chat-tool-caller-current-execution-context :read-set))
+          (chat-files-current-observation-context
+           chat-tool-caller-current-execution-context)
+          (chat-files-enforce-read-set
+           (hash-table-p chat-files-current-read-set))
           (chat-files-allowed-directories
            (chat-tool-caller--allowed-directories))
           (default-directory
@@ -1008,12 +1022,14 @@ loop."
                                consent)))))))))))
       (error
        (let ((text (format "Error executing tool '%s': %s"
-                           name (error-message-string err))))
+                           name (error-message-string err)))
+             (error-type (chat-tool-caller--condition-error-type err)))
          (chat-tool-caller--notify
           observer
-          (list :type 'tool-error
-                :tool name
-                :result-summary (chat-tool-caller--compact-text text)))
+          (append (list :type 'tool-error
+                        :tool name
+                        :result-summary (chat-tool-caller--compact-text text))
+                  (when error-type (list :error-type error-type))))
          (funcall error-callback text))))))
 
 (defun chat-tool-caller--execute-authorized
@@ -1044,16 +1060,18 @@ The caller has re-established the execution context."
                  (chat-tool-caller--tool-result-summary result)))
           result)
       (error
-       (let ((result
+       (let ((error-type (chat-tool-caller--condition-error-type err))
+             (result
               (format "Error executing tool '%s': %s"
                       name
                       (chat-tool-caller--access-denied-hint
                        tool-id (error-message-string err)))))
          (chat-tool-caller--notify
           observer
-          (list :type 'tool-error
-                :tool name
-                :result-summary (chat-tool-caller--compact-text result)))
+          (append (list :type 'tool-error
+                        :tool name
+                        :result-summary (chat-tool-caller--compact-text result))
+                  (when error-type (list :error-type error-type))))
          result)))))
 
 (defun chat-tool-caller-execute (call &optional session observer)

@@ -143,6 +143,292 @@
        (should (= (plist-get result :end) 1))
        (should (equal (plist-get result :lines) nil))))))
 
+;; ------------------------------------------------------------------
+;; Run-local read-set consistency
+;; ------------------------------------------------------------------
+
+(defmacro chat-test-with-enforced-read-set (&rest body)
+  "Run BODY with a fresh, enforced file observation set."
+  (declare (indent 0) (debug t))
+  `(let ((chat-files-current-read-set (make-hash-table :test 'equal))
+         (chat-files-enforce-read-set t))
+     ,@body))
+
+(ert-deftest chat-files-read-set-allows-unchanged-write ()
+  "An observed file can be changed while its version remains current."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "observed.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file path (insert "old"))
+     (chat-test-with-enforced-read-set
+       (let* ((chat-files-current-observation-context
+               '(:session-id "session-1" :turn-id 3 :run-id "run-4"))
+              (read-result (chat-files-read path))
+              (version-info (plist-get read-result :version-info))
+              (write-result
+               (chat-files-write path "new" nil nil
+                                 (plist-get read-result :version))))
+         (should (string-prefix-p "file:sha256:"
+                                  (plist-get read-result :version)))
+         (should (string-prefix-p "file:sha256:"
+                                  (plist-get write-result :version)))
+         (should (integerp (plist-get version-info :observed-at)))
+         (should (equal (plist-get version-info :session-id) "session-1"))
+         (should (= (plist-get version-info :turn-id) 3))
+         (should (equal (plist-get version-info :run-id) "run-4"))
+         (should (string= (with-temp-buffer
+                            (insert-file-contents path)
+                            (buffer-string))
+                          "new")))))))
+
+(ert-deftest chat-files-read-set-rejects-existing-write-without-read ()
+  "An existing file cannot be changed without a run-local observation."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "unread.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file path (insert "original"))
+     (chat-test-with-enforced-read-set
+       (should-error (chat-files-write path "replacement")
+                     :type 'chat-files-file-not-read))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path)
+                        (buffer-string))
+                      "original")))))
+
+(ert-deftest chat-files-read-set-rejects-external-edit-after-read ()
+  "A disk change after reading is rejected without overwriting it."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "stale.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file path (insert "original"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read-lines path 1 1)
+       (with-temp-file path (insert "external"))
+       (should-error (chat-files-replace path "external" "agent")
+                     :type 'chat-files-stale-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path)
+                        (buffer-string))
+                      "external")))))
+
+(ert-deftest chat-files-read-set-rejects-modified-visiting-buffer ()
+  "Unsaved user edits in a visiting buffer are never overwritten."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "buffer.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          buffer)
+     (with-temp-file path (insert "disk"))
+     (unwind-protect
+         (chat-test-with-enforced-read-set
+           (chat-files-read path)
+           (setq buffer (find-file-noselect path))
+           (with-current-buffer buffer
+             (goto-char (point-max))
+             (insert " unsaved"))
+           (should-error (chat-files-write path "agent")
+                         :type 'chat-files-stale-file))
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer (set-buffer-modified-p nil))
+         (kill-buffer buffer)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path)
+                        (buffer-string))
+                      "disk")))))
+
+(ert-deftest chat-files-read-set-new-file-and-competing-creation ()
+  "New files work, while a path observed absent rejects later creation."
+  (chat-test-with-temp-dir
+   (let* ((fresh (expand-file-name "fresh.txt" temp-dir))
+          (contended (expand-file-name "contended.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (chat-test-with-enforced-read-set
+       (chat-files-write fresh "created")
+       (should (string= (with-temp-buffer
+                          (insert-file-contents fresh)
+                          (buffer-string))
+                        "created"))
+       (chat-files--record-observation
+        contended (chat-files--path-version contended nil))
+       (with-temp-file contended (insert "competitor"))
+       (should-error (chat-files-write contended "agent")
+                     :type 'chat-files-stale-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents contended)
+                        (buffer-string))
+                      "competitor")))))
+
+(ert-deftest chat-files-read-set-rejects-model-version-mismatch ()
+  "A caller-provided token must agree with the runtime observation."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "token.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file path (insert "original"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read path)
+       (should-error (chat-files-write path "agent" nil nil "file:sha256:wrong")
+                     :type 'chat-files-version-mismatch)))))
+
+(ert-deftest chat-files-read-set-keeps-multi-file-patch-atomic-on-drift ()
+  "One stale file rejects a multi-file patch before any file is changed."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (path-a (expand-file-name "a.txt" temp-dir))
+          (path-b (expand-file-name "b.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch (mapconcat
+                  #'identity
+                  '("*** Begin Patch"
+                    "*** Update File: a.txt"
+                    "@@"
+                    "-alpha"
+                    "+ALPHA"
+                    "*** Update File: b.txt"
+                    "@@"
+                    "-external"
+                    "+BETA"
+                    "*** End Patch")
+                  "\n")))
+     (with-temp-file path-a (insert "alpha\n"))
+     (with-temp-file path-b (insert "beta\n"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read path-a)
+       (chat-files-read path-b)
+       (with-temp-file path-b (insert "external\n"))
+       (should-error (chat-files-apply-patch patch)
+                     :type 'chat-files-stale-file))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path-a)
+                        (buffer-string))
+                      "alpha\n"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path-b)
+                        (buffer-string))
+                      "external\n")))))
+
+(ert-deftest chat-files-read-set-revalidates-multi-file-patch-at-commit ()
+  "Drift between planning and commit rejects the entire patch."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (path-a (expand-file-name "commit-a.txt" temp-dir))
+          (path-b (expand-file-name "commit-b.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch (mapconcat
+                  #'identity
+                  '("*** Begin Patch"
+                    "*** Update File: commit-a.txt"
+                    "@@"
+                    "-alpha"
+                    "+ALPHA"
+                    "*** Update File: commit-b.txt"
+                    "@@"
+                    "-beta"
+                    "+BETA"
+                    "*** End Patch")
+                  "\n"))
+          (original-commit
+           (symbol-function 'chat-files--commit-planned-file-states)))
+     (with-temp-file path-a (insert "alpha\n"))
+     (with-temp-file path-b (insert "beta\n"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read path-a)
+       (chat-files-read path-b)
+       (cl-letf (((symbol-function 'chat-files--commit-planned-file-states)
+                  (lambda (states &optional paths)
+                    (with-temp-file path-b (insert "external\n"))
+                    (funcall original-commit states paths))))
+         (should-error (chat-files-apply-patch patch)
+                       :type 'chat-files-stale-file)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path-a)
+                        (buffer-string))
+                      "alpha\n"))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path-b)
+                        (buffer-string))
+                      "external\n")))))
+
+(ert-deftest chat-files-read-set-validates-move-source-and-target ()
+  "Moves require a current source and an unchanged absent destination."
+  (chat-test-with-temp-dir
+   (let* ((source (expand-file-name "source.txt" temp-dir))
+          (target (expand-file-name "target.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file source (insert "source"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read source)
+       (chat-files--record-observation
+        target (chat-files--path-version target nil))
+       (with-temp-file target (insert "competitor"))
+       (should-error (chat-files-move source target)
+                     :type 'chat-files-stale-file))
+     (should (file-exists-p source))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target)
+                        (buffer-string))
+                      "competitor")))))
+
+(ert-deftest chat-files-read-set-allows-observed-delete ()
+  "An unchanged observed file can be deleted and becomes absent."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "delete.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir)))
+     (with-temp-file path (insert "delete me"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read path)
+       (let ((result (chat-files-delete path)))
+         (should (equal (plist-get result :version) "absent"))))
+     (should-not (file-exists-p path)))))
+
+(ert-deftest chat-files-read-set-allows-delete-then-add-in-one-patch ()
+  "A read existing path can be replaced through delete then add."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (path (expand-file-name "replace.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch (mapconcat
+                  #'identity
+                  '("*** Begin Patch"
+                    "*** Delete File: replace.txt"
+                    "*** Add File: replace.txt"
+                    "+new"
+                    "*** End Patch")
+                  "\n")))
+     (with-temp-file path (insert "old\n"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read path)
+       (chat-files-apply-patch patch))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents path)
+                        (buffer-string))
+                      "new\n")))))
+
+(ert-deftest chat-files-read-set-allows-observed-move-chain ()
+  "A read source can move through initially absent intermediate paths."
+  (chat-test-with-temp-dir
+   (let* ((default-directory temp-dir)
+          (source (expand-file-name "source.txt" temp-dir))
+          (target (expand-file-name "target.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (patch (mapconcat
+                  #'identity
+                  '("*** Begin Patch"
+                    "*** Update File: source.txt"
+                    "*** Move to: middle.txt"
+                    "*** Update File: middle.txt"
+                    "*** Move to: target.txt"
+                    "*** End Patch")
+                  "\n")))
+     (with-temp-file source (insert "content\n"))
+     (chat-test-with-enforced-read-set
+       (chat-files-read source)
+       (chat-files-apply-patch patch))
+     (should-not (file-exists-p source))
+     (should-not (file-exists-p (expand-file-name "middle.txt" temp-dir)))
+     (should (string= (with-temp-buffer
+                        (insert-file-contents target)
+                        (buffer-string))
+                      "content\n")))))
+
 (ert-deftest chat-files-exists-p-checks-file ()
   "Test file existence check."
   (chat-test-with-temp-dir

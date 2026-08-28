@@ -79,6 +79,35 @@ car collects the messages of every request."
        (chat-agent--complete-result run nil '(:cancelled t) nil)))
     (should (equal finished (list run 'cancelled nil)))))
 
+(ert-deftest chat-agent-runs-own-isolated-read-sets ()
+  "Every foreground or child run starts with an independent read set."
+  (let ((calls-a (list nil))
+        (calls-b (list nil))
+        run-a
+        run-b)
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport '((:content "done")) calls-a)))
+      (setq run-a
+            (chat-agent-start
+             (list :model 'kimi
+                   :messages (list (chat-agent-test--user-message))))))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport '((:content "done")) calls-b)))
+      (setq run-b
+            (chat-agent-start
+             (list :model 'kimi
+                   :messages (list (chat-agent-test--user-message))))))
+    (let ((read-set-a (chat-agent-run-state-read-set run-a))
+          (read-set-b (chat-agent-run-state-read-set run-b)))
+      (should (hash-table-p read-set-a))
+      (should (hash-table-p read-set-b))
+      (should-not (eq read-set-a read-set-b))
+      (should (stringp (chat-agent-run-state-run-id run-a)))
+      (should-not (equal (chat-agent-run-state-run-id run-a)
+                         (chat-agent-run-state-run-id run-b)))
+      (puthash "/tmp/only-a" 'observed read-set-a)
+      (should-not (gethash "/tmp/only-a" read-set-b)))))
+
 (ert-deftest chat-agent-tracked-run-is-a-durable-foreground-task ()
   "A UI-style run records one terminal task and clears its live marker."
   (chat-test-with-temp-dir
