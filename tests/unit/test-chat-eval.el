@@ -67,6 +67,29 @@
                     (chat-eval-result-fixture-digest loaded)))
      (should-error (chat-eval-save-result result)))))
 
+(ert-deftest chat-eval-record-result-supports-asynchronous-producers ()
+  "External runners can persist their own timing and terminal status."
+  (chat-eval-test-with-runtime
+   (let* ((result
+           (chat-eval-record-result
+            :scenario-id "coding-task"
+            :scenario-revision 3
+            :category "coding"
+            :fixture-id "fixture-a"
+            :fixture-digest (make-string 64 ?a)
+            :started-at 40
+            :finished-at 85
+            :status 'timed-out
+            :checks (list (chat-eval-check
+                           "executor" nil "completed" "timed-out"))
+            :metadata '((taskId . "task-a"))))
+          (loaded (chat-eval-load-result (chat-eval-result-id result))))
+     (should (= 45 (chat-eval-result-duration-ms loaded)))
+     (should (eq 'timed-out (chat-eval-result-status loaded)))
+     (should (equal "task-a"
+                    (alist-get 'taskId
+                               (chat-eval-result-metadata loaded)))))))
+
 (ert-deftest chat-eval-scenario-errors-fail-one-result-not-the-suite ()
   "One broken scenario does not prevent later scenarios from running."
   (chat-eval-test-with-runtime

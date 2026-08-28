@@ -281,6 +281,47 @@
           (delete-file temp)))))
   result)
 
+(cl-defun chat-eval-record-result
+    (&key scenario-id scenario-revision category fixture-id fixture-digest
+          started-at finished-at status checks metadata id)
+  "Create, optionally persist and return one immutable evaluation result.
+
+Identity fields describe the scenario that produced CHECKS.  STATUS defaults
+to `passed' only when every normalized check passes.  Callers that run
+asynchronously can supply their original STARTED-AT and FINISHED-AT values
+without changing the versioned result schema."
+  (dolist (field (list scenario-id category fixture-id fixture-digest))
+    (unless (and (stringp field) (not (string-empty-p field)))
+      (error "Evaluation result identity fields cannot be empty")))
+  (unless (and (integerp scenario-revision) (> scenario-revision 0))
+    (error "Evaluation result scenario revision must be positive"))
+  (unless (listp checks)
+    (error "Evaluation result checks must be a list"))
+  (let* ((started (or started-at (funcall chat-eval-clock-function)))
+         (finished (or finished-at (funcall chat-eval-clock-function)))
+         (normalized (mapcar #'chat-eval--normalize-check checks))
+         (result
+          (chat-eval-result-create-record
+           :schema-version chat-eval-result-schema-version
+           :id (or id (funcall chat-eval-id-function))
+           :scenario-id scenario-id
+           :scenario-revision scenario-revision
+           :category category
+           :fixture-id fixture-id
+           :fixture-digest fixture-digest
+           :started-at started
+           :finished-at finished
+           :duration-ms (max 0 (- finished started))
+           :status (or status
+                       (if (seq-every-p #'chat-eval-check-passed normalized)
+                           'passed
+                         'failed))
+           :checks normalized
+           :metadata metadata)))
+    (when chat-eval-auto-save
+      (chat-eval-save-result result))
+    result))
+
 (defun chat-eval-run (scenario-or-id &optional metadata)
   "Run SCENARIO-OR-ID, persist its result and return it."
   (let* ((scenario
@@ -291,23 +332,17 @@
          (_ (chat-eval--validate-scenario scenario))
          (started (funcall chat-eval-clock-function))
          (checks (chat-eval--execute scenario))
-         (finished (funcall chat-eval-clock-function))
-         (result
-          (chat-eval-result-create-record
-           :schema-version chat-eval-result-schema-version
-           :id (funcall chat-eval-id-function)
-           :scenario-id (chat-eval-scenario-id scenario)
-           :scenario-revision (chat-eval-scenario-revision scenario)
-           :category (chat-eval-scenario-category scenario)
-           :fixture-id (chat-eval-scenario-fixture-id scenario)
-           :fixture-digest (chat-eval--fixture-digest scenario)
-           :started-at started :finished-at finished
-           :duration-ms (max 0 (- finished started))
-           :status (if (seq-every-p #'chat-eval-check-passed checks)
-                       'passed 'failed)
-           :checks checks :metadata metadata)))
-    (when chat-eval-auto-save (chat-eval-save-result result))
-    result))
+         (finished (funcall chat-eval-clock-function)))
+    (chat-eval-record-result
+     :scenario-id (chat-eval-scenario-id scenario)
+     :scenario-revision (chat-eval-scenario-revision scenario)
+     :category (chat-eval-scenario-category scenario)
+     :fixture-id (chat-eval-scenario-fixture-id scenario)
+     :fixture-digest (chat-eval--fixture-digest scenario)
+     :started-at started
+     :finished-at finished
+     :checks checks
+     :metadata metadata)))
 
 (defun chat-eval-run-all (&optional include-live)
   "Run every registered scenario, excluding live checks by default."

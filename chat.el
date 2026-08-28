@@ -158,6 +158,7 @@ Returns the list of files that were loaded."
 (require 'chat-agent)
 (require 'chat-agent-wire)
 (chat-agent-wire-install)
+(require 'chat-coding-eval)
 
 ;; Plugin host: Emacs-native tools and optional user plugins.
 (require 'chat-plugin)
