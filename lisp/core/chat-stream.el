@@ -465,14 +465,17 @@ Returns the process object."
                                 (error-message-string callback-error)))))))
                       (let ((content (chat-stream--extract-content data provider)))
                         (when (and (stringp content) (not (string-empty-p content)))
-                          (when request-id
+                          (when-let* ((trace
+                                       (and request-id
+                                            (chat-request-diagnostics-get
+                                             request-id))))
                             (chat-request-diagnostics-record
                              request-id
                              'stream-chunk
                              :process proc
                              :summary (format "Received %d streamed chunks"
                                               (1+ (or (chat-request-trace-stream-chunk-count
-                                                       (chat-request-diagnostics-get request-id))
+                                                       trace)
                                                       0)))))
                           (condition-case callback-error
                               (funcall callback content)

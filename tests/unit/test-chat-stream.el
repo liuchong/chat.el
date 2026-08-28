@@ -152,6 +152,34 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest chat-stream-handle-output-does-not-require-diagnostics-trace ()
+  "An optional request id must not make diagnostics part of the data path."
+  (let ((buffer (generate-new-buffer " *chat-stream-no-trace*"))
+        (chat-request-diagnostics--traces (make-hash-table :test 'equal))
+        payloads
+        chunks)
+    (unwind-protect
+        (let ((proc (make-pipe-process :name "chat-stream-no-trace"
+                                       :buffer buffer
+                                       :noquery t)))
+          (process-put proc 'chat-request-id "unregistered-request")
+          (with-current-buffer buffer
+            (setq-local chat-stream--partial-line ""))
+          (chat-stream--handle-output
+           proc
+           (concat
+            "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n"
+            "data: {\"choices\":[{\"delta\":{\"content\":\" second\"}}]}\n")
+           'kimi
+           (lambda (chunk) (push chunk chunks))
+           nil
+           (lambda (payload) (push payload payloads)))
+          (should (equal (nreverse chunks) '("first" " second")))
+          (should (= (length payloads) 2))
+          (delete-process proc))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest chat-stream-captures-http-error-payload ()
   "Test non-SSE JSON error bodies are captured for the sentinel."
   (let ((buffer (generate-new-buffer " *stream-err-test*"))
