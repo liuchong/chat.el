@@ -77,6 +77,10 @@ original Markdown."
                     "- an item\n- another"
                     "> quoted\n> more"
                     "A [link](http://example.com) inline."
+                    "![diagram](https://example.com/diagram.png)"
+                    "Setext title\n============"
+                    "Press <kbd>RET</kbd> then <br> continue."
+                    "Literal \\*stars\\* and footnote[^1]."
                     "~~struck~~ and *slanted*"
                     "1. first\n2. second"
                     "- [ ] todo\n- [x] done"))
@@ -135,6 +139,19 @@ An interim note is italic and the code inside it has to be both."
                 (test-markdown--faces-at
                  (chat-markdown-render "## Title") "Title"))))
 
+(ert-deftest chat-markdown-headings-hide-closing-decoration ()
+  (let ((rendered (chat-markdown-render "## Title ##")))
+    (should (equal "Title" (test-markdown--visible rendered)))
+    (should (equal "## Title ##" (substring-no-properties rendered)))))
+
+(ert-deftest chat-markdown-setext-headings-do-not-leave-a-blank-line ()
+  (let* ((source "Title\n=====\nAfter")
+         (rendered (chat-markdown-render source)))
+    (should (equal "Title\nAfter" (test-markdown--visible rendered)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (memq 'chat-markdown-heading-1
+                  (test-markdown--faces-at rendered "Title")))))
+
 (ert-deftest chat-markdown-a-link-shows-its-text-only ()
   "The address is hidden but still in the buffer, and reachable."
   (let ((rendered (chat-markdown-render "see [docs](http://example.com) x")))
@@ -142,6 +159,53 @@ An interim note is italic and the code inside it has to be both."
     (should (equal "http://example.com"
                    (get-text-property (string-match "docs" rendered)
                                       'chat-markdown-url rendered)))))
+
+(ert-deftest chat-markdown-links-are-keyboard-and-mouse-actions ()
+  "A link face without a keymap only looks interactive."
+  (let* ((rendered (chat-markdown-render "[docs](https://example.com)"))
+         (at (string-match "docs" rendered)))
+    (should (eq chat-markdown-link-map
+                (get-text-property at 'keymap rendered)))
+    (should (eq #'chat-markdown-open-link
+                (lookup-key chat-markdown-link-map (kbd "RET"))))))
+
+(ert-deftest chat-markdown-autolinks-hide-only-the-angle-brackets ()
+  (let ((rendered (chat-markdown-render "<https://example.com/path>")))
+    (should (equal "https://example.com/path"
+                   (test-markdown--visible rendered)))
+    (should (equal "https://example.com/path"
+                   (get-text-property (string-match "https" rendered)
+                                      'chat-markdown-url rendered)))))
+
+(ert-deftest chat-markdown-images-are-pure-actionable-resources ()
+  "Rendering names an image without fetching, decoding or duplicating it."
+  (let* ((source "![diagram](https://example.com/diagram.png)")
+         (rendered (chat-markdown-render source))
+         (resource (get-text-property 0 'chat-markdown-resource rendered)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (equal "▧ diagram" (get-text-property 0 'display rendered)))
+    (should (equal 'image (plist-get resource :kind)))
+    (should (equal "diagram" (plist-get resource :label)))
+    (should (equal "https://example.com/diagram.png"
+                   (plist-get resource :source)))
+    (should (eq 'markdown (plist-get resource :syntax)))
+    (should (eq chat-markdown-link-map
+                (get-text-property 0 'keymap rendered)))))
+
+(ert-deftest chat-markdown-backslash-escapes-win-before-emphasis ()
+  (let ((rendered (chat-markdown-render "\\*literal\\* and \\|")))
+    (should (equal "*literal* and |" (test-markdown--visible rendered)))
+    (should-not (memq 'italic
+                      (test-markdown--faces-at rendered "literal")))))
+
+(ert-deftest chat-markdown-footnotes-are-compact-but-copyable ()
+  (let* ((source "Claim[^source].")
+         (rendered (chat-markdown-render source))
+         (at (string-match "source" rendered)))
+    (should (equal "Claimsource." (test-markdown--visible rendered)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (equal "source"
+                   (get-text-property at 'chat-markdown-footnote rendered)))))
 
 (ert-deftest chat-markdown-an-underscore-inside-a-word-is-not-emphasis ()
   "Or every snake_case identifier would come out slanted and truncated."
@@ -297,6 +361,18 @@ having the table face somewhere in the list is not enough; it must lead."
     (dolist (line (split-string screen "\n"))
       (should (<= (string-width line) chat-markdown-table-max-width)))))
 
+(ert-deftest chat-markdown-table-pipes-inside-data-do-not-split-columns ()
+  "Escaped and code pipes are cell content, not table structure."
+  (let* ((source (concat "| kind | value |\n"
+                         "| --- | --- |\n"
+                         "| escaped | a \\| b |\n"
+                         "| code | `x|y` |"))
+         (lines (split-string
+                 (test-markdown--screen (chat-markdown-render source)) "\n")))
+    (should (apply #'= (mapcar #'string-width lines)))
+    (should (string-match-p "a | b" (nth 2 lines)))
+    (should (string-match-p "x|y" (nth 3 lines)))))
+
 ;; ------------------------------------------------------------------
 ;; Code blocks
 ;; ------------------------------------------------------------------
@@ -381,17 +457,55 @@ the expensive part of doing so."
 ;; Outside the subset
 ;; ------------------------------------------------------------------
 
-(ert-deftest chat-markdown-what-is-not-rendered-is-still-shown ()
+(ert-deftest chat-markdown-unsupported-syntax-is-still-shown ()
   "The prompt narrows the subset to improve display; it is not a premise
 the renderer relies on.  Anything outside it lands as itself."
   (dolist (source '("<div class=\"x\">raw</div>"
                     "$x^2 + y$"
-                    "###### deep heading"
-                    "Text[^1] with a footnote."
-                    "Underlined\n=========="))
+                    "[label][reference]\n\n[reference]: https://example.com"
+                    "An &unresolved; entity"))
     (let ((rendered (chat-markdown-render source)))
       (should (equal source (substring-no-properties rendered)))
       (should (stringp rendered)))))
+
+(ert-deftest chat-markdown-safe-html-keeps-semantics-without-running-html ()
+  (let* ((source "Press <kbd>RET</kbd>, <mark>carefully</mark>.<br>Now")
+         (rendered (chat-markdown-render source)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (equal "Press RET, carefully.\nNow"
+                   (test-markdown--screen rendered)))
+    (should (memq 'chat-markdown-kbd
+                  (test-markdown--faces-at rendered "RET")))
+    (should (memq 'chat-markdown-mark
+                  (test-markdown--faces-at rendered "carefully")))))
+
+(ert-deftest chat-markdown-html-links-use-the-same-action-surface ()
+  (let* ((source "Read <a class='doc' href=\"https://example.com\"><strong>docs</strong></a>.")
+         (rendered (chat-markdown-render source))
+         (position (string-match "docs" rendered)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (equal "Read docs." (test-markdown--visible rendered)))
+    (should (equal "https://example.com"
+                   (get-text-property position 'chat-markdown-url rendered)))
+    (should (keymapp (get-text-property position 'keymap rendered)))
+    (should (memq 'bold (test-markdown--faces-at rendered "docs")))))
+
+(ert-deftest chat-markdown-html-images-become-inert-resource-nodes ()
+  (let* ((source "<img src='file:///tmp/chart.png' alt='chart'>")
+         (rendered (chat-markdown-render source))
+         (resource (get-text-property 0 'chat-markdown-resource rendered)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (equal "▧ chart" (test-markdown--screen rendered)))
+    (should (equal '(:kind image :source "file:///tmp/chart.png"
+                     :label "chart" :syntax html)
+                   resource))))
+
+(ert-deftest chat-markdown-unknown-html-stays-visible-and-dim ()
+  (let* ((source "<widget action=\"run\">unsafe</widget>")
+         (rendered (chat-markdown-render source)))
+    (should (equal source (test-markdown--visible rendered)))
+    (should (memq 'chat-markdown-html
+                  (test-markdown--faces-at rendered "widget")))))
 
 (ert-deftest chat-markdown-a-lone-marker-does-not-eat-the-rest ()
   "An unclosed construct must not take the text after it with it."
@@ -402,6 +516,28 @@ the renderer relies on.  Anything outside it lands as itself."
     (should (equal source
                    (substring-no-properties
                     (chat-markdown-render source))))))
+
+(ert-deftest chat-markdown-many-inline-links-render-in-one-pass ()
+  "A dense line must not search its full remainder once per link."
+  (let* ((count 2000)
+         (source (mapconcat
+                  (lambda (index)
+                    (format "[item-%d](https://example.com/%d)" index index))
+                  (number-sequence 1 count) " "))
+         (rendered (chat-markdown-render source)))
+    (should (equal source (substring-no-properties rendered)))
+    (should (= count
+               (let ((position 0)
+                     (links 0))
+                 (while (setq position
+                              (text-property-not-all
+                               position (length rendered)
+                               'chat-markdown-url nil rendered))
+                   (setq links (1+ links)
+                         position (or (next-single-property-change
+                                       position 'chat-markdown-url rendered)
+                                      (length rendered))))
+                 links)))))
 
 ;; ------------------------------------------------------------------
 ;; Streaming
@@ -421,6 +557,11 @@ changes, which is what keeps a piece's cost proportional to the tail."
   ;; Closed, it is.
   (let ((source "```elisp\n(a)\n```\nafter"))
     (should (= (length "```elisp\n(a)\n```\n")
+               (chat-markdown-stable-prefix-length source)))))
+
+(ert-deftest chat-markdown-a-complete-setext-heading-is-stable ()
+  (let ((source "Title\n=====\nnext"))
+    (should (= (length "Title\n=====\n")
                (chat-markdown-stable-prefix-length source)))))
 
 (ert-deftest chat-markdown-nothing-finished-means-no-stable-prefix ()
@@ -501,6 +642,11 @@ taken is double width."
 (ert-deftest chat-align-a-ragged-row-does-not-constrain-what-it-lacks ()
   "So that a malformed table is laid out rather than refused."
   (should (equal '(3 2) (chat-align-column-widths '(("abc") ("a" "bc"))))))
+
+(ert-deftest chat-align-fitting-keeps-columns-and-the-existing-proportions ()
+  (should (equal '(10 5) (chat-align-fit-widths '(20 10) 22 7)))
+  (should (equal '(4 2) (chat-align-fit-widths '(4 2) 22 7)))
+  (should (equal '(3 3) (chat-align-fit-widths '(20 1) 10 4))))
 
 (provide 'test-chat-markdown)
 ;;; test-chat-markdown.el ends here

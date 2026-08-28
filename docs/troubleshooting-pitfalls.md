@@ -2312,6 +2312,70 @@ source but no longer decide where the visible border lands.
 not the storage representation. Once text properties can hide or replace
 characters, source length is no longer evidence about occupied space.
 
+### Splitting A Table Before Recognising Its Inline Syntax
+
+**Problem**: a table that otherwise aligned correctly gained an extra column
+when a cell contained `\|` or inline code such as `` `left|right` ``.
+
+**Cause**: splitting on every pipe treats Markdown data as table structure.
+Alignment cannot repair the wrong number of cells after that decision.
+
+**Solution**: scan the row once, tracking backslash escapes and matching
+backtick-run lengths. Only an unescaped pipe outside a code run is a boundary;
+keep the original escape and backticks in the cell for the inline renderer.
+
+**General rule**: structure tokenisation must understand the minimal lexical
+contexts that can quote its delimiter. Do not ask layout code to recover a
+structure the tokenizer already changed.
+
+### Searching Every Inline Rule Through The Remaining Line
+
+**Problem**: ordinary replies rendered quickly, but one long line containing
+many links slowed superlinearly; 2000 links took over a second.
+
+**Cause**: after every match, every inline regexp searched the entire remaining
+line to discover which construct started next. Repeating those suffix scans made
+a dense line approximately quadratic.
+
+**Solution**: locate the next possible opening token once, dispatch from its
+first bytes to the small set of constructs it can begin, and accept only a match
+at that position. A 2000-link stress case then takes tens of milliseconds.
+
+**General rule**: a single forward scanner is not linear if each step performs
+another unbounded search over its remaining input.
+
+### Appending A Resource Placeholder Duplicates The Document
+
+**Problem**: an image's source syntax stayed in the buffer and a second
+placeholder string was appended, so copying and session rendering no longer
+had one authoritative representation.
+
+**Cause**: the placeholder was treated as new content instead of a view of the
+existing source span.
+
+**Solution**: put the compact label in a `display` property over the complete
+source span and attach a resource descriptor plus link keymap to that span.
+The core renderer exposes metadata but performs no file, network or image work.
+
+**General rule**: when source must remain copyable, a visual resource is a text
+property over that source, not another string beside it.
+
+### Duplicate Detection Can Make A Flat Protocol Quadratic
+
+**Problem**: parsing a large flat MDP object slowed disproportionately as each
+new field was added.
+
+**Cause**: every insertion searched the growing alist with `assoc`. The outer
+field pass was linear and the inner duplicate check was linear again.
+
+**Solution**: preserve the alist for ordered output, but maintain a per-object
+hash set for membership. Use the same principle when annotating lines: build a
+line-number set once instead of scanning all structural line numbers for every
+line.
+
+**General rule**: ordered storage and fast membership are different jobs. Keep
+the representation required by callers, and add an index for validation paths.
+
 ### Emacs Gives A Subprocess A Pty, So Git Starts A Pager And Waits Forever
 
 **Problem**: `git log` and `git tag -l` run their whole timeout and then

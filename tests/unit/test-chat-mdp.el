@@ -340,6 +340,30 @@ model which line to correct."
     (should (string-match-p "line 1" message))
     (should (string-match-p "level-one" message))))
 
+(ert-deftest chat-mdp-rejects-input-beyond-its-character-budget ()
+  "Model output cannot turn one parse into an unbounded allocation."
+  (let ((chat-mdp-max-input-chars 8))
+    (should (eq 'MDP-E010 (test-mdp--code "- a: 1234")))
+    (should (= 1 (test-mdp--line "- a: 1234")))))
+
+(ert-deftest chat-mdp-rejects-nesting-beyond-its-depth-budget ()
+  (let ((chat-mdp-max-depth 1)
+        (text "- a:\n  - b:\n    - c: 1"))
+    (should (eq 'MDP-E010 (test-mdp--code text)))
+    (should (= 3 (test-mdp--line text)))))
+
+(ert-deftest chat-mdp-many-distinct-fields-keep-their-order ()
+  "Duplicate detection stays linear as the object grows."
+  (let* ((count 1500)
+         (text (mapconcat (lambda (index)
+                            (format "- key-%04d: %d" index index))
+                          (number-sequence 0 (1- count)) "\n"))
+         (value (chat-mdp-parse text)))
+    (should-not (chat-mdp-error-p value))
+    (should (= count (length value)))
+    (should (equal "key-0000" (caar value)))
+    (should (equal "key-1499" (car (car (last value)))))))
+
 ;; ------------------------------------------------------------------
 ;; Round trip
 ;; ------------------------------------------------------------------
@@ -419,6 +443,21 @@ has no other symptom."
     (should (= 3 (length rows)))
     (should (apply #'= (mapcar #'string-width rows)))))
 
+(ert-deftest chat-mdp-a-wide-machine-table-fits-its-display-budget ()
+  "Long tool payloads stay inspectable beside the chat transcript."
+  (let* ((chat-mdp-machine-table-max-width 36)
+         (value '(("S" . ((("name" . "a very long display name")
+                            ("result" . "a result that is also long"))))))
+         (view (chat-mdp-machine-view value))
+         (rows (seq-filter (lambda (line) (string-prefix-p "  |" line))
+                           (split-string view "\n"))))
+    (should (= 2 (length rows)))
+    (should (seq-every-p
+             (lambda (row)
+               (<= (string-width row) chat-mdp-machine-table-max-width))
+             rows))
+    (should (seq-some (lambda (row) (string-match-p "…" row)) rows))))
+
 (ert-deftest chat-mdp-a-heterogeneous-array-is-shown-element-by-element ()
   "Rather than forced into columns it does not have."
   (let ((view (chat-mdp-machine-view
@@ -435,6 +474,15 @@ result: it sees Markdown syntax and cannot tell structure from prose."
                    (get-text-property 0 'face annotated)))
     (should-not (get-text-property (string-match "- a" annotated)
                                    'face annotated))))
+
+(ert-deftest chat-mdp-annotating-many-lines-keeps-structural-lines-clear ()
+  (let* ((prose (mapconcat (lambda (index) (format "note %d" index))
+                            (number-sequence 1 1200) "\n"))
+         (text (concat prose "\n- answer: 42"))
+         (annotated (chat-mdp-annotate text))
+         (answer (string-match "- answer" annotated)))
+    (should (eq 'chat-mdp-comment (get-text-property 0 'face annotated)))
+    (should-not (get-text-property answer 'face annotated))))
 
 ;; ------------------------------------------------------------------
 ;; Independence

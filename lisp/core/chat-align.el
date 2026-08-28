@@ -82,6 +82,41 @@ short lists defaulting the rest to `left'.  SEPARATOR defaults to \" | \"."
      cells
      separator)))
 
+(defun chat-align-fit-widths (widths max-width fixed-width
+                                     &optional minimum-width)
+  "Reduce WIDTHS proportionally to fit MAX-WIDTH columns.
+
+FIXED-WIDTH is the space consumed by indentation, borders and separators.
+MINIMUM-WIDTH defaults to three columns, enough to retain one character and
+an ellipsis.  Columns are never dropped: a clipped table remains structurally
+honest about how many fields it contains."
+  (let* ((minimum-width (or minimum-width 3))
+         (content-width (apply #'+ (or widths '(0))))
+         (total (+ fixed-width content-width)))
+    (if (or (null widths) (<= total max-width) (zerop content-width))
+        widths
+      (let ((room (max 1 (- max-width fixed-width))))
+        (let* ((fitted
+                (mapcar (lambda (width)
+                          (max minimum-width
+                               (floor (* width
+                                         (/ (float room) content-width)))))
+                        widths))
+               (excess (- (apply #'+ fitted) room)))
+          ;; Clamping a very narrow column to MINIMUM-WIDTH can put the sum
+          ;; back over budget.  Take that excess from the widest columns;
+          ;; this only runs when all columns can still keep their minimum.
+          (dolist (index (sort (number-sequence 0 (1- (length fitted)))
+                               (lambda (left right)
+                                 (> (nth left fitted) (nth right fitted)))))
+            (when (> excess 0)
+              (let ((cut (min excess
+                              (max 0 (- (nth index fitted)
+                                        minimum-width)))))
+                (setf (nth index fitted) (- (nth index fitted) cut)
+                      excess (- excess cut)))))
+          fitted)))))
+
 (defun chat-align-truncate (text width &optional marker)
   "Return TEXT cut to WIDTH columns, ending in MARKER when it was cut.
 

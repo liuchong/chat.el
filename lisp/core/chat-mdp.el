@@ -39,6 +39,33 @@
 (require 'subr-x)
 (require 'chat-align)
 
+(defgroup chat-mdp nil
+  "Reading, writing and inspecting bounded MDP payloads."
+  :group 'chat)
+
+(defcustom chat-mdp-max-input-chars (* 2 1024 1024)
+  "Largest MDP payload accepted by `chat-mdp-parse'.
+
+MDP enters through model output, so parsing needs a deterministic memory
+boundary.  Two MiB is far above an ordinary tool payload while keeping a
+malformed response from becoming an unbounded allocation."
+  :type 'integer
+  :group 'chat-mdp)
+
+(defcustom chat-mdp-max-depth 128
+  "Deepest container nesting accepted by `chat-mdp-parse'."
+  :type 'integer
+  :group 'chat-mdp)
+
+(defcustom chat-mdp-machine-table-max-width 100
+  "Maximum display width of a table in the MDP machine view.
+
+The document view has its own independently configurable width.  This limit
+keeps the diagnostic view readable beside a chat transcript without changing
+the parsed value or the encoded payload."
+  :type 'integer
+  :group 'chat-mdp)
+
 ;; ------------------------------------------------------------------
 ;; The internal representation
 ;; ------------------------------------------------------------------
@@ -80,7 +107,8 @@
     (MDP-E005 . "a table header cell that is empty or repeated")
     (MDP-E006 . "a table or element marker with nothing to belong to")
     (MDP-E007 . "an empty heading or key")
-    (MDP-E009 . "a tab indent, a skipped level, or depth with no container"))
+    (MDP-E009 . "a tab indent, a skipped level, or depth with no container")
+    (MDP-E010 . "the payload exceeds its configured size or nesting budget"))
   "The illegal constructions, and what each one means.
 
 Every one has to be detectable and has to carry a line number, because
@@ -269,13 +297,16 @@ structure and prose."
        ((string-match chat-mdp--table-regexp line)
         (when (chat-mdp--tab-indented-p line)
           (chat-mdp--fail 'MDP-E009 number))
-        (push (list :kind 'table-row
-                    :level (chat-mdp--indent-level (match-string 1 line))
-                    :cells (chat-mdp--table-cells line)
-                    :separator (string-match-p
-                                chat-mdp--table-separator-regexp line)
-                    :line number)
-              items))))
+        (let ((level (chat-mdp--indent-level (match-string 1 line))))
+          (when (> level chat-mdp-max-depth)
+            (chat-mdp--fail 'MDP-E010 number))
+          (push (list :kind 'table-row
+                      :level level
+                      :cells (chat-mdp--table-cells line)
+                      :separator (string-match-p
+                                  chat-mdp--table-separator-regexp line)
+                      :line number)
+                items)))))
     (nreverse items)))
 
 (defun chat-mdp--classify-item (line number)
@@ -298,6 +329,8 @@ structure and prose."
       (when key
         (when (chat-mdp--tab-indented-p line)
           (chat-mdp--fail 'MDP-E009 number))
+        (when (> level chat-mdp-max-depth)
+          (chat-mdp--fail 'MDP-E010 number))
         (if (string-empty-p key)
             ;; An empty key is an element marker, not a malformed field.
             (list :kind 'element :level level
@@ -346,6 +379,7 @@ KIND decides what emptiness means: a section with no content is an empty
 object, a container or an element with none is null."
   (kind 'section)
   (fields nil)                          ; reversed alist
+  (keys (make-hash-table :test 'equal)) ; duplicate detection
   (table nil)
   (has-table nil)
   (elements nil)                        ; reversed list
@@ -363,8 +397,9 @@ object, a container or an element with none is null."
     (chat-mdp--fail 'MDP-E002 line))
   (when (chat-mdp--block-elements block)
     (chat-mdp--fail 'MDP-E002 line))
-  (when (assoc key (chat-mdp--block-fields block))
+  (when (gethash key (chat-mdp--block-keys block))
     (chat-mdp--fail 'MDP-E003 line))
+  (puthash key t (chat-mdp--block-keys block))
   (push (cons key value) (chat-mdp--block-fields block)))
 
 (defun chat-mdp--set-table (block table line)
@@ -415,6 +450,8 @@ Nothing here repairs anything.  The tolerance MDP has is the tolerance
 its comment rule gives it, and copying the empirical JSON repairs onto a
 new format would bring the old format's illness along with them."
   (catch 'chat-mdp-error
+    (when (> (length (or text "")) chat-mdp-max-input-chars)
+      (chat-mdp--fail 'MDP-E010 1))
     (chat-mdp--assemble (chat-mdp--classify
                          (split-string (or text "") "\n")))))
 
@@ -786,18 +823,28 @@ diagnose than one that lined up in neither."
                                           "")))
                                     keys))
                                  array)))
-             (widths (chat-align-column-widths rows))
-             (indent (make-string (* 2 level) ?\s)))
+             (indent (make-string (* 2 level) ?\s))
+             (natural-widths (chat-align-column-widths rows))
+             (fixed-width (+ (string-width indent) 4
+                             (* 3 (max 0 (1- (length natural-widths))))))
+             (widths (chat-align-fit-widths
+                      natural-widths chat-mdp-machine-table-max-width
+                      fixed-width)))
         (cons (concat indent "| "
                       (chat-align-row
-                       (mapcar (lambda (key)
-                                 (propertize key 'face 'chat-mdp-key))
-                               keys)
+                       (cl-mapcar
+                        (lambda (key width)
+                          (chat-align-truncate
+                           (propertize key 'face 'chat-mdp-key) width))
+                        keys widths)
                        widths)
                       " |")
               (mapcar (lambda (row)
                         (concat indent "| "
-                                (chat-align-row row widths) " |"))
+                                (chat-align-row
+                                 (cl-mapcar #'chat-align-truncate row widths)
+                                 widths)
+                                " |"))
                       (cdr rows))))
     (let ((lines nil)
           (index -1))
@@ -847,15 +894,16 @@ that is loaded the document view is entirely its business.  Where it is
 not, MDP degrades to plain text by design, which is readable enough that
 half a second renderer here would not earn its keep."
   (let* ((lines (split-string (or text "") "\n"))
-         (structural (catch 'chat-mdp-error
-                       (mapcar (lambda (item) (plist-get item :line))
-                               (chat-mdp--classify lines))))
-         (structural (if (chat-mdp-error-p structural) nil structural))
+         (classified (catch 'chat-mdp-error (chat-mdp--classify lines)))
+         (structural (make-hash-table :test 'eql))
          (number 0))
+    (unless (chat-mdp-error-p classified)
+      (dolist (item classified)
+        (puthash (plist-get item :line) t structural)))
     (mapconcat
      (lambda (line)
        (setq number (1+ number))
-       (if (memq number structural)
+       (if (gethash number structural)
            line
          (propertize line 'face 'chat-mdp-comment)))
      lines "\n")))

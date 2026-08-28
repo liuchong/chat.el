@@ -141,6 +141,26 @@ so the same visual surface was split in half and could drift."
   "Struck-out text."
   :group 'chat-markdown)
 
+(defface chat-markdown-resource
+  '((t :inherit (link fixed-pitch)))
+  "A linked image or other resource named by Markdown."
+  :group 'chat-markdown)
+
+(defface chat-markdown-kbd
+  '((t :inherit (fixed-pitch bold) :underline t))
+  "Keyboard input carried by a safe HTML tag."
+  :group 'chat-markdown)
+
+(defface chat-markdown-mark
+  '((t :inherit bold :underline t))
+  "Text emphasized by a safe HTML mark tag."
+  :group 'chat-markdown)
+
+(defface chat-markdown-footnote
+  '((t :inherit link :height 0.8 :raise 0.25))
+  "A compact Markdown footnote reference."
+  :group 'chat-markdown)
+
 (define-obsolete-face-alias 'chat-ui-code-block-face 'chat-code-block-face
   "2026-08-27")
 
@@ -158,6 +178,34 @@ One symbol for all of them, so that showing the source is one entry in
   "Whether Markdown markers are hidden by default in new chat buffers."
   :type 'boolean
   :group 'chat-markdown)
+
+(defvar chat-markdown-link-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'chat-markdown-open-link)
+    (define-key map [mouse-1] #'chat-markdown-open-link-at-mouse)
+    map)
+  "Keymap carried by rendered Markdown links and resources.")
+
+(defun chat-markdown--url-at-point ()
+  "Return the rendered Markdown URL at point or immediately before it."
+  (or (get-text-property (point) 'chat-markdown-url)
+      (and (> (point) (point-min))
+           (get-text-property (1- (point)) 'chat-markdown-url))))
+
+;;;###autoload
+(defun chat-markdown-open-link ()
+  "Open the rendered Markdown link at point."
+  (interactive)
+  (if-let* ((url (chat-markdown--url-at-point)))
+      (browse-url url)
+    (user-error "No Markdown link at point")))
+
+;;;###autoload
+(defun chat-markdown-open-link-at-mouse (event)
+  "Open the rendered Markdown link clicked by mouse EVENT."
+  (interactive "e")
+  (posn-set-point (event-end event))
+  (chat-markdown-open-link))
 
 (defun chat-markdown--hidden (text)
   "Return TEXT marked as a hidden marker.
@@ -201,6 +249,10 @@ choice."
 (defconst chat-markdown--heading-regexp
   "^\\(#\\{1,6\\}\\)[ \t]+\\(.*\\)$"
   "An ATX heading: 1 the hashes, 2 the text.")
+
+(defconst chat-markdown--setext-regexp
+  "^[ \t]*\\(=+\\|-+\\)[ \t]*$"
+  "The underline completing a setext heading.")
 
 (defconst chat-markdown--rule-regexp
   "^[ \t]*\\(-[ \t]*-[ \t]*-[- \t]*\\|\\*[ \t]*\\*[ \t]*\\*[* \t]*\\|_[ \t]*_[ \t]*_[_ \t]*\\)$"
@@ -257,8 +309,17 @@ choice."
     ("__\\([^_\n]+\\)__" bold)
     ("~~\\([^~\n]+\\)~~" strike)
     ("\\*\\([^*\n]+\\)\\*" italic)
-    ("\\(?:^\\|[^A-Za-z0-9_]\\)\\(_\\([^_\n]+\\)_\\)" italic-underscore))
+    ("_\\([^_\n]+\\)_" italic-underscore))
   "Inline markers, as (REGEXP KIND), tried in order at each position.")
+
+(defconst chat-markdown--inline-start-regexp
+  (regexp-opt '("\\" "!" "[" "`" "*" "_" "~" "<"
+                "http://" "https://" "ftp://"))
+  "Text that can begin an inline construct.")
+
+(defconst chat-markdown--escape-regexp
+  "\\\\\\([^[:alnum:][:space:]]\\)"
+  "A backslash escape for Markdown punctuation: 1 the literal character.")
 
 (defconst chat-markdown--image-regexp
   "!\\[\\([^]\n]*\\)\\](\\([^)\n]*\\))"
@@ -271,6 +332,32 @@ choice."
 (defconst chat-markdown--url-regexp
   "\\(?:https?\\|ftp\\)://[^ \t\n<>\"'()]+"
   "A bare URL.")
+
+(defconst chat-markdown--autolink-regexp
+  "<\\(\\(?:https?\\|ftp\\)://[^ \t\n<>]+\\)>"
+  "A URL autolink: 1 the address.")
+
+(defconst chat-markdown--footnote-regexp
+  "\\[\\^\\([^]\n]+\\)\\]"
+  "A footnote reference: 1 its label.")
+
+(defconst chat-markdown--html-pair-regexp
+  (concat
+   "<\\(strong\\|b\\|em\\|i\\|code\\|kbd\\|mark\\|del\\|s\\|sub\\|sup"
+   "\\|summary\\)\\(?:[ \t]+[^>\n]*\\)?>\\(.*?\\)</\\1[ \t]*>")
+  "A safe paired HTML tag: 1 the tag, 2 its body.")
+
+(defconst chat-markdown--html-break-regexp
+  "<br\\(?:[ \t]+[^>\n]*\\)?/?>"
+  "A safe HTML line break.")
+
+(defconst chat-markdown--html-link-regexp
+  "<a\\(?:[ \t]+[^>\n]*\\)?>\\(.*?\\)</a[ \t]*>"
+  "A safe HTML link: 1 its body; attributes are read separately.")
+
+(defconst chat-markdown--html-image-regexp
+  "<img\\(?:[ \t]+[^>\n]*\\)?/?>"
+  "A safe HTML image resource.")
 
 (defun chat-markdown--inline-face (kind)
   "Return the face for inline KIND."
@@ -293,34 +380,23 @@ up as itself rather than as a crash."
         (pos 0)
         (length (length text)))
     (while (< pos length)
-      (let ((best nil))
-        ;; Images before links: the link pattern matches an image too, and
-        ;; would leave the `!' behind as text.
-        (dolist (candidate
-                 (list (chat-markdown--match chat-markdown--image-regexp
-                                             text pos 'image)
-                       (chat-markdown--match chat-markdown--link-regexp
-                                             text pos 'link)
-                       (chat-markdown--match chat-markdown--url-regexp
-                                             text pos 'url)))
-          (setq best (chat-markdown--earlier best candidate)))
-        (dolist (rule chat-markdown--inline-rules)
-          (setq best (chat-markdown--earlier
-                      best (chat-markdown--match (car rule) text pos
-                                                 (cadr rule)))))
-        (if (not best)
-            (progn (push (chat-markdown--plain (substring text pos) base)
-                         pieces)
-                   (setq pos length))
-          (let ((start (plist-get best :start))
-                (end (plist-get best :end)))
-            (when (> start pos)
-              (push (chat-markdown--plain (substring text pos start) base)
-                    pieces))
-            (push (chat-markdown--render-inline best base) pieces)
-            ;; Guaranteed progress: a rule that matched an empty span would
-            ;; otherwise spin here forever.
-            (setq pos (max end (1+ start)))))))
+      (let ((start (string-match chat-markdown--inline-start-regexp text pos)))
+        (if (null start)
+            (progn
+              (push (chat-markdown--plain (substring text pos) base) pieces)
+              (setq pos length))
+          (when (> start pos)
+            (push (chat-markdown--plain (substring text pos start) base)
+                  pieces))
+          (let ((best (chat-markdown--match-candidate text start)))
+            (if best
+                (progn
+                  (push (chat-markdown--render-inline best base) pieces)
+                  (setq pos (max (plist-get best :end) (1+ start))))
+              (push (chat-markdown--plain (substring text start (1+ start))
+                                          base)
+                    pieces)
+              (setq pos (1+ start)))))))
     (apply #'concat (nreverse pieces))))
 
 (defun chat-markdown--plain (text base)
@@ -328,23 +404,132 @@ up as itself rather than as a crash."
   (if base (propertize text 'face base) text))
 
 (defun chat-markdown--match (regexp text pos kind)
-  "Return where REGEXP matches TEXT at or after POS, as a plist, or nil."
+  "Return REGEXP's match at POS in TEXT as a plist, or nil."
   (save-match-data
-    (when (string-match regexp text pos)
+    (when (eq pos (string-match regexp text pos))
       (list :kind kind
             :start (match-beginning 0)
             :end (match-end 0)
             :whole (match-string 0 text)
             :one (match-string 1 text)
             :two (match-string 2 text)
-            :one-start (match-beginning 1)))))
+            :one-start (match-beginning 1)
+            :two-start (match-beginning 2)
+            :two-end (match-end 2)))))
 
-(defun chat-markdown--earlier (a b)
-  "Return whichever of A and B starts first, preferring A when equal."
-  (cond ((null a) b)
-        ((null b) a)
-        ((<= (plist-get a :start) (plist-get b :start)) a)
-        (t b)))
+(defun chat-markdown--prefix-at-p (prefix text pos &optional fold-case)
+  "Return non-nil when PREFIX occurs in TEXT at POS.
+
+FOLD-CASE makes the small comparison case-insensitive."
+  (let ((end (+ pos (length prefix))))
+    (and (<= end (length text))
+         (string-equal (if fold-case (downcase prefix) prefix)
+                       (if fold-case
+                           (downcase (substring text pos end))
+                         (substring text pos end))))))
+
+(defun chat-markdown--match-candidate (text pos)
+  "Return the inline construct that can begin at POS in TEXT, or nil.
+
+Dispatching from the opening bytes avoids searching every regexp through the
+remaining line after every match."
+  (let ((char (aref text pos)))
+    (pcase char
+      (?\\ (chat-markdown--match chat-markdown--escape-regexp
+                                  text pos 'escape))
+      (?! (and (chat-markdown--prefix-at-p "![" text pos)
+               (chat-markdown--match chat-markdown--image-regexp
+                                     text pos 'image)))
+      (?\[ (if (chat-markdown--prefix-at-p "[^" text pos)
+              (chat-markdown--match chat-markdown--footnote-regexp
+                                    text pos 'footnote)
+            (chat-markdown--match chat-markdown--link-regexp
+                                  text pos 'link)))
+      (?` (chat-markdown--match (caar chat-markdown--inline-rules)
+                                text pos 'code))
+      (?* (cond
+           ((chat-markdown--prefix-at-p "***" text pos)
+            (chat-markdown--match (car (nth 1 chat-markdown--inline-rules))
+                                  text pos 'bold-italic))
+           ((chat-markdown--prefix-at-p "**" text pos)
+            (chat-markdown--match (car (nth 3 chat-markdown--inline-rules))
+                                  text pos 'bold))
+           (t (chat-markdown--match
+               (car (nth 6 chat-markdown--inline-rules)) text pos 'italic))))
+      (?_ (cond
+           ((chat-markdown--prefix-at-p "___" text pos)
+            (chat-markdown--match (car (nth 2 chat-markdown--inline-rules))
+                                  text pos 'bold-italic))
+           ((chat-markdown--prefix-at-p "__" text pos)
+            (chat-markdown--match (car (nth 4 chat-markdown--inline-rules))
+                                  text pos 'bold))
+           ((chat-markdown--underscore-open-p text pos)
+            (chat-markdown--match (car (nth 7 chat-markdown--inline-rules))
+                                  text pos 'italic-underscore))))
+      (?~ (and (chat-markdown--prefix-at-p "~~" text pos)
+               (chat-markdown--match (car (nth 5 chat-markdown--inline-rules))
+                                     text pos 'strike)))
+      (?< (cond
+           ((or (chat-markdown--prefix-at-p "<http" text pos t)
+                (chat-markdown--prefix-at-p "<ftp" text pos t))
+            (chat-markdown--match chat-markdown--autolink-regexp
+                                  text pos 'autolink))
+           ((chat-markdown--prefix-at-p "<a" text pos t)
+            (chat-markdown--match chat-markdown--html-link-regexp
+                                  text pos 'html-link))
+           ((chat-markdown--prefix-at-p "<img" text pos t)
+            (chat-markdown--match chat-markdown--html-image-regexp
+                                  text pos 'html-image))
+           ((chat-markdown--prefix-at-p "<br" text pos t)
+            (chat-markdown--match chat-markdown--html-break-regexp
+                                  text pos 'html-break))
+           (t (chat-markdown--match chat-markdown--html-pair-regexp
+                                    text pos 'html-pair))))
+      ((or ?h ?H ?f ?F)
+       (and (or (chat-markdown--prefix-at-p "http://" text pos t)
+                (chat-markdown--prefix-at-p "https://" text pos t)
+                (chat-markdown--prefix-at-p "ftp://" text pos t))
+            (chat-markdown--match chat-markdown--url-regexp text pos 'url))))))
+
+(defun chat-markdown--underscore-open-p (text pos)
+  "Return non-nil when an underscore at POS may open emphasis in TEXT."
+  (or (zerop pos)
+      (not (string-match-p "[[:alnum:]_]"
+                           (string (aref text (1- pos)))))))
+
+(defun chat-markdown--html-attribute (tag name)
+  "Return NAME's value from the single HTML TAG, or nil.
+
+Only quoted and unquoted scalar attributes are recognized.  This is not an
+HTML parser: it is the deliberately small boundary used by the safe `a' and
+`img' mappings, while every other tag remains inert text."
+  (let ((case-fold-search t)
+        (regexp (concat "\\(?:\\`\\|[ \t]\\)" (regexp-quote name)
+                        "[ \t]*=[ \t]*\\(?:\"\\([^\"]*\\)\""
+                        "\\|'\\([^']*\\)'\\|\\([^ \t>]+\\)\\)")))
+    (when (string-match regexp tag)
+      (or (match-string 1 tag)
+          (match-string 2 tag)
+          (match-string 3 tag)))))
+
+(defun chat-markdown--render-resource (source label url base syntax)
+  "Render SOURCE as an actionable resource named LABEL at URL.
+
+SYNTAX records which source notation supplied it.  The descriptor lets a UI
+materialize a preview later without giving this pure renderer I/O work."
+  (let* ((label (if (string-empty-p (or label ""))
+                    (or url "image")
+                  label))
+         (shown (format "▧ %s" label)))
+    (chat-markdown--put
+     source 'chat-markdown-resource base
+     'display shown
+     'chat-markdown-url url
+     'chat-markdown-resource
+     (list :kind 'image :source url :label label :syntax syntax)
+     'keymap chat-markdown-link-map
+     'mouse-face 'highlight
+     'help-echo (or url ""))))
 
 (defun chat-markdown--render-inline (match base)
   "Return the rendering of MATCH over BASE."
@@ -353,37 +538,80 @@ up as itself rather than as a crash."
         (one (plist-get match :one))
         (two (plist-get match :two)))
     (pcase kind
+      ('escape
+       (concat (chat-markdown--hidden "\\")
+               (chat-markdown--plain (or one "") base)))
       ('image
-       ;; A placeholder, not the image: inlining images is a non-goal, and
-       ;; a line saying what it is can at least be opened.
-       (concat (chat-markdown--hidden whole)
-               (chat-markdown--put (format "[image: %s]"
-                                           (if (string-empty-p (or one ""))
-                                               (or two "")
-                                             one))
-                                   'chat-markdown-link base
-                                   'chat-markdown-url two)))
+       ;; The core renderer never fetches or decodes a resource.  It exposes
+       ;; a compact, actionable node that a UI may materialize later without
+       ;; putting network or image work on the streaming render path.
+       (chat-markdown--render-resource whole one two base 'markdown))
       ('link
        (concat (chat-markdown--hidden (concat "[" ))
                (chat-markdown--put (or one "") 'chat-markdown-link base
                                    'chat-markdown-url two
+                                   'keymap chat-markdown-link-map
                                    'mouse-face 'highlight
                                    'help-echo (or two ""))
                (chat-markdown--hidden (concat "](" (or two "") ")"))))
+      ('autolink
+       (concat (chat-markdown--hidden "<")
+               (chat-markdown--put (or one "") 'chat-markdown-link base
+                                   'chat-markdown-url one
+                                   'keymap chat-markdown-link-map
+                                   'mouse-face 'highlight
+                                   'help-echo (or one ""))
+               (chat-markdown--hidden ">")))
       ('url
        (chat-markdown--put whole 'chat-markdown-link base
                            'chat-markdown-url whole
+                           'keymap chat-markdown-link-map
                            'mouse-face 'highlight
                            'help-echo whole))
-      ('italic-underscore
-       ;; The rule matches a leading character it must not consume, so
-       ;; that `snake_case_names' are left alone.
-       (let* ((lead (substring whole 0 (- (length whole) (length one))))
-              (inner (substring one 1 (1- (length one)))))
-         (concat (chat-markdown--plain lead base)
-                 (chat-markdown--hidden "_")
-                 (chat-markdown--inline-body inner 'italic base)
-                 (chat-markdown--hidden "_"))))
+      ('footnote
+       (concat (chat-markdown--hidden "[^")
+               (chat-markdown--put (or one "") 'chat-markdown-footnote base
+                                   'chat-markdown-footnote one)
+               (chat-markdown--hidden "]")))
+      ('html-break
+       (chat-markdown--put whole 'chat-markdown-html base 'display "\n"))
+      ('html-image
+       (let ((url (chat-markdown--html-attribute whole "src")))
+         (if url
+             (chat-markdown--render-resource
+              whole (chat-markdown--html-attribute whole "alt")
+              url base 'html)
+           (chat-markdown--put whole 'chat-markdown-html base))))
+      ('html-link
+       (let ((url (chat-markdown--html-attribute whole "href")))
+         (if (not url)
+             (chat-markdown--put whole 'chat-markdown-html base)
+           (let* ((start (plist-get match :start))
+                  (body-start (- (plist-get match :one-start) start))
+                  (body-end (+ body-start (length (or one ""))))
+                  (body (chat-markdown--add-face
+                         (chat-markdown--inline (or one "") base)
+                         'chat-markdown-link)))
+             (when (> (length body) 0)
+               (add-text-properties
+                0 (length body)
+                `(chat-markdown-url ,url
+                  keymap ,chat-markdown-link-map
+                  mouse-face highlight
+                  help-echo ,url)
+                body))
+             (concat
+              (chat-markdown--hidden (substring whole 0 body-start))
+              body
+              (chat-markdown--hidden (substring whole body-end)))))))
+      ('html-pair
+       (let* ((start (plist-get match :start))
+              (body-start (- (plist-get match :two-start) start))
+              (body-end (- (plist-get match :two-end) start))
+              (face (chat-markdown--html-inline-face one)))
+         (concat (chat-markdown--hidden (substring whole 0 body-start))
+                 (chat-markdown--inline-body (or two "") face base)
+                 (chat-markdown--hidden (substring whole body-end)))))
       (_
        (let* ((marker-length (/ (- (length whole) (length (or one ""))) 2))
               (marker (substring whole 0 marker-length)))
@@ -391,6 +619,18 @@ up as itself rather than as a crash."
                  (chat-markdown--inline-body
                   (or one "") (chat-markdown--inline-face kind) base)
                  (chat-markdown--hidden marker)))))))
+
+(defun chat-markdown--html-inline-face (tag)
+  "Return the Markdown display face for safe HTML TAG."
+  (pcase (downcase (or tag ""))
+    ((or "strong" "b" "summary") 'bold)
+    ((or "em" "i") 'italic)
+    ("code" 'chat-markdown-code)
+    ("kbd" 'chat-markdown-kbd)
+    ("mark" 'chat-markdown-mark)
+    ((or "del" "s") 'chat-markdown-strike)
+    ((or "sub" "sup") 'chat-markdown-footnote)
+    (_ 'chat-markdown-html)))
 
 (defun chat-markdown--inline-body (text face base)
   "Return TEXT in FACE over BASE, with nested markers handled.
@@ -547,10 +787,41 @@ nothing on screen to say that it had."
   :group 'chat-markdown)
 
 (defun chat-markdown--table-cells (line)
-  "Return the cells of table LINE."
+  "Return the cells of table LINE without splitting escaped or code pipes."
   (let* ((trimmed (string-trim line))
-         (inner (string-trim trimmed "^|" "|$")))
-    (mapcar #'string-trim (split-string inner "|"))))
+         (inner (string-trim trimmed "^|" "|$"))
+         (cells nil)
+         (current nil)
+         (code-run nil)
+         (index 0)
+         (length (length inner)))
+    (while (< index length)
+      (let ((char (aref inner index)))
+        (cond
+         ;; Keep escapes in the source cell.  The inline renderer hides the
+         ;; slash later, while the splitter only needs to know this pipe is
+         ;; data rather than a column boundary.
+         ((and (eq char ?\\) (< (1+ index) length))
+          (push (substring inner index (+ index 2)) current)
+          (setq index (+ index 2)))
+         ((eq char ?`)
+          (let ((end index))
+            (while (and (< end length) (eq (aref inner end) ?`))
+              (setq end (1+ end)))
+            (let ((run (substring inner index end)))
+              (push run current)
+              (cond ((null code-run) (setq code-run run))
+                    ((equal run code-run) (setq code-run nil)))
+              (setq index end))))
+         ((and (eq char ?|) (null code-run))
+          (push (string-trim (apply #'concat (nreverse current))) cells)
+          (setq current nil
+                index (1+ index)))
+         (t
+          (push (string char) current)
+          (setq index (1+ index))))))
+    (push (string-trim (apply #'concat (nreverse current))) cells)
+    (nreverse cells)))
 
 (defun chat-markdown--table-alignments (separator)
   "Return the column alignments SEPARATOR asks for."
@@ -777,16 +1048,8 @@ survive or the copied table stops being valid Markdown."
 
 Narrowed proportionally rather than by dropping columns: a table missing
 its last two columns looks like a table that had three."
-  (let* ((separators (* 3 (max 0 (1- (length widths)))))
-         (total (+ 4 separators (apply #'+ (or widths '(0)))))
-         (over (- total chat-markdown-table-max-width)))
-    (if (or (null widths) (<= over 0))
-        widths
-      (let ((room (max 1 (- chat-markdown-table-max-width 4 separators))))
-        (mapcar (lambda (width)
-                  (max 3 (floor (* width (/ (float room)
-                                            (apply #'+ widths))))))
-                widths)))))
+  (let ((fixed (+ 4 (* 3 (max 0 (1- (length widths)))))))
+    (chat-align-fit-widths widths chat-markdown-table-max-width fixed)))
 
 (defun chat-markdown--render-separator (cells widths base)
   "Return the dashed row of CELLS shown as a rule sized to WIDTHS.
@@ -838,7 +1101,12 @@ change what the copied table means, not just how it looks."
   (save-match-data
     (string-match chat-markdown--heading-regexp line)
     (let* ((hashes (match-string 1 line))
-           (text (match-string 2 line))
+           (raw (match-string 2 line))
+           (content-start (match-beginning 2))
+           (closing-at (and (string-match "[ \t]+#+[ \t]*\\'" raw)
+                            (match-beginning 0)))
+           (text (if closing-at (substring raw 0 closing-at) raw))
+           (closing (and closing-at (substring raw closing-at)))
            (level (length hashes))
            (face (pcase level
                    ((or 1 2) 'chat-markdown-heading-1)
@@ -848,9 +1116,20 @@ change what the copied table means, not just how it looks."
       ;; The space after the hashes goes too, or the heading sits one
       ;; column in from everything else.
       (concat (chat-markdown--hidden
-               (substring line 0 (match-beginning 2)))
+               (substring line 0 content-start))
               (chat-markdown--inline
-               text (chat-markdown--face face base))))))
+               text (chat-markdown--face face base))
+              (and closing (chat-markdown--hidden closing))))))
+
+(defun chat-markdown--render-setext (lines base)
+  "Return two-line setext heading LINES rendered over BASE."
+  (let* ((title (car lines))
+         (underline (cadr lines))
+         (face (if (string-match-p "=" underline)
+                   'chat-markdown-heading-1
+                 'chat-markdown-heading-2)))
+    (concat (chat-markdown--inline title (chat-markdown--face face base))
+            (chat-markdown--hidden (concat "\n" underline)))))
 
 (defun chat-markdown--render-bullet (line base)
   "Return unordered list item LINE rendered over BASE."
@@ -1011,11 +1290,10 @@ background and its fixed pitch, which the mode does not set."
 (defun chat-markdown--block-at (lines index)
   "Return (KIND . END) for the block starting at INDEX of LINES.
 
-END is one past the block's last line.  One pass, no lookbehind: setext
-headings are not recognised, because deciding one needs the line after and
-by then the line before has already been drawn."
+END is one past the block's last line."
   (let* ((line (nth index lines))
-         (count (length lines)))
+         (count (length lines))
+         (next (and (< (1+ index) count) (nth (1+ index) lines))))
     (cond
      ((string-match-p chat-markdown--fence-regexp line)
       ;; To the closing fence, or to the end if it has not arrived.
@@ -1024,8 +1302,19 @@ by then the line before has already been drawn."
                     (not (string-match-p chat-markdown--fence-regexp
                                          (nth end lines))))
           (setq end (1+ end)))
-        (cons 'fence (min count (1+ end)))))
+         (cons 'fence (min count (1+ end)))))
      ((string-empty-p (string-trim line)) (cons 'blank (1+ index)))
+     ((and next
+           (string-match-p chat-markdown--setext-regexp next)
+           (not (or (string-match-p chat-markdown--fence-regexp line)
+                    (string-match-p chat-markdown--heading-regexp line)
+                    (string-match-p chat-markdown--rule-regexp line)
+                    (string-match-p chat-markdown--bullet-regexp line)
+                    (string-match-p chat-markdown--ordered-regexp line)
+                    (string-match-p chat-markdown--quote-regexp line)
+                    (string-match-p chat-markdown--table-row-regexp line)
+                    (string-match-p chat-markdown--html-regexp line))))
+      (cons 'setext (+ index 2)))
      ((string-match-p chat-markdown--heading-regexp line)
       (cons 'heading (1+ index)))
      ((string-match-p chat-markdown--rule-regexp line)
@@ -1077,13 +1366,14 @@ are four callers with one input."
            ('quote (chat-markdown--render-quote block-lines base-face))
            ('heading (chat-markdown--render-heading (car block-lines)
                                                     base-face))
+           ('setext (chat-markdown--render-setext block-lines base-face))
            ('bullet (chat-markdown--render-bullet (car block-lines)
                                                   base-face))
            ('ordered (chat-markdown--render-ordered (car block-lines)
                                                     base-face))
            ('rule (chat-markdown--render-rule (car block-lines) base-face))
-           ('html (chat-markdown--put (car block-lines)
-                                      'chat-markdown-html base-face))
+           ('html (chat-markdown--render-html-line (car block-lines)
+                                                   base-face))
            ('blank (chat-markdown--plain (car block-lines) base-face))
            (_ (chat-markdown--inline (car block-lines) base-face)))
          pieces)
@@ -1095,6 +1385,23 @@ are four callers with one input."
   (propertize line
               'display (make-string (min 40 (max 8 (length line))) ?─)
               'face (chat-markdown--face 'chat-markdown-rule base)))
+
+(defun chat-markdown--render-html-line (line base)
+  "Render safe semantics in HTML LINE and dim everything else."
+  (let ((trimmed (string-trim line)))
+    (cond
+     ((string-match-p "\\`<details\\(?:[ \t]+[^>]*\\)?>\\'" trimmed)
+      (chat-markdown--put line 'chat-markdown-html base
+                          'display "▾ Details"))
+     ((string-match-p "\\`</details[ \t]*>\\'" trimmed)
+      (chat-markdown--hidden line))
+     ((or (string-match-p chat-markdown--html-pair-regexp line)
+          (string-match-p chat-markdown--html-link-regexp line)
+          (string-match-p chat-markdown--html-image-regexp line)
+          (string-match-p chat-markdown--html-break-regexp line)
+          (string-match-p chat-markdown--autolink-regexp line))
+      (chat-markdown--inline line base))
+     (t (chat-markdown--put line 'chat-markdown-html base)))))
 
 ;; ------------------------------------------------------------------
 ;; Streaming
@@ -1154,6 +1461,7 @@ styling stops changing anyway."
   (pcase kind
     ('blank t)
     ('heading t)
+    ('setext t)
     ('rule t)
     ('html t)
     ;; A fence is finished only when a closing one arrived, which is what

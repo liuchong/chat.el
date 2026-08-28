@@ -44,6 +44,11 @@ wire adapters. M6 adds checkpoints, worktrees and execution backends next.
 - versioned typed message parts with legacy text projection
 - durable image and file attachments across reload, branch and edit-resend
 - native file attach, clipboard image, preview and staged removal commands
+- native in-buffer Markdown document rendering with reversible markers, syntax-coloured
+  fences, stable streaming tails, CJK-safe tables, actionable image resources and a
+  safe semantic HTML subset
+- independent bounded MDP codec with document/machine dual views, linear duplicate
+  detection and width-limited typed record tables
 
 ### LLM Providers
 

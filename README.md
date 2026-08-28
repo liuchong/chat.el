@@ -1068,7 +1068,11 @@ labelled rail and colours from their actual major mode, blockquotes keep a
 quiet left rail, bullets become `•`, and links show their text. Tables use
 one fixed-pitch metric and Unicode borders; widths come from the text that
 is actually visible, so hidden backticks, link destinations and Chinese
-cells cannot move a column boundary. No preview window, no external
+cells cannot move a column boundary. Escaped pipes and pipes inside inline
+code remain cell data. Setext headings, autolinks, footnote references and
+common safe HTML semantics are handled too; unknown HTML remains visible
+and inert. Markdown and HTML images become compact, actionable resource
+nodes without putting file or network I/O on the streaming path. No preview window, no external
 renderer. Tables, code blocks and machine views inherit the buffer
 background instead of drawing light or dark panels.
 
@@ -1104,7 +1108,10 @@ parsing and no encoder can put them back.
 `chat-mdp-machine-view` shows what the parser actually extracted, which
 is the only way to check that the two readings agree: a payload that
 reads correctly to a person while parsing one field short has no other
-symptom.
+symptom. Its record tables share the document renderer's display-width
+arithmetic and stay within a configurable width. Parsing has explicit input
+and nesting budgets, and large flat objects use constant-time duplicate-key
+checks rather than repeatedly scanning the fields already seen.
 
 To compare them directly, select one complete MDP payload and run
 `M-x chat-mdp-preview-region`. The preview shows the Markdown document
