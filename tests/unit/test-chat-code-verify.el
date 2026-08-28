@@ -21,6 +21,21 @@
    :source 'test
    :revision "test" :steps steps :repair-limit 2))
 
+(defun chat-code-verify-test--install-execution-backends ()
+  "Install local plus a deterministic restricted backend test double."
+  (chat-execution-install-local-backend)
+  (chat-execution-register-backend
+   (chat-execution-backend-create
+    :id 'darwin-sandbox
+    :capabilities
+    (chat-execution-capabilities-create
+     :filesystem 'scoped :network 'controlled :environment 'explicit
+     :timeout t :process-tree-cleanup t :platform 'test
+     :availability "available")
+    :start-function #'chat-execution--local-start
+    :cancel-function #'chat-execution--local-cancel
+    :live-p-function #'chat-execution--local-live-p)))
+
 (ert-deftest chat-code-verify-contract-rejects-shell-and-invalid-status ()
   "Verification commands are argv-only and result statuses are closed."
   (should-error
@@ -69,7 +84,7 @@
          (chat-task--loaded-p t)
          (chat-session-wire--sequences (make-hash-table :test 'equal))
          (chat-session-wire--sizes (make-hash-table :test 'equal)))
-     (chat-execution-install-local-backend)
+     (chat-code-verify-test--install-execution-backends)
      (let* ((step (chat-verification-step-create
                    :id "test" :kind 'test
                    :argv (list invocation-name "-Q" "--batch"
@@ -138,7 +153,7 @@
    (let ((chat-execution-directory (expand-file-name "executions/" chat-state-dir))
          (chat-execution--records (make-hash-table :test 'equal))
          (chat-execution--backends (make-hash-table :test 'eq)))
-     (chat-execution-install-local-backend)
+     (chat-code-verify-test--install-execution-backends)
      (cl-labels
          ((run (argv timeout limit)
             (let ((chat-code-verify-executor #'chat-code-verify--execute-step))
@@ -173,7 +188,7 @@
          (chat-execution--backends (make-hash-table :test 'eq))
          (chat-code-verify-executor #'chat-code-verify--execute-step)
          result)
-     (chat-execution-install-local-backend)
+     (chat-code-verify-test--install-execution-backends)
      (let* ((profile
              (chat-code-verify-test--profile
               (chat-verification-step-create

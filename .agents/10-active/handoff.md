@@ -14,10 +14,10 @@
 
 ## Continue With
 
-- M14 durable work plans are complete and independently tested
-- Continue with M15 execution isolation from `programming-capability-reliability-plan.md`
-- Run platform probes in the foreground with timeouts and verify process cleanup
-- Keep backend capability facts separate from profile policy requirements
+- M15 capability-tested execution isolation is complete and independently tested
+- Continue with M16 review and coding collaboration from `programming-capability-reliability-plan.md`
+- Build the read-only Review Agent before adding coding child roles and merge behavior
+- Keep child path ownership, scheduler resources, worktree base and completion evidence explicit
 
 ## Avoid
 

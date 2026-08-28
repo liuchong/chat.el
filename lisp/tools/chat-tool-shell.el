@@ -227,9 +227,14 @@ truncated and spills into a temporary file."
                 (chat-execution-start
                  (chat-execution-request-from-context
                   argv
+                  :backend (chat-execution-backend-for-policy 'inspect)
                   :directory default-directory
                   :environment process-environment
-                  :idempotency 'non-idempotent
+                  :policy 'inspect
+                  :read-roots (list default-directory)
+                  :network nil
+                  :require-process-tree-cleanup t
+                  :idempotency 'read-only
                   :timeout timeout
                   :metadata '((kind . "shell-tool")))
                  :name "chat-shell"
@@ -245,6 +250,8 @@ truncated and spills into a temporary file."
           (while (and (process-live-p proc)
                       (< (float-time) deadline))
             (accept-process-output proc 0.2))
+          (when (eq (chat-execution-record-status record) 'timed-out)
+            (setq timed-out t))
           (when (process-live-p proc)
             (setq timed-out t)
             (chat-execution-cancel record "shell command timed out"))

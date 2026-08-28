@@ -685,6 +685,20 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 - 超时和取消后无孤儿进程、监听端口和不可回收临时目录。
 - 后端能力和实际行为一致，并由集成测试证明。
 
+#### 完成记录（2026-08-28）
+
+- execution schema 升级为 v2，策略要求与测得的 backend capability 分离；v1
+  记录迁移为显式 `local`，不会被误标为隔离执行。
+- Darwin 前台探针在硬超时内证明 deny-default sandbox 可用，公开事实为
+  `scoped` filesystem、`controlled` network、`explicit` environment、backend
+  timeout 和 process-tree cleanup；能力不可用时 fail closed，绝不回退 local。
+- `inspect`、`build`、`networked-build` 已实现。默认网络关闭；联网构建经共享
+  approval/Guard 路径取得与 request/session 绑定的一次性授权，retry 必须重新审批。
+- 真实测试覆盖项目外读取、父目录写入、symlink escape、默认联网、环境泄漏、
+  Clang 项目编译、获批 socket、超时、主动取消、启动准备异常和临时目录清理。
+- shell tool、background work 和 project verification 已接入策略选择；显式 local
+  仍保留为非隔离用户选择。平台隔离 16/16、三个调用方 47/47 定向测试通过。
+
 ### M16：独立 Review Agent 与代码型多 Agent 协作
 
 #### 目标

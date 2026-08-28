@@ -17,12 +17,20 @@
 (require 'subr-x)
 (require 'chat-event)
 
+(declare-function chat-approval-authorize-async "chat-approval"
+                  (tool call session observer callback))
+(declare-function make-chat-forged-tool "chat-tool-forge" (&rest arguments))
+(declare-function chat-session-id "chat-session" (session))
+
 (defgroup chat-execution nil
   "Execution backend requests and attempts."
   :group 'chat)
 
-(defconst chat-execution-schema-version 1
+(defconst chat-execution-schema-version 2
   "Current execution request and record schema version.")
+
+(defconst chat-execution-supported-schema-versions '(1 2)
+  "Execution schemas that can be migrated without replaying work.")
 
 (defconst chat-execution-idempotency-classes
   '(read-only idempotent non-idempotent)
@@ -43,6 +51,10 @@
 (define-error 'chat-execution-unknown-backend "Unknown execution backend")
 (define-error 'chat-execution-renewal-required
   "Renewed permission is required before retry")
+(define-error 'chat-execution-capability-unavailable
+  "Execution backend cannot satisfy the requested policy")
+(define-error 'chat-execution-network-authorization-required
+  "Networked execution requires a fresh approval")
 
 (cl-defstruct
     (chat-execution-request
@@ -50,10 +62,15 @@
                    (&key (schema-version chat-execution-schema-version)
                          id (backend 'local) command directory environment
                          session-id turn-id task-id parent-id
-                         (idempotency 'non-idempotent) timeout metadata)))
+                         (idempotency 'non-idempotent) timeout metadata
+                         (policy 'local) read-roots write-roots network
+                         environment-keys require-process-tree-cleanup
+                         network-authorization-id)))
   "One versioned backend-neutral execution request."
   schema-version id backend command directory environment
-  session-id turn-id task-id parent-id idempotency timeout metadata)
+  session-id turn-id task-id parent-id idempotency timeout metadata
+  policy read-roots write-roots network environment-keys
+  require-process-tree-cleanup network-authorization-id)
 
 (cl-defstruct
     (chat-execution-record
@@ -65,11 +82,21 @@
   schema-version id request status attempts created-at updated-at native-handle)
 
 (cl-defstruct
+    (chat-execution-capabilities
+     (:constructor chat-execution-capabilities-create
+                   (&key filesystem network environment timeout
+                         process-tree-cleanup platform availability)))
+  "Measured facts exposed by one execution backend."
+  filesystem network environment timeout process-tree-cleanup platform
+  availability)
+
+(cl-defstruct
     (chat-execution-backend
      (:constructor chat-execution-backend-create
-                   (&key id start-function cancel-function live-p-function)))
+                   (&key id capabilities start-function cancel-function
+                         live-p-function)))
   "One backend implementation registered with the runtime."
-  id start-function cancel-function live-p-function)
+  id capabilities start-function cancel-function live-p-function)
 
 (defvar chat-execution--backends (make-hash-table :test 'eq)
   "Registered execution backends by symbol.")
@@ -83,10 +110,26 @@
 (defvar chat-execution-current-context nil
   "Dynamically bound session, Turn, task and parent execution correlation.")
 
+(defvar chat-execution--network-authorizations (make-hash-table :test 'equal)
+  "One-use network authorization records keyed by opaque ID.")
+
+(defconst chat-execution-policy-ids '(local inspect build networked-build)
+  "Closed set of execution policies understood by the runtime.")
+
+(defcustom chat-execution-restricted-environment-keys
+  '("PATH" "HOME" "TMPDIR" "LANG" "LC_ALL" "LC_CTYPE" "TERM"
+    "DEVELOPER_DIR" "SDKROOT")
+  "Environment variables inherited by restricted execution by default."
+  :type '(repeat string)
+  :group 'chat-execution)
+
 (cl-defun chat-execution-request-from-context
     (command &key id (backend 'local) directory environment
              session-id turn-id task-id parent-id
-             (idempotency 'non-idempotent) timeout metadata)
+             (idempotency 'non-idempotent) timeout metadata
+             (policy 'local) read-roots write-roots network
+             environment-keys require-process-tree-cleanup
+             network-authorization-id)
   "Create an execution request for COMMAND using the current correlation.
 
 Explicit identity arguments take precedence over the dynamically bound
@@ -105,7 +148,14 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
      :parent-id (or parent-id (plist-get context :parent-id))
      :idempotency idempotency
      :timeout timeout
-     :metadata metadata)))
+     :metadata metadata
+     :policy policy
+     :read-roots read-roots
+     :write-roots write-roots
+     :network network
+     :environment-keys environment-keys
+     :require-process-tree-cleanup require-process-tree-cleanup
+     :network-authorization-id network-authorization-id)))
 
 (defun chat-execution--timestamp-ms ()
   "Return the current Unix time in milliseconds."
@@ -123,6 +173,105 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
         ((and (stringp value) (not (string-empty-p value))) (intern value))
         (t fallback)))
 
+(defun chat-execution--canonical-root (path)
+  "Return existing PATH as a canonical directory root."
+  (unless (and (stringp path) (file-directory-p path))
+    (signal 'chat-execution-invalid-request
+            (list "execution root is not a directory" path)))
+  (file-name-as-directory (file-truename (expand-file-name path))))
+
+(defun chat-execution--canonical-roots (roots)
+  "Return canonical, duplicate-free directory ROOTS."
+  (delete-dups (mapcar #'chat-execution--canonical-root (or roots nil))))
+
+(defun chat-execution--path-in-roots-p (path roots)
+  "Return non-nil when canonical PATH is equal to or inside ROOTS."
+  (let ((canonical (file-name-as-directory
+                    (file-truename (expand-file-name path)))))
+    (seq-some (lambda (root)
+                (or (equal canonical root)
+                    (file-in-directory-p canonical root)))
+              roots)))
+
+(defun chat-execution--backend-supports-policy-p (backend request)
+  "Return non-nil when BACKEND can enforce REQUEST rather than approximate it."
+  (let* ((policy (chat-execution-request-policy request))
+         (facts (chat-execution-backend-capabilities backend)))
+    (if (eq policy 'local)
+        (eq (chat-execution-backend-id backend) 'local)
+      (and (chat-execution-capabilities-p facts)
+           (eq (chat-execution-capabilities-filesystem facts) 'scoped)
+           (eq (chat-execution-capabilities-network facts) 'controlled)
+           (eq (chat-execution-capabilities-environment facts) 'explicit)
+           (chat-execution-capabilities-timeout facts)
+           (or (not (chat-execution-request-require-process-tree-cleanup request))
+               (chat-execution-capabilities-process-tree-cleanup facts))))))
+
+(defun chat-execution--consume-network-authorization (request)
+  "Consume and validate REQUEST's one-use network approval."
+  (let* ((id (chat-execution-request-network-authorization-id request))
+         (record (and id (gethash id chat-execution--network-authorizations))))
+    (unless (and record
+                 (equal (plist-get record :request-id)
+                        (chat-execution-request-id request))
+                 (equal (plist-get record :session-id)
+                        (chat-execution-request-session-id request)))
+      (signal 'chat-execution-network-authorization-required
+              (list (chat-execution-request-id request))))
+    (remhash id chat-execution--network-authorizations)
+    t))
+
+(defun chat-execution-prepare-request (request)
+  "Normalize policy fields and prove that REQUEST's backend can enforce them."
+  (let* ((policy (chat-execution--symbol
+                  (chat-execution-request-policy request) 'local))
+         (backend (chat-execution-get-backend
+                   (chat-execution-request-backend request)))
+         (directory (or (chat-execution-request-directory request)
+                        default-directory))
+         (read-roots (chat-execution--canonical-roots
+                      (or (chat-execution-request-read-roots request)
+                          (and (not (eq policy 'local)) (list directory)))))
+         (write-roots (chat-execution--canonical-roots
+                       (or (chat-execution-request-write-roots request)
+                           (and (memq policy '(build networked-build))
+                                (list directory)))))
+         (network (and (chat-execution-request-network request) t)))
+    (unless (memq policy chat-execution-policy-ids)
+      (signal 'chat-execution-invalid-request (list "policy" policy)))
+    (when (and (eq policy 'inspect) write-roots)
+      (signal 'chat-execution-invalid-request
+              (list "inspect policy cannot write" write-roots)))
+    (unless (eq network (eq policy 'networked-build))
+      (signal 'chat-execution-invalid-request
+              (list "network does not match policy" policy network)))
+    (when (not (eq policy 'local))
+      (unless (chat-execution--path-in-roots-p directory read-roots)
+        (signal 'chat-execution-invalid-request
+                (list "directory is outside read roots" directory)))
+      (unless (seq-every-p
+               (lambda (root) (chat-execution--path-in-roots-p root read-roots))
+               write-roots)
+        (signal 'chat-execution-invalid-request
+                (list "write roots must be inside read roots" write-roots))))
+    (setf (chat-execution-request-policy request) policy)
+    (unless (chat-execution--backend-supports-policy-p backend request)
+      (signal 'chat-execution-capability-unavailable
+              (list (chat-execution-backend-id backend) policy)))
+    (setf (chat-execution-request-directory request)
+          (file-name-as-directory (file-truename (expand-file-name directory)))
+          (chat-execution-request-read-roots request) read-roots
+          (chat-execution-request-write-roots request) write-roots
+          (chat-execution-request-network request) network
+          (chat-execution-request-environment-keys request)
+          (delete-dups
+           (copy-sequence
+            (or (chat-execution-request-environment-keys request)
+                chat-execution-restricted-environment-keys))))
+    (when network
+      (chat-execution--consume-network-authorization request))
+    request))
+
 (defun chat-execution--validate-request (request)
   "Validate and return REQUEST."
   (unless (chat-execution-request-p request)
@@ -133,7 +282,7 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
         (idempotency (chat-execution--symbol
                       (chat-execution-request-idempotency request))))
     (unless (and (integerp version)
-                 (= version chat-execution-schema-version))
+                 (memq version chat-execution-supported-schema-versions))
       (signal 'chat-execution-invalid-request
               (list "schemaVersion" version)))
     (unless (and (listp (chat-execution-request-command request))
@@ -155,7 +304,9 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
       (signal 'chat-execution-invalid-request
               (list "timeout" (chat-execution-request-timeout request))))
     (setf (chat-execution-request-backend request) backend
-          (chat-execution-request-idempotency request) idempotency)
+          (chat-execution-request-idempotency request) idempotency
+          (chat-execution-request-schema-version request)
+          chat-execution-schema-version)
     (unless (chat-execution-request-id request)
       (setf (chat-execution-request-id request) (chat-execution-new-id)))
     request))
@@ -164,16 +315,102 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
   "Register BACKEND and return it."
   (unless (and (chat-execution-backend-p backend)
                (symbolp (chat-execution-backend-id backend))
+               (chat-execution-capabilities-p
+                (chat-execution-backend-capabilities backend))
                (functionp (chat-execution-backend-start-function backend)))
     (error "Invalid execution backend: %S" backend))
   (puthash (chat-execution-backend-id backend)
            backend chat-execution--backends)
   backend)
 
+(defun chat-execution-backend-capability-data (id)
+  "Return bounded public capability facts for backend ID."
+  (let ((facts (chat-execution-backend-capabilities
+                (chat-execution-get-backend id))))
+    `((backend . ,(symbol-name id))
+      (filesystem . ,(symbol-name
+                       (chat-execution-capabilities-filesystem facts)))
+      (network . ,(symbol-name
+                    (chat-execution-capabilities-network facts)))
+      (environment . ,(symbol-name
+                        (chat-execution-capabilities-environment facts)))
+      (timeout . ,(and (chat-execution-capabilities-timeout facts) t))
+      (processTreeCleanup .
+                          ,(and (chat-execution-capabilities-process-tree-cleanup
+                                 facts)
+                                t))
+      (platform . ,(chat-execution-capabilities-platform facts))
+      (availability . ,(chat-execution-capabilities-availability facts)))))
+
+(defun chat-execution-authorize-network (request session callback)
+  "Authorize networked REQUEST through the shared approval and Guard path.
+CALLBACK receives CONSENT and REASON.  A consent mints one request-bound token
+that `chat-execution-start' consumes; retries require a new approval."
+  (unless (and (eq (chat-execution-request-policy request) 'networked-build)
+               (chat-execution-request-network request))
+    (signal 'chat-execution-invalid-request
+            (list "request is not networked-build")))
+  (unless (and (fboundp 'chat-approval-authorize-async)
+               (fboundp 'make-chat-forged-tool))
+    (signal 'chat-execution-capability-unavailable
+            (list "approval runtime unavailable")))
+  (when session
+    (let ((session-id (chat-session-id session))
+          (request-session-id (chat-execution-request-session-id request)))
+      (when (and request-session-id
+                 (not (equal request-session-id session-id)))
+        (signal 'chat-execution-invalid-request
+                (list "network approval session mismatch"
+                      request-session-id session-id)))
+      (setf (chat-execution-request-session-id request) session-id)))
+  (unless (chat-execution-request-id request)
+    (setf (chat-execution-request-id request) (chat-execution-new-id)))
+  (let* ((tool
+          (make-chat-forged-tool
+           :id 'execution_networked_build
+           :name "Networked Build Execution"
+           :description "Run a scoped build with outbound network access."
+           :owner 'execution :sensitivity 'project
+           :effects '(write outbound) :is-active t))
+         (call
+          (list :id (concat (chat-execution-request-id request) ":approval")
+                :name "execution_networked_build"
+                :arguments
+                `(("program" . ,(car (chat-execution-request-command request)))
+                  ("directory" . ,(chat-execution-request-directory request))
+                  ("backend" . ,(symbol-name
+                                  (chat-execution-request-backend request)))))))
+    (chat-approval-authorize-async
+     tool call session nil
+     (lambda (consent reason)
+       (when consent
+         (let ((id (format "network-authorization-%s-%d"
+                           (chat-execution-request-id request)
+                           (chat-execution--timestamp-ms))))
+           (puthash id
+                    (list :request-id (chat-execution-request-id request)
+                          :session-id
+                          (chat-execution-request-session-id request))
+                    chat-execution--network-authorizations)
+           (setf (chat-execution-request-network-authorization-id request) id)))
+       (funcall callback consent reason)))))
+
 (defun chat-execution-get-backend (id)
   "Return registered backend ID or signal explicitly."
   (or (gethash id chat-execution--backends)
       (signal 'chat-execution-unknown-backend (list id))))
+
+(defun chat-execution-backend-for-policy (policy)
+  "Return an installed backend that enforces POLICY without fallback."
+  (if (eq policy 'local)
+      'local
+    (let ((backend (gethash 'darwin-sandbox chat-execution--backends)))
+      (if (and backend
+               (equal (chat-execution-capabilities-availability
+                       (chat-execution-backend-capabilities backend))
+                      "available"))
+          'darwin-sandbox
+        (signal 'chat-execution-capability-unavailable (list policy))))))
 
 (defun chat-execution--environment-keys (environment)
   "Return variable names from process ENVIRONMENT without their values."
@@ -191,8 +428,8 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
     (backend . ,(symbol-name (chat-execution-request-backend request)))
     (command . ,(chat-execution-request-command request))
     (directory . ,(chat-execution-request-directory request))
-    (environmentKeys . ,(chat-execution--environment-keys
-                          (chat-execution-request-environment request)))
+    (suppliedEnvironmentKeys . ,(chat-execution--environment-keys
+                                  (chat-execution-request-environment request)))
     (sessionId . ,(chat-execution-request-session-id request))
     (turnId . ,(chat-execution-request-turn-id request))
     (taskId . ,(chat-execution-request-task-id request))
@@ -200,13 +437,23 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
     (idempotency . ,(symbol-name
                      (chat-execution-request-idempotency request)))
     (timeout . ,(chat-execution-request-timeout request))
+    (policy . ,(symbol-name (chat-execution-request-policy request)))
+    (readRoots . ,(chat-execution-request-read-roots request))
+    (writeRoots . ,(chat-execution-request-write-roots request))
+    (network . ,(and (chat-execution-request-network request) t))
+    (environmentKeys . ,(chat-execution-request-environment-keys request))
+    (requireProcessTreeCleanup .
+                               ,(and (chat-execution-request-require-process-tree-cleanup
+                                      request)
+                                     t))
     (metadata . ,(chat-execution-request-metadata request))))
 
 (defun chat-execution--request-from-json (data)
   "Return an execution request decoded from DATA."
-  (chat-execution--validate-request
-   (chat-execution-request-create
-    :schema-version (or (alist-get 'schemaVersion data) 0)
+  (let ((version (or (alist-get 'schemaVersion data) 0)))
+    (chat-execution--validate-request
+     (chat-execution-request-create
+    :schema-version version
     :id (alist-get 'id data)
     :backend (chat-execution--symbol (alist-get 'backend data) 'local)
     :command (append (alist-get 'command data) nil)
@@ -221,7 +468,18 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
     :idempotency (chat-execution--symbol
                   (alist-get 'idempotency data) 'non-idempotent)
     :timeout (alist-get 'timeout data)
-    :metadata (alist-get 'metadata data))))
+    :metadata (alist-get 'metadata data)
+    :policy (if (= version 1)
+                'local
+              (chat-execution--symbol (alist-get 'policy data) 'local))
+    :read-roots (and (> version 1) (append (alist-get 'readRoots data) nil))
+    :write-roots (and (> version 1) (append (alist-get 'writeRoots data) nil))
+    :network (and (> version 1) (eq (alist-get 'network data) t))
+    :environment-keys
+    (and (> version 1) (append (alist-get 'environmentKeys data) nil))
+    :require-process-tree-cleanup
+    (and (> version 1)
+         (eq (alist-get 'requireProcessTreeCleanup data) t))))))
 
 (defun chat-execution--attempt-to-json (attempt)
   "Return durable JSON-friendly data for ATTEMPT."
@@ -256,10 +514,10 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
 (defun chat-execution--record-from-json (data)
   "Return an execution record decoded from DATA."
   (let ((version (or (alist-get 'schemaVersion data) 0)))
-    (unless (= version chat-execution-schema-version)
+    (unless (memq version chat-execution-supported-schema-versions)
       (error "Unsupported execution record schema version: %s" version))
     (chat-execution-record-create
-     :schema-version version
+     :schema-version chat-execution-schema-version
      :id (alist-get 'id data)
      :request (chat-execution--request-from-json (alist-get 'request data))
      :status (chat-execution--symbol (alist-get 'status data) 'interrupted)
@@ -320,6 +578,10 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
            (list (cons 'execution_id (chat-execution-record-id record))
                  (cons 'backend
                        (symbol-name (chat-execution-request-backend request)))
+                 (cons 'policy
+                       (symbol-name (chat-execution-request-policy request)))
+                 (cons 'network
+                       (and (chat-execution-request-network request) t))
                  (cons 'attempt (and attempt (plist-get attempt :number)))
                  (cons 'status
                        (symbol-name (chat-execution-record-status record)))
@@ -393,10 +655,15 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
   (and (processp native) (process-live-p native)))
 
 (defun chat-execution-install-local-backend ()
-  "Install the built-in local process backend."
+  "Install the explicit unrestricted local process backend."
   (chat-execution-register-backend
    (chat-execution-backend-create
     :id 'local
+    :capabilities
+    (chat-execution-capabilities-create
+     :filesystem 'unrestricted :network 'unrestricted
+     :environment 'inherited :timeout nil :process-tree-cleanup nil
+     :platform system-type :availability "explicit-local")
     :start-function #'chat-execution--local-start
     :cancel-function #'chat-execution--local-cancel
     :live-p-function #'chat-execution--local-live-p)))
@@ -427,13 +694,22 @@ tool, task and extension processes; callers must still classify IDEMPOTENCY."
                  request options
                  (lambda (process event)
                    (unless (process-live-p process)
-                     (chat-execution--finish
-                      record
-                      (if (zerop (process-exit-status process))
-                          'completed
-                        'failed)
-                      (process-exit-status process)
-                      (unless (zerop (process-exit-status process)) event)))
+                     (let ((forced-status
+                            (process-get process
+                                         'chat-execution-terminal-status))
+                           (forced-reason
+                            (process-get process
+                                         'chat-execution-terminal-reason)))
+                       (chat-execution--finish
+                        record
+                        (or forced-status
+                            (if (zerop (process-exit-status process))
+                                'completed
+                              'failed))
+                        (process-exit-status process)
+                        (or forced-reason
+                            (unless (zerop (process-exit-status process))
+                              event)))))
                    (when user-sentinel
                      (funcall user-sentinel process event)))))
           (setf (chat-execution-record-native-handle record) native)
@@ -452,6 +728,7 @@ Supported OPTIONS mirror the local process needs: :name, :buffer, :stderr,
 :filter, :sentinel, :connection-type, :coding and :noquery.  They are not
 persisted.  Return a backend-neutral `chat-execution-record'."
   (chat-execution--validate-request request)
+  (chat-execution-prepare-request request)
   (let* ((id (chat-execution-request-id request))
          (existing (gethash id chat-execution--records)))
     (when existing
@@ -549,6 +826,7 @@ contains the transient start options accepted by `chat-execution-start'."
       (signal 'chat-execution-renewal-required
               (list (chat-execution-record-id record))))
     (setf (chat-execution-request-environment request) environment)
+    (chat-execution-prepare-request request)
     (chat-execution--start-record record options)))
 
 (defun chat-execution-load ()
@@ -562,7 +840,7 @@ contains the transient start options accepted by `chat-execution-start'."
                      (insert-file-contents file)
                      (json-read-from-string (buffer-string))))
              (version (or (alist-get 'schemaVersion data) 0)))
-        (unless (= version chat-execution-schema-version)
+        (unless (memq version chat-execution-supported-schema-versions)
           (error "Unsupported execution state schema version: %s" version))
         (dolist (entry (alist-get 'records data))
           (let ((record (chat-execution--record-from-json entry)))
@@ -587,8 +865,12 @@ contains the transient start options accepted by `chat-execution-start'."
   (hash-table-count chat-execution--records))
 
 (defun chat-execution-initialize ()
-  "Install the local backend and reconcile durable execution state."
+  "Install measured backends and reconcile durable execution state."
   (chat-execution-install-local-backend)
+  (when (and (eq system-type 'darwin)
+             (require 'chat-execution-darwin nil t)
+             (not (gethash 'darwin-sandbox chat-execution--backends)))
+    (chat-execution-install-darwin-backend))
   (chat-execution-load))
 
 (provide 'chat-execution)

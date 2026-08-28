@@ -435,9 +435,15 @@ configuration and deterministic detection."
                 (setq
                  record
                  (chat-execution-start
-                  (chat-execution-request-from-context
+                 (chat-execution-request-from-context
                    argv
+                   :backend (chat-execution-backend-for-policy 'build)
                    :directory (chat-verification-step-directory step)
+                   :policy 'build
+                   :read-roots (list (plist-get context :project-root))
+                   :write-roots (list (plist-get context :project-root))
+                   :network nil
+                   :require-process-tree-cleanup t
                    :session-id (plist-get context :session-id)
                    :turn-id (plist-get context :turn-id)
                    :task-id (plist-get context :task-id)
@@ -467,8 +473,13 @@ configuration and deterministic detection."
                   :sentinel
                   (lambda (process _event)
                     (unless (process-live-p process)
-                      (finish (if (zerop (process-exit-status process))
-                                  'passed 'failed)
+                      (finish (cond
+                               ((and record
+                                     (eq (chat-execution-record-status record)
+                                         'timed-out))
+                                'timed-out)
+                               ((zerop (process-exit-status process)) 'passed)
+                               (t 'failed))
                               (process-exit-status process)
                               (unless (zerop (process-exit-status process))
                                 "nonzero-exit"))))))
@@ -654,7 +665,9 @@ configuration and deterministic detection."
   (let* ((id (chat-code-verify--new-id "verification"))
          (task-id (or task-id id))
          (context (list :session-id session-id :turn-id turn-id
-                        :task-id task-id :parent-id parent-id))
+                        :task-id task-id :parent-id parent-id
+                        :project-root
+                        (chat-verification-profile-project-root profile)))
          (task
           (when (or session-id parent-id)
             (chat-task-adopt

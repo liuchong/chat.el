@@ -290,10 +290,16 @@ this tool is for, and refusing it would be refusing the tool."
         (progn
           (let ((record
                  (chat-execution-start
-                  (chat-execution-request-from-context
+                 (chat-execution-request-from-context
                    (list shell-file-name shell-command-switch command)
+                   :backend (chat-execution-backend-for-policy 'build)
                    :directory default-directory
                    :environment process-environment
+                   :policy 'build
+                   :read-roots (list default-directory)
+                   :write-roots (list default-directory)
+                   :network nil
+                   :require-process-tree-cleanup t
                    :session-id (chat-work-task-session-id task)
                    :task-id id
                    :idempotency 'non-idempotent

@@ -20,7 +20,7 @@ are in `programming-capability-reliability-plan.md`.
 - M0-M6 lifecycle, capability, extension, task, content and recovery contracts
 - M7 attributable memory, derived Trace reconstruction and deterministic evals
 - M8 versioned App Server bridge and optional `termini.el` entry point
-- current canonical verification at 1655/1655
+- current canonical verification at 1666/1666
 
 ## Active Stages
 
@@ -30,16 +30,16 @@ are in `programming-capability-reliability-plan.md`.
 4. M12: project verification plans and bounded repair (complete)
 5. M13: structured work context, scoped instructions and working notes (complete)
 6. M14: durable TODO plans and native chat progress UI (complete)
-7. M15: capability-tested execution isolation backends (active)
-8. M16: read-only Review Agent and conflict-safe coding subagents
+7. M15: capability-tested execution isolation backends (complete)
+8. M16: read-only Review Agent and conflict-safe coding subagents (active)
 9. M17: rollout, performance verification and final acceptance
 
 ## Immediate Next Action
 
-Implement M15's capability-tested execution isolation contract and foreground,
-timeout-bounded platform probes. Keep policy selection separate from backend
-capability facts, and do not enable a later default until its effect is
-measurable against M9.
+Implement M16's independent read-only Review Agent first, then add child coding
+roles with declared paths, scheduler resources, session-owned worktrees and a
+conflict-refusing merge gate. Reuse M12 verification, M14 plans and M15 execution
+policies; do not introduce parallel task, event, checkpoint or workspace stores.
 
 ## Stage Gate
 

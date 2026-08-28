@@ -8,11 +8,13 @@
 
 ## Doing Now
 
-M14 is complete. Durable revisioned TODO plans now bind to session/task scope,
-require resolvable completion evidence, gate governed tools at the runtime
-boundary and project a bounded active slice into both Agent context and a stable
-Emacs-native progress region. M15 is active: define and verify execution backend
-capabilities before adding filesystem, network and process isolation policies.
+M15 is complete. Execution policies now bind canonical read/write roots, explicit
+environment, controlled network, backend timeout and process-tree cleanup to
+measured backend facts. Darwin isolation is selected only after a foreground
+deny-default probe; unavailable or mismatched capabilities block without local
+fallback. M16 is active: add independent read-only review, then conflict-safe
+coding child roles over existing task, workspace, checkpoint and verification
+contracts.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

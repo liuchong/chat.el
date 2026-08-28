@@ -21,6 +21,8 @@
 - Agent-authored notes can be mistaken for project instructions or verified facts.
 - A plan can become prompt ceremony while the Agent acts outside its current item.
 - Plan history can consume context or stale evidence can be repeated every turn.
+- A platform sandbox API can disappear or change behavior after an OS update.
+- Compiler shims can hide filesystem and environment requirements from argv inspection.
 
 ## Mitigations
 
@@ -37,6 +39,8 @@
 - Keep Agent notes at Agent authority, label hypotheses and require revisions for updates.
 - Gate governed tools on a scoped active plan with one dependency-ready current item.
 - Project only the bounded active slice and evidence added after the prior revision.
+- Probe isolation in the foreground at startup and report unavailable rather than falling back.
+- Resolve measured tool shims to real binaries and derive SDK paths without widening write roots.
 
 ## Governing Plan
 

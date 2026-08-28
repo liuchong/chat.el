@@ -84,6 +84,11 @@ process and updates the attempt exactly once. On restart, a running attempt
 becomes `interrupted`; it is not restarted. Retry is always explicit, and a
 non-idempotent retry requires renewed permission.
 
+This is the M6 foundation contract. Spec 023 upgrades the live execution schema
+to version 2 with policy, canonical roots, network, explicit environment and
+process-tree cleanup requirements. Version-one records migrate to explicit
+unrestricted `local`; they are never reclassified as isolated attempts.
+
 The initial migration covers shell tools, background process tasks, external
 subagents, stdio extension clients and code test processes. Model transport
 processes remain in the Model Runtime because they implement request transport,
