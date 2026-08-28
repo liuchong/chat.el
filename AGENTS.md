@@ -54,8 +54,10 @@ Copyright 2026 chat.el contributors.
 
 - 每完成一个可独立验证的阶段，并且该阶段相关测试已经通过后，必须立即直接提交一次
 - 不要把多个已经完成且已验证的阶段长时间堆积在工作区里等待一次性提交
-- 阶段提交的标题必须使用这种结构：`feat: xxx test: yyy docs: zzz`
-- 标题只写本阶段最核心的功能、测试和文档变化，使用英文，保持简短
+- 阶段提交使用 Conventional Commits：`type(scope): concise subject`
+- `type` 按主变化选择一个 `feat`、`fix`、`test`、`docs`、`refactor`、`perf` 或 `chore`
+- 一个标题只能有一个 type；测试和文档属于同一阶段时写进正文，不得把多个标题拼在一行
+- 标题只写本阶段最核心变化，使用英文，保持简短
 - 标题后必须追加英文正文，说明本次阶段提交完成了什么、覆盖了哪些验证、还有什么明确未完成项
 
 ## Documentation Must Be Updated

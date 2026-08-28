@@ -4,7 +4,7 @@
 - Attention: active
 - Status: active
 - Scope: coding-agent-reliability
-- Tags: coding, evaluation, code-intelligence, editing, verification, sandbox, review
+- Tags: coding, evaluation, code-intelligence, editing, verification, context, planning, sandbox, review
 
 ## 1. 文档目的
 
@@ -75,10 +75,13 @@
 3. 系统在有限上下文预算内优先提供与任务、当前 diff、焦点文件和失败诊断最相关的代码。
 4. 每个代码修改批次都产生验证计划、执行记录和最终验证结论；未执行或失败不得显示为已验证成功。
 5. 失败可在明确预算内反馈给同一 Agent 修复；预算耗尽后留下可继续的证据，不进入无限循环。
-6. 命令运行在声明了文件、网络、环境和时间权限的 execution backend 中；后端能力不足时必须显式降级或拒绝。
-7. Review Agent 默认只读，输出结构化、可定位、去重并带证据的发现，不直接修改代码。
-8. 所有关键行为进入现有 session event、Trace、task、checkpoint 和 Eval 体系，不创建第二套事实来源。
-9. 最终能力由固定任务集重复测量，并满足第 13 节全部验收门槛。
+6. Agent 能把目标、约束、事实、决策、阻塞和下一步写入可查询的结构化工作笔记；压缩前后保持身份、来源和作用域。
+7. 上下文由带类型、来源、权限、作用域、优先级和预算策略的 fragment 组成；AGENTS 文件及其显式依赖形成可检查规则图，而不是无标识字符串拼接。
+8. 除明确的单步或只读问答外，编码任务具有持久 TODO 计划；修改状态、证据和阻塞会进入事件并在聊天 UI 原生展示。
+9. 命令运行在声明了文件、网络、环境和时间权限的 execution backend 中；后端能力不足时必须显式降级或拒绝。
+10. Review Agent 默认只读，输出结构化、可定位、去重并带证据的发现，不直接修改代码。
+11. 所有关键行为进入现有 session event、Trace、task、checkpoint 和 Eval 体系，不创建第二套事实来源。
+12. 最终能力由固定任务集重复测量，并满足第 13 节全部验收门槛。
 
 ## 4. 非目标
 
@@ -99,6 +102,10 @@ User objective
       |
       v
 Coding task planner
+      |
+      +--> Work context store -------> scoped notes / rules / artifacts
+      |
+      +--> Durable work plan --------> TODO state / evidence / native UI
       |
       +--> Code intelligence facade --> semantic backends --> repo map
       |
@@ -126,6 +133,7 @@ Session events + Trace + Eval result
 - 工作区归属只写 `chat-workspace`。
 - 回滚证据只写 `chat-checkpoint`。
 - 命令状态只写 `chat-execution`。
+- 运行中目标、规则、工作笔记和计划只写版本化 work-context / work-plan 合同；prompt 和 UI 只是投影。
 - Eval 结果只写不可变 `chat-eval-result`。
 - repo map、符号索引和 LSP 结果都是可重建缓存，不具有用户数据权威性。
 
@@ -250,6 +258,49 @@ Review Agent 只能输出以下结构化记录：
 ```
 
 缺少有效项目内路径、正整数行号或具体证据的记录不得进入正式 findings。样式、偏好和无行为影响的建议默认不报告。
+
+### 6.6 结构化上下文 fragment 与工作笔记
+
+新增 `chat-context-fragment`、`chat-context-bundle` 和 `chat-work-note`。每个
+fragment 必须携带 stable ID、kind、authority、source、scope、priority、budget
+policy、digest 和 typed payload；每个工作笔记必须携带 key、kind、value、tags、
+source、scope、status、revision 和 timestamps。
+
+规则：
+
+- `instruction`、`objective`、`working-note`、`history`、`code`、`tool-schema` 和
+  `verification` 等区域在运行时保持分离，只在 transport adapter 最后序列化。
+- scope 至少支持 global、project、directory subtree、exact path、session、turn、
+  task 和 child task；不匹配的 fragment 不得进入请求。
+- authority 至少区分 system、user/developer instruction、project rule、runtime
+  fact、Agent note 和 untrusted content；工作笔记不能升级为规则。
+- AGENTS 文件按 filesystem root 到目标路径排序；每个源文件保留自身目录作用域、
+  digest 和 precedence。显式依赖继承声明它的规则作用域，必须限制在可信项目根，
+  并有 cycle、depth、file count 和 byte limit。
+- 工作笔记按 scope + key、tag 和 kind 建索引；upsert 必须使用 revision，避免旧
+  Agent step 覆盖新记录。删除、归档和 supersede 均可审计。
+- compaction 只能压缩允许压缩的 fragment；目标、活动计划、未解决 blocker、
+  resident rule 和当前任务关键笔记以结构身份重新投影，不能依赖旧 prompt 文本幸存。
+
+### 6.7 持久 TODO 计划
+
+新增 `chat-work-plan` 和 `chat-work-plan-item`：
+
+```elisp
+(cl-defstruct chat-work-plan
+  schema-version id revision session-id task-id objective status mode items
+  created-at updated-at completed-at metadata)
+
+(cl-defstruct chat-work-plan-item
+  id title status order depends-on acceptance evidence-ids
+  started-at completed-at blocked-reason metadata)
+```
+
+状态集固定为 plan 的 `active|completed|blocked|cancelled` 和 item 的
+`pending|in-progress|completed|blocked|skipped`。同一 plan 最多一个
+`in-progress` item；依赖未完成时不得启动；completed 必须附可追溯 evidence，
+blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确定性单步任务以
+枚举 reason 跳过建表，任何多文件修改、child task 或 repair loop 都必须先有计划。
 
 ## 7. 施工阶段
 
@@ -473,7 +524,103 @@ Review Agent 只能输出以下结构化记录：
 - 定向模块测试 38/38、Agent 最终投影测试 3/3、隔离 coding fixture 集成测试
   1/1 通过；canonical suite 1615/1615 通过，零 unexpected result。
 
-### M13：执行隔离后端
+### M13：结构化工作上下文、笔记与作用域规则图
+
+#### 目标
+
+把 prompt 从若干大字符串升级为可组合、可筛选、可审计的 typed context bundle，
+并提供面向当前工作、可跨压缩恢复的结构化笔记区。
+
+#### 修改范围
+
+- 新增 `lisp/core/chat-work-context.el`，定义 fragment、bundle、note、scope 和索引。
+- 重构 `lisp/core/chat-project.el`，让 AGENTS 文件与显式依赖输出规则 fragment 图。
+- 扩展 `lisp/core/chat-context.el`、`chat-context-budget.el` 和 Agent request projection。
+- 扩展 capability pack，提供 note upsert/query/archive/delete 和 context inspect。
+- 增加 `tests/unit/test-chat-work-context.el`、project scope/inclusion、compaction 与
+  integration 覆盖。
+
+#### 实施步骤
+
+1. 先冻结 schema、enum、scope matching、authority precedence、revision 与限额。
+2. 实现 session-owned 原子存储和 `(scope, key)`、kind、tag 索引；不复制 transcript。
+3. 将 objective、runtime facts、memory、history、code context、tool schemas 和验证
+   证据适配为 fragment；兼容 API 仍可接收字符串，但立即包装并记录来源。
+4. AGENTS discovery 输出每个文件独立 fragment；解析显式依赖并建立 parent/child
+   图，限制 canonical project root、最大深度 8、文件 64 个、总量 256KiB。
+5. 目标路径筛选 scope，按 authority、目录 specificity、显式 priority 和稳定 ID
+   排序；冲突不静默覆盖，保留 shadowed provenance 供 inspect。
+6. context budget 按 fragment 计量、选择、demote、compact 或 trim；serializer 只在
+   provider 边界生成有标签的 messages。
+7. compaction 前保存未解决 blocker、决策、下一步和任务事实；压缩后按 stable ID
+   重建活动工作上下文，过期/归档笔记不注入。
+8. Trace 和 observability 显示候选/选中 fragment、scope、来源、裁剪原因和 note
+   读写事件，不保存完整敏感正文。
+
+#### 必测场景
+
+- root 与嵌套 AGENTS 规则只在各自目录 subtree 生效，兄弟目录不泄漏。
+- 显式依赖相对路径、重复 include、cycle、越界 path、symlink escape、深度和总量上限。
+- 同 key 并发 revision 冲突、supersede、archive、delete 和重启恢复。
+- Agent note 不能覆盖 system/user/project instruction，也不能伪装成 verified fact。
+- context 压缩前后 objective、active blockers、current decisions 和 next step 等价。
+- 8K/32K/128K 预算下选择确定，单次构建主循环无无界扫描。
+
+#### 退出条件
+
+- AGENTS 与依赖的 scope corpus 100% 选对，0 次跨目录规则泄漏。
+- 工作笔记可按 key/kind/tag 在重启和 compaction 后确定性查询。
+- request diagnostics 能解释每个 fragment 为什么进入、被遮蔽或被裁剪。
+- legacy string API 行为兼容，canonical suite 零 unexpected result。
+
+### M14：持久 TODO 计划合同与聊天 UI
+
+#### 目标
+
+让非简单编码任务先形成可执行计划，并用计划状态约束循环、保留证据和稳定展示进度。
+
+#### 修改范围
+
+- 新增 `lisp/core/chat-work-plan.el`，持久化 plan/item 状态机与 evidence 关联。
+- 在 programming capability pack 注册 plan create/update/read/skip 工具。
+- 在 Agent tool boundary 增加 plan-required checkpoint 和复杂度可解释判定。
+- 在 `lisp/ui/chat-ui.el` 增加紧凑计划摘要与可折叠明细，复用 runtime events。
+- 增加 plan contract、recovery、agent-loop、UI point/window stability 和 Eval 测试。
+
+#### 实施步骤
+
+1. 冻结 plan/item schema、迁移、状态转换、单 active item 和 dependency 规则。
+2. plan 绑定 session + foreground task；只持久化意图、状态和 evidence ID，不保存回调。
+3. `auto` 策略在 mutation、child task、repair 或第二个实质步骤前要求活动计划；允许
+   answer-only、read-only、single-bounded-action 使用枚举 skip reason 并写审计事件。
+4. tool result、verification、checkpoint、review finding 和 workspace diff 可作为
+   evidence；completed item 缺 evidence 时拒绝转换。
+5. Agent turn 前投影 objective、active item、remaining dependencies、blockers 和完成
+   比例；不把全部历史计划逐轮重复注入。
+6. UI 在输入区上方显示固定单行摘要 `Plan current/total · changed files · diff`；
+   `TAB`/鼠标切换原生折叠明细，更新时保持输入 point、window-start 和用户滚动位置。
+7. 重启从 durable plan 重建；运行中 item 变为 blocked/interrupted，需要显式 resume，
+   不自动假装继续执行。
+8. Trace 记录 plan-created、item-started/completed/blocked、plan-completed/skipped，
+   Eval 统计无计划 mutation、重复完成、停滞和计划偏离。
+
+#### 必测场景
+
+- 问答和单次只读查询不强制计划；多文件修改在无计划时 fail closed 并可恢复。
+- 非法状态跳转、两个 active item、未完成依赖、无 evidence 完成全部拒绝。
+- 用户在运行中修改目标，plan revision 更新且旧 step 不能覆盖。
+- restart、cancel、compaction、repair 和 child task 后计划状态、当前项和证据不丢。
+- 流式回复持续增长时计划 UI 不移动输入 point、不重置 window-start、不跳回中间。
+- 折叠/展开、窄窗口、CJK 标题、长路径和无图形终端均可读。
+
+#### 退出条件
+
+- fixture 中所有非简单编码任务 100% 在首次 mutation 前建立活动计划。
+- plan 状态机、证据和 task/session/event 关联可在重启后完整重建。
+- UI 状态与 durable plan 一致，连续 1,000 次状态更新无 point/window 跳动和残留 timer。
+- 计划额外 prompt token 在 large task 中位数不超过总输入的 5%。
+
+### M15：执行隔离后端
 
 #### 目标
 
@@ -512,7 +659,7 @@ Review Agent 只能输出以下结构化记录：
 - 超时和取消后无孤儿进程、监听端口和不可回收临时目录。
 - 后端能力和实际行为一致，并由集成测试证明。
 
-### M14：独立 Review Agent 与代码型多 Agent 协作
+### M16：独立 Review Agent 与代码型多 Agent 协作
 
 #### 目标
 
@@ -549,7 +696,7 @@ Review Agent 只能输出以下结构化记录：
 - 无冲突并行任务可以安全合并并通过验证。
 - 有冲突任务 100% 被调度器或合并门识别，不发生静默覆盖。
 
-### M15：产品化、性能与最终验收
+### M17：产品化、性能与最终验收
 
 #### 目标
 
@@ -558,7 +705,7 @@ Review Agent 只能输出以下结构化记录：
 #### 实施步骤
 
 1. 清理被新 facade 和 verifier 替代的实验调用路径，保留必要兼容 wrapper 并标记删除条件。
-2. 在统一 chat surface 中展示当前阶段：understanding、editing、verifying、repairing、reviewing。
+2. 在统一 chat surface 中展示当前阶段：planning、understanding、editing、verifying、repairing、reviewing。
 3. 为 stale write、semantic backend、verification 和 sandbox 增加可操作错误说明。
 4. 更新用户文档、配置示例、帮助命令和故障排查。
 5. 对 10,000 文件 fixture 做索引、增量更新、查询、上下文构建和内存测试。
@@ -575,9 +722,9 @@ Review Agent 只能输出以下结构化记录：
 
 | 层级 | 内容 | 是否进入 canonical suite |
 |---|---|---|
-| Unit | 数据合同、digest、排序、解析、状态机、错误类型 | 是 |
-| Integration | Agent loop + file gate + checkpoint + execution + verifier | 是，外部依赖缺失时只允许明确 skip |
-| E2E | 临时 Git fixture 中完成编辑、验证、review、恢复 | 是，必须确定性 |
+| Unit | 数据合同、digest、scope、排序、解析、状态机、错误类型、UI 纯投影 | 是 |
+| Integration | Agent loop + scoped context + plan gate + file gate + checkpoint + execution + verifier | 是，外部依赖缺失时只允许明确 skip |
+| E2E | 临时 Git fixture 中完成计划、编辑、压缩恢复、验证、review | 是，必须确定性 |
 | Offline Eval | 五个现有合同及新增非模型 coding contracts | 是 |
 | Live Eval | 固定模型执行 30 个真实任务 | 否，单独命令 |
 | Spike | 平台隔离、外部服务和语言服务器可行性 | 否，正式实现前运行 |
@@ -601,7 +748,9 @@ Review Agent 只能输出以下结构化记录：
 标题示例：
 
 ```text
-feat: add versioned file edits test: cover stale writes docs: record M10 evidence
+feat(files): enforce versioned writes
+test(files): cover stale write refusal
+docs(files): record M10 evidence
 ```
 
 正文必须使用英文说明：
@@ -638,6 +787,20 @@ feat: add versioned file edits test: cover stale writes docs: record M10 evidenc
 - local backend 不删除，但必须明确显示 unrestricted。
 - 隔离后端不可用时允许用户显式选择 local；系统不得自动无提示降级。
 
+### 10.5 上下文与工作笔记
+
+- 现有字符串 prompt API 保留为 adapter，并立即包装为带来源的 fragment。
+- `memory.md` 和 `chat-memory-item` 继续表示长期记忆；不会自动迁入工作笔记。
+- 现有 session scratch 文件保持可读；结构化 note 使用独立 schema，普通文件不被
+  猜测为 note。
+- 旧 session 没有 work-context state 时按空集合加载，不修改原 session 文件。
+
+### 10.6 TODO 计划
+
+- `chat-task` 继续表示可调度工作生命周期；plan 只描述一个 task 内的步骤和证据。
+- 旧 task 没有 plan 时可查看和取消；仅在它再次执行 mutation 时触发 plan-required。
+- UI 只从 public plan API 和 events 投影，不把折叠状态写回 runtime 事实。
+
 ## 11. 可观测性与审计
 
 新增或规范化以下事件，不改变现有 event 总线：
@@ -648,6 +811,9 @@ feat: add versioned file edits test: cover stale writes docs: record M10 evidenc
 - `file-version-refused`；
 - `verification-planned/step-started/step-completed/completed`；
 - `repair-started/stopped`；
+- `context-bundle-built/fragment-selected/fragment-omitted`；
+- `work-note-created/updated/archived/deleted/conflicted`；
+- `work-plan-created/item-started/item-completed/item-blocked/completed/skipped`；
 - `review-started/finding/completed`；
 - `workspace-merge-started/completed/conflicted`。
 
@@ -657,6 +823,9 @@ Trace 至少新增：
 
 - semantic query 数、backend 分布、timeout 数；
 - context candidate/selected/token 数；
+- context scope refusal、dependency cycle 和 truncation 数；
+- work note query/hit/conflict 数；
+- plan item、blocked、skipped、无计划 mutation refusal 和停滞数；
 - stale write refusal 数；
 - verification step、失败和 retry 数；
 - review finding 按 severity 计数；
@@ -672,6 +841,10 @@ Trace 至少新增：
 | digest 增加大文件成本 | 沿用文件大小上限，分块 hash，并复用同一 file identity 缓存 |
 | 自动验证进入死循环 | repair limit、step budget、相同失败 fingerprint 停止条件 |
 | 自动格式化扩大 diff | format step 受 allowed paths 和 checkpoint 控制，越界立即拒绝 |
+| 工作笔记把猜测固化成规则 | authority 固定、source/provenance 可见、note 不得升级 instruction |
+| AGENTS 依赖泄漏或循环 | canonical root、scope matching、cycle/depth/count/byte limit |
+| TODO 变成提示词负担或形式主义 | 只投影 active slice、简单任务可审计 skip、token 与成功率门禁 |
+| UI 进度更新打断输入 | runtime/UI 分离、保留 point/window、批量事件和 1,000 次更新测试 |
 | sandbox 能力被高估 | 先 spike，capability 与实际测试绑定，不可用就明确 blocked |
 | Review 产生大量低价值意见 | typed finding、证据门槛、severity/precision Eval 和去重 |
 | 并行 Agent 互相覆盖 | scheduler 资源冲突、独立 worktree、base revision 和 merge gate |
@@ -679,7 +852,7 @@ Trace 至少新增：
 
 ## 13. 最终验收标准
 
-以下条件必须全部满足，M15 才能标记 complete。
+以下条件必须全部满足，M17 才能标记 complete。
 
 ### 13.0 指标计算
 
@@ -728,14 +901,25 @@ Trace 至少新增：
 - 10,000 文件 fixture 的主循环单切片 <= 50ms，warm semantic query p95 <= 200ms。
 - 最终成功任务的中位输入 token 不高于 M9 同任务基线的 110%；large-repo tasks 的中位输入 token 必须至少降低 15%。
 
-### 13.6 Review 与协作
+### 13.6 上下文连续性与计划
+
+- AGENTS scope corpus 和依赖图选择准确率 100%，跨 project/directory 泄漏为 0。
+- compaction/restart 后 objective、active blocker、decision、next step 和 current plan
+  的 identity 与内容等价；关键工作项丢失为 0。
+- work note revision 冲突 100% 拒绝，Agent note 升级为 instruction 的次数为 0。
+- 非简单编码任务在首次 mutation 前具有活动计划的比例为 100%；非法 plan 状态为 0。
+- completed plan item 的 evidence 可解析率 100%，UI 与 durable plan 状态一致率 100%。
+- 计划 UI 1,000 次更新不移动输入 point、用户 window-start 或产生残留 timer。
+- plan + active work note 的中位 prompt 开销不超过输入 token 的 5%。
+
+### 13.7 Review 与协作
 
 - critical/high 预埋缺陷 recall >= 85%，precision >= 80%。
 - Review Agent 写操作次数为 0。
 - 并行冲突静默覆盖次数为 0。
 - 合并后的变更全部重新通过 required verification。
 
-### 13.7 文档与可运维性
+### 13.8 文档与可运维性
 
 - 所有新增 public command、配置和状态都有用户文档。
 - `.agents/` 包含每阶段决策、实施证据、测试命令和未完成项。
@@ -748,14 +932,15 @@ Trace 至少新增：
 
 1. commit 和配置快照；
 2. 环境、Emacs 版本、backend capability；
-3. M9 基线与 M15 结果对比；
+3. M9 基线与 M17 结果对比；
 4. 每个任务类别及语言的成功率；
 5. token、延迟、tool error、retry 和 approval 分布；
 6. semantic corpus 指标；
 7. stale write、安全隔离和进程清理结果；
-8. Review precision/recall；
-9. canonical suite 完整计数；
-10. 失败任务分类和仍然存在的风险。
+8. context scope/compaction continuity 和 plan adherence/UI stability；
+9. Review precision/recall；
+10. canonical suite 完整计数；
+11. 失败任务分类和仍然存在的风险。
 
 报告不得只给总分，也不得删除失败样本。任何未达到门槛的项目必须使总状态为 failed 或 blocked，不能用平均分掩盖。
 
@@ -768,9 +953,14 @@ M9 baseline
   -> M10 versioned edits
   -> M11 semantic intelligence and repo map
   -> M12 verification and bounded repair
-  -> M13 execution isolation
-  -> M14 review and coding multi-agent
-  -> M15 rollout and acceptance
+  -> M13 structured work context and scoped rules
+  -> M14 durable TODO plans and native UI
+  -> M15 execution isolation
+  -> M16 review and coding multi-agent
+  -> M17 rollout and acceptance
 ```
 
-M10 可以在 M9 基线建立后与 M11 的后端合同设计并行调查，但共享的 Agent loop、tool caller 和 context 文件不得并行修改。M12 依赖 M10 和 M11；M14 依赖 M12 和 M13。最终默认开启任何能力前，必须先在 live Eval 中证明不降低成功率。
+M10 可以在 M9 基线建立后与 M11 的后端合同设计并行调查，但共享的 Agent loop、
+tool caller 和 context 文件不得并行修改。M12 依赖 M10 和 M11；M14 依赖 M13；
+M16 依赖 M12、M14 和 M15。最终默认开启任何能力前，必须先在 live Eval 中证明
+不降低成功率。

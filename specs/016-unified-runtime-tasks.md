@@ -14,6 +14,11 @@ objects so restart recovery never pretends a stale process is still running.
 
 ## Contract
 
+The task contract owns schedulable lifecycle and parent/child work identity. It
+does not own the ordered TODO steps inside a task; those are the versioned
+`chat-work-plan` projection defined by Spec 022. A task can exist without a plan
+for compatibility, while governed coding actions may require one.
+
 `chat-task` schema version 1 owns:
 
 - stable task and parent ids;

@@ -9,13 +9,15 @@
 ## Current Phase
 
 The completed M0-M8 Agent Runtime foundation is now followed by the active
-M9-M15 coding reliability roadmap. The new work is governed by
+M9-M17 coding reliability roadmap. The new work is governed by
 `.agents/10-active/programming-capability-reliability-plan.md`: establish an
 isolated real-task Eval baseline first, then add runtime-owned versioned edits,
 semantic code intelligence and repo mapping, project verification with bounded
-repair, tested execution isolation, read-only review and conflict-safe coding
-subagents. No capability becomes a default until the fixed task set shows that
-it does not reduce success, safety or responsiveness.
+repair, structured working context and scoped rules, durable TODO plans with a
+native progress UI, tested execution isolation, read-only review and
+conflict-safe coding subagents. M9-M12 are complete; M13 is active. No
+capability becomes a default until the fixed task set shows that it does not
+reduce success, safety or responsiveness.
 
 M0 through M8 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes the foundational contracts and Spec 014 orders their delivery through
@@ -67,7 +69,7 @@ second remote state store. Native session and job views read only through the
 bridge. Loading `chat.el` alone neither loads the integration nor starts a
 sidecar.
 
-The canonical offline suite passes 1567/1567. A separate foreground live smoke
+The canonical offline suite passes 1615/1615. A separate foreground live smoke
 negotiated protocol `2026-07-08`, read RuntimeSessions, shut down cleanly and
 left no App Server process behind.
 

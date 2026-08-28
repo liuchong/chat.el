@@ -317,6 +317,26 @@ Every phase must preserve:
 - conventional commit messages scoped to the completed phase;
 - a stage record containing behavior, tests, measurements and follow-up risks.
 
+## Coding Reliability Extension
+
+The completed M0-M8 runtime is the foundation for the active M9-M17 coding
+reliability program. Specs 021 and 022 add two missing contracts before
+execution isolation and review:
+
+- M9-M12: reproducible coding evaluation, versioned edits, semantic context
+  and bounded verification;
+- M13: typed context fragments, scoped AGENTS dependency graphs and
+  session/task working notes;
+- M14: durable TODO plans, governed mutations and native chat progress UI;
+- M15: capability-tested execution isolation;
+- M16: read-only review and conflict-safe coding collaboration;
+- M17: rollout, performance measurement and final acceptance.
+
+These phases use the existing event, task, checkpoint, execution, memory,
+Trace and Eval boundaries. Working notes do not become long-term memory, plans
+do not become a second task scheduler, and UI state does not become runtime
+truth.
+
 ## Current Baseline
 
 M0 through M8 are complete. The runtime provides versioned lifecycle,
@@ -324,4 +344,5 @@ capability, extension, task, content, recovery, memory, Trace and evaluation
 contracts. The optional Termini bridge adds negotiated remote projections and
 native controls without making `chat.el` depend on a Termini executable or
 creating a second remote task store. The canonical offline baseline is
-1539/1539; live provider and App Server checks remain opt-in.
+1615/1615 after coding reliability M12; live provider and App Server checks
+remain opt-in.

@@ -13,6 +13,12 @@ database.
 
 ## Memory Contract
 
+Memory is durable knowledge intended to remain useful beyond the current task.
+It is distinct from the session/task-scoped working notes in Spec 021. Working
+notes may hold current decisions, blockers and next steps, expire with the work
+scope and are never promoted to long-term memory or instruction authority
+without an explicit operation.
+
 `chat-memory-item` schema version 1 contains:
 
 - item ID and bounded text content;
