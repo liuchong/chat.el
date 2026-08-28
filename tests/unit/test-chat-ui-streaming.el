@@ -366,6 +366,33 @@ paints and reports no window worth painting into."
   "Following while someone types would take the cursor out from under them."
   (should-not (chat-ui-window-follows-p 4990 5000 4980 1 5000)))
 
+(ert-deftest chat-ui-manual-scroll-with-input-point-never-recenters ()
+  "An off-screen input cursor cannot reclaim a manually positioned window."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (dotimes (index 200)
+        (insert (format "history-%03d\n" index)))
+      (setq chat-ui--conversation-start (copy-marker (point-min)))
+      (setq chat-ui--messages-end (copy-marker (point-max)))
+      (insert "prompt> draft")
+      (setq chat-ui--input-overlay (copy-marker (- (point-max) 5) t))
+      (goto-char (point-max))
+      (set-window-point (selected-window) (point))
+      (goto-char (point-min))
+      (forward-line 19)
+      (set-window-start (selected-window) (point))
+      (let ((state (chat-ui--capture-live-window-state (current-buffer))))
+        (goto-char (marker-position chat-ui--messages-end))
+        (insert "new-output-1\nnew-output-2\n")
+        (set-marker chat-ui--messages-end (point))
+        (chat-ui--follow-live-output (current-buffer) state))
+      (should (equal "history-019"
+                     (save-excursion
+                       (goto-char (window-start (selected-window)))
+                       (buffer-substring-no-properties
+                        (line-beginning-position) (line-end-position))))))))
+
 (ert-deftest chat-ui-a-short-buffer-always-follows ()
   "A buffer smaller than the slack has no scrolled-up state to protect."
   (should (chat-ui-window-follows-p 1 20 nil 1 20)))

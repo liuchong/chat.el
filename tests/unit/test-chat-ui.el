@@ -2324,6 +2324,31 @@ recorded Markdown."
     (should (eq (get-text-property (point-min) 'face)
                 'chat-ui-role-assistant))))
 
+(ert-deftest chat-ui-visible-presentation-recovers-after-navigation ()
+  "A navigation command repairs both a missing prompt and visible role face."
+  (save-window-excursion
+    (chat-ui-auto-test--with-session
+      ;; The auto fixture exercises the UI primitives without enabling the
+      ;; major mode; this repair is itself gated to real chat buffers.
+      (setq-local major-mode 'chat-mode)
+      (switch-to-buffer (current-buffer))
+      (let ((inhibit-read-only t))
+        (goto-char (marker-position chat-ui--conversation-start))
+        (chat-ui--insert-role-label 'assistant)
+        (set-marker chat-ui--messages-end (point))
+        (let ((role-start (marker-position chat-ui--conversation-start)))
+          (remove-text-properties role-start (+ role-start 9) '(face nil))
+          (goto-char (marker-position chat-ui--input-overlay))
+          (delete-region (line-beginning-position) (point))
+          ;; Model the command that exposed this role label.  The repair is
+          ;; intentionally bounded to the visible transcript rather than
+          ;; rescanning a long conversation after every navigation command.
+          (set-window-start (selected-window) role-start)
+          (chat-ui--repair-visible-presentation)
+          (should (eq (get-text-property role-start 'face)
+                      'chat-ui-role-assistant))
+          (should (chat-ui--input-prompt-bounds)))))))
+
 (ert-deftest chat-ui-request-state-is-buffer-local-per-session ()
   "Test two chat buffers keep independent active run state."
   (with-temp-buffer

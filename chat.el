@@ -758,6 +758,12 @@ One table for every chat buffer.  Commands that need code capability are
 bound unconditionally and refuse politely without it, so a key does not
 appear and disappear depending on which session is in front of you.")
 
+;; `defvar' preserves an existing map when this package is reloaded.  Keep
+;; the emergency bindings current even in a long-running Emacs upgraded in
+;; place, which is exactly when a newly added cancellation key matters.
+(define-key chat-mode-map (kbd "C-g") #'chat-ui-cancel-response)
+(define-key chat-mode-map (kbd "C-c C-c") #'chat-ui-cancel-response)
+
 (defun chat--reading-session-name (&optional file)
   "Return a default session name for reading workflow commands."
   (let* ((path (or file default-directory))
@@ -855,6 +861,7 @@ the header and in which commands do anything."
   ;; stationary prompt appear halfway up the frame.  Values above 100
   ;; keep the point visible by the smallest possible scroll instead.
   (setq-local scroll-conservatively 101)
+  (add-hook 'post-command-hook #'chat-ui--repair-visible-presentation nil t)
   ;; Wrapping at word boundaries, and Markdown markers hidden.  Not
   ;; `visual-line-mode', which would rebind C-a away from
   ;; `chat-ui-beginning-of-input'.

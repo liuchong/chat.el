@@ -30,11 +30,16 @@ long streaming tail.
 - Window intent is captured before each live redraw. Only a window exactly at
   the previous buffer end follows output. Every manually scrolled window
   restores markers for its historical top line and point after the redraw.
-- An input cursor that becomes invisible is anchored at the bottom edge; it is
-  never recentered into the middle of the window.
+- A manually scrolled window remains fixed even when point is still in the
+  off-screen input area. The input cursor does not reclaim or recenter that
+  window; following resumes only after the reader returns to the live edge.
 - Role labels retain a semantic `chat-ui-role` property independently of their
-  face. Every live or full redraw repairs role faces and the input prompt from
-  semantic markers, so a display pass cannot leave the buffer half-usable.
+  face. Live and full redraws repair role faces and the input prompt from
+  semantic markers. A bounded post-command repair also restores the prompt and
+  only the role labels visible after navigation, avoiding a full-history scan.
+- Cancellation keys are rebound outside the mode-map initializer as well as
+  declared in it. Reloading the package in a long-running Emacs therefore
+  updates an already-existing keymap instead of leaving `C-c C-c` undefined.
 
 ## Markdown Rule
 
@@ -47,7 +52,7 @@ changed.
 
 ## Verification
 
-- canonical unit suite: 1765/1765 passed, zero skipped and zero unexpected
+- canonical unit suite: 1777/1777 passed, zero skipped and zero unexpected
 - deterministic integration: 2/2 passed; two credentialed provider checks
   skipped explicitly because credentials are absent
 - deterministic end-to-end: 2/2 passed
@@ -66,8 +71,12 @@ changed.
 
 - Capture user viewport intent before mutation; post-render proximity is not
   evidence that the user wanted to follow.
+- Point and viewport are separate state. Keeping an input point visible after
+  the reader scrolls into history violates the stronger viewport intent.
 - Persist semantic display identity separately from faces, then repair faces
-  idempotently after redraws.
+  idempotently after redraws and navigation.
+- A `defvar` initializer does not update an existing keymap during package
+  reload. Emergency bindings also need an idempotent top-level definition.
 - Permission outcomes belong to the transcript even when the model summarizes
   them incorrectly.
 - A performance fallback may reduce layout work, but it must preserve the

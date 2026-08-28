@@ -1796,6 +1796,26 @@ the buffer never stays half-usable until it is reopened."
        (marker-position chat-ui--conversation-start)
        (marker-position chat-ui--messages-end)))))
 
+(defun chat-ui--repair-visible-presentation ()
+  "Repair the prompt and visible role labels after an interactive command.
+
+Scrolling can expose text whose presentation properties were cleared by
+another display pass.  Limit role repair to visible windows so typing in a
+long transcript never scans the whole conversation."
+  (when (derived-mode-p 'chat-mode)
+    (let ((inhibit-read-only t))
+      (with-silent-modifications
+        (chat-ui--render-input-prompt)
+        (when (and (markerp chat-ui--conversation-start)
+                   (markerp chat-ui--messages-end))
+          (dolist (window (get-buffer-window-list (current-buffer) nil t))
+            (when (window-live-p window)
+              (chat-ui--repair-role-faces
+               (max (marker-position chat-ui--conversation-start)
+                    (window-start window))
+               (min (marker-position chat-ui--messages-end)
+                    (or (window-end window t) (point-max)))))))))))
+
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
   (goto-char (point-max))
@@ -3429,8 +3449,8 @@ yanked it back down."
 
 CAPTURED-STATE, when non-nil, was taken before the redraw.  Only windows
 that were exactly at the bottom then follow.  Other windows restore their
-old top line.  An input cursor that finally falls below the frame is put
-at the bottom edge instead of being recentered halfway up the window."
+old top line.  Point may remain in the input while that line is off-screen;
+manual reading position owns the window until the reader returns to it."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (let ((edge (and (markerp chat-ui--messages-end)
@@ -3448,13 +3468,8 @@ at the bottom edge instead of being recentered halfway up the window."
                           (set-window-start
                            window (marker-position (plist-get state :start)) t)
                           (set-window-point
-                           window (marker-position (plist-get state :point)))
-                          (when (and (plist-get state :input-point)
-                                     (not (pos-visible-in-window-p
-                                           (window-point window) window)))
-                            (with-selected-window window
-                              (goto-char (window-point window))
-                              (recenter -1)))))))
+                           window (marker-position
+                                   (plist-get state :point)))))))
                 (chat-ui--release-live-window-state captured-state))
             ;; Compatibility path for callers that only want to follow an
             ;; already drawn edge.  Event rendering always supplies the
