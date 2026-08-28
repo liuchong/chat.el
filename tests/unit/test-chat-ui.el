@@ -1439,6 +1439,26 @@ symbol and not its display name."
       (should (string-prefix-p "K " (chat-ui--input-prompt)))
       (should-not (string-match-p "send" (chat-ui--input-prompt))))))
 
+(ert-deftest chat-ui-the-prompt-draws-the-vendor-not-the-protocol-alias ()
+  "Two transports for one vendor must select the same packaged logo."
+  (let (drawn-provider)
+    (cl-letf (((symbol-function 'chat-ui--session-provider)
+               (lambda () 'deepseek-anthropic))
+              ((symbol-function 'chat-ui--session-model-name)
+               (lambda (&optional _session) "deepseek-v4-flash"))
+              ((symbol-function 'chat-llm-get-provider-config)
+               (lambda (_provider) '(:name "DeepSeek (Anthropic)")))
+              ((symbol-function 'chat-llm-provider-vendor)
+               (lambda (_provider) 'deepseek))
+              ((symbol-function 'chat-ui--model-choice-count)
+               (lambda () 1))
+              ((symbol-function 'chat-mark-provider-image)
+               (lambda (provider _glyph _face)
+                 (setq drawn-provider provider)
+                 nil)))
+      (chat-ui--prompt-model-segment)
+      (should (eq drawn-provider 'deepseek)))))
+
 (ert-deftest chat-ui-a-shell-line-does-not-advertise-a-model ()
   "RET there does not reach one, and naming it would train the eye to skip."
   (chat-ui-auto-test--with-session

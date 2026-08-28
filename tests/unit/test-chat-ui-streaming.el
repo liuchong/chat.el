@@ -340,6 +340,15 @@ paints and reports no window worth painting into."
 ;; every window looks like it is at the bottom and no arrangement of one
 ;; can tell the two cases apart.
 
+(ert-deftest chat-ui-live-output-never-recenters-the-input-point ()
+  "A growing reply scrolls by the minimum needed instead of jumping halfway."
+  (with-temp-buffer
+    (chat-mode)
+    ;; Emacs assigns the special never-recenter behaviour to values above
+    ;; 100.  Testing the buffer policy is deterministic in batch, unlike
+    ;; redisplay itself, which has no graphical window here.
+    (should (> scroll-conservatively 100))))
+
 (ert-deftest chat-ui-a-scrolled-reader-is-left-alone ()
   "Being pulled back to the bottom mid-read is worse than no following."
   (should-not (chat-ui-window-follows-p 100 400 nil 1 5000)))

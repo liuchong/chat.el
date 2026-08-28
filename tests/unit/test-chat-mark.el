@@ -90,6 +90,19 @@ that back."
   ;; And a provider we simply have no colour for inherits instead.
   (should-not (cdr (chat-mark-for-provider 'qwen "Qwen"))))
 
+(ert-deftest chat-mark-every-catalogued-vendor-has-a-packaged-logo ()
+  "Every vendor in the built-in logo catalogue has a readable SVG mark."
+  (dolist (provider chat-mark-packaged-provider-logos)
+    (let ((file (chat-mark--logo-file provider)))
+      (should file)
+      (should (file-readable-p file))
+      (should (string-equal "svg" (file-name-extension file))))))
+
+(ert-deftest chat-mark-protocol-aliases-share-the-vendor-logo ()
+  "A second protocol must not make one company look like another company."
+  (should (equal (chat-mark--logo-file 'kimi)
+                 (chat-mark--logo-file 'kimi-code))))
+
 (ert-deftest chat-mark-a-known-brand-colour-is-given-for-both-backgrounds ()
   "A brand colour unreadable on a dark theme is worse than no colour."
   (dolist (face '(chat-mark-brand-kimi
@@ -194,10 +207,29 @@ the glyph, which is a working prompt."
 The four listed glyphs were chosen because each looks like the logo it
 stands for.  Boxing them for the sake of every provider having a picture
 would replace a resemblance with a decoration."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
-    (dolist (provider (mapcar #'car chat-mark-provider-marks))
-      (should-not
-       (chat-mark-provider-image provider "\u2733" 'chat-mark-brand-claude)))))
+  (chat-test-with-temp-dir
+   (let ((chat-mark-logo-directory temp-dir)
+         (chat-mark-packaged-logo-directory temp-dir))
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
+       (clrhash chat-mark--image-cache)
+       (dolist (provider (mapcar #'car chat-mark-provider-marks))
+         (should-not
+          (chat-mark-provider-image
+           provider "\u2733" 'chat-mark-brand-claude)))))))
+
+(ert-deftest chat-mark-a-packaged-logo-follows-the-theme-foreground ()
+  "Monochrome logos remain visible on both light and dark backgrounds."
+  (skip-unless (image-type-available-p 'svg))
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'default-font-height) (lambda (&rest _) 19))
+            ((symbol-function 'face-foreground)
+             (lambda (&rest _) "#ABCDEF")))
+    (clrhash chat-mark--image-cache)
+    (let* ((image (chat-mark-provider-image 'deepseek "D" nil))
+           (data (and image (plist-get (cdr image) :data))))
+      (should data)
+      (should (string-match-p "#ABCDEF" data))
+      (should-not (string-match-p "currentColor" data)))))
 
 (ert-deftest chat-mark-a-real-logo-file-wins-over-anything-generated ()
   "Including over a listed glyph: the file is the reader saying which mark."

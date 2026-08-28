@@ -748,6 +748,11 @@ the header and in which commands do anything."
   :group 'chat
   (setq buffer-read-only nil)
   (setq truncate-lines nil)
+  ;; A live reply inserts above the input point.  Once that point leaves
+  ;; the window, Emacs normally recenters it; the resulting jump makes a
+  ;; stationary prompt appear halfway up the frame.  Values above 100
+  ;; keep the point visible by the smallest possible scroll instead.
+  (setq-local scroll-conservatively 101)
   ;; Wrapping at word boundaries, and Markdown markers hidden.  Not
   ;; `visual-line-mode', which would rebind C-a away from
   ;; `chat-ui-beginning-of-input'.

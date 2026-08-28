@@ -1511,12 +1511,14 @@ causing them.
 Clickable only when there is more than one provider to choose from.  A
 `mouse-face' over a menu of one promises a choice that does not exist."
   (let* ((provider (chat-ui--session-provider))
+         (vendor (and provider (chat-llm-provider-vendor provider)))
+         (mark-provider (or vendor provider))
          (config (and provider (chat-llm-get-provider-config provider)))
          (display-name (plist-get config :name))
          (model (or (chat-ui--session-model-name)
                     (and provider (symbol-name provider))
                     ""))
-         (mark (chat-mark-for-provider provider display-name))
+         (mark (chat-mark-for-provider mark-provider display-name))
          (switchable (> (chat-ui--model-choice-count) 1))
          (shown (truncate-string-to-width
                  model chat-ui-prompt-model-width nil nil "\u2026"))
@@ -1527,7 +1529,7 @@ Clickable only when there is more than one provider to choose from.  A
     (concat
      (chat-ui--prompt-mark
       (car mark) (cdr mark)
-      (chat-mark-provider-image provider (car mark) (cdr mark)))
+      (chat-mark-provider-image mark-provider (car mark) (cdr mark)))
      (apply #'chat-ui--prompt-segment
             shown
             'face 'chat-ui-prompt-model

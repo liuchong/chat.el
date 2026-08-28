@@ -207,15 +207,28 @@ platform's own accent."
 ;; means the glyph stands, which is the previous behaviour exactly.
 
 (defcustom chat-mark-logo-directory (expand-file-name "~/.chat/logos/")
-  "Where a provider's own logo file is looked for.
+  "Where provider logo overrides are looked for.
 
 A file named after the provider symbol -- `deepseek.svg', `kimi.png' --
-is drawn in place of anything generated here.  No logo ships with
-chat.el: a vendor's mark belongs to the vendor, and a redrawn
-approximation of one is a worse answer than an honest badge.  Drop the
-real file in and the prompt shows the real mark."
+is drawn before the built-in logo.  This keeps local replacements and
+future providers possible without changing chat.el."
   :type 'directory
   :group 'chat-mark)
+
+(defconst chat-mark-packaged-logo-directory
+  (expand-file-name
+   "../../assets/provider-logos/"
+   (file-name-directory (or load-file-name buffer-file-name default-directory)))
+  "Directory containing logos for the providers chat.el registers.")
+
+(defconst chat-mark-packaged-provider-logos
+  '(ark claude deepseek doubao gemini glm grok hunyuan kimi kimi-code
+        minimax mistral openai qwen)
+  "Provider identities covered by the built-in logo set.")
+
+(defconst chat-mark-provider-logo-aliases
+  '((kimi-code . kimi))
+  "Provider identities that intentionally share a packaged logo.")
 
 (defcustom chat-mark-logo-enabled t
   "Whether provider marks may be drawn as images.
@@ -257,14 +270,31 @@ in one session -- but a cache with no bound is a leak that happens to be
 slow, and this file has no business being the reason a long session
 grows.")
 
+(defun chat-mark--logo-file-in (directory providers)
+  "Return the first logo in DIRECTORY matching one of PROVIDERS."
+  (when (file-directory-p directory)
+    (cl-loop for provider in providers
+             thereis
+             (cl-loop for extension in chat-mark--logo-extensions
+                      for path = (expand-file-name
+                                  (format "%s.%s" provider extension)
+                                  directory)
+                      when (file-readable-p path) return path))))
+
 (defun chat-mark--logo-file (provider)
-  "Return the path of PROVIDER's own logo file, or nil when there is none."
-  (when (and provider (file-directory-p chat-mark-logo-directory))
-    (cl-loop for extension in chat-mark--logo-extensions
-             for path = (expand-file-name
-                         (format "%s.%s" provider extension)
-                         chat-mark-logo-directory)
-             when (file-readable-p path) return path)))
+  "Return the preferred logo file for PROVIDER, or nil when there is none.
+
+A user override named for the exact provider wins, followed by its logo
+alias.  Packaged files use the same order."
+  (when provider
+    (let ((providers (delete-dups
+                      (list provider
+                            (or (cdr (assq provider
+                                           chat-mark-provider-logo-aliases))
+                                provider)))))
+      (or (chat-mark--logo-file-in chat-mark-logo-directory providers)
+          (chat-mark--logo-file-in
+           chat-mark-packaged-logo-directory providers)))))
 
 (defun chat-mark--escape-xml (text)
   "Return TEXT with the three characters XML cannot take literally escaped."
@@ -317,13 +347,22 @@ be checked as a string without a frame to draw it on."
   "Return an image of PROVIDER's mark, or nil when none can be made.
 
 A logo file wins over a drawn badge for any provider, including one whose
-glyph already resembles its logo: a reader who put the real mark in the
-directory asked for the real mark.  Failing that, a badge needs a colour
-to fill -- and an unknown brand colour is left unknown here for the same
-reason `chat-mark-provider-faces' leaves it out, rather than being
-guessed at so that every row can have a picture."
+glyph already resembles its logo.  A monochrome SVG follows the theme by
+replacing `currentColor' before it is rasterised.  Failing that, a badge
+needs a known brand colour; an unknown provider is never assigned one."
   (if-let* ((file (chat-mark--logo-file provider)))
-      (create-image file nil nil :height size :ascent 'center :scale 1)
+      (if (and colour (string-equal (file-name-extension file) "svg"))
+          (with-temp-buffer
+            (insert-file-contents file)
+            (let ((source (buffer-string)))
+              (if (string-match-p "currentColor" source)
+                  (create-image
+                   (replace-regexp-in-string
+                    "currentColor" colour source t t)
+                   'svg t :height size :ascent 'center :scale 1)
+                (create-image file nil nil
+                              :height size :ascent 'center :scale 1))))
+        (create-image file nil nil :height size :ascent 'center :scale 1))
     (when colour
       (create-image (chat-mark-badge-svg glyph colour size)
                     'svg t :ascent 'center :scale 1))))
@@ -345,23 +384,22 @@ the glyph."
   "Return an image for PROVIDER's mark, or nil to leave GLYPH as it is.
 
 GLYPH goes inside a generated badge; FACE supplies the colour it is
-filled with, resolved now so that a theme change is picked up on the next
-redraw.
+filled with.  A packaged monochrome logo uses FACE or the default text
+foreground, resolved now so that a theme change is picked up on redraw.
 
 Returns nil, never a placeholder, in every case it cannot serve: images
 switched off, no graphical frame, no librsvg, a glyph that is already a
-recognisable mark with no logo file to better it, a provider with no
-brand colour, or a frame that cannot be measured.  The caller puts what
-comes back over the glyph, so nil is not a failure to handle -- it is the
-glyph, which is what was drawn before any of this existed."
+recognisable mark with no logo file to better it, an unknown provider
+without a logo or brand colour, or a frame that cannot be measured.  The
+caller puts what comes back over the glyph, so nil leaves the glyph."
   (when (and chat-mark-logo-enabled provider (display-graphic-p))
     (let ((file (chat-mark--logo-file provider))
-          (colour (and face (face-foreground face nil 'default))))
+          (colour (face-foreground (or face 'default) nil 'default)))
       ;; Establish that there is something to draw before measuring the
       ;; frame to draw it at.  Most calls arrive with nothing to draw, and
       ;; the measurement is the one step here that can fail.
       (when (or file
-                (and colour
+                (and face colour
                      (image-type-available-p 'svg)
                      ;; A listed glyph resembles the logo already, and a
                      ;; letter in a box is not an improvement on it.  The
