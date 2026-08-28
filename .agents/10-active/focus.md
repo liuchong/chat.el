@@ -17,7 +17,11 @@ The fixed corpus now contains one deterministic large-repository task with
 10,000 indexed Python files, measured rather than trusted from its tag.
 Completion now requires separate immutable M9 `baseline` and M17 `current`
 campaigns, each with 30-by-5 live results and trusted provider token usage;
-those result sets are not currently available.
+those result sets are not currently available. A no-network preflight confirms
+that the current campaign harness can load the fixed 30-task manifest over M9
+revision `e4e6cbc` and declare 150 expected results after explicitly raising the
+historical checkout's inherited fixture limit to 12,000. No model was called,
+so this only closes the harness-compatibility uncertainty.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

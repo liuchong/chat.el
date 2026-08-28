@@ -215,6 +215,9 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 具体 model、五次重复、campaign id 和角色。M9 checkout 使用 `baseline`，M17
 checkout 使用 `current`；两边必须使用同一 manifest、模型和 capability snapshot。
 运行前 tracked worktree 必须干净，避免无法复现的本地修改冒充固定 revision。
+历史 M9 checkout 会保留当时的 2,000 文件 Eval 上限；加载当前 campaign harness
+后必须显式把 `chat-coding-eval-max-fixture-files` 设为 12,000，才能接受当前固定
+10,000-indexed-file task。只生成 `campaign.json` 是兼容性预检，不算 live trial。
 
 每次运行只写入 `~/.chat/evaluations/coding-campaigns/<campaign-id>/`。目录中的
 `campaign.json` 在开始前固定模型、profile、transport、approval mode、manifest

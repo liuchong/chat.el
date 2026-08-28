@@ -76,9 +76,14 @@ and workspace cleanup.
 ## Blocking Evidence
 
 No immutable M9 or M17 live campaign exists on this machine. The running Emacs
-session has configured providers, but a clean historical M9 runtime with the
-current campaign harness has not been prepared, and no 300-trial comparison has
-been executed. Therefore the required M9 and M17 30-by-5 comparison and the 15
+session has configured providers, but no 300-trial comparison has been executed.
+A no-network compatibility preflight loaded the current campaign harness over
+the historical M9 implementation revision
+`e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`. With the current corpus limit of
+12,000 files injected explicitly, it loaded all 30 tasks and produced a
+`baseline` descriptor with 150 expected results. This proves the manifest and
+campaign contracts can run against M9; it is not a model trial and supplies no
+token evidence. Therefore the required M9 and M17 30-by-5 comparison and the 15
 percent large-repository token reduction gate remain blocked by missing live
 token evidence. They are not reported as failed model trials and are not
 replaced with synthetic data.
@@ -91,9 +96,12 @@ comparison and the blocked large-repository token gate. Its overall status is
 
 ## Unblock Procedure
 
-1. Configure one provider and freeze provider, concrete model, capability
-   snapshot, profile and task revisions.
-2. Run `M-x chat-coding-eval-run-live` with five repetitions in a fresh M9
-   `baseline` campaign and again in a fresh M17 `current` campaign.
-3. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
-4. Mark M17 complete only if the immutable aggregate result is `passed`.
+1. Freeze one configured provider, concrete model, capability snapshot, profile
+   and task revisions.
+2. In the clean M9 checkout, load the current campaign harness and set
+   `chat-coding-eval-max-fixture-files` to 12,000 before loading the fixed
+   manifest. Run five repetitions in a fresh `baseline` campaign.
+3. In the clean M17 checkout, run `M-x chat-coding-eval-run-live` with the same
+   provider, concrete model and five repetitions in a fresh `current` campaign.
+4. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
+5. Mark M17 complete only if the immutable aggregate result is `passed`.

@@ -760,7 +760,10 @@ merge gate；合并后重新运行 M12 verification。决策与验收证据见 D
 10,000 文件基准和严格不可变验收聚合已经完成。性能门槛通过；30-by-5 live
 对比和 large-repo token usage 对照因真实模型结果缺失保持 blocked。固定
 large-repo task 已完成并通过实际物化集成测试。实现决策见 Decision 0031，
-实测和解锁步骤见 `stage-2026-08-28-productized-coding-acceptance.md`。
+实测和解锁步骤见 `stage-2026-08-28-productized-coding-acceptance.md`。历史 M9
+revision `e4e6cbc` 已通过当前 harness 的无网络 30-task/150-result 契约预检；
+因旧 checkout 会保留 2,000 文件上限，baseline 运行必须显式注入当前 12,000
+文件上限。该预检不替代任何真实模型样本或 token evidence。
 
 #### 目标
 

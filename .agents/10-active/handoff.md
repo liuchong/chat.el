@@ -18,6 +18,9 @@
 - Keep M17 blocked until isolated M9 baseline and M17 current campaigns each
   contain a comparable 30-by-5 live result set with trusted token usage
 - The fixed tagged large-repository task now materializes 10,000 indexed files
+- The M9 revision `e4e6cbc` passes a no-network current-harness preflight for
+  30 tasks and 150 expected results when its inherited fixture limit is raised
+  explicitly to 12,000; this is compatibility evidence, not live Eval evidence
 - Reproduce the aggregate with `M-x chat-coding-acceptance-run-final`
 
 ## Avoid
