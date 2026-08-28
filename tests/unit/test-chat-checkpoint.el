@@ -33,6 +33,25 @@
     (chat-session-save session)
     session))
 
+(ert-deftest chat-checkpoint-create-normalizes-persisted-id-vectors ()
+  "A decoded checkpoint ID array remains appendable on the next Turn."
+  (chat-test-with-temp-dir
+   (chat-checkpoint-test--repository temp-dir)
+   (let* ((chat-checkpoint-directory
+           (expand-file-name "checkpoints/" chat-state-dir))
+          (chat-checkpoint--registry (make-hash-table :test 'equal))
+          (default-directory temp-dir)
+          (session (chat-checkpoint-test--session temp-dir))
+          (prior-ids ["checkpoint-old-1" "checkpoint-old-2"]))
+     (chat-session-metadata-set session 'checkpoint-ids prior-ids)
+     (let ((checkpoint (chat-checkpoint-create session :turn-id 3))
+           (ids (chat-session-metadata-get session 'checkpoint-ids)))
+       (should (listp ids))
+       (should (equal ids
+                      (list "checkpoint-old-1"
+                            "checkpoint-old-2"
+                            (chat-checkpoint-id checkpoint))))))))
+
 (ert-deftest chat-checkpoint-owned-rollback-preserves-preexisting-dirty-work ()
   "Rollback restores one owned file and leaves unrelated user dirt intact."
   (chat-test-with-temp-dir

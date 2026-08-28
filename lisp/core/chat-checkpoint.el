@@ -421,8 +421,9 @@
            :git-status (cadr git)
            :metadata metadata)))
     (chat-checkpoint-save checkpoint)
-    (let ((ids (copy-sequence
-                (or (chat-session-metadata-get session 'checkpoint-ids) nil))))
+    (let ((ids (append
+                (or (chat-session-metadata-get session 'checkpoint-ids) nil)
+                nil)))
       (unless (member (chat-checkpoint-id checkpoint) ids)
         (setq ids (append ids (list (chat-checkpoint-id checkpoint)))))
       (chat-session-metadata-set session 'checkpoint-ids ids)
