@@ -242,8 +242,14 @@
              (campaignManifestDigest . "manifest")
              (implementationRevision . "revision-a")))
           (results
-           (cl-loop repeat 150 collect
-                    (chat-eval-result-create-record :metadata metadata))))
+           (cl-loop for task below 30 append
+                    (cl-loop for repetition from 1 to 5 collect
+                             (chat-eval-result-create-record
+                              :metadata
+                              (append
+                               `((taskId . ,(format "task-%02d" task))
+                                 (repetition . ,repetition))
+                               (copy-tree metadata)))))))
      (make-directory directory t)
      (with-temp-file (expand-file-name "campaign.json" directory)
        (insert
@@ -269,8 +275,19 @@
      (should
       (eq 'passed
           (chat-coding-acceptance-gate-status
-          (chat-coding-acceptance--campaign-directory-gate
+           (chat-coding-acceptance--campaign-directory-gate
             directory results "baseline"))))
+     (setf (alist-get 'repetition
+                      (chat-eval-result-metadata (car results)))
+           2)
+     (should
+      (eq 'failed
+          (chat-coding-acceptance-gate-status
+           (chat-coding-acceptance--campaign-directory-gate
+            directory results "baseline"))))
+     (setf (alist-get 'repetition
+                      (chat-eval-result-metadata (car results)))
+           1)
      (setf (alist-get 'campaignId
                       (chat-eval-result-metadata (car results)))
            "mismatch")

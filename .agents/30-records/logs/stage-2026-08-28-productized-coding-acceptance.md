@@ -22,6 +22,11 @@
   completion records
 - campaign gates that reject mixed roles, manifests, configurations or
   implementation revisions
+- resumable live campaigns that validate the frozen descriptor, model-specific
+  capability snapshot and every durable repetition/task identity before only
+  scheduling missing trials
+- exclusive local run locks with stale-process recovery; cancellation stays
+  resumable and only a complete unique matrix can create terminal evidence
 - closed failure taxonomy: model ability, context omission, tool error,
   verification error, permission block and infrastructure
 - standalone 10,000-file benchmark covering cold index, single-file update,
@@ -85,7 +90,10 @@ all 150 expected results: 3 passed, 107 failed, 23 errored and 17 cancelled.
 This is real baseline evidence and must not be rewritten as a synthetic or
 successful result.
 
-The comparable immutable M19 `current` campaign is still absent. Therefore the
+The first M19 `current` attempt, `m19-current-20260828T210105`, stopped after
+the first repetition produced 30/150 terminal results at revision `8c45301`.
+It has no `completion.json`, remains preserved as incomplete evidence and cannot
+be mixed with the post-change implementation revision. Therefore the
 required paired comparison and the 15 percent large-repository token-reduction
 gate remain blocked. The M9 result alone is not enough to attribute failures to
 model ability, runtime behavior or infrastructure; the typed M19 comparison and
@@ -106,5 +114,8 @@ comparison and the blocked large-repository token gate. Its overall status is
    manifest. Run five repetitions in a fresh `baseline` campaign.
 3. In the clean M19 checkout, run `M-x chat-coding-eval-run-live` with the same
    provider, concrete model and five repetitions in a fresh `current` campaign.
-4. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
-5. Mark M19 complete only if the immutable aggregate result is `passed`.
+4. If the process is interrupted, run `M-x chat-coding-eval-resume-live` on that
+   exact directory. Do not reuse the earlier 30-result campaign after the
+   implementation revision changes.
+5. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
+6. Mark M19 complete only if the immutable aggregate result is `passed`.

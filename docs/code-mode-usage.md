@@ -212,7 +212,7 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 
 在 Emacs 中，`M-x chat-coding-acceptance-run-performance` 会把性能门槛写成
 不可变 Eval。最终 live 验收使用 `M-x chat-coding-eval-run-live`，固定 provider、
-具体 model、五次重复、campaign id 和角色。M9 checkout 使用 `baseline`，M17
+具体 model、五次重复、campaign id 和角色。M9 checkout 使用 `baseline`，M19
 checkout 使用 `current`；两边必须使用同一 manifest、模型和 capability snapshot。
 运行前 tracked worktree 必须干净，避免无法复现的本地修改冒充固定 revision。
 历史 M9 checkout 会保留当时的 2,000 文件 Eval 上限；加载当前 campaign harness
@@ -220,13 +220,16 @@ checkout 使用 `current`；两边必须使用同一 manifest、模型和 capabi
 10,000-indexed-file task。只生成 `campaign.json` 是兼容性预检，不算 live trial。
 
 每次运行只写入 `~/.chat/evaluations/coding-campaigns/<campaign-id>/`。目录中的
-`campaign.json` 在开始前固定模型、profile、transport、approval mode、manifest
-digest、实现 revision、任务数和预期结果数；每条 trial 保存相同的 configuration
-digest；全部结束后才生成 `completion.json`。已存在的 campaign 目录不能复用。
-分别得到 150 条 M9 与 150 条 M17 结果后运行
+`campaign.json` 在开始前固定模型及其 capability snapshot、profile、transport、
+approval mode、manifest digest、实现 revision、任务数和预期结果数；每条 trial
+保存相同的 configuration digest 和唯一 repetition/task 身份；全部结束后才生成
+`completion.json`。进程中断或主动取消后，用
+`M-x chat-coding-eval-resume-live` 校验并只补齐缺失 trial。恢复不会接受不同
+manifest、revision、运行配置、重复身份或并发执行，也不能向已有
+`completion.json` 的 campaign 追加结果。分别得到 150 条 M9 与 150 条 M19 结果后运行
 `M-x chat-coding-acceptance-run-final`。验收会拒绝混合 campaign、相同实现
-revision、不同 manifest、缺失可信 token usage 或不真实的 large-repo 样本，结果
-不会被误判为通过。
+revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 token usage 或
+不真实的 large-repo 样本，结果不会被误判为通过。
 
 固定 manifest 保持 30 个任务的语言和类别平衡，其中 `python-locate` 是
 `large-repo` task。版本化生成描述符在隔离 workspace 内物化 10,000 个可索引

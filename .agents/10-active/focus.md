@@ -16,7 +16,7 @@ permission state: research and plan-state writes are allowed, source mutation
 and unknown effects fail closed, and approval is tied to the exact submitted
 plan revision through a user-only path. Goal and Plan Mode share the existing
 session/event/context/UI infrastructure rather than creating parallel stores.
-The canonical suite passes 1760/1760 after migration, scope-isolation,
+The canonical suite passes 1765/1765 after migration, scope-isolation,
 revision-conflict, 20-turn/two-compaction recovery, 1,000-update UI tests and
 the live-chat stability regressions recorded in the current stage log.
 
@@ -30,9 +30,16 @@ The fixed corpus now contains one deterministic large-repository task with
 Completion now requires separate immutable M9 `baseline` and M19 `current`
 campaigns, each with 30-by-5 live results and trusted provider token usage. The
 M9 baseline campaign is now complete at revision `e4e6cbc`: 150/150 terminal
-results, with 3 passed, 107 failed, 23 errored and 17 cancelled. The comparable
-M19 current campaign is still missing, so no paired capability or token claim is
-accepted yet.
+results, with 3 passed, 107 failed, 23 errored and 17 cancelled. The first M19
+current attempt at revision `8c45301` was interrupted after its first 30/150
+terminal results and has no completion record. It remains preserved as
+incomplete evidence and cannot be mixed with another revision. Campaigns can
+now resume only missing repetition/task identities after validating the frozen
+descriptor, manifest, implementation revision, model capability snapshot,
+runtime configuration and every durable result. Concurrent runs are locked out,
+cancellation leaves resumable evidence, and completion requires the exact
+unique matrix. A fresh post-change M19 current campaign is still required, so no
+paired capability or token claim is accepted yet.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

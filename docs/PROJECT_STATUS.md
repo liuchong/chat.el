@@ -37,10 +37,13 @@ control. Independent Plan Mode enforces read-only research until the user
 approves the exact submitted work-plan revision. M19 runtime phases, actionable
 diagnostics, strict acceptance aggregation and the 10,000-file performance path
 are implemented. Live coding Eval now writes each run to a fresh versioned
-campaign with immutable configuration and completion records, and acceptance
-rejects mixed campaigns. The immutable M9 baseline is complete with 150/150
-results; final acceptance remains blocked until the comparable M19 current
-campaign and paired trusted-token comparison exist. The fixed corpus now
+campaign with immutable configuration and completion records. Interrupted
+campaigns can resume only validated missing repetition/task identities; stale
+locks recover, concurrent runs and configuration drift fail closed, and terminal
+evidence requires the exact unique result matrix. The immutable M9 baseline is
+complete with 150/150 results. An initial M19 attempt stopped after 30/150 and
+remains incomplete evidence; final acceptance remains blocked until a complete
+post-change M19 current campaign and paired trusted-token comparison exist. The fixed corpus now
 includes a measured 10,000-indexed-file large-repository task.
 
 ## Implemented Areas
@@ -213,8 +216,8 @@ includes a measured 10,000-indexed-file large-repository task.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1760 regression tests discovered
-- 1760 passing
+- 1765 regression tests discovered
+- 1765 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -222,7 +225,8 @@ includes a measured 10,000-indexed-file large-repository task.
 - deterministic coding-fixture and workflow/MCP integration: 2 passing;
   2 online provider checks skip when credentials are absent
 - primary-loop MCP and nested-agent end-to-end paths: 2 passing
-- five built-in offline Eval scenarios passing
+- five built-in offline Eval scenarios passing; run them directly with
+  `chat-eval-run-all` after loading `chat.el`
 - 10,000-file performance gates passing: 31.0ms maximum wall slice and
   111.3ms warm query p95 in the recorded M19 environment
 
@@ -374,8 +378,9 @@ includes a measured 10,000-indexed-file large-repository task.
 
 ## Recommended Next Work
 
-- finish the isolated M9 historical 30-by-5 live campaign, then run the M19
-  current campaign with the same frozen provider/model/capability identity
+- run a fresh post-change M19 current 30-by-5 campaign with the same frozen
+  provider/model/capability identity as the completed M9 baseline; resume only
+  that campaign's validated missing trials if interrupted
 - record the immutable comparison, trusted usage sample and failure taxonomy;
   do not mark M19 complete before every strict acceptance gate passes
 - make true provider streaming and fallback behavior share one transport abstraction

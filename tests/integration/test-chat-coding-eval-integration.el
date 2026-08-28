@@ -42,6 +42,16 @@
                                (chat-coding-eval-suite-state-current suite))))))
        (should completed))
      (should (= 60 (length results)))
+     (should (= 30 (cl-count
+                    1 results
+                    :key (lambda (result)
+                           (alist-get 'repetition
+                                      (chat-eval-result-metadata result))))))
+     (should (= 30 (cl-count
+                    2 results
+                    :key (lambda (result)
+                           (alist-get 'repetition
+                                      (chat-eval-result-metadata result))))))
      (should (seq-every-p
               (lambda (result)
                 (and (eq 'passed (chat-eval-result-status result))

@@ -43,9 +43,11 @@ fixed manifest identity frozen by the completed M9 baseline, create one fresh
 immutable `current` campaign, run M19 over all 30 tasks five times, then record
 the strict immutable paired aggregate. The current campaign must have one clean
 implementation revision, one manifest digest, 150 results and a terminal
-completion record. The corpus includes a versioned task with 10,000 measured
-indexed files. Do not mark M19 complete while the current campaign or its
-trusted token sample is absent.
+completion record. If its process is interrupted, resume that exact campaign
+with `chat-coding-eval-resume-live`; never mix the earlier 30/150 attempt bound
+to revision `8c45301` into the new result set. The corpus includes a versioned
+task with 10,000 measured indexed files. Do not mark M19 complete while the
+current campaign or its trusted token sample is absent.
 
 ## Stage Gate
 

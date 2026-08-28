@@ -117,6 +117,32 @@
           (json-read-file file))
       (error nil))))
 
+(defun chat-coding-acceptance--campaign-trial-key (result repetitions)
+  "Return validated task/repetition key for RESULT within REPETITIONS."
+  (let* ((metadata (chat-eval-result-metadata result))
+         (executor (chat-coding-acceptance--field metadata 'executor))
+         (task-id (chat-coding-acceptance--field metadata 'taskId))
+         (repetition
+          (or (chat-coding-acceptance--field metadata 'repetition)
+              (chat-coding-acceptance--field executor 'repetition))))
+    (when (and (stringp task-id) (not (string-empty-p task-id))
+               (integerp repetition) (> repetition 0)
+               (<= repetition repetitions))
+      (cons task-id repetition))))
+
+(defun chat-coding-acceptance--complete-trial-matrix-p
+    (results task-count repetitions)
+  "Return non-nil for a complete unique RESULT trial matrix."
+  (let ((keys (mapcar
+               (lambda (result)
+                 (chat-coding-acceptance--campaign-trial-key
+                  result repetitions))
+               results)))
+    (and (seq-every-p #'identity keys)
+         (= (length keys) (* task-count repetitions))
+         (= (length (delete-dups (copy-sequence keys))) (length keys))
+         (= (length (delete-dups (mapcar #'car keys))) task-count))))
+
 (defun chat-coding-acceptance--campaign-directory-gate
     (directory results expected-role)
   "Validate campaign DIRECTORY and RESULTS for EXPECTED-ROLE."
@@ -134,6 +160,12 @@
          (implementation-revision
           (alist-get 'implementationRevision descriptor))
          (expected (alist-get 'expectedResultCount descriptor))
+         (task-count (alist-get 'taskCount descriptor))
+         (repetitions (alist-get 'repetitions descriptor))
+         (complete-trial-matrix
+          (and (integerp task-count) (integerp repetitions)
+               (chat-coding-acceptance--complete-trial-matrix-p
+                results task-count repetitions)))
          (results-match
           (and results
                (seq-every-p
@@ -170,6 +202,7 @@
                (= (or (alist-get 'expectedResultCount completion) 0) 150)
                (= (or (alist-get 'resultCount completion) 0) 150)
                (= (length results) 150)
+               complete-trial-matrix
                results-match
                (eq t (alist-get 'complete completion)))))
     (chat-coding-acceptance-gate-create
@@ -184,7 +217,8 @@
        (expectedResults . ,expected)
        (recordedResults . ,(and completion
                                 (alist-get 'resultCount completion)))
-       (loadedResults . ,(length results)))
+       (loadedResults . ,(length results))
+       (completeTrialMatrix . ,(and complete-trial-matrix t)))
      :evidence
      (unless passed
        "Use a fresh campaign directory and wait for completion.json."))))

@@ -36,6 +36,33 @@
    :timeout-seconds (or timeout 2)
    :judges judges))
 
+(defun chat-coding-eval-test--small-manifest (root)
+  "Create and return a two-task campaign manifest below ROOT."
+  (let ((fixture (expand-file-name "fixture/" root))
+        (manifest (expand-file-name "manifest.json" root)))
+    (make-directory fixture t)
+    (write-region "unchanged\n" nil
+                  (expand-file-name "sample.txt" fixture) nil 'silent)
+    (with-temp-file manifest
+      (insert
+       (json-encode
+        `((schemaVersion . 1)
+          (tasks
+           . [((id . "resume-one") (revision . 1)
+               (category . "read-only-review") (language . "text")
+               (description . "first") (fixtureId . "resume-v1")
+               (fixture . "fixture") (prompt . "Inspect the fixture.")
+               (allowedPaths . ["sample.txt"]) (timeoutSeconds . 2)
+               (judges . [((type . "no-change") (name . "unchanged"))]))
+              ((id . "resume-two") (revision . 1)
+               (category . "read-only-review") (language . "text")
+               (description . "second") (fixtureId . "resume-v1")
+               (fixture . "fixture") (prompt . "Inspect the fixture again.")
+               (allowedPaths . ["sample.txt"]) (timeoutSeconds . 2)
+               (judges . [((type . "no-change")
+                            (name . "unchanged"))]))])))))
+    manifest))
+
 (ert-deftest chat-coding-eval-suite-has-fixed-balanced-coverage ()
   "The baseline contains thirty tasks with balanced category coverage."
   (let* ((tasks (chat-coding-eval-load-suite
@@ -178,13 +205,9 @@
      (should (= 64 (length (alist-get 'configurationDigest descriptor))))
      (should (equal "baseline-revision"
                     (alist-get 'implementationRevision descriptor)))
-     (chat-coding-eval--complete-campaign campaign nil)
-     (let ((json-object-type 'alist)
-           (json-key-type 'symbol))
-       (should (= 0 (alist-get 'resultCount
-                               (json-read-file
-                                (expand-file-name "completion.json"
-                                                  directory))))))
+     (should-error (chat-coding-eval--complete-campaign campaign nil))
+     (should-not (file-exists-p
+                  (expand-file-name "completion.json" directory)))
      (should-error
       (chat-coding-eval-prepare-campaign
        "baseline-001" 'provider-a "model-a" 5
@@ -214,9 +237,166 @@
      (should (equal "campaign-001"
                     (alist-get 'campaignId
                                (chat-eval-result-metadata (car results)))))
+     (should (= 1 (alist-get 'repetition
+                             (chat-eval-result-metadata (car results)))))
      (should (= 1 (length (directory-files campaign-directory nil
                                            "\\.json\\'"))))
      (should-not (file-directory-p chat-eval-directory)))))
+
+(ert-deftest chat-coding-eval-resume-runs-only-missing-trials ()
+  "Resume validates disk state, fills missing identities and completes once."
+  (chat-coding-eval-test-with-runtime
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (manifest (chat-coding-eval-test--small-manifest temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "resume-001" 'provider-a "model-a" 2 manifest
+            :implementation-revision "resume-revision"))
+          (directory (plist-get campaign :directory))
+          first-results
+          (resume-calls 0))
+     (chat-coding-eval--run-suite-entries
+      (list (cons 1 (car (plist-get campaign :tasks))))
+      (lambda (_task _workspace done)
+        (funcall done 'completed "inspected" nil))
+      :result-directory directory
+      :result-metadata (plist-get campaign :result-metadata)
+      :on-complete (lambda (results _state) (setq first-results results)))
+     (should (chat-coding-eval-test--wait (lambda () first-results)))
+     (should (= 1 (length first-results)))
+     (cl-letf (((symbol-function 'chat-llm-provider-configured-p)
+                (lambda (_provider) t))
+               ((symbol-function 'chat-coding-eval-agent-executor)
+                (lambda (_provider _model)
+                  (lambda (_task _workspace done)
+                    (cl-incf resume-calls)
+                    (funcall done 'completed "inspected" nil)))))
+       (chat-coding-eval-resume-live
+        directory manifest "resume-revision")
+       (should
+        (chat-coding-eval-test--wait
+         (lambda ()
+           (file-exists-p (expand-file-name "completion.json" directory)))))
+       (should (= 3 resume-calls))
+       (should-error
+        (chat-coding-eval-resume-live
+         directory manifest "resume-revision")))
+     (let* ((loaded (chat-coding-eval--load-campaign-results campaign))
+            (results (plist-get loaded :results))
+            (completion
+             (chat-coding-eval--read-json-file
+              (expand-file-name "completion.json" directory))))
+       (should (= 4 (length results)))
+       (should (= 4 (alist-get 'resultCount completion)))
+       (should (eq t (alist-get 'complete completion)))
+       (should (equal '(1 1 2 2)
+                      (mapcar
+                       (lambda (result)
+                         (alist-get 'repetition
+                                    (chat-eval-result-metadata result)))
+                       results))))
+     (should-not
+      (file-exists-p (chat-coding-eval--campaign-lock-file directory))))))
+
+(ert-deftest chat-coding-eval-resume-rejects-duplicate-trial-identity ()
+  "Two durable records cannot claim the same repetition and scenario."
+  (chat-coding-eval-test-with-runtime
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (manifest (chat-coding-eval-test--small-manifest temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "duplicate-001" 'provider-a "model-a" 1 manifest
+            :implementation-revision "resume-revision"))
+          (directory (plist-get campaign :directory))
+          results)
+     (chat-coding-eval--run-suite-entries
+      (list (cons 1 (car (plist-get campaign :tasks))))
+      (lambda (_task _workspace done)
+        (funcall done 'completed "inspected" nil))
+      :result-directory directory
+      :result-metadata (plist-get campaign :result-metadata)
+      :on-complete (lambda (values _state) (setq results values)))
+     (should (chat-coding-eval-test--wait (lambda () results)))
+     (let* ((source (car (directory-files directory t "\\`eval-.*\\.json\\'")))
+            (duplicate (chat-coding-eval--read-json-file source)))
+       (setf (alist-get 'id duplicate) "eval-duplicate")
+       (with-temp-file (expand-file-name "eval-duplicate.json" directory)
+         (insert (json-encode duplicate))))
+     (should-error (chat-coding-eval--campaign-work campaign)))))
+
+(ert-deftest chat-coding-eval-resume-rejects-configuration-drift ()
+  "Resume refuses revision, approval or manifest changes before execution."
+  (chat-coding-eval-test-with-runtime
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (manifest (chat-coding-eval-test--small-manifest temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "drift-001" 'provider-a "model-a" 1 manifest
+            :implementation-revision "resume-revision"))
+          (directory (plist-get campaign :directory)))
+     (should-error
+      (chat-coding-eval--load-open-campaign
+       directory manifest "different-revision"))
+     (let ((chat-coding-eval-approval-mode 'manual))
+       (should-error
+        (chat-coding-eval--load-open-campaign
+         directory manifest "resume-revision")))
+     (write-region "\n" nil manifest t 'silent)
+     (should-error
+      (chat-coding-eval--load-open-campaign
+       directory manifest "resume-revision")))))
+
+(ert-deftest chat-coding-eval-campaign-lock-is-exclusive-and-recoverable ()
+  "Only one live process may schedule missing campaign trials."
+  (chat-test-with-temp-dir
+   (chat-coding-eval--acquire-campaign-lock temp-dir)
+   (should-error (chat-coding-eval--acquire-campaign-lock temp-dir))
+   (should (chat-coding-eval--release-campaign-lock temp-dir))
+   (with-temp-file (chat-coding-eval--campaign-lock-file temp-dir)
+     (insert (json-encode `((pid . 99999999) (host . ,(system-name))))))
+   (should (chat-coding-eval--acquire-campaign-lock temp-dir))
+   (should (chat-coding-eval--release-campaign-lock temp-dir))
+   (should-not
+    (file-exists-p (chat-coding-eval--campaign-lock-file temp-dir)))))
+
+(ert-deftest chat-coding-eval-cancelled-campaign-remains-resumable ()
+  "Cancellation persists its current trial without terminalizing the campaign."
+  (chat-coding-eval-test-with-runtime
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (manifest (chat-coding-eval-test--small-manifest temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "cancel-001" 'provider-a "model-a" 1 manifest
+            :implementation-revision "resume-revision"))
+          (directory (plist-get campaign :directory))
+          suite)
+     (cl-letf (((symbol-function 'chat-llm-provider-configured-p)
+                (lambda (_provider) t))
+               ((symbol-function 'chat-coding-eval-agent-executor)
+                (lambda (_provider _model)
+                  (lambda (_task _workspace _done) #'ignore))))
+       (setq suite
+             (chat-coding-eval--start-campaign
+              campaign 'provider-a "model-a"))
+       (should (chat-coding-eval-cancel-suite suite))
+       (should
+        (chat-coding-eval-test--wait
+         (lambda ()
+           (not (file-exists-p
+                 (chat-coding-eval--campaign-lock-file directory)))))))
+     (should-not
+      (file-exists-p (expand-file-name "completion.json" directory)))
+     (let ((work (chat-coding-eval--campaign-work campaign)))
+       (should (= 1 (length (plist-get work :results))))
+       (should (= 1 (length (plist-get work :pending))))
+       (should
+        (eq 'cancelled
+            (chat-eval-result-status
+             (car (plist-get work :results)))))))))
 
 (ert-deftest chat-coding-eval-rejects-unsafe-allowed-and-judge-paths ()
   "Fixture policy rejects traversal before an executor can run."

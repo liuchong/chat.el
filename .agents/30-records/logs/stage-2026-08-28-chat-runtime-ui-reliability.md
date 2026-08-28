@@ -47,7 +47,7 @@ changed.
 
 ## Verification
 
-- canonical unit suite: 1760/1760 passed, zero skipped and zero unexpected
+- canonical unit suite: 1765/1765 passed, zero skipped and zero unexpected
 - deterministic integration: 2/2 passed; two credentialed provider checks
   skipped explicitly because credentials are absent
 - deterministic end-to-end: 2/2 passed

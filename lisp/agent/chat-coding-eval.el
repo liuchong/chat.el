@@ -839,13 +839,13 @@ function.  ON-COMPLETE receives the immutable result and run state."
           (funcall
            executor current workspace
            (lambda (status answer metadata)
-             (funcall done status answer
-                      (cons (cons 'repetition repetition) metadata)))))
+             (funcall done status answer metadata))))
         :cleanup (chat-coding-eval-suite-state-cleanup-p state)
         :result-directory
         (chat-coding-eval-suite-state-result-directory state)
         :result-metadata
-        (chat-coding-eval-suite-state-result-metadata state)
+        (cons (cons 'repetition repetition)
+              (chat-coding-eval-suite-state-result-metadata state))
         :on-complete
         (lambda (result _run)
           (push result (chat-coding-eval-suite-state-results state))
@@ -855,6 +855,38 @@ function.  ON-COMPLETE receives the immutable result and run state."
           ;; responsive between isolated tasks.
           (run-at-time 0 nil #'chat-coding-eval--suite-next state)))))))
   state)
+
+(cl-defun chat-coding-eval--run-suite-entries
+    (entries executor &key initial-results on-result on-complete
+             (cleanup chat-coding-eval-clean-workspaces)
+             result-directory result-metadata campaign-directory)
+  "Run explicit repetition/task ENTRIES with EXECUTOR.
+
+INITIAL-RESULTS are durable results loaded before a resumed run."
+  (unless (and (listp entries)
+               (seq-every-p
+                (lambda (entry)
+                  (and (consp entry)
+                       (integerp (car entry))
+                       (> (car entry) 0)
+                       (chat-coding-eval-task-p (cdr entry))))
+                entries))
+    (error "Coding evaluation entries are invalid"))
+  (unless (functionp executor)
+    (error "Coding evaluation executor must be callable"))
+  (unless (and (listp initial-results)
+               (seq-every-p #'chat-eval-result-p initial-results))
+    (error "Coding evaluation initial results are invalid"))
+  (let ((state
+         (chat-coding-eval-suite-state-create-record
+          :pending entries
+          :results (nreverse (copy-sequence initial-results))
+          :executor executor
+          :on-result on-result :on-complete on-complete
+          :cleanup-p cleanup :result-directory result-directory
+          :result-metadata result-metadata
+          :campaign-directory campaign-directory)))
+    (chat-coding-eval--suite-next state)))
 
 (cl-defun chat-coding-eval-run-suite
     (tasks executor &key (repetitions 1) on-result on-complete
@@ -873,15 +905,12 @@ ON-COMPLETE receives results in execution order and the suite state."
     (dotimes (index repetitions)
       (dolist (task tasks)
         (push (cons (1+ index) task) pending)))
-    (let ((state
-           (chat-coding-eval-suite-state-create-record
-            :pending (nreverse pending)
-            :results nil :executor executor
-            :on-result on-result :on-complete on-complete
-            :cleanup-p cleanup :result-directory result-directory
-            :result-metadata result-metadata
-            :campaign-directory campaign-directory)))
-      (chat-coding-eval--suite-next state))))
+    (chat-coding-eval--run-suite-entries
+     (nreverse pending) executor
+     :on-result on-result :on-complete on-complete
+     :cleanup cleanup :result-directory result-directory
+     :result-metadata result-metadata
+     :campaign-directory campaign-directory)))
 
 (defun chat-coding-eval-cancel-suite (state)
   "Cancel suite STATE and its current run."
@@ -893,21 +922,23 @@ ON-COMPLETE receives results in execution order and the suite state."
       (chat-coding-eval--suite-next state))
     t))
 
-(defun chat-coding-eval--capability-snapshot (provider)
-  "Return bounded resolved capability facts for PROVIDER."
-  (let ((facts (chat-model-capabilities-resolve provider)))
-    `((schemaVersion . ,(chat-model-capabilities-schema-version facts))
-      (provider . ,(symbol-name provider))
-      (source . ,(symbol-name (chat-model-capabilities-source facts)))
-      (stream . ,(chat-model-capabilities-stream facts))
-      (tools . ,(chat-model-capabilities-tools facts))
-      (toolChoice . ,(chat-model-capabilities-tool-choice facts))
-      (reasoning . ,(chat-model-capabilities-reasoning facts))
-      (structuredOutput .
-                        ,(chat-model-capabilities-structured-output facts))
-      (contextWindow . ,(chat-model-capabilities-context-window facts))
-      (maxOutputTokens .
-                       ,(chat-model-capabilities-max-output-tokens facts)))))
+(defun chat-coding-eval--capability-snapshot (provider &optional model)
+  "Return bounded resolved capability facts for PROVIDER and MODEL."
+  (let ((facts (chat-model-capabilities-resolve provider model)))
+    (chat-eval--sanitize-value
+     `((schemaVersion . ,(chat-model-capabilities-schema-version facts))
+       (provider . ,(symbol-name provider))
+       (model . ,model)
+       (source . ,(symbol-name (chat-model-capabilities-source facts)))
+       (stream . ,(chat-model-capabilities-stream facts))
+       (tools . ,(chat-model-capabilities-tools facts))
+       (toolChoice . ,(chat-model-capabilities-tool-choice facts))
+       (reasoning . ,(chat-model-capabilities-reasoning facts))
+       (structuredOutput .
+                         ,(chat-model-capabilities-structured-output facts))
+       (contextWindow . ,(chat-model-capabilities-context-window facts))
+       (maxOutputTokens .
+                        ,(chat-model-capabilities-max-output-tokens facts))))))
 
 (defun chat-coding-eval--model-name (provider requested)
   "Resolve REQUESTED model name for PROVIDER."
@@ -972,6 +1003,107 @@ ON-COMPLETE receives results in execution order and the suite state."
       (when (file-exists-p temp)
         (delete-file temp)))))
 
+(defun chat-coding-eval--read-json-file (file)
+  "Read JSON object FILE as a symbol-keyed alist."
+  (unless (and (file-regular-p file) (not (file-symlink-p file)))
+    (error "Campaign record is missing or unsafe: %s" file))
+  (let ((json-object-type 'alist)
+        (json-array-type 'list)
+        (json-key-type 'symbol))
+    (json-read-file file)))
+
+(defun chat-coding-eval--campaign-configuration
+    (provider model capability-snapshot approval-mode repetitions task-count
+              manifest-digest implementation-revision)
+  "Return canonical campaign configuration fields."
+  `((provider . ,(if (symbolp provider) (symbol-name provider) provider))
+    (model . ,model)
+    (modelCapabilitySnapshot . ,capability-snapshot)
+    (profile . "code")
+    (transport . "stream")
+    (approvalMode . ,(if (symbolp approval-mode)
+                         (symbol-name approval-mode)
+                       approval-mode))
+    (repetitions . ,repetitions)
+    (taskCount . ,task-count)
+    (manifestDigest . ,manifest-digest)
+    (implementationRevision . ,implementation-revision)))
+
+(defun chat-coding-eval--configuration-digest (configuration)
+  "Return the stable digest for canonical CONFIGURATION."
+  (secure-hash 'sha256
+               (encode-coding-string (json-encode configuration) 'utf-8)))
+
+(defun chat-coding-eval--campaign-result-metadata (descriptor)
+  "Return per-result campaign metadata from DESCRIPTOR."
+  `((campaignId . ,(alist-get 'campaignId descriptor))
+    (campaignRole . ,(alist-get 'role descriptor))
+    (campaignConfigurationDigest .
+                                 ,(alist-get 'configurationDigest descriptor))
+    (campaignManifestDigest . ,(alist-get 'manifestDigest descriptor))
+    (implementationRevision .
+                            ,(alist-get 'implementationRevision descriptor))
+    (provider . ,(alist-get 'provider descriptor))
+    (model . ,(alist-get 'model descriptor))
+    (modelCapabilitySnapshot .
+                             ,(alist-get 'modelCapabilitySnapshot descriptor))
+    (profile . ,(alist-get 'profile descriptor))
+    (transport . ,(alist-get 'transport descriptor))
+    (approvalMode . ,(alist-get 'approvalMode descriptor))))
+
+(defun chat-coding-eval--campaign-lock-file (directory)
+  "Return the run lock path for campaign DIRECTORY."
+  (expand-file-name ".running.json" directory))
+
+(defun chat-coding-eval--campaign-lock-live-p (owner)
+  "Return non-nil when lock OWNER identifies a live local Emacs process."
+  (let ((pid (alist-get 'pid owner))
+        (host (alist-get 'host owner)))
+    (and (integerp pid) (> pid 0)
+         (equal host (system-name))
+         (ignore-errors (process-attributes pid)))))
+
+(defun chat-coding-eval--acquire-campaign-lock (directory)
+  "Acquire and return the exclusive run lock for campaign DIRECTORY."
+  (let* ((file (chat-coding-eval--campaign-lock-file directory))
+         (owner `((pid . ,(emacs-pid))
+                  (host . ,(system-name))
+                  (startedAt . ,(funcall chat-eval-clock-function))))
+         acquired)
+    (dotimes (_attempt 3)
+      (unless acquired
+        (when (file-exists-p file)
+          (let ((existing
+                 (condition-case err
+                     (chat-coding-eval--read-json-file file)
+                   (error
+                    (user-error "Campaign run lock is unreadable: %s"
+                                (error-message-string err))))))
+            (if (or (not (equal (alist-get 'host existing) (system-name)))
+                    (chat-coding-eval--campaign-lock-live-p existing))
+                (user-error "Campaign is already running: %s" directory)
+              (delete-file file))))
+        (condition-case nil
+            (with-temp-buffer
+              (insert (json-encode owner))
+              (write-region (point-min) (point-max) file nil 'silent nil 'excl)
+              (setq acquired t))
+          (file-already-exists nil))))
+    (unless acquired
+      (user-error "Could not acquire campaign run lock: %s" directory))
+    file))
+
+(defun chat-coding-eval--release-campaign-lock (directory)
+  "Release this Emacs process's run lock for campaign DIRECTORY."
+  (let ((file (chat-coding-eval--campaign-lock-file directory)))
+    (when (file-exists-p file)
+      (let ((owner (ignore-errors (chat-coding-eval--read-json-file file))))
+        (when (and owner
+                   (= (or (alist-get 'pid owner) -1) (emacs-pid))
+                   (equal (alist-get 'host owner) (system-name)))
+          (delete-file file)
+          t)))))
+
 (cl-defun chat-coding-eval-prepare-campaign
     (campaign-id provider model repetitions manifest
                  &key implementation-revision (role "current"))
@@ -993,20 +1125,14 @@ The returned plist contains :directory, :result-metadata and :descriptor."
          (revision
           (chat-coding-eval--implementation-revision implementation-revision))
          (manifest-digest (chat-coding-eval--file-digest manifest))
+         (capability-snapshot
+          (chat-coding-eval--capability-snapshot provider model))
          (configuration
-          `((provider . ,(symbol-name provider))
-            (model . ,model)
-            (profile . "code")
-            (transport . "stream")
-            (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
-            (repetitions . ,repetitions)
-            (taskCount . ,(length tasks))
-            (manifestDigest . ,manifest-digest)
-            (implementationRevision . ,revision)))
+          (chat-coding-eval--campaign-configuration
+           provider model capability-snapshot chat-coding-eval-approval-mode
+           repetitions (length tasks) manifest-digest revision))
          (configuration-digest
-          (secure-hash 'sha256
-                       (encode-coding-string (json-encode configuration)
-                                             'utf-8)))
+          (chat-coding-eval--configuration-digest configuration))
          (directory
           (expand-file-name campaign-id chat-coding-eval-campaign-directory))
          (descriptor
@@ -1030,19 +1156,267 @@ The returned plist contains :directory, :result-metadata and :descriptor."
      :directory directory
      :descriptor descriptor
      :tasks tasks
-     :result-metadata
-     `((campaignId . ,campaign-id)
-       (campaignRole . ,role)
-       (campaignConfigurationDigest . ,configuration-digest)
-       (campaignManifestDigest . ,manifest-digest)
-       (implementationRevision . ,revision)))))
+     :provider provider
+     :result-metadata (chat-coding-eval--campaign-result-metadata descriptor))))
+
+(defun chat-coding-eval--digest-p (value)
+  "Return non-nil when VALUE is a SHA-256 hexadecimal digest."
+  (and (stringp value)
+       (string-match-p "\\`[[:xdigit:]]\\{64\\}\\'" value)))
+
+(defun chat-coding-eval--required-string (object key)
+  "Return nonempty string KEY from OBJECT, or reject the record."
+  (let ((value (alist-get key object)))
+    (unless (and (stringp value) (not (string-empty-p value)))
+      (error "Campaign field %s must be a nonempty string" key))
+    value))
+
+(defun chat-coding-eval--load-open-campaign
+    (directory manifest &optional implementation-revision)
+  "Load and validate unfinished campaign DIRECTORY against MANIFEST."
+  (let* ((directory (file-name-as-directory (expand-file-name directory)))
+         (directory-name (directory-file-name directory)))
+    (unless (and (file-directory-p directory)
+                 (not (file-symlink-p directory-name)))
+      (user-error "Campaign directory does not exist or is unsafe: %s"
+                  directory))
+    (when (file-exists-p (expand-file-name "completion.json" directory))
+      (user-error "Campaign already has terminal completion evidence: %s"
+                  directory))
+    (unless (file-regular-p manifest)
+      (user-error "Campaign manifest does not exist: %s" manifest))
+    (let* ((descriptor
+            (chat-coding-eval--read-json-file
+             (expand-file-name "campaign.json" directory)))
+           (campaign-id
+            (chat-coding-eval--required-string descriptor 'campaignId))
+           (role (chat-coding-eval--required-string descriptor 'role))
+           (provider-name
+            (chat-coding-eval--required-string descriptor 'provider))
+           (model (chat-coding-eval--required-string descriptor 'model))
+           (profile (chat-coding-eval--required-string descriptor 'profile))
+           (transport
+            (chat-coding-eval--required-string descriptor 'transport))
+           (approval-mode
+            (chat-coding-eval--required-string descriptor 'approvalMode))
+           (capability-snapshot
+            (alist-get 'modelCapabilitySnapshot descriptor))
+           (repetitions (alist-get 'repetitions descriptor))
+           (task-count (alist-get 'taskCount descriptor))
+           (expected (alist-get 'expectedResultCount descriptor))
+           (manifest-digest
+            (chat-coding-eval--required-string descriptor 'manifestDigest))
+           (revision
+            (chat-coding-eval--required-string
+             descriptor 'implementationRevision))
+           (configuration-digest
+            (chat-coding-eval--required-string
+             descriptor 'configurationDigest))
+           (tasks (chat-coding-eval-load-suite manifest))
+           (current-revision
+            (chat-coding-eval--implementation-revision
+             implementation-revision))
+           (configuration
+            (chat-coding-eval--campaign-configuration
+             provider-name model capability-snapshot approval-mode repetitions
+             task-count manifest-digest revision)))
+      (unless (= (or (alist-get 'schemaVersion descriptor) 0)
+                 chat-coding-eval-campaign-schema-version)
+        (error "Unsupported coding evaluation campaign schema"))
+      (chat-coding-eval--validate-campaign-id campaign-id)
+      (unless (equal campaign-id
+                     (file-name-nondirectory directory-name))
+        (error "Campaign directory name does not match its descriptor"))
+      (unless (member role '("baseline" "current"))
+        (error "Campaign role is invalid: %s" role))
+      (unless (string-match-p
+               "\\`[[:alnum:]][[:alnum:]_.-]*\\'" provider-name)
+        (error "Campaign provider identity is invalid"))
+      (unless (and (integerp repetitions) (> repetitions 0)
+                   (integerp task-count) (> task-count 0)
+                   (= task-count (length tasks))
+                   (integerp expected)
+                   (= expected (* repetitions task-count)))
+        (error "Campaign task or repetition counts do not match the manifest"))
+      (unless (and (equal profile "code") (equal transport "stream"))
+        (error "Campaign execution profile or transport is unsupported"))
+      (unless (and (listp capability-snapshot)
+                   (equal capability-snapshot
+                          (chat-coding-eval--capability-snapshot
+                           (intern provider-name) model)))
+        (error "Campaign model capabilities differ from the current runtime"))
+      (unless (equal approval-mode
+                     (symbol-name chat-coding-eval-approval-mode))
+        (error "Campaign approval mode differs from the current runtime"))
+      (unless (and (chat-coding-eval--digest-p manifest-digest)
+                   (equal manifest-digest
+                          (chat-coding-eval--file-digest manifest)))
+        (error "Campaign manifest digest does not match"))
+      (unless (equal revision current-revision)
+        (error "Campaign implementation revision does not match this checkout"))
+      (unless (and (chat-coding-eval--digest-p configuration-digest)
+                   (equal configuration-digest
+                          (chat-coding-eval--configuration-digest
+                           configuration)))
+        (error "Campaign configuration digest does not match its fields"))
+      (list
+       :directory directory
+       :descriptor descriptor
+       :tasks tasks
+       :provider (intern provider-name)
+       :result-metadata
+       (chat-coding-eval--campaign-result-metadata descriptor)))))
+
+(defun chat-coding-eval--result-metadata-value (metadata key)
+  "Return validated campaign KEY from result METADATA.
+
+Older records may hold execution identity inside their executor object."
+  (unless (listp metadata)
+    (error "Campaign result metadata is not an object"))
+  (let* ((executor (alist-get 'executor metadata))
+         (top (assq key metadata))
+         (nested (and (listp executor) (assq key executor))))
+    (when (and top nested (not (equal (cdr top) (cdr nested))))
+      (error "Campaign result has conflicting %s metadata" key))
+    (cond (top (cdr top))
+          (nested (cdr nested)))))
+
+(defun chat-coding-eval--task-table (tasks)
+  "Return scenario-id to task table for TASKS."
+  (let ((table (make-hash-table :test 'equal)))
+    (dolist (task tasks table)
+      (let ((scenario-id (concat "coding/" (chat-coding-eval-task-id task))))
+        (when (gethash scenario-id table)
+          (error "Campaign manifest has duplicate task id: %s" scenario-id))
+        (puthash scenario-id task table)))))
+
+(defun chat-coding-eval--validate-campaign-result
+    (result descriptor task-table)
+  "Validate RESULT identity for DESCRIPTOR and TASK-TABLE.
+
+Return the unique repetition/scenario key."
+  (unless (chat-eval-result-p result)
+    (error "Campaign result record is invalid"))
+  (let* ((metadata (chat-eval-result-metadata result))
+         (scenario-id (chat-eval-result-scenario-id result))
+         (task (and (stringp scenario-id)
+                    (gethash scenario-id task-table)))
+         (repetition
+          (chat-coding-eval--result-metadata-value metadata 'repetition)))
+    (unless task
+      (error "Campaign result has unknown scenario: %s" scenario-id))
+    (unless (= (or (chat-eval-result-scenario-revision result) 0)
+               (chat-coding-eval-task-revision task))
+      (error "Campaign result scenario revision does not match: %s"
+             scenario-id))
+    (unless (equal (alist-get 'taskId metadata)
+                   (chat-coding-eval-task-id task))
+      (error "Campaign result task identity does not match: %s" scenario-id))
+    (unless (and (integerp repetition) (> repetition 0)
+                 (<= repetition (alist-get 'repetitions descriptor)))
+      (error "Campaign result repetition is invalid: %s" scenario-id))
+    (dolist
+        (field
+         `((campaignId . ,(alist-get 'campaignId descriptor))
+           (campaignRole . ,(alist-get 'role descriptor))
+           (campaignConfigurationDigest .
+                                        ,(alist-get 'configurationDigest
+                                                    descriptor))
+           (campaignManifestDigest . ,(alist-get 'manifestDigest descriptor))
+           (implementationRevision .
+                                   ,(alist-get 'implementationRevision
+                                               descriptor))
+           (provider . ,(alist-get 'provider descriptor))
+           (model . ,(alist-get 'model descriptor))
+           (modelCapabilitySnapshot .
+                                    ,(alist-get 'modelCapabilitySnapshot
+                                                descriptor))
+           (profile . ,(alist-get 'profile descriptor))
+           (transport . ,(alist-get 'transport descriptor))
+           (approvalMode . ,(alist-get 'approvalMode descriptor))))
+      (unless (equal (chat-coding-eval--result-metadata-value
+                      metadata (car field))
+                     (cdr field))
+        (error "Campaign result %s metadata does not match: %s"
+               (car field) scenario-id)))
+    (cons repetition scenario-id)))
+
+(defun chat-coding-eval--load-campaign-results (campaign)
+  "Load and validate durable results for CAMPAIGN."
+  (let* ((directory (plist-get campaign :directory))
+         (descriptor (plist-get campaign :descriptor))
+         (task-table (chat-coding-eval--task-table
+                      (plist-get campaign :tasks)))
+         (keys (make-hash-table :test 'equal))
+         (ids (make-hash-table :test 'equal))
+         indexed)
+    (dolist (file (sort (directory-files directory t "\\`eval-.*\\.json\\'")
+                        #'string<))
+      (unless (and (file-regular-p file) (not (file-symlink-p file)))
+        (error "Campaign result file is missing or unsafe: %s" file))
+      (let* ((result (chat-eval-load-result file))
+             (id (chat-eval-result-id result))
+             (key (chat-coding-eval--validate-campaign-result
+                   result descriptor task-table)))
+        (unless (and (stringp id) (not (string-empty-p id)))
+          (error "Campaign result id cannot be empty: %s" file))
+        (unless (equal (file-name-nondirectory file) (concat id ".json"))
+          (error "Campaign result file name does not match its id: %s" file))
+        (when (gethash id ids)
+          (error "Campaign has duplicate result id: %s" id))
+        (when (gethash key keys)
+          (error "Campaign has duplicate repetition/scenario result: %S" key))
+        (puthash id t ids)
+        (puthash key t keys)
+        (push (cons key result) indexed)))
+    (setq indexed
+          (sort indexed
+                (lambda (left right)
+                  (let ((left-key (car left))
+                        (right-key (car right)))
+                    (if (= (car left-key) (car right-key))
+                        (string< (cdr left-key) (cdr right-key))
+                      (< (car left-key) (car right-key)))))))
+    (list :results (mapcar #'cdr indexed) :keys keys)))
+
+(defun chat-coding-eval--campaign-work (campaign)
+  "Return durable results and missing entries for CAMPAIGN."
+  (let* ((loaded (chat-coding-eval--load-campaign-results campaign))
+         (keys (plist-get loaded :keys))
+         (tasks (plist-get campaign :tasks))
+         (repetitions
+          (alist-get 'repetitions (plist-get campaign :descriptor)))
+         pending)
+    (dotimes (index repetitions)
+      (dolist (task tasks)
+        (let ((key (cons (1+ index)
+                         (concat "coding/"
+                                 (chat-coding-eval-task-id task)))))
+          (unless (gethash key keys)
+            (push (cons (1+ index) task) pending)))))
+    (list :results (plist-get loaded :results)
+          :pending (nreverse pending))))
 
 (defun chat-coding-eval--complete-campaign (campaign results)
   "Write terminal evidence for CAMPAIGN and RESULTS."
   (let* ((directory (plist-get campaign :directory))
          (descriptor (plist-get campaign :descriptor))
+         (durable-descriptor
+          (chat-coding-eval--read-json-file
+           (expand-file-name "campaign.json" directory)))
          (expected (alist-get 'expectedResultCount descriptor))
-         (passed (cl-count 'passed results :key #'chat-eval-result-status)))
+         (durable (plist-get (chat-coding-eval--load-campaign-results campaign)
+                             :results))
+         (durable-ids
+          (sort (mapcar #'chat-eval-result-id durable) #'string<))
+         (reported-ids
+          (sort (mapcar #'chat-eval-result-id results) #'string<))
+         (passed (cl-count 'passed durable :key #'chat-eval-result-status)))
+    (unless (and (equal descriptor durable-descriptor)
+                 (= expected (length durable))
+                 (= expected (length results))
+                 (equal durable-ids reported-ids))
+      (error "Campaign cannot complete without every unique durable result"))
     (chat-coding-eval--write-json-exclusive
      (expand-file-name "completion.json" directory)
      `((schemaVersion . ,chat-coding-eval-campaign-schema-version)
@@ -1050,9 +1424,9 @@ The returned plist contains :directory, :result-metadata and :descriptor."
        (configurationDigest . ,(alist-get 'configurationDigest descriptor))
        (completedAt . ,(funcall chat-eval-clock-function))
        (expectedResultCount . ,expected)
-       (resultCount . ,(length results))
+       (resultCount . ,(length durable))
        (passedCount . ,passed)
-       (complete . ,(if (= expected (length results)) t :json-false))))))
+       (complete . t)))))
 
 (defun chat-coding-eval-agent-executor (provider &optional model-name)
   "Return a live Agent executor using PROVIDER and MODEL-NAME."
@@ -1069,7 +1443,8 @@ The returned plist contains :directory, :result-metadata and :descriptor."
                      "Finish with a concise answer describing the result.")
              (chat-coding-eval-task-prompt task)
              (string-join (chat-coding-eval-task-allowed-paths task) ", ")))
-           (capabilities (chat-coding-eval--capability-snapshot provider))
+           (capabilities
+            (chat-coding-eval--capability-snapshot provider resolved-model))
            usage
            (tool-errors 0)
            (approvals 0)
@@ -1136,6 +1511,67 @@ The returned plist contains :directory, :result-metadata and :descriptor."
                 (verificationRetryCount . 0))))))))
         (lambda () (chat-agent-cancel run))))))
 
+(defun chat-coding-eval--start-campaign (campaign provider model)
+  "Start or resume CAMPAIGN with exact PROVIDER and MODEL identity."
+  (unless chat-eval-auto-save
+    (user-error "Live campaigns require durable evaluation results"))
+  (unless (chat-llm-provider-configured-p provider)
+    (user-error "Evaluation provider is not configured: %s" provider))
+  (let* ((directory (plist-get campaign :directory))
+         (work (chat-coding-eval--campaign-work campaign))
+         (initial-results (plist-get work :results))
+         (pending (plist-get work :pending)))
+    (chat-coding-eval--acquire-campaign-lock directory)
+    (condition-case err
+        (chat-coding-eval--run-suite-entries
+         pending
+         (chat-coding-eval-agent-executor provider model)
+         :initial-results initial-results
+         :result-directory directory
+         :result-metadata (plist-get campaign :result-metadata)
+         :campaign-directory directory
+         :on-result
+         (lambda (result repetition _state)
+           (message "Coding eval %s repeat %d: %s"
+                    (chat-eval-result-scenario-id result) repetition
+                    (chat-eval-result-status result)))
+         :on-complete
+         (lambda (results state)
+           (unwind-protect
+               (if (chat-coding-eval-suite-state-cancelled-p state)
+                   (message
+                    "Coding evaluation paused with %d durable result(s) in %s"
+                    (length results) directory)
+                 (chat-coding-eval--complete-campaign campaign results)
+                 (message "Coding evaluation completed: %d result(s) in %s"
+                          (length results) directory))
+             (chat-coding-eval--release-campaign-lock directory))))
+      (error
+       (chat-coding-eval--release-campaign-lock directory)
+       (signal (car err) (cdr err))))))
+
+(defun chat-coding-eval-resume-live
+    (campaign-directory &optional manifest implementation-revision)
+  "Resume missing trials in CAMPAIGN-DIRECTORY.
+
+The immutable descriptor, MANIFEST, current runtime configuration and every
+durable result must agree before any missing trial is scheduled."
+  (interactive
+   (list (read-directory-name "Campaign directory: "
+                              chat-coding-eval-campaign-directory nil t)
+         chat-coding-eval-default-manifest))
+  (let ((file (or manifest chat-coding-eval-default-manifest)))
+    (unless (and file (file-exists-p file))
+      (user-error "No coding evaluation manifest is available"))
+    (let* ((campaign
+            (chat-coding-eval--load-open-campaign
+             campaign-directory file implementation-revision))
+           (descriptor (plist-get campaign :descriptor)))
+      (chat-coding-eval--start-campaign
+       campaign
+       (plist-get campaign :provider)
+       (alist-get 'model descriptor)))))
+
 (defun chat-coding-eval-run-live
     (provider repetitions &optional manifest model-name campaign-id
               implementation-revision role)
@@ -1167,23 +1603,7 @@ MODEL-NAME defaults to PROVIDER's registered model."
             provider resolved-model repetitions file
             :implementation-revision implementation-revision
             :role (or role "current"))))
-      (chat-coding-eval-run-suite
-       (plist-get campaign :tasks)
-       (chat-coding-eval-agent-executor provider resolved-model)
-       :repetitions repetitions
-       :result-directory (plist-get campaign :directory)
-       :result-metadata (plist-get campaign :result-metadata)
-       :campaign-directory (plist-get campaign :directory)
-       :on-result
-       (lambda (result repetition _state)
-         (message "Coding eval %s repeat %d: %s"
-                  (chat-eval-result-scenario-id result) repetition
-                  (chat-eval-result-status result)))
-       :on-complete
-       (lambda (results _state)
-         (chat-coding-eval--complete-campaign campaign results)
-         (message "Coding evaluation completed: %d result(s) in %s"
-                  (length results) (plist-get campaign :directory)))))))
+      (chat-coding-eval--start-campaign campaign provider resolved-model))))
 
 (provide 'chat-coding-eval)
 ;;; chat-coding-eval.el ends here

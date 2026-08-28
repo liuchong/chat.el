@@ -20,9 +20,12 @@ durable Goal contracts and independent read-only Plan Mode. M19 has
 productized phase status, actionable diagnostics, strict acceptance and the
 10,000-file performance path. The immutable M9 baseline is complete with all
 150 expected terminal results; final acceptance is blocked by the missing
-comparable M19 current campaign and paired trusted-token evidence. Live runs
-use fresh immutable baseline/current campaign directories and acceptance
-rejects mixed configuration or implementation revisions. The fixed 30-task
+complete comparable M19 current campaign and paired trusted-token evidence. An
+initial M19 attempt stopped after 30/150 results and remains nonterminal evidence.
+Live runs use fresh configuration-frozen baseline/current campaign directories;
+an interrupted directory can resume only its validated missing trial identities.
+Acceptance rejects duplicate identities, mixed configuration or implementation
+revisions. The fixed 30-task
 corpus includes one versioned `large-repo` task with 10,000 indexed source files. No
 capability becomes a default until the fixed task set shows that it does not
 reduce success, safety or responsiveness.
