@@ -36,6 +36,10 @@
   (should (symbolp chat-default-model))
   (should (eq chat-default-model 'kimi)))
 
+(ert-deftest chat-session-list-page-size-defaults-to-five ()
+  "Session pickers start with a small, configurable recent page."
+  (should (= (default-value 'chat-session-list-page-size) 5)))
+
 (ert-deftest chat-load-config-files-loads-supported-locations-in-order ()
   "Test config files load from all supported locations in override order."
   (chat-test-with-temp-dir
@@ -95,6 +99,64 @@
   "Test that chat-list-sessions is bound."
   (should (fboundp 'chat-list-sessions))
   (should (commandp 'chat-list-sessions)))
+
+(ert-deftest chat-session-picker-reveals-older-sessions-in-pages ()
+  "Choosing the more candidate expands the picker without losing recency order."
+  (let* ((chat-session-list-page-size 2)
+         (sessions
+          (mapcar (lambda (number)
+                    (make-chat-session
+                     :id (format "session-%d" number)
+                     :name (format "Session %d" number)
+                     :model-id 'kimi))
+                  '(1 2 3 4 5)))
+         collections
+         (answers (list chat--more-sessions-label "Session 3"))
+         opened)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (push (copy-sequence collection) collections)
+                 (pop answers)))
+              ((symbol-function 'chat--open-session)
+               (lambda (session) (setq opened session))))
+      (chat--select-or-create-session sessions))
+    (setq collections (nreverse collections))
+    (should (equal (car collections)
+                   '("Session 1" "Session 2" "More sessions...")))
+    (should (equal (cadr collections)
+                   '("Session 1" "Session 2" "Session 3" "Session 4"
+                     "More sessions...")))
+    (should (equal (chat-session-id opened) "session-3"))))
+
+(ert-deftest chat-session-list-buffer-reveals-more-with-a-button ()
+  "The list buffer renders one recent page and expands on demand."
+  (let* ((chat-session-list-page-size 2)
+         (now (current-time))
+         (sessions
+          (mapcar (lambda (number)
+                    (make-chat-session
+                     :id (format "session-%d" number)
+                     :name (format "Session %d" number)
+                     :model-id 'kimi
+                     :updated-at now))
+                  '(1 2 3 4 5))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'chat-session-list)
+                   (lambda () sessions))
+                  ((symbol-function 'pop-to-buffer) #'ignore))
+          (chat-list-sessions)
+          (with-current-buffer "*Chat Sessions*"
+            (should (string-match-p "Showing 2 of 5" (buffer-string)))
+            (should (string-match-p "Session 2" (buffer-string)))
+            (should-not (string-match-p "Session 3" (buffer-string)))
+            (goto-char (point-min))
+            (search-forward chat--more-sessions-label)
+            (button-activate (button-at (1- (point))))
+            (should (string-match-p "Showing 4 of 5" (buffer-string)))
+            (should (string-match-p "Session 4" (buffer-string)))
+            (should-not (string-match-p "Session 5" (buffer-string)))))
+      (when (get-buffer "*Chat Sessions*")
+        (kill-buffer "*Chat Sessions*")))))
 
 (ert-deftest chat-show-help-command-is-bound ()
   (should (commandp 'chat-show-help))

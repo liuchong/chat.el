@@ -28,6 +28,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'button)
 (require 'seq)
 
 ;; Prefer newer source files over stale byte-compiled artifacts.
@@ -236,6 +237,16 @@ Returns the list of files that were loaded."
 (defcustom chat-auto-save t
   "Whether to automatically save sessions after each message."
   :type 'boolean
+  :group 'chat)
+
+(defcustom chat-session-list-page-size 5
+  "Number of recent sessions initially shown by session pickers.
+
+Session storage and internal indexes always retain the complete list.
+Interactive session surfaces reveal older entries in batches of this
+size when the user chooses the more-sessions action."
+  :type '(integer :tag "Sessions per page")
+  :safe (lambda (value) (and (integerp value) (> value 0)))
   :group 'chat)
 
 (defcustom chat-commands-help
@@ -450,37 +461,101 @@ MODEL is an optional model identifier, uses chat-default-model if not provided."
 
 ;;;###autoload
 (defun chat-list-sessions ()
-  "Display a list of all saved sessions."
+  "Display recent saved sessions with incremental access to older ones."
   (interactive)
   (let ((sessions (chat-session-list)))
     (with-current-buffer (get-buffer-create "*Chat Sessions*")
-      (erase-buffer)
-      (insert "Chat Sessions\n")
-      (insert "============\n\n")
-      (if sessions
-          (dolist (session sessions)
-            (insert (format "• %s\n" (chat-session-name session)))
-            (insert (format "  ID: %s\n" (chat-session-id session)))
-            (insert (format "  Model: %s\n" (chat-session-model-id session)))
-            (insert (format "  Updated: %s\n\n"
-                           (format-time-string "%Y-%m-%d %H:%M"
-                                              (chat-session-updated-at session))))))
-        (insert "No sessions found.\n")
-        (insert "Create one with M-x chat-new-session\n"))
-      (goto-char (point-min))
-      (pop-to-buffer (current-buffer))))
+      (special-mode)
+      (setq-local chat--session-list-sessions sessions)
+      (setq-local chat--session-list-visible-count
+                  (min (length sessions) (chat--session-page-size)))
+      (chat--render-session-list)
+      (pop-to-buffer (current-buffer)))))
 
 ;; ------------------------------------------------------------------
 ;; Internal Functions
 ;; ------------------------------------------------------------------
 
+(defconst chat--more-sessions-label "More sessions..."
+  "Completion candidate used to reveal another page of sessions.")
+
+(defvar-local chat--session-list-sessions nil
+  "Complete ordered session list behind the session-list buffer.")
+
+(defvar-local chat--session-list-visible-count 0
+  "Number of sessions currently visible in the session-list buffer.")
+
+(defun chat--session-page-size ()
+  "Return a valid positive session page size."
+  (if (and (integerp chat-session-list-page-size)
+           (> chat-session-list-page-size 0))
+      chat-session-list-page-size
+    5))
+
+(defun chat--render-session-list ()
+  "Render the current incremental session list buffer."
+  (let ((inhibit-read-only t)
+        (sessions chat--session-list-sessions))
+    (erase-buffer)
+    (insert "Chat Sessions\n")
+    (insert "============\n\n")
+    (if sessions
+        (let* ((total (length sessions))
+               (visible-count (min chat--session-list-visible-count total)))
+          (insert (format "Showing %d of %d, newest first\n\n"
+                          visible-count total))
+          (dolist (session (seq-take sessions visible-count))
+            (insert (format "• %s\n" (chat-session-name session)))
+            (insert (format "  ID: %s\n" (chat-session-id session)))
+            (insert (format "  Model: %s\n" (chat-session-model-id session)))
+            (insert (format "  Updated: %s\n\n"
+                            (format-time-string
+                             "%Y-%m-%d %H:%M"
+                             (chat-session-updated-at session)))))
+          (when (< visible-count total)
+            (insert-text-button
+             chat--more-sessions-label
+             'follow-link t
+             'help-echo "Show more saved sessions"
+             'action #'chat--session-list-show-more)
+            (insert "\n")))
+      (insert "No sessions found.\n")
+      (insert "Create one with M-x chat-new-session\n"))
+    (goto-char (point-min))))
+
+(defun chat--session-list-show-more (_button)
+  "Reveal another page in the current session list buffer."
+  (setq chat--session-list-visible-count
+        (min (length chat--session-list-sessions)
+             (+ chat--session-list-visible-count
+                (chat--session-page-size))))
+  (chat--render-session-list))
+
 (defun chat--select-or-create-session (sessions)
-  "Prompt user to select from SESSIONS or create new."
-  (let* ((names (mapcar #'chat-session-name sessions))
-         (choice (completing-read "Select session (or type new name): "
-                                  names
-                                  nil
-                                  nil)))
+  "Prompt user to select from ordered SESSIONS or create new.
+
+Only the newest page is offered initially.  Choosing the more-sessions
+candidate adds another page without discarding the current candidates."
+  (let ((visible-count (min (length sessions) (chat--session-page-size)))
+        choice
+        names)
+    (while
+        (progn
+          (setq names (mapcar #'chat-session-name
+                              (seq-take sessions visible-count)))
+          (setq choice
+                (completing-read
+                 "Select session (or type new name): "
+                 (append names
+                         (when (< visible-count (length sessions))
+                           (list chat--more-sessions-label)))
+                 nil
+                 nil))
+          (when (string= choice chat--more-sessions-label)
+            (setq visible-count
+                  (min (length sessions)
+                       (+ visible-count (chat--session-page-size))))
+            t)))
     (if (member choice names)
         (let ((session (cl-find choice sessions
                                :key #'chat-session-name
