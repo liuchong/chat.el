@@ -16,6 +16,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'seq)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -53,6 +54,10 @@
 ;; ------------------------------------------------------------------
 
 (defvar chat-code-intel--active-indexes (make-hash-table :test 'equal))
+
+(defun chat-code-intel-active-index (project-root)
+  "Return the in-memory index for PROJECT-ROOT without disk access."
+  (gethash project-root chat-code-intel--active-indexes))
 
 (defun chat-code-intel-get-index (project-root)
   "Get or create index for PROJECT-ROOT."
@@ -121,21 +126,30 @@
 
 (defun chat-code-intel--extract-symbols (file-path)
   "Extract symbols from FILE-PATH."
-  (let ((language (chat-code-intel--detect-language file-path))
-        symbols)
+  (let ((language (chat-code-intel--detect-language file-path)))
     (with-temp-buffer
       (insert-file-contents file-path)
-      (pcase language
-        ('python (setq symbols (chat-code-intel--parse-python-symbols)))
-        ('javascript (setq symbols (chat-code-intel--parse-js-symbols)))
-        ('emacs-lisp (setq symbols (chat-code-intel--parse-elisp-symbols)))
-        ('go (setq symbols (chat-code-intel--parse-go-symbols)))
-        ('rust (setq symbols (chat-code-intel--parse-rust-symbols)))
-        (_ (setq symbols nil)))
-      ;; Set file for all symbols
-      (dolist (sym symbols)
-        (setf (chat-code-symbol-file sym) file-path)))
-    symbols))
+      (let ((symbols (chat-code-intel-extract-buffer-symbols language)))
+        (dolist (sym symbols)
+          (setf (chat-code-symbol-file sym) file-path))
+        symbols))))
+
+(defun chat-code-intel-extract-buffer-symbols (language)
+  "Extract fallback symbols for LANGUAGE from the current buffer."
+  (pcase language
+    ('python (chat-code-intel--parse-python-symbols))
+    ((or 'javascript 'typescript) (chat-code-intel--parse-js-symbols))
+    ('emacs-lisp (chat-code-intel--parse-elisp-symbols))
+    ('go (chat-code-intel--parse-go-symbols))
+    ('rust (chat-code-intel--parse-rust-symbols))
+    (_ nil)))
+
+(defun chat-code-intel-extract-symbols (file-path)
+  "Return fallback structural symbols extracted from FILE-PATH.
+
+This public wrapper lets cache builders reuse the lightweight parser
+without depending on its implementation name."
+  (chat-code-intel--extract-symbols file-path))
 
 ;; ------------------------------------------------------------------
 ;; Language Parsers
@@ -148,6 +162,8 @@
       ("py" 'python)
       ("js" 'javascript)
       ("ts" 'typescript)
+      ("jsx" 'javascript)
+      ("tsx" 'typescript)
       ("el" 'emacs-lisp)
       ("go" 'go)
       ("rs" 'rust)
@@ -155,11 +171,16 @@
       ("java" 'java)
       (_ 'unknown))))
 
+(defun chat-code-intel-detect-language (file-path)
+  "Return the fallback parser language for FILE-PATH."
+  (chat-code-intel--detect-language file-path))
+
 (defun chat-code-intel--parse-python-symbols ()
   "Parse Python symbols."
   (let (symbols)
     (goto-char (point-min))
-    (while (re-search-forward "^\\s-*def\\s-+\\([^(]+\\)" nil t)
+    (while (re-search-forward
+            "^\\s-*def\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)" nil t)
       (push (make-chat-code-symbol
              :name (match-string 1)
              :type 'function
@@ -169,7 +190,8 @@
              :docstring nil)
             symbols))
     (goto-char (point-min))
-    (while (re-search-forward "^\\s-*class\\s-+\\([^(]+\\)" nil t)
+    (while (re-search-forward
+            "^\\s-*class\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)" nil t)
       (push (make-chat-code-symbol
              :name (match-string 1)
              :type 'class
@@ -184,7 +206,9 @@
   "Parse JavaScript symbols."
   (let (symbols)
     (goto-char (point-min))
-    (while (re-search-forward "\\(?:function\\s-+\\|const\\s-+\\|let\\s-+\\|var\\s-+\\)\\([^(= ]+\\)" nil t)
+    (while (re-search-forward
+            "\\(?:function\\s-+\\|const\\s-+\\|let\\s-+\\|var\\s-+\\)\\([[:alpha:]_$][[:alnum:]_$]*\\)"
+            nil t)
       (push (make-chat-code-symbol
              :name (match-string 1)
              :type 'function
@@ -193,16 +217,31 @@
              :signature nil
              :docstring nil)
             symbols))
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(class\\|interface\\)\\s-+\\([^ {]+\\)" nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 2)
+             :type (if (string= (match-string 1) "interface") 'interface 'class)
+             :line (line-number-at-pos)
+             :column nil :signature nil :docstring nil)
+            symbols))
     symbols))
 
 (defun chat-code-intel--parse-elisp-symbols ()
   "Parse Emacs Lisp symbols."
   (let (symbols)
     (goto-char (point-min))
-    (while (re-search-forward "(defun\\s-+\\([^( ]+\\)" nil t)
+    (while (re-search-forward
+            "(\\(defun\\|defmacro\\|cl-defun\\|cl-defgeneric\\|cl-defmethod\\)\\s-+\\([^[:space:]()]+\\)"
+            nil t)
       (push (make-chat-code-symbol
-             :name (match-string 1)
-             :type 'function
+             :name (match-string 2)
+             :type (pcase (match-string 1)
+                     ("cl-defgeneric" 'interface)
+                     ("cl-defmethod" 'method)
+                     ("defmacro" 'macro)
+                     (_ 'function))
              :line (line-number-at-pos)
              :column nil
              :signature nil
@@ -214,7 +253,9 @@
   "Parse Go symbols."
   (let (symbols)
     (goto-char (point-min))
-    (while (re-search-forward "^func\\s-+\\(?:([^)]*)\\s-+\\)?\\([^(]+\\)" nil t)
+    (while (re-search-forward
+            "^[[:space:]]*func\\s-+\\(?:([^)]*)\\s-+\\)?\\([[:alpha:]_][[:alnum:]_]*\\)"
+            nil t)
       (push (make-chat-code-symbol
              :name (match-string 1)
              :type 'function
@@ -223,13 +264,23 @@
              :signature nil
              :docstring nil)
             symbols))
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*type\\s-+\\([^[:space:]]+\\)\\s-+\\(interface\\|struct\\)" nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 1)
+             :type (if (string= (match-string 2) "interface") 'interface 'struct)
+             :line (line-number-at-pos)
+             :column nil :signature nil :docstring nil)
+            symbols))
     symbols))
 
 (defun chat-code-intel--parse-rust-symbols ()
   "Parse Rust symbols."
   (let (symbols)
     (goto-char (point-min))
-    (while (re-search-forward "^\\s-*fn\\s-+\\([^(]+\\)" nil t)
+    (while (re-search-forward
+            "^\\s-*fn\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)" nil t)
       (push (make-chat-code-symbol
              :name (match-string 1)
              :type 'function
@@ -237,6 +288,18 @@
              :column nil
              :signature nil
              :docstring nil)
+            symbols))
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(trait\\|struct\\|enum\\)\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)" nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 2)
+             :type (pcase (match-string 1)
+                     ("trait" 'interface)
+                     ("enum" 'enum)
+                     (_ 'struct))
+             :line (line-number-at-pos)
+             :column nil :signature nil :docstring nil)
             symbols))
     symbols))
 
@@ -251,19 +314,41 @@
     (with-temp-buffer
       (insert-file-contents file-path)
       (goto-char (point-min))
-      ;; Find all potential symbol references
-      (while (re-search-forward "\\b\\([a-zA-Z_][a-zA-Z0-9_]*\\)\\s*(" nil t)
+      ;; Find identifier uses.  Definitions at their defining line are not
+      ;; references; all other exact identifier occurrences are retained.
+      ;; This catches function values, interface uses and Lisp calls instead
+      ;; of limiting the index to C-style call syntax.
+      (while (re-search-forward "\\_<\\([a-zA-Z_][a-zA-Z0-9_]*\\)\\_>" nil t)
         (let ((name (match-string 1)))
           (when (gethash name symbols-table)
-            (let ((ref (make-chat-code-reference
-                        :symbol-name name
-                        :file file-path
-                        :line (line-number-at-pos)
-                        :column (current-column)
-                        :type 'call)))
-              (puthash name
-                      (cons ref (gethash name references-table))
-                      references-table))))))))
+            (let* ((line (line-number-at-pos))
+                   (definition-p
+                    (seq-some
+                     (lambda (symbol)
+                       (and (string= (chat-code-symbol-file symbol) file-path)
+                            (= (chat-code-symbol-line symbol) line)))
+                     (gethash name symbols-table))))
+              (unless definition-p
+                (let* ((after (save-excursion
+                                (skip-chars-forward "[:space:]")
+                                (char-after)))
+                       (before (save-excursion
+                                 (goto-char (match-beginning 1))
+                                 (skip-chars-backward "[:space:]")
+                                 (char-before)))
+                       (ref (make-chat-code-reference
+                             :symbol-name name
+                             :file file-path
+                             :line line
+                             :column (save-excursion
+                                       (goto-char (match-beginning 1))
+                                       (current-column))
+                             :type (if (or (eq after ?\() (eq before ?\())
+                                       'call
+                                     'reference))))
+                  (puthash name
+                           (cons ref (gethash name references-table))
+                           references-table))))))))))
 
 ;; ------------------------------------------------------------------
 ;; Call Graph
@@ -290,15 +375,18 @@
 
 (defun chat-code-intel--find-containing-function (index file line)
   "Find function containing FILE at LINE."
-  (let ((symbols (chat-code-index-symbols index)))
-    (catch 'found
-      (maphash (lambda (name syms)
-                 (dolist (sym syms)
-                   (when (and (string= (chat-code-symbol-file sym) file)
-                              (<= (chat-code-symbol-line sym) line))
-                     (throw 'found name))))
-               symbols)
-      nil)))
+  (let ((symbols (chat-code-index-symbols index))
+        best-name
+        (best-line 0))
+    (maphash (lambda (name syms)
+               (dolist (sym syms)
+                 (when (and (string= (chat-code-symbol-file sym) file)
+                            (<= (chat-code-symbol-line sym) line)
+                            (> (chat-code-symbol-line sym) best-line))
+                   (setq best-name name
+                         best-line (chat-code-symbol-line sym)))))
+             symbols)
+    best-name))
 
 ;; ------------------------------------------------------------------
 ;; Query Functions

@@ -403,6 +403,19 @@ Review Agent 只能输出以下结构化记录：
 - 相同输入得到确定性排序。
 - 10,000 文件 fixture 上，主循环单次不可让出时间不超过 50ms；warm query 的 p95 不超过 200ms。
 
+#### 完成记录（2026-08-28）
+
+- 状态：completed。
+- 新增统一异步代码智能 facade、typed result、backend registry、确定性排序、项目路径约束、总超时和同步热缓存读取；`ok`、`empty`、`unavailable`、`timeout`、`error` 以及逐后端 attempts 均可区分。
+- 公共语义 adapter 仅使用 `xref`、`imenu`、`flymake` 和 `treesit` 公共 API；不会探测客户端内部状态，不会自动启动或安装语言服务。已有语义服务可通过公共 xref backend 自动参与。
+- 现有轻量索引作为 `index` fallback 接入，旧 JSON 索引读写保持兼容；同时修正 TypeScript 分派、跨行符号误吞、Lisp 引用遗漏、定义行误计引用和最近包含函数判断，并补充 class、interface、trait、struct、generic 和 method 结构提取。
+- 新增可重建 repo map，保存 canonical path、digest、语言、符号、import、test relation、大文件跳过原因和 revision；扫描、解析和边重建均按 timer slice 与条目上限让出主循环，后续刷新只解析 digest 变化文件并重建变化节点及邻边。
+- 上下文排序权重集中声明，综合 query、symbol、focus、changed file、diagnostic、test relation、token cost，按预算去重；相同 revision、查询和预算产生完全相同结果。
+- Code session 请求只消费热缓存并异步安排刷新；来源、backend、revision、attempts、预算和截断原因写入现有 request diagnostics。普通聊天不会创建 repo map 或进入代码上下文路径。
+- 五语言基础指标 fixture 的 definition accuracy 为 100%，reference precision 和 recall 均不低于方案门槛；扩展语料覆盖重名、跨文件引用、嵌套定义、接口/实现、无效语法和 CJK 路径。
+- 固定相关文件查询 Top-5 命中 10/10；10,000 文件 fixture 的单 slice 不超过 50ms，20 次 warm query 的 p95 不超过 200ms。
+- M11 与既有代码模块定向回归 18/18 通过；canonical suite 1601/1601 通过；integration 2/2 通过，2 个凭证依赖测试按既有条件 skip。
+
 ### M12：项目级自动验证与有限修复
 
 #### 目标

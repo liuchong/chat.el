@@ -45,6 +45,7 @@
 (require 'chat-agent)
 (require 'chat-agent-transcript)
 (require 'chat-code-lsp)
+(chat-code-intelligence-install-default-backends)
 (require 'chat-tool-caller)
 (require 'chat-request-diagnostics)
 (require 'chat-request-panel)

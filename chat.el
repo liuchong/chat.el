@@ -199,6 +199,8 @@ Returns the list of files that were loaded."
   (require 'chat-edit)
   (require 'chat-code-preview)
   (require 'chat-code-intel)
+  (require 'chat-code-intelligence)
+  (require 'chat-repo-map)
   (require 'chat-code-lsp)
   (require 'chat-code-refactor)
   (require 'chat-code-test)

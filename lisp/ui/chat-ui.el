@@ -2670,19 +2670,23 @@ there is no second request path to hold it."
              (chat-code-session-p session))
     (let* ((prompt (and (fboundp 'chat-code--compose-system-prompt)
                         (chat-code--compose-system-prompt)))
-           (context (and (fboundp 'chat-context-code-build)
-                         (ignore-errors
-                           (chat-context-code-to-string
-                            (chat-context-code-build session)))))
-           (lsp (and (fboundp 'chat-code-lsp-available-p)
-                     (chat-code-lsp-available-p)
-                     (when-let ((ctx (chat-code-lsp-get-context)))
-                       (chat-code-lsp-format-context ctx)))))
+           (context-object
+            (and (fboundp 'chat-context-code-build)
+                 (ignore-errors (chat-context-code-build session))))
+           (context (and context-object
+                         (chat-context-code-to-string context-object))))
+      (when (and chat-ui--current-request-id
+                 context-object
+                 (fboundp 'chat-code-context-diagnostics))
+        (chat-request-diagnostics-record
+         chat-ui--current-request-id
+         'code-context-built
+         :diagnostics (chat-code-context-diagnostics context-object)
+         :summary "Prepared versioned coding context"))
       (string-join (delq nil (list prompt
                                    (and context
                                         (not (string-empty-p context))
-                                        context)
-                                   lsp))
+                                        context)))
                    "\n\n"))))
 
 (defun chat-ui--current-model-supports-tools-p ()

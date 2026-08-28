@@ -1,0 +1,473 @@
+;;; chat-repo-map.el --- Incremental repository context map -*- lexical-binding: t -*-
+
+;; Copyright (C) 2026 chat.el contributors
+;; License: 1PL (One Public License) - https://license.pub/1pl/
+
+;;; Commentary:
+
+;; A repo map is a disposable, run-independent cache used to rank context.
+;; Refreshes traverse and parse in bounded timer slices.  Request assembly
+;; only reads the last complete revision and therefore never waits for a
+;; repository scan.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'seq)
+(require 'subr-x)
+(require 'chat-code-intel)
+
+(defgroup chat-repo-map nil
+  "Incremental repository maps for coding context."
+  :group 'chat-code
+  :prefix "chat-repo-map-")
+
+(defcustom chat-repo-map-slice-milliseconds 20
+  "Target maximum work time for one refresh timer slice."
+  :type 'integer
+  :group 'chat-repo-map)
+
+(defcustom chat-repo-map-max-items-per-slice 32
+  "Maximum traversal or graph items processed in one timer slice."
+  :type 'integer
+  :group 'chat-repo-map)
+
+(defcustom chat-repo-map-max-file-size (* 500 1024)
+  "Maximum file size parsed into a repo map."
+  :type 'integer
+  :group 'chat-repo-map)
+
+(defcustom chat-repo-map-refresh-minimum-interval 2.0
+  "Minimum seconds between automatic refreshes of a warm map."
+  :type 'number
+  :group 'chat-repo-map)
+
+(defcustom chat-repo-map-score-weights
+  '((query-path . 80)
+    (query-symbol . 120)
+    (focus . 300)
+    (focus-adjacent . 100)
+    (changed . 180)
+    (diagnostic . 220)
+    (test-relation . 90)
+    (token-kib . -1))
+  "Explicit scoring weights used by `chat-repo-map-query'."
+  :type '(alist :key-type symbol :value-type integer)
+  :group 'chat-repo-map)
+
+(defconst chat-repo-map--source-pattern
+  "\\.\\(py\\|js\\|ts\\|jsx\\|tsx\\|el\\|go\\|rs\\|rb\\|java\\|c\\|cc\\|cpp\\|h\\|hpp\\)\\'"
+  "File name pattern admitted to the repo map.")
+
+(defconst chat-repo-map--ignored-directories
+  '(".git" "node_modules" "__pycache__" ".venv" "target" "dist" "build")
+  "Directories omitted from traversal.")
+
+(cl-defstruct chat-repo-map-entry
+  path digest size language symbols imports test-p skipped-reason updated-at)
+
+(cl-defstruct chat-repo-map
+  root revision entries adjacency state callbacks last-result)
+
+(defvar chat-repo-map--cache (make-hash-table :test 'equal))
+
+(defun chat-repo-map--canonical-root (root)
+  "Return canonical directory form of ROOT."
+  (file-name-as-directory (file-truename root)))
+
+(defun chat-repo-map-get (root)
+  "Return the warm repo map for ROOT, or nil."
+  (gethash (chat-repo-map--canonical-root root) chat-repo-map--cache))
+
+(defun chat-repo-map--get-or-create (root)
+  "Return a repo map for ROOT, creating an empty cache if needed."
+  (let* ((root (chat-repo-map--canonical-root root))
+         (map (gethash root chat-repo-map--cache)))
+    (or map
+        (let ((created
+               (make-chat-repo-map
+                :root root :revision "empty"
+                :entries (make-hash-table :test 'equal)
+                :adjacency (make-hash-table :test 'equal)
+                :state 'cold :callbacks nil)))
+          (puthash root created chat-repo-map--cache)
+          created))))
+
+(defun chat-repo-map--ignored-path-p (path)
+  "Return non-nil when PATH is an ignored directory."
+  (member (file-name-nondirectory (directory-file-name path))
+          chat-repo-map--ignored-directories))
+
+(defun chat-repo-map--source-file-p (path)
+  "Return non-nil when PATH is a supported source file."
+  (and (string-match-p chat-repo-map--source-pattern path)
+       (file-regular-p path)))
+
+(defun chat-repo-map--extract-buffer-imports ()
+  "Return lightweight import targets from the current buffer."
+  (let (imports)
+    (goto-char (point-min))
+    (while
+        (re-search-forward
+         "^[[:space:]]*\\(?:import\\|from\\|require\\|use\\|mod\\|#include\\|package\\)[[:space:]('\"<]*\\([^[:space:]'\">;,)]+\\)"
+         nil t)
+      (push (match-string-no-properties 1) imports))
+    (sort (delete-dups imports) #'string<)))
+
+(defun chat-repo-map--read-file-summary (path language)
+  "Read PATH once and return digest, symbols, and imports for LANGUAGE."
+  (with-temp-buffer
+    (insert-file-contents path)
+    (let ((digest (secure-hash 'sha256 (current-buffer)))
+          (symbols (chat-code-intel-extract-buffer-symbols language))
+          (imports (chat-repo-map--extract-buffer-imports)))
+      (dolist (symbol symbols)
+        (setf (chat-code-symbol-file symbol) path))
+      (list digest symbols imports))))
+
+(defun chat-repo-map--test-file-p (path)
+  "Return non-nil when PATH has a conventional test name."
+  (string-match-p
+   "\\(?:^\\|/\\)\\(?:test[s]?/\\|[^/]*\\(?:_test\\|test_\\|\\.test\\|\\.spec\\)[^/]*\\)"
+   path))
+
+(defun chat-repo-map--entry-for-file (path old-entry)
+  "Return an updated entry for PATH, reusing OLD-ENTRY when unchanged."
+  (let* ((attributes (file-attributes path 'string))
+         (size (file-attribute-size attributes))
+         (modified-at (float-time (file-attribute-modification-time attributes))))
+    (if (> size chat-repo-map-max-file-size)
+        (if (and old-entry
+                 (eq (chat-repo-map-entry-skipped-reason old-entry) 'large-file)
+                 (= size (chat-repo-map-entry-size old-entry))
+                 (= modified-at (chat-repo-map-entry-updated-at old-entry)))
+            old-entry
+          (make-chat-repo-map-entry
+           :path path :digest nil :size size
+           :language (chat-code-intel-detect-language path)
+           :symbols nil :imports nil
+           :test-p (chat-repo-map--test-file-p path)
+           :skipped-reason 'large-file :updated-at modified-at))
+      (let* ((language (chat-code-intel-detect-language path))
+             (summary (chat-repo-map--read-file-summary path language))
+             (digest (nth 0 summary)))
+        (if (and old-entry
+                 (equal digest (chat-repo-map-entry-digest old-entry)))
+            old-entry
+          (make-chat-repo-map-entry
+           :path path :digest digest :size size
+           :language language
+           :symbols (nth 1 summary)
+           :imports (nth 2 summary)
+           :test-p (chat-repo-map--test-file-p path)
+           :skipped-reason nil :updated-at modified-at))))))
+
+(defun chat-repo-map--stem (path)
+  "Return a normalized relation stem for PATH."
+  (let ((name (file-name-base path)))
+    (setq name (replace-regexp-in-string "\\(?:_test\\|test_\\|\\.test\\|\\.spec\\)" "" name))
+    (downcase name)))
+
+(defun chat-repo-map--revision (entries)
+  "Return a deterministic revision for ENTRIES."
+  (let (parts)
+    (maphash
+     (lambda (path entry)
+       (push (format "%s\0%s\0%s"
+                     path
+                     (or (chat-repo-map-entry-digest entry) "skipped")
+                     (or (chat-repo-map-entry-skipped-reason entry) "indexed"))
+             parts))
+     entries)
+    (secure-hash 'sha256 (mapconcat #'identity (sort parts #'string<) "\0"))))
+
+(defun chat-repo-map-refresh-async (root callback)
+  "Refresh ROOT in timer slices and call CALLBACK with a result plist.
+
+If ROOT is already refreshing, CALLBACK joins that refresh.  The returned
+function removes CALLBACK from the waiter list."
+  (let* ((map (chat-repo-map--get-or-create root))
+         (root (chat-repo-map-root map)))
+    (if (eq (chat-repo-map-state map) 'building)
+        (progn
+          (push callback (chat-repo-map-callbacks map))
+          (lambda ()
+            (setf (chat-repo-map-callbacks map)
+                  (delq callback (chat-repo-map-callbacks map)))))
+      (setf (chat-repo-map-state map) 'building
+            (chat-repo-map-callbacks map) (list callback))
+      (let ((queue (list root))
+            (phase 'scan)
+            (seen (make-hash-table :test 'equal))
+            (entries (copy-hash-table (chat-repo-map-entries map)))
+            (stems (make-hash-table :test 'equal))
+            (adjacency (copy-hash-table (chat-repo-map-adjacency map)))
+            (changed-paths (make-hash-table :test 'equal))
+            (removed-paths (make-hash-table :test 'equal))
+            (changed-stems (make-hash-table :test 'equal))
+            (phase-queue nil)
+            (changed 0)
+            (skipped 0)
+            (removed 0)
+            (edges-rebuilt 0)
+            (slice-count 0)
+            (max-slice-ms 0.0)
+            timer)
+        (cl-labels
+            ((finish ()
+               (setf (chat-repo-map-entries map) entries
+                     (chat-repo-map-adjacency map) adjacency
+                     (chat-repo-map-revision map) (chat-repo-map--revision entries)
+                     (chat-repo-map-state map) 'warm)
+               (let ((result
+                      (list :status 'ok
+                            :revision (chat-repo-map-revision map)
+                            :files (hash-table-count entries)
+                            :changed changed :removed removed :skipped skipped
+                            :edges-rebuilt edges-rebuilt
+                            :slices slice-count :max-slice-ms max-slice-ms)))
+                 (setf (chat-repo-map-last-result map)
+                       (plist-put result :completed-at (float-time)))
+                 (let ((callbacks (nreverse (chat-repo-map-callbacks map))))
+                   (setf (chat-repo-map-callbacks map) nil)
+                   (dolist (waiter callbacks) (funcall waiter result)))))
+             (prune-removed ()
+               (maphash
+                (lambda (path _entry)
+                  (unless (gethash path seen)
+                    (remhash path entries)
+                    (remhash path adjacency)
+                    (puthash path t removed-paths)
+                    (cl-incf removed)))
+                (copy-hash-table entries)))
+             (scan-item (path)
+               (condition-case nil
+                   (cond
+                    ((and (file-directory-p path)
+                          (not (file-symlink-p path))
+                          (not (chat-repo-map--ignored-path-p path)))
+                     (setq queue
+                           (nconc (sort (directory-files path t directory-files-no-dot-files-regexp t)
+                                       #'string<)
+                                  queue)))
+                    ((chat-repo-map--source-file-p path)
+                     (let* ((path (file-truename path))
+                            (old (gethash path entries))
+                            (entry (chat-repo-map--entry-for-file path old)))
+                       (puthash path t seen)
+                       (puthash path entry entries)
+                       (when (chat-repo-map-entry-skipped-reason entry) (cl-incf skipped))
+                       (unless (eq entry old)
+                         (puthash path t changed-paths)
+                         (cl-incf changed))))
+                    (t nil))
+                 (file-error nil)))
+             (build-stem (path)
+               (let ((stem (chat-repo-map--stem path)))
+                 (puthash stem (cons path (gethash stem stems)) stems)))
+             (resolve-edges (path)
+               (cl-incf edges-rebuilt)
+               (let* ((entry (gethash path entries))
+                      (related (copy-sequence
+                                (gethash (chat-repo-map--stem path) stems))))
+                 (dolist (target (chat-repo-map-entry-imports entry))
+                   (setq related
+                         (nconc (copy-sequence
+                                 (gethash (chat-repo-map--stem target) stems))
+                                related)))
+                 (puthash path (sort (delete path (delete-dups related)) #'string<)
+                          adjacency)))
+             (affected-path-p (path entry)
+               (or (gethash path changed-paths)
+                   (gethash (chat-repo-map--stem path) changed-stems)
+                   (seq-some (lambda (neighbor)
+                               (or (gethash neighbor changed-paths)
+                                   (gethash neighbor removed-paths)))
+                             (gethash path adjacency))
+                   (seq-some (lambda (target)
+                               (gethash (chat-repo-map--stem target) changed-stems))
+                             (chat-repo-map-entry-imports entry))))
+             (advance-phase ()
+               (pcase phase
+                 ('scan
+                  (prune-removed)
+                  (setq phase 'stems
+                        phase-queue nil)
+                  (maphash (lambda (path _entry) (push path phase-queue)) entries)
+                  (setq phase-queue (sort phase-queue #'string<)))
+                 ('stems
+                  (setq phase 'edges
+                        phase-queue nil)
+                  (maphash (lambda (path _)
+                             (puthash (chat-repo-map--stem path) t changed-stems))
+                           changed-paths)
+                  (maphash (lambda (path _)
+                             (puthash (chat-repo-map--stem path) t changed-stems))
+                           removed-paths)
+                  (maphash (lambda (path entry)
+                             (when (affected-path-p path entry)
+                               (push path phase-queue)))
+                           entries)
+                  (setq phase-queue (sort phase-queue #'string<)))
+                 ('edges (setq phase 'done))))
+             (step ()
+               (let* ((started (float-time))
+                      (deadline (+ started (/ chat-repo-map-slice-milliseconds 1000.0)))
+                      (processed 0))
+                 (cl-incf slice-count)
+                 (while (and (< (float-time) deadline)
+                             (< processed chat-repo-map-max-items-per-slice)
+                             (not (eq phase 'done)))
+                   (cl-incf processed)
+                   (pcase phase
+                     ('scan
+                      (if queue (scan-item (pop queue)) (advance-phase)))
+                     ('stems
+                      (if phase-queue (build-stem (pop phase-queue)) (advance-phase)))
+                     ('edges
+                      (if phase-queue (resolve-edges (pop phase-queue)) (advance-phase)))))
+                 (setq max-slice-ms
+                       (max max-slice-ms (* 1000.0 (- (float-time) started))))
+                 (if (eq phase 'done)
+                     (finish)
+                   (setq timer (run-at-time 0 nil #'step))))))
+          (setq timer (run-at-time 0 nil #'step))
+          (lambda ()
+            (setf (chat-repo-map-callbacks map)
+                  (delq callback (chat-repo-map-callbacks map)))))))))
+
+(defun chat-repo-map-schedule-refresh (root)
+  "Schedule a non-blocking refresh for ROOT unless one is running."
+  (let* ((map (chat-repo-map--get-or-create root))
+         (last (chat-repo-map-last-result map))
+         (completed-at (plist-get last :completed-at)))
+    (unless (or (eq (chat-repo-map-state map) 'building)
+                (and completed-at
+                     (< (- (float-time) completed-at)
+                        chat-repo-map-refresh-minimum-interval)))
+      (chat-repo-map-refresh-async root #'ignore))))
+
+(defun chat-repo-map--canonical-candidate (path)
+  "Return a stable absolute form for candidate PATH."
+  (when path
+    (condition-case nil
+        (file-truename path)
+      (file-error (expand-file-name path)))))
+
+(defun chat-repo-map--weight (component)
+  "Return configured score weight for COMPONENT."
+  (or (alist-get component chat-repo-map-score-weights) 0))
+
+(defun chat-repo-map--query-terms (query)
+  "Return normalized lexical terms from QUERY."
+  (sort (delete-dups
+         (seq-filter
+          (lambda (term) (> (length term) 1))
+          (split-string (downcase (or query "")) "[^[:alnum:]_]+" t)))
+        #'string<))
+
+(defun chat-repo-map--score-entry (map entry request)
+  "Return score and reasons for ENTRY in MAP under REQUEST."
+  (let* ((path (chat-repo-map-entry-path entry))
+         (path-text (downcase path))
+         (symbol-text
+          (downcase
+           (mapconcat #'chat-code-symbol-name
+                      (chat-repo-map-entry-symbols entry) " ")))
+         (terms (chat-repo-map--query-terms (plist-get request :query)))
+         (focus (chat-repo-map--canonical-candidate
+                 (plist-get request :focus-file)))
+         (changed (delq nil (mapcar #'chat-repo-map--canonical-candidate
+                                    (or (plist-get request :changed-files) nil))))
+         (diagnostics (delq nil (mapcar #'chat-repo-map--canonical-candidate
+                                        (or (plist-get request :diagnostic-paths) nil))))
+         (score 0)
+         reasons)
+    (dolist (term terms)
+      (when (string-match-p (regexp-quote term) path-text)
+        (cl-incf score (chat-repo-map--weight 'query-path))
+        (push 'query-path reasons))
+      (when (string-match-p (regexp-quote term) symbol-text)
+        (cl-incf score (chat-repo-map--weight 'query-symbol))
+        (push 'query-symbol reasons)))
+    (when (and focus (string= path focus))
+      (cl-incf score (chat-repo-map--weight 'focus))
+      (push 'focus reasons))
+    (when (and focus (member path (gethash focus (chat-repo-map-adjacency map))))
+      (cl-incf score (chat-repo-map--weight 'focus-adjacent))
+      (push 'focus-adjacent reasons))
+    (when (member path changed)
+      (cl-incf score (chat-repo-map--weight 'changed))
+      (push 'changed reasons))
+    (when (member path diagnostics)
+      (cl-incf score (chat-repo-map--weight 'diagnostic))
+      (push 'diagnostic reasons))
+    (when (and focus
+               (not (string= path focus))
+               (string= (chat-repo-map--stem path) (chat-repo-map--stem focus))
+               (or (chat-repo-map-entry-test-p entry)
+                   (chat-repo-map--test-file-p focus)))
+      (cl-incf score (chat-repo-map--weight 'test-relation))
+      (push 'test-relation reasons))
+    (cl-incf score (* (chat-repo-map--weight 'token-kib)
+                      (/ (chat-repo-map-entry-size entry) 1024)))
+    (cons score (sort (delete-dups reasons)
+                      (lambda (a b) (string< (symbol-name a) (symbol-name b)))))))
+
+(defun chat-repo-map-query (root request)
+  "Rank warm repo map entries for ROOT according to REQUEST.
+
+REQUEST accepts `:query', `:focus-file', `:changed-files',
+`:diagnostic-paths', `:limit' and `:token-budget'."
+  (let ((map (chat-repo-map-get root)))
+    (if (or (null map) (eq (chat-repo-map-state map) 'cold))
+        (list :status 'unavailable :revision "none" :items nil
+              :diagnostics '((reason . cold-cache)))
+      (let ((candidates nil)
+            (budget (or (plist-get request :token-budget) 4000))
+            (limit (or (plist-get request :limit) 10))
+            (used 0)
+            (selected nil)
+            (excluded 0)
+            (seen (make-hash-table :test 'equal)))
+        (maphash
+         (lambda (_path entry)
+           (unless (chat-repo-map-entry-skipped-reason entry)
+             (let ((score (chat-repo-map--score-entry map entry request)))
+               (push (list :path (chat-repo-map-entry-path entry)
+                           :score (car score)
+                           :reasons (cdr score)
+                           :token-cost (max 1 (/ (chat-repo-map-entry-size entry) 4))
+                           :language (chat-repo-map-entry-language entry)
+                           :symbols (mapcar #'chat-code-symbol-name
+                                            (chat-repo-map-entry-symbols entry)))
+                     candidates))))
+         (chat-repo-map-entries map))
+        (setq candidates
+              (sort candidates
+                    (lambda (a b)
+                      (if (= (plist-get a :score) (plist-get b :score))
+                          (string< (plist-get a :path) (plist-get b :path))
+                        (> (plist-get a :score) (plist-get b :score))))))
+        (dolist (item candidates)
+          (let ((path (plist-get item :path))
+                (cost (plist-get item :token-cost)))
+            (if (or (>= (length selected) limit)
+                    (gethash path seen)
+                    (> (+ used cost) budget))
+                (cl-incf excluded)
+              (puthash path t seen)
+              (cl-incf used cost)
+              (push item selected))))
+        (list :status (if selected 'ok 'empty)
+              :revision (chat-repo-map-revision map)
+              :items (nreverse selected)
+              :diagnostics `((state . ,(chat-repo-map-state map))
+                             (token-budget . ,budget)
+                             (token-used . ,used)
+                             (excluded . ,excluded)
+                             (truncation-reason . ,(and (> excluded 0)
+                                                       'budget-or-limit))))))))
+
+(provide 'chat-repo-map)
+;;; chat-repo-map.el ends here

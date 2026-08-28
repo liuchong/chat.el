@@ -16,6 +16,9 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
+(require 'chat-code-intelligence)
+(require 'chat-repo-map)
 
 ;; ------------------------------------------------------------------
 ;; Customization
@@ -63,7 +66,8 @@
   sources               ; List of context-source structs
   files                 ; List of file-context structs
   symbols               ; List of relevant symbols
-  total-tokens)         ; Estimated total tokens
+  total-tokens          ; Estimated total tokens
+  diagnostics)          ; Rebuildable source and truncation evidence
 
 (cl-defstruct chat-code-context-source
   "A source of context information."
@@ -106,20 +110,18 @@ Uses a simple heuristic: ~4 characters per token on average."
 Uses symbol index for smart context when available."
   (let* ((strategy (chat-code-session-context-strategy code-session))
          (budget (chat-context-code--calculate-budget strategy))
+         (root (chat-code-session-project-root code-session))
+         (focus (chat-code-session-focus-file code-session))
          (context (make-chat-code-context
                    :strategy strategy
                    :budget budget
                    :sources nil
                    :files nil
                    :symbols nil
-                   :total-tokens 0)))
+                   :total-tokens 0
+                   :diagnostics nil)))
     (chat-context-code--add-project-instructions context code-session)
-    ;; Try to use symbol index for smart context
-    (when (featurep 'chat-code-intel)
-      (let ((index (chat-code-intel-get-index
-                    (chat-code-session-project-root code-session))))
-        (when index
-          (chat-context-code--add-symbol-context context code-session index))))
+    (chat-context-code--add-intelligence-context context code-session)
     ;; Build context based on strategy
     (pcase strategy
       ('minimal (chat-context-code--build-minimal context code-session))
@@ -127,9 +129,57 @@ Uses symbol index for smart context when available."
       ('balanced (chat-context-code--build-balanced context code-session))
       ('comprehensive (chat-context-code--build-comprehensive context code-session))
       (_ (chat-context-code--build-balanced context code-session)))
+    ;; Consume only the last complete map.  A refresh runs in timer slices
+    ;; and can never delay this request path.
+    (when (and root (not (eq strategy 'minimal)))
+      (let ((ranked
+             (chat-repo-map-query
+              root
+              (list :focus-file focus
+                    :query (and focus (file-name-base focus))
+                    :token-budget (max 500 (/ budget 3))
+                    :limit (if (eq strategy 'comprehensive) 8 4)))))
+        (push (list :source 'repo-map
+                    :status (plist-get ranked :status)
+                    :revision (plist-get ranked :revision)
+                    :details (plist-get ranked :diagnostics))
+              (chat-code-context-diagnostics context))
+        (when (eq (plist-get ranked :status) 'ok)
+          (dolist (item (plist-get ranked :items))
+            (let ((path (plist-get item :path)))
+              (unless (or (and focus (string= (file-truename focus) path))
+                          (chat-context-code--file-in-context-p context path))
+                (chat-context-code--add-file
+                 context path :max-lines 40 :with-outline t)))))))
+    (when root (chat-repo-map-schedule-refresh root))
     ;; Optimize to fit budget
     (chat-context-code--optimize context)
     context))
+
+(defun chat-context-code--add-intelligence-context (context code-session)
+  "Add warm facade symbol context for CODE-SESSION to CONTEXT."
+  (let* ((root (chat-code-session-project-root code-session))
+         (focus (chat-code-session-focus-file code-session))
+         (result
+          (and root focus
+               (chat-code-intelligence-query-cached
+                'symbols (list :project-root root :path focus)))))
+    (when result
+      (push (list :source 'code-intelligence
+                  :status (plist-get result :status)
+                  :backend (plist-get result :backend)
+                  :revision (plist-get result :revision)
+                  :attempts (plist-get result :attempts))
+            (chat-code-context-diagnostics context))
+      (when (eq (plist-get result :status) 'ok)
+        (dolist (item (seq-take (plist-get result :items) 12))
+          (push (format ";; Symbol: %s (%s at %s:%d)"
+                        (plist-get item :name)
+                        (plist-get item :kind)
+                        (plist-get item :path)
+                        (plist-get item :line))
+                (chat-code-context-symbols context))))))
+  context)
 
 (defun chat-context-code--add-project-instructions (context code-session)
   "Add project instruction files from CODE-SESSION into CONTEXT.
@@ -499,6 +549,13 @@ If OUTLINE-ONLY is t, extract only function/class signatures."
                             (< (chat-code-context-source-priority a)
                                (chat-code-context-source-priority b)))))
       (insert (chat-code-context-source-content source))
+      (insert "\n"))
+    (when (chat-code-context-symbols context)
+      (insert ";; Related Symbols\n")
+      (dolist (symbol (sort (delete-dups
+                             (copy-sequence (chat-code-context-symbols context)))
+                            #'string<))
+        (insert symbol "\n"))
       (insert "\n"))
     ;; Add files
     (dolist (file-ctx (chat-code-context-files context))
