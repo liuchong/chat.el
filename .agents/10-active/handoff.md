@@ -14,10 +14,10 @@
 
 ## Continue With
 
-- M16 independent review and conflict-safe coding collaboration are complete
-- Continue with M17 rollout, performance verification and final acceptance
-- Keep review findings evidence-bearing and child outcomes bounded
-- Preserve path ownership, base revision and post-merge verification as merge gates
+- M17 runtime status, diagnostics, performance runner and strict gate code are complete
+- Keep M17 blocked until both comparable 30-by-5 live result sets exist
+- Add a fixed tagged large-repository task before evaluating its token gate
+- Reproduce the aggregate with `M-x chat-coding-acceptance-run-final`
 
 ## Avoid
 

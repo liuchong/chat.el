@@ -1,8 +1,9 @@
 # Code Mode 使用指南
 
-Code Mode 是 chat.el 的 AI 编程工作模式。
-当前稳定主路径是单 buffer 对话、基础上下文拼装、基础 edit 接受/拒绝，以及从代码缓冲发起 explain、refactor、fix、docs、tests、complete 请求。
-多文件重构、git 辅助、索引性能优化等高级模块目前仍在修整中，不应默认视为稳定能力。
+Code Mode 是统一 chat buffer 上的一组编程能力，不是第二套对话界面。
+当前稳定主路径覆盖结构化项目上下文、版本化读写、语义检索与 repo map、
+预览编辑、项目验证与有界修复、TODO 计划、隔离执行、只读审查和受控子任务合并。
+历史索引命令只作为兼容入口保留；新调用应使用语义 facade 和 repo map。
 
 ## 目录
 
@@ -175,6 +176,45 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 
 摘要行上按 `RET` 或点一下展开该组，再按一次收起。`C-c C-d` 一次展开或
 折叠全部。折叠状态按组记住，后续同类内容到达时该组保持你选的状态。
+
+### 运行阶段与可操作错误
+
+顶部状态只投影当前运行事实，不另存一份任务状态：
+
+| 阶段 | 含义 |
+|------|------|
+| `planning` | 创建或恢复有证据要求的 TODO 计划 |
+| `understanding` | 读取规则、文件和语义上下文 |
+| `editing` | 生成、预览或应用受版本保护的修改 |
+| `verifying` | 执行项目要求的 format、lint、type、test 或 build |
+| `repairing` | 在预算内根据验证失败修复并重验 |
+| `reviewing` | 在独立只读上下文中复核 diff 和证据 |
+
+流式输出导致状态更新时，输入区内的 point 和可见窗口的 `window-start`
+保持不变。计划仍显示在输入区上方的原生进度区域，不会在顶部重复一份。
+
+错误分为 `unavailable`、`blocked`、`stale`、`failed`、`timeout` 和
+`cancelled`。错误正文后的 `Next:` 是可执行恢复动作，例如重新读取漂移文件、
+打开目标文件建立语义上下文、补齐验证能力、选择可用隔离 backend，或确认权限
+后重试。不要通过重复发送同一句话绕过 stale 或 blocked 状态。
+
+### Repo Map 与最终验收
+
+完整刷新用于发现未知外部变化；编辑器已知刚写入的路径通过
+`chat-repo-map-update-paths-async` 只更新受影响关系。兼容索引命令仍可用，
+但新扩展不应直接依赖其内部 hash table 或后台 timer。
+
+可复现性能命令：
+
+```text
+/Users/liu/projects/.agent-tools/capped.sh 1500 emacs -Q -batch -l tests/performance/run-repo-map-benchmark.el
+```
+
+在 Emacs 中，`M-x chat-coding-acceptance-run-performance` 会把性能门槛写成
+不可变 Eval。最终 live 验收先用 `M-x chat-coding-eval-run-live` 分别生成
+M9 和 M17 的 30 task x 5 结果集，再运行
+`M-x chat-coding-acceptance-run-final`。缺失任一结果集、可信 token usage 或固定
+large-repo 样本时，结果为 `blocked`，不会被当成通过。
 
 当文件写工具触发审批时，原生审批提示除了单次、session、tool 级放行外，还会在可判定目录范围时提供 directory 级放行。
 这适合文档目录、测试目录或你愿意交给 AI 连续修改并用 `git diff` 审查的子树。
@@ -617,8 +657,8 @@ M-x lsp 或 M-x eglot
 (advice-add 'chat-context-code-build :override #'my-custom-context-builder)
 ```
 
-当前不推荐把 `code-mode` 直接当作批处理或 CI 非交互引擎使用。
-它的主路径仍然以交互式缓冲工作流为中心。
+统一 chat surface 的主路径仍然以交互式缓冲工作流为中心。批处理或 CI 应调用
+明确的 Eval、verification 或 performance 入口，不应模拟按键驱动 UI。
 
 ### 与 Projectile 集成
 
@@ -665,4 +705,4 @@ M-x lsp 或 M-x eglot
 
 ---
 
-*Code Mode Guide - Current Repair Edition*
+*Code Mode Guide - Productized Coding Workflow*

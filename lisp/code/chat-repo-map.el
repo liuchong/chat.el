@@ -72,7 +72,8 @@
   path digest size language symbols imports test-p skipped-reason updated-at)
 
 (cl-defstruct chat-repo-map
-  root revision entries adjacency query-cache state callbacks last-result)
+  root revision entries adjacency stems importers query-cache state callbacks
+  last-result timer)
 
 (defvar chat-repo-map--cache (make-hash-table :test 'equal))
 
@@ -94,6 +95,8 @@
                 :root root :revision "empty"
                 :entries (make-hash-table :test 'equal)
                 :adjacency (make-hash-table :test 'equal)
+                :stems (make-hash-table :test 'equal)
+                :importers (make-hash-table :test 'equal)
                 :query-cache (make-hash-table :test 'equal)
                 :state 'cold :callbacks nil)))
           (puthash root created chat-repo-map--cache)
@@ -194,7 +197,7 @@ If ROOT is already refreshing, CALLBACK joins that refresh.  The returned
 function removes CALLBACK from the waiter list."
   (let* ((map (chat-repo-map--get-or-create root))
          (root (chat-repo-map-root map)))
-    (if (eq (chat-repo-map-state map) 'building)
+    (if (memq (chat-repo-map-state map) '(building updating))
         (progn
           (push callback (chat-repo-map-callbacks map))
           (lambda ()
@@ -207,6 +210,7 @@ function removes CALLBACK from the waiter list."
             (seen (make-hash-table :test 'equal))
             (entries (copy-hash-table (chat-repo-map-entries map)))
             (stems (make-hash-table :test 'equal))
+            (importers (make-hash-table :test 'equal))
             (adjacency (copy-hash-table (chat-repo-map-adjacency map)))
             (changed-paths (make-hash-table :test 'equal))
             (removed-paths (make-hash-table :test 'equal))
@@ -224,10 +228,13 @@ function removes CALLBACK from the waiter list."
             timer)
         (cl-labels
             ((finish ()
+               (setf (chat-repo-map-timer map) nil)
                (when-let ((cache (chat-repo-map-query-cache map)))
                  (clrhash cache))
                (setf (chat-repo-map-entries map) entries
                      (chat-repo-map-adjacency map) adjacency
+                     (chat-repo-map-stems map) stems
+                     (chat-repo-map-importers map) importers
                      (chat-repo-map-revision map) (chat-repo-map--revision entries)
                      (chat-repo-map-state map) 'warm)
                (let ((result
@@ -277,8 +284,14 @@ function removes CALLBACK from the waiter list."
                     (t nil))
                  (file-error nil)))
              (build-stem (path)
-               (let ((stem (chat-repo-map--stem path)))
-                 (puthash stem (cons path (gethash stem stems)) stems)))
+               (let* ((entry (gethash path entries))
+                      (stem (chat-repo-map--stem path)))
+                 (puthash stem (cons path (gethash stem stems)) stems)
+                 (dolist (target (chat-repo-map-entry-imports entry))
+                   (let ((target-stem (chat-repo-map--stem target)))
+                     (puthash target-stem
+                              (cons path (gethash target-stem importers))
+                              importers)))))
              (resolve-edges (path)
                (cl-incf edges-rebuilt)
                (let* ((entry (gethash path entries))
@@ -366,18 +379,281 @@ function removes CALLBACK from the waiter list."
                             (* 1000.0 (- (float-time) started))))
                  (if (eq phase 'done)
                      (finish)
-                   (setq timer (run-at-time 0 nil #'step))))))
+                   (setq timer (run-at-time 0 nil #'step))
+                   (setf (chat-repo-map-timer map) timer)))))
           (setq timer (run-at-time 0 nil #'step))
+          (setf (chat-repo-map-timer map) timer)
           (lambda ()
             (setf (chat-repo-map-callbacks map)
                   (delq callback (chat-repo-map-callbacks map)))))))))
+
+(defun chat-repo-map--table-list-add (table key value)
+  "Add VALUE once to the list stored at KEY in TABLE."
+  (puthash key (cons value (delete value (gethash key table))) table))
+
+(defun chat-repo-map--table-list-remove (table key value)
+  "Remove VALUE from the list stored at KEY in TABLE."
+  (let ((remaining (delete value (gethash key table))))
+    (if remaining
+        (puthash key remaining table)
+      (remhash key table))))
+
+(defun chat-repo-map--incremental-revision (previous entries paths)
+  "Return a revision derived from PREVIOUS after updating PATHS in ENTRIES."
+  (secure-hash
+   'sha256
+   (concat
+    previous "\0"
+    (mapconcat
+     (lambda (path)
+       (let ((entry (gethash path entries)))
+         (format "%s\0%s"
+                 path
+                 (if entry
+                     (or (chat-repo-map-entry-digest entry) "skipped")
+                   "removed"))))
+     (sort (copy-sequence paths) #'string<)
+     "\0"))))
+
+(defun chat-repo-map-update-paths-async (root paths callback)
+  "Incrementally update known PATHS below ROOT and call CALLBACK.
+
+This path is for editor-observed writes and removals.  It avoids discovering
+changes by rescanning ROOT, while preserving the full refresh API for unknown
+external changes.  The returned function cancels delivery to CALLBACK."
+  (unless (functionp callback)
+    (error "Repo map update requires a callback"))
+  (let* ((map (chat-repo-map--get-or-create root))
+         (root (chat-repo-map-root map))
+         (paths
+          (sort
+           (delete-dups
+            (delq
+             nil
+             (mapcar
+              (lambda (path)
+                (let ((canonical
+                       (condition-case nil
+                           (file-truename path)
+                         (file-error (expand-file-name path root)))))
+                  (when (file-in-directory-p canonical root) canonical)))
+              paths)))
+           #'string<))
+         timer)
+    (if (not (eq (chat-repo-map-state map) 'warm))
+        (let (cancelled refresh-cancel update-cancel)
+          (setq
+           refresh-cancel
+           (chat-repo-map-refresh-async
+            root
+            (lambda (_result)
+              (unless cancelled
+                (setq update-cancel
+                      (chat-repo-map-update-paths-async
+                       root paths callback))))))
+          (lambda ()
+            (setq cancelled t)
+            (when (functionp refresh-cancel) (funcall refresh-cancel))
+            (when (functionp update-cancel) (funcall update-cancel))))
+      (let ((cancelled nil))
+        (setf (chat-repo-map-state map) 'updating
+              (chat-repo-map-callbacks map) (list callback))
+        (setq
+         timer
+         (run-at-time
+          0 nil
+          (lambda ()
+            (unless cancelled
+              (let* ((started (float-time))
+                     (cpu-started (float-time (current-cpu-time)))
+                     (gc-started (float-time gc-elapsed)))
+                (condition-case error-data
+                    (let ((entries (copy-hash-table
+                                    (chat-repo-map-entries map)))
+                          (adjacency (copy-hash-table
+                                      (chat-repo-map-adjacency map)))
+                          (stems (copy-hash-table
+                                  (chat-repo-map-stems map)))
+                          (importers (copy-hash-table
+                                      (chat-repo-map-importers map)))
+                          (affected-stems (make-hash-table :test 'equal))
+                          (affected-paths (make-hash-table :test 'equal))
+                          (changed 0)
+                          (removed 0)
+                          (edges-rebuilt 0))
+                      (dolist (path paths)
+                        (let* ((old (gethash path entries))
+                               (old-stem (and old (chat-repo-map--stem path))))
+                          (puthash path t affected-paths)
+                          (dolist (neighbor (gethash path adjacency))
+                            (puthash neighbor t affected-paths))
+                          (when old
+                            (puthash old-stem t affected-stems)
+                            (chat-repo-map--table-list-remove
+                             stems old-stem path)
+                            (dolist (target (chat-repo-map-entry-imports old))
+                              (chat-repo-map--table-list-remove
+                               importers (chat-repo-map--stem target) path)))
+                          (if (chat-repo-map--source-file-p path)
+                              (let* ((entry
+                                      (chat-repo-map--entry-for-file path old))
+                                     (stem (chat-repo-map--stem path)))
+                                (puthash path entry entries)
+                                (puthash stem t affected-stems)
+                                (chat-repo-map--table-list-add stems stem path)
+                                (dolist (target
+                                         (chat-repo-map-entry-imports entry))
+                                  (chat-repo-map--table-list-add
+                                   importers (chat-repo-map--stem target) path))
+                                (unless (eq entry old) (cl-incf changed)))
+                            (when old
+                              (remhash path entries)
+                              (remhash path adjacency)
+                              (cl-incf removed)))))
+                      (maphash
+                       (lambda (stem _)
+                         (dolist (path (append (gethash stem stems)
+                                              (gethash stem importers)))
+                           (puthash path t affected-paths)))
+                       affected-stems)
+                      (maphash
+                       (lambda (path _)
+                         (let ((entry (gethash path entries)))
+                           (if (null entry)
+                               (remhash path adjacency)
+                             (cl-incf edges-rebuilt)
+                             (let ((related
+                                    (copy-sequence
+                                     (gethash (chat-repo-map--stem path)
+                                              stems))))
+                               (dolist (target
+                                        (chat-repo-map-entry-imports entry))
+                                 (setq related
+                                       (nconc
+                                        (copy-sequence
+                                         (gethash (chat-repo-map--stem target)
+                                                  stems))
+                                        related)))
+                               (puthash
+                                path
+                                (sort (delete path (delete-dups related))
+                                      #'string<)
+                                adjacency)))))
+                       affected-paths)
+                      (when-let ((cache (chat-repo-map-query-cache map)))
+                        (clrhash cache))
+                      (let* ((wall-ms
+                              (* 1000.0 (- (float-time) started)))
+                             (gc-ms
+                              (* 1000.0
+                                 (- (float-time gc-elapsed) gc-started)))
+                             (cpu-ms
+                              (max
+                               0.0
+                               (- (* 1000.0
+                                     (- (float-time (current-cpu-time))
+                                        cpu-started))
+                                  gc-ms)))
+                             (result
+                              (list
+                               :status 'ok
+                               :revision
+                               (chat-repo-map--incremental-revision
+                                (chat-repo-map-revision map) entries paths)
+                               :files (hash-table-count entries)
+                               :changed changed :removed removed :skipped 0
+                               :edges-rebuilt edges-rebuilt :slices 1
+                               :max-slice-ms cpu-ms
+                               :max-slice-wall-ms wall-ms
+                               :max-slice-gc-ms gc-ms
+                               :max-slice-phase 'incremental
+                               :completed-at (float-time))))
+                        (setf (chat-repo-map-entries map) entries
+                              (chat-repo-map-adjacency map) adjacency
+                              (chat-repo-map-stems map) stems
+                              (chat-repo-map-importers map) importers
+                              (chat-repo-map-revision map)
+                              (plist-get result :revision)
+                              (chat-repo-map-state map) 'warm
+                              (chat-repo-map-last-result map) result
+                              (chat-repo-map-timer map) nil)
+                        (let ((callbacks
+                               (nreverse (chat-repo-map-callbacks map))))
+                          (setf (chat-repo-map-callbacks map) nil)
+                          (dolist (waiter callbacks)
+                            (funcall waiter result)))))
+                  (error
+                   (setf (chat-repo-map-state map) 'warm
+                         (chat-repo-map-timer map) nil)
+                   (let ((callbacks
+                          (nreverse (chat-repo-map-callbacks map))))
+                     (setf (chat-repo-map-callbacks map) nil)
+                     (dolist (waiter callbacks)
+                       (funcall
+                        waiter
+                        (list :status 'failed
+                              :error (error-message-string error-data)))))))))))))
+        (setf (chat-repo-map-timer map) timer)
+        (lambda ()
+          (setq cancelled t)
+          (when (timerp timer) (cancel-timer timer))
+          (setf (chat-repo-map-timer map) nil)
+          (setf (chat-repo-map-callbacks map)
+                (delq callback (chat-repo-map-callbacks map)))
+          (when (eq (chat-repo-map-state map) 'updating)
+            (setf (chat-repo-map-state map) 'warm))))))
+
+(defun chat-repo-map-discard (root)
+  "Cancel and remove the cached repo map owned for ROOT."
+  (let* ((canonical (chat-repo-map--canonical-root root))
+         (map (gethash canonical chat-repo-map--cache)))
+    (when map
+      (when (timerp (chat-repo-map-timer map))
+        (cancel-timer (chat-repo-map-timer map)))
+      (setf (chat-repo-map-timer map) nil
+            (chat-repo-map-callbacks map) nil
+            (chat-repo-map-state map) 'discarded)
+      (remhash canonical chat-repo-map--cache)
+      t)))
+
+(defun chat-repo-map--call-arguments (call)
+  "Return CALL arguments as a string-keyed alist."
+  (let ((arguments (plist-get call :arguments)))
+    (cond
+     ((hash-table-p arguments)
+      (let (alist)
+        (maphash (lambda (key value)
+                   (push (cons (format "%s" key) value) alist))
+                 arguments)
+        (nreverse alist)))
+     ((listp arguments) arguments)
+     (t nil))))
+
+(defun chat-repo-map-update-tool-call (root call)
+  "Update a warm ROOT map after successful precise file CALL.
+
+Return the asynchronous cancel function, or nil when CALL has no exact file
+targets or ROOT has no warm map."
+  (let* ((map (chat-repo-map-get root))
+         (tool-id (intern (format "%s" (plist-get call :name)))))
+    (when (and map
+               (eq (chat-repo-map-state map) 'warm)
+               (memq tool-id
+                     '(files_write files_replace files_patch apply_patch))
+               (fboundp 'chat-files--tool-target-paths))
+      (let ((default-directory (chat-repo-map-root map))
+            (paths
+             (chat-files--tool-target-paths
+              tool-id (chat-repo-map--call-arguments call))))
+        (when paths
+          (chat-repo-map-update-paths-async root paths #'ignore))))))
 
 (defun chat-repo-map-schedule-refresh (root)
   "Schedule a non-blocking refresh for ROOT unless one is running."
   (let* ((map (chat-repo-map--get-or-create root))
          (last (chat-repo-map-last-result map))
          (completed-at (plist-get last :completed-at)))
-    (unless (or (eq (chat-repo-map-state map) 'building)
+    (unless (or (memq (chat-repo-map-state map) '(building updating))
                 (and completed-at
                      (< (- (float-time) completed-at)
                         chat-repo-map-refresh-minimum-interval)))

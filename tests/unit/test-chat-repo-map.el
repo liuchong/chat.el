@@ -16,6 +16,16 @@
       (accept-process-output nil 0.005))
     result))
 
+(defun chat-test-repo-map--update (root paths &optional timeout)
+  "Update known PATHS below ROOT and wait up to TIMEOUT seconds."
+  (let ((deadline (+ (float-time) (or timeout 5.0)))
+        result)
+    (chat-repo-map-update-paths-async
+     root paths (lambda (value) (setq result value)))
+    (while (and (null result) (< (float-time) deadline))
+      (accept-process-output nil 0.005))
+    result))
+
 (ert-deftest chat-repo-map-refreshes-only-changed-files-and-keeps-cjk-paths ()
   "Refreshes reuse unchanged entries and retain canonical CJK paths."
   (chat-test-with-temp-dir
@@ -81,6 +91,60 @@
                          (mapcar (lambda (item) (plist-get item :path))
                                  (plist-get first :items))))
                 (length (plist-get first :items)))))))
+
+(ert-deftest chat-repo-map-known-path-update-avoids-a-full-tree-scan ()
+  "An editor-observed write updates only its affected relation set."
+  (chat-test-with-temp-dir
+   (let* ((chat-repo-map--cache (make-hash-table :test 'equal))
+          (source (expand-file-name "src/payment.py" temp-dir))
+          (test-file (expand-file-name "tests/payment_test.py" temp-dir))
+          (unrelated (expand-file-name "src/unrelated.py" temp-dir))
+          map old-entry result)
+     (make-directory (file-name-directory source) t)
+     (make-directory (file-name-directory test-file) t)
+     (with-temp-file source (insert "def charge(): return 1\n"))
+     (with-temp-file test-file (insert "from payment import charge\n"))
+     (with-temp-file unrelated (insert "def untouched(): return 1\n"))
+     (should (chat-test-repo-map--refresh temp-dir))
+     (setq map (chat-repo-map-get temp-dir)
+           old-entry (gethash (file-truename source)
+                              (chat-repo-map-entries map)))
+     (with-temp-file source (insert "def charge(): return 2\n"))
+     (setq result (chat-test-repo-map--update temp-dir (list source)))
+     (should (eq (plist-get result :status) 'ok))
+     (should (= (plist-get result :changed) 1))
+     (should (= (plist-get result :slices) 1))
+     (should (< (plist-get result :edges-rebuilt)
+                (plist-get result :files)))
+     (should-not (eq old-entry
+                     (gethash (file-truename source)
+                              (chat-repo-map-entries map)))))))
+
+(ert-deftest chat-repo-map-successful-file-call-notifies-the-warm-map ()
+  "A precise successful tool call enters the known-path update path."
+  (chat-test-with-temp-dir
+   (let* ((chat-repo-map--cache (make-hash-table :test 'equal))
+          (chat-files-allowed-directories (list temp-dir))
+          (source (expand-file-name "src/value.py" temp-dir))
+          map previous cancel)
+     (make-directory (file-name-directory source) t)
+     (with-temp-file source (insert "def value(): return 1\n"))
+     (should (chat-test-repo-map--refresh temp-dir))
+     (setq map (chat-repo-map-get temp-dir)
+           previous (chat-repo-map-revision map))
+     (with-temp-file source (insert "def value(): return 2\n"))
+     (setq cancel
+           (chat-repo-map-update-tool-call
+            temp-dir
+            (list :name "files_write"
+                  :arguments `(("path" . ,source)))))
+     (should (functionp cancel))
+     (let ((deadline (+ (float-time) 2.0)))
+       (while (and (equal previous (chat-repo-map-revision map))
+                   (< (float-time) deadline))
+         (accept-process-output nil 0.005)))
+     (should-not (equal previous (chat-repo-map-revision map)))
+     (should (= 1 (plist-get (chat-repo-map-last-result map) :changed))))))
 
 (ert-deftest chat-repo-map-fixed-queries-exceed-top-five-hit-target ()
   "Fixed related-file queries achieve at least 90 percent Top-5 hits."

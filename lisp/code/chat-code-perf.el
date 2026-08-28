@@ -5,8 +5,10 @@
 
 ;;; Commentary:
 
-;; This module provides performance optimizations for code capability.
-;; Features: incremental indexing, background indexing, cache management.
+;; Compatibility entry points for the original symbol index commands.  The
+;; default coding runtime uses the semantic facade and `chat-repo-map'.  Remove
+;; these wrappers only after documentation, keymaps, configuration examples and
+;; call sites no longer refer to them for one compatibility cycle.
 
 ;;; Code:
 

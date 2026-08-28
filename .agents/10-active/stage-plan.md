@@ -20,11 +20,11 @@ are in `programming-capability-reliability-plan.md`.
 - M0-M6 lifecycle, capability, extension, task, content and recovery contracts
 - M7 attributable memory, derived Trace reconstruction and deterministic evals
 - M8 versioned App Server bridge and optional `termini.el` entry point
-- current canonical verification at 1666/1666
+- current canonical verification is rerun at every stage gate
 
 ## Active Stages
 
-1. M9: isolated real coding Eval baseline (complete)
+1. M9: isolated real coding Eval infrastructure (complete; live baseline missing)
 2. M10: runtime-owned file read set and stale-write refusal (complete)
 3. M11: semantic code-intelligence facade and deterministic repo map (complete)
 4. M12: project verification plans and bounded repair (complete)
@@ -32,14 +32,15 @@ are in `programming-capability-reliability-plan.md`.
 6. M14: durable TODO plans and native chat progress UI (complete)
 7. M15: capability-tested execution isolation backends (complete)
 8. M16: read-only Review Agent and conflict-safe coding subagents (complete)
-9. M17: rollout, performance verification and final acceptance (active)
+9. M17: rollout and performance implementation (complete; final acceptance blocked)
 
 ## Immediate Next Action
 
-Implement M17 rollout and acceptance: expose runtime phases on the unified chat
-surface, add actionable status diagnostics, document the completed coding
-contracts, run the 10,000-file benchmark and execute the final repeated coding
-Eval comparison without introducing parallel runtime stores.
+Produce the missing comparable live evidence: add the fixed large-repository
+task, freeze one provider/model/capability identity, run both M9 and M17 over 30
+tasks five times, then record the strict immutable aggregate result.  Do not
+mark M17 complete while either result set or the large-repository token sample
+is absent.
 
 ## Stage Gate
 

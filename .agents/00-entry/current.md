@@ -14,8 +14,11 @@ M9-M17 coding reliability roadmap. The new work is governed by
 isolated real-task Eval baseline first, then add runtime-owned versioned edits,
 semantic code intelligence and repo mapping, project verification with bounded
 repair, structured working context and scoped rules, durable TODO plans with a
-    native progress UI, tested execution isolation, read-only review and
-    conflict-safe coding subagents. M9-M15 are complete; M16 is active. No
+native progress UI, tested execution isolation, read-only review and
+conflict-safe coding subagents. M9-M16 implementations are complete. M17 has
+productized phase status, actionable diagnostics, strict acceptance and the
+10,000-file performance path, but final acceptance is blocked by missing
+comparable live and large-repository token evidence. No
 capability becomes a default until the fixed task set shows that it does not
 reduce success, safety or responsiveness.
 
@@ -69,7 +72,7 @@ second remote state store. Native session and job views read only through the
 bridge. Loading `chat.el` alone neither loads the integration nor starts a
 sidecar.
 
-The canonical offline suite passes 1666/1666. A separate foreground live smoke
+The canonical offline suite passes 1692/1692. A separate foreground live smoke
 negotiated protocol `2026-07-08`, read RuntimeSessions, shut down cleanly and
 left no App Server process behind.
 

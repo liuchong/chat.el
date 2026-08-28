@@ -8,13 +8,13 @@
 
 ## Doing Now
 
-M16 is complete. Independent review now runs in a fresh read-only child context,
-parses strict evidence-bearing findings, records session audit facts and offers
-a native jump-to-source view. Coding children declare path ownership, scheduler
-resources, profile/model, budget and evidence; nonconflicting children use owned
-worktrees while the merge gate refuses stale base, ownership drift, parent path
-drift and patch conflicts before applying bytes, then reruns verification. M17
-is active: productize runtime phases, complete performance and final acceptance.
+M17 implementation is complete and its final acceptance is blocked. The unified
+chat surface projects planning, understanding, editing, verifying, repairing
+and reviewing without moving the input point or visible window. Diagnostics
+carry closed error kinds and next actions. The 10,000-file performance gates
+pass, including a known single-file update that no longer rescans the tree.
+Completion now requires comparable M9 and M17 30-by-5 live results plus a fixed
+large-repository token fixture; neither is currently available.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

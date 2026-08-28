@@ -45,6 +45,7 @@
 (require 'chat-context-budget)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
+(require 'chat-runtime-status)
 (require 'chat-request-panel)
 (require 'chat-request-surface)
 (require 'chat-status)
@@ -177,6 +178,9 @@ See `chat-ui-send-modes'.")
 (defvar-local chat-ui--request-tool-events nil
   "Current structured tool events for the request panel.")
 
+(defvar-local chat-ui--runtime-status nil
+  "Current pure runtime status projection for this chat buffer.")
+
 (defvar-local chat-ui--last-approval-hint nil
   "Last approval hint signature shown in this buffer.")
 
@@ -240,6 +244,11 @@ whole rather than to any one part of it.")
                      (chat-ui-default-command session))))
          (queued (chat-ui--queue-length session)))
     (concat (chat-i18n 'status-model "Model: %s" model)
+            (when-let ((phase (and chat-ui--runtime-status
+                                   (chat-runtime-status-phase
+                                    chat-ui--runtime-status))))
+              (format " | %s"
+                      (chat-runtime-status-phase-label phase)))
             (when auto (format " | %s" (chat-i18n 'status-auto "auto: /%s" auto)))
             (when (> queued 0)
               (format " | %s" (chat-i18n 'status-queued "queued: %d" queued)))
@@ -265,19 +274,63 @@ worst way for this to fail."
 
 (defun chat-ui--render-status-line ()
   "Rewrite the status line in place from the current session."
-  (save-excursion
-    (let ((inhibit-read-only t))
-      (goto-char (point-min))
-      (forward-line 1)
-      (delete-region (line-beginning-position) (line-end-position))
-      (let ((start (point)))
-        (insert (chat-ui--status-line
-                 (and (boundp 'chat--current-session)
-                      chat--current-session)))
-        ;; Appended, so a segment that carries its own face keeps it.  The
-        ;; dangerous-mode warning is the reason: propertizing the whole line
-        ;; would grey it out along with everything else.
-        (add-face-text-property start (point) 'shadow t)))))
+  (let* ((input-offset
+          (and (markerp chat-ui--input-overlay)
+               (marker-position chat-ui--input-overlay)
+               (>= (point) (marker-position chat-ui--input-overlay))
+               (- (point) (marker-position chat-ui--input-overlay))))
+         (point-anchor (and (null input-offset) (copy-marker (point) t)))
+         (window-anchors
+          (mapcar (lambda (window)
+                    (cons window (copy-marker (window-start window) nil)))
+                  (get-buffer-window-list (current-buffer) nil t))))
+    (unwind-protect
+        (save-excursion
+          (let ((inhibit-read-only t))
+            (goto-char (point-min))
+            (forward-line 1)
+            (delete-region (line-beginning-position) (line-end-position))
+            (let ((start (point)))
+              (insert (chat-ui--status-line
+                       (and (boundp 'chat--current-session)
+                            chat--current-session)))
+              ;; Appended, so a segment that carries its own face keeps it.
+              (add-face-text-property start (point) 'shadow t))))
+      (cond
+       ((and input-offset (marker-position chat-ui--input-overlay))
+        (goto-char (+ (marker-position chat-ui--input-overlay) input-offset)))
+       ((and point-anchor (marker-position point-anchor))
+        (goto-char point-anchor)))
+      (when point-anchor (set-marker point-anchor nil))
+      (dolist (entry window-anchors)
+        (when (and (window-live-p (car entry))
+                   (marker-position (cdr entry)))
+          (set-window-start (car entry) (cdr entry) t))
+        (set-marker (cdr entry) nil)))))
+
+(defun chat-ui--set-runtime-status (status)
+  "Set STATUS and redraw only when its visible projection changed."
+  (unless (equal (and status
+                      (list (chat-runtime-status-phase status)
+                            (chat-runtime-status-kind status)
+                            (chat-runtime-status-summary status)
+                            (chat-runtime-status-action status)))
+                 (and chat-ui--runtime-status
+                      (list (chat-runtime-status-phase chat-ui--runtime-status)
+                            (chat-runtime-status-kind chat-ui--runtime-status)
+                            (chat-runtime-status-summary chat-ui--runtime-status)
+                            (chat-runtime-status-action chat-ui--runtime-status))))
+    (setq chat-ui--runtime-status status)
+    (chat-ui--render-status-line)))
+
+(defun chat-ui--project-runtime-event (type &optional payload)
+  "Project runtime TYPE and PAYLOAD into this chat buffer."
+  (let ((phase (chat-runtime-status-phase-for-event type payload)))
+    (cond
+     ((eq phase 'idle) (chat-ui--set-runtime-status nil))
+     ((memq phase chat-runtime-status-phases)
+      (chat-ui--set-runtime-status
+       (chat-runtime-status-create :phase phase :source type))))))
 
 (defun chat-ui--response-active-p ()
   "Return non nil when a response is already in progress."
@@ -1789,6 +1842,23 @@ where some of it is."
                      (equal (chat-session-id chat--current-session)
                             (chat-event-session-id event)))
             (chat-ui--render-work-plan)))))))
+
+(defun chat-ui--observe-runtime-event (event)
+  "Project lifecycle EVENT into chat buffers for the same session."
+  (let ((phase
+         (unless (memq (chat-event-type event)
+                       chat-ui--work-plan-event-types)
+           (chat-runtime-status-phase-for-event
+            (chat-event-type event) (chat-event-payload event)))))
+    (when phase
+      (dolist (buffer (buffer-list))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (when (and chat--current-session
+                       (equal (chat-session-id chat--current-session)
+                              (chat-event-session-id event)))
+              (chat-ui--project-runtime-event
+               (chat-event-type event) (chat-event-payload event)))))))))
 
 ;; ------------------------------------------------------------------
 ;; Message Sending
@@ -3321,6 +3391,9 @@ assistant response being filled in."
   (let ((tool-events nil))
     (lambda (event)
       (let ((type (plist-get event :type)))
+        (when (buffer-live-p ui-buffer)
+          (with-current-buffer ui-buffer
+            (chat-ui--project-runtime-event type event)))
         (cond
          ((eq type 'stream-chunk)
           (when (buffer-live-p ui-buffer)
@@ -3652,14 +3725,18 @@ edit a coding reply may be proposing."
       (chat-ui--cleanup-request-state 'error error-message)))
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
-      (save-excursion
-        (goto-char chat-ui--messages-end)
-        ;; Through the renderer too: an error message often quotes a path
-        ;; or a command, and a provider's message is frequently Markdown.
-        (chat-ui--insert-formatted-response
-         (format "[Error: %s]" error-message))
-        (insert "\n\n")
-        (set-marker chat-ui--messages-end (point))))))
+      (let ((diagnostic
+             (chat-runtime-status-diagnostic-for-message error-message)))
+        (save-excursion
+          (goto-char chat-ui--messages-end)
+          ;; Through the renderer too: an error message often quotes a path
+          ;; or a command, and a provider's message is frequently Markdown.
+          (chat-ui--insert-formatted-response
+           (format "[Error: %s]\n\nNext: %s"
+                   error-message
+                   (chat-runtime-status-action diagnostic)))
+          (insert "\n\n")
+          (set-marker chat-ui--messages-end (point)))))))
 
 (defun chat-ui--get-response ()
   "Get AI response for current session.
@@ -4387,6 +4464,7 @@ This is an ephemeral query - the result is displayed but not persisted."
   (chat-ui--cleanup-request-state))
 
 (chat-event-add-observer #'chat-ui--observe-work-plan-event)
+(chat-event-add-observer #'chat-ui--observe-runtime-event)
 
 (provide 'chat-ui)
 ;;; chat-ui.el ends here

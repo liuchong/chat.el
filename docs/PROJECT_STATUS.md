@@ -6,7 +6,9 @@ Last updated: 2026-08-28
 
 `chat.el` is now at a usable coding assistant baseline inside Emacs.
 The core chat flow, native and JSON tool calling, ordered assistant/tool transcript persistence, durable session tree metadata, work orchestration, MCP/sub-agent backends, capability packs, per-step agent context hooks, cancellation callbacks, scoped plugin runtime, session tool overlays, file tools, approval gates, async request path, context trimming, and tool forging path are all implemented and covered by tests.
-`code-mode` now has a repaired basic chat flow with preview backed edits, but several advanced helper modules remain experimental.
+Coding capability now runs on the unified chat surface with versioned edits,
+semantic context, verification, repair, plans, isolation, review and controlled
+collaboration. Historical indexing commands remain compatibility wrappers.
 Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
@@ -29,8 +31,10 @@ coding-reliability roadmap are complete: isolated real-task evaluation,
 versioned edits, semantic code intelligence, automatic verification and
 scoped structured work context, plus durable evidence-linked TODO plans with a
 native progress UI, capability-tested execution isolation, independent typed
-review and conflict-safe coding children. Product rollout, final performance
-evidence and acceptance remain.
+review and conflict-safe coding children. M17 runtime phases, actionable
+diagnostics, strict acceptance aggregation and the 10,000-file performance path
+are implemented. Final acceptance remains blocked until comparable M9/M17 live
+result sets and a fixed large-repository token fixture exist.
 
 ## Implemented Areas
 
@@ -161,6 +165,8 @@ evidence and acceptance remain.
 - revisioned session/task work plans with DAG dependencies, one current item,
   scoped evidence, restart recovery and tool-boundary enforcement
 - native folded plan progress above the input area with point and scroll stability
+- six-phase runtime projection with deduplicated repaint and stable input/window anchors
+- actionable unavailable, blocked, stale, failed, timeout and cancelled diagnostics
 
 ### MCP and Sub-agents
 
@@ -175,6 +181,8 @@ evidence and acceptance remain.
 - declared coding-child path ownership, hierarchical scheduler locks and owned worktrees
 - merge refusal for stale base, ownership drift, parent drift and patch conflicts
 - bounded parent summaries and mandatory post-merge verification evidence
+- immutable final coding acceptance with exact live sample and identity gates
+- 10,000-file repo-map benchmark with known-path incremental refresh
 
 ### Capability Packs
 
@@ -192,15 +200,18 @@ evidence and acceptance remain.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1655 regression tests discovered
-- 1655 passing
+- 1692 regression tests discovered
+- 1692 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
 - deterministic end-to-end command: `emacs -Q -batch -l tests/run-e2e-tests.el -f ert-run-tests-batch-and-exit`
-- cross-module workflow/MCP integration: 1 passing; online provider checks
-  skip when credentials are absent
+- deterministic coding-fixture and workflow/MCP integration: 2 passing;
+  2 online provider checks skip when credentials are absent
 - primary-loop MCP and nested-agent end-to-end paths: 2 passing
+- five built-in offline Eval scenarios passing
+- 10,000-file performance gates passing: 31.0ms maximum wall slice and
+  111.3ms warm query p95 in the recorded M17 environment
 
 ### Stability Highlights
 

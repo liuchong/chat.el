@@ -308,6 +308,11 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 
 ### M9：建立真实编程 Eval 基线
 
+实施状态（2026-08-28）：runner、30-task manifest、fixture、确定性 judge 和
+不可变结果合同已经完成；本机没有留存固定 provider/model/capability identity 的
+live 结果集。因此“基线基础设施完成”不等于“可比较 M9 live baseline 已存在”，
+最终验收必须按相同的五次重复重新运行 M9 与 M17。
+
 #### 目标
 
 让后续每项能力建设都能回答“相同模型和任务下，实际成功率是否提高”。
@@ -744,6 +749,11 @@ merge gate；合并后重新运行 M12 verification。决策与验收证据见 D
 - 有冲突任务 100% 被调度器或合并门识别，不发生静默覆盖。
 
 ### M17：产品化、性能与最终验收
+
+实施状态（2026-08-28）：runtime phase、可操作诊断、已知路径增量 repo map、
+10,000 文件基准和严格不可变验收聚合已经完成。性能门槛通过；30-by-5 live
+对比和 large-repo token 门槛因证据缺失保持 blocked。实现决策见 Decision 0031，
+实测和解锁步骤见 `stage-2026-08-28-productized-coding-acceptance.md`。
 
 #### 目标
 

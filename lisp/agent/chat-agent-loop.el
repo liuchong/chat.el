@@ -688,6 +688,14 @@ need approval carry exclusive accesses and therefore remain serialized."
          (aset results index result)
          (remhash index running)
          (cl-incf finished)
+         (when (and (not failed)
+                    (chat-agent-run-state-session run)
+                    (fboundp 'chat-code-session-project-root)
+                    (fboundp 'chat-repo-map-update-tool-call))
+           (when-let* ((root
+                        (chat-code-session-project-root
+                         (chat-agent-run-state-session run))))
+             (chat-repo-map-update-tool-call root call)))
          (chat-agent--publish-tool-event run 'post-tool call result)
          (chat-agent--hook-all
           'chat-plugin-after-tool-call-functions run call result))

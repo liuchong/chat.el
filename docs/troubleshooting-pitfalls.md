@@ -2561,4 +2561,42 @@ the program needs to remember something, it needs its own place to
 remember it — sharing storage with configuration makes both unmaintainable
 and makes intent impossible to reconstruct.
 
-Last updated: 2026-08-27
+### An Incremental Refresh That Still Walked The Whole Repository
+
+**Problem**: changing one known file in a 10,000-file fixture reported one
+changed entry, but the refresh still took roughly as long as a full scan.
+
+**Cause**: “incremental” described reuse after discovery. The implementation
+still traversed every directory and hashed every candidate to discover that one
+file had changed, then rebuilt a temporary relation index on every refresh.
+
+**Solution**: keep stem and importer indexes with the last complete repo-map
+revision. Unknown external changes use the bounded full scanner; an
+editor-observed write calls `chat-repo-map-update-paths-async` with exact paths
+and atomically replaces only affected entries and edges. Benchmark the two paths
+separately so warm-query work cannot leak into the incremental timer.
+
+**General rule**: an incremental result count does not prove incremental work.
+Measure the discovery path, update path and dependent recomputation separately,
+and provide an API that accepts knowledge the caller already owns.
+
+### A Missing Baseline Is Not A Failed Trial Or A Passing Gate
+
+**Problem**: Eval infrastructure existed, so stage records described the M9
+baseline as complete even though no immutable live result set could be found.
+
+**Cause**: runner completion, fixture completion and evidence completion were
+collapsed into one status. That made a final comparison appear runnable without
+the provider/model/capability identity or five repetitions per task.
+
+**Solution**: validate exact sample count and identity in one immutable final
+gate. Missing M9, M17, token usage or large-repository evidence is `blocked`;
+observed task or threshold failure is `failed`. `M-x
+chat-coding-acceptance-run-final` records the distinction in the existing Eval
+store.
+
+**General rule**: absence is neither zero nor success. A strict acceptance
+system must preserve the difference between bad evidence and no evidence,
+because only the second can be fixed by rerunning the measurement.
+
+Last updated: 2026-08-28

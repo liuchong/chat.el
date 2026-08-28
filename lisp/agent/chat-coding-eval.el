@@ -404,6 +404,7 @@
              :metadata
              `((taskId . ,(chat-coding-eval-task-id task))
                (language . ,(chat-coding-eval-task-language task))
+               (taskTags . ,(chat-coding-eval-task-tags task))
                (fixtureRevision .
                                 ,(chat-coding-eval-run-state-fixture-revision
                                   state))
