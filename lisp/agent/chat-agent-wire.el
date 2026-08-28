@@ -169,6 +169,7 @@ a run that worked into a run that failed while being watched."
                      (plist-get usage :cache-write-tokens)))))
       ('model-retry
        (list (cons 'attempt (plist-get event :attempt))
+             (cons 'delay_seconds (plist-get event :delay-seconds))
              (cons 'message (chat-agent-wire--short
                              (plist-get event :message)))))
       ('tool-batch-start

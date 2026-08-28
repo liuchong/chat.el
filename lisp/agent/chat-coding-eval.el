@@ -819,12 +819,18 @@ function.  ON-COMPLETE receives the immutable result and run state."
    ((chat-coding-eval-suite-state-cancelled-p state)
     (setf (chat-coding-eval-suite-state-current state) nil)
     (when-let ((callback (chat-coding-eval-suite-state-on-complete state)))
-      (funcall callback (nreverse (chat-coding-eval-suite-state-results state))
+      (funcall callback
+               (nreverse
+                (copy-sequence
+                 (chat-coding-eval-suite-state-results state)))
                state)))
    ((null (chat-coding-eval-suite-state-pending state))
     (setf (chat-coding-eval-suite-state-current state) nil)
     (when-let ((callback (chat-coding-eval-suite-state-on-complete state)))
-      (funcall callback (nreverse (chat-coding-eval-suite-state-results state))
+      (funcall callback
+               (nreverse
+                (copy-sequence
+                 (chat-coding-eval-suite-state-results state)))
                state)))
    (t
     (let* ((entry (pop (chat-coding-eval-suite-state-pending state)))
@@ -1494,6 +1500,7 @@ Return the unique repetition/scenario key."
                 (profile . "code")
                 (transport . "stream")
                 (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
+                (failureReason . ,(plist-get event :reason))
                 (tokenUsage . ,usage)
                 (sessionId . ,(chat-session-id session))
                 (runtimeTaskId . ,(and run
@@ -1510,6 +1517,26 @@ Return the unique repetition/scenario key."
                 (staleWriteCount . ,stale-writes)
                 (verificationRetryCount . 0))))))))
         (lambda () (chat-agent-cancel run))))))
+
+(defun chat-coding-eval--transient-infrastructure-result-p (result)
+  "Return non-nil when RESULT is a retryable transport failure."
+  (let* ((metadata (chat-eval-result-metadata result))
+         (executor (and (listp metadata) (alist-get 'executor metadata)))
+         (reason (and (listp executor) (alist-get 'failureReason executor))))
+    (and (eq (chat-eval-result-status result) 'error)
+         (chat-agent--transient-model-error-p reason))))
+
+(defun chat-coding-eval--quarantine-result (result directory)
+  "Move transient RESULT from DIRECTORY into its immutable attempts archive."
+  (let* ((attempt-directory (expand-file-name "attempts/" directory))
+         (name (concat (chat-eval-result-id result) ".json"))
+         (source (expand-file-name name directory))
+         (target (expand-file-name name attempt-directory)))
+    (unless (and (file-regular-p source) (not (file-symlink-p source)))
+      (error "Transient campaign result is missing or unsafe: %s" source))
+    (make-directory attempt-directory t)
+    (rename-file source target nil)
+    target))
 
 (defun chat-coding-eval--start-campaign (campaign provider model)
   "Start or resume CAMPAIGN with exact PROVIDER and MODEL identity."
@@ -1531,10 +1558,17 @@ Return the unique repetition/scenario key."
          :result-metadata (plist-get campaign :result-metadata)
          :campaign-directory directory
          :on-result
-         (lambda (result repetition _state)
-           (message "Coding eval %s repeat %d: %s"
-                    (chat-eval-result-scenario-id result) repetition
-                    (chat-eval-result-status result)))
+         (lambda (result repetition state)
+           (if (chat-coding-eval--transient-infrastructure-result-p result)
+               (progn
+                 (chat-coding-eval--quarantine-result result directory)
+                 (message
+                  "Coding eval paused after transient transport failure: %s repeat %d"
+                  (chat-eval-result-scenario-id result) repetition)
+                 (chat-coding-eval-cancel-suite state))
+             (message "Coding eval %s repeat %d: %s"
+                      (chat-eval-result-scenario-id result) repetition
+                      (chat-eval-result-status result))))
          :on-complete
          (lambda (results state)
            (unwind-protect

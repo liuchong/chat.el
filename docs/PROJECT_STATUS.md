@@ -216,8 +216,8 @@ includes a measured 10,000-indexed-file large-repository task.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1765 regression tests discovered
-- 1765 passing
+- 1769 regression tests discovered
+- 1769 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

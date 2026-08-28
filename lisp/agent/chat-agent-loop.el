@@ -517,6 +517,14 @@ single pending piece becomes the delta without being copied."
          "\\|timed? out\\)")
         (downcase message))))
 
+(defun chat-agent--transport-retry-delay (attempt)
+  "Return the nonnegative retry delay for zero-based ATTEMPT."
+  (let* ((delays (seq-filter
+                  (lambda (delay) (and (numberp delay) (>= delay 0)))
+                  chat-agent-model-transport-retry-delays))
+         (delay (or (nth attempt delays) (car (last delays)) 0)))
+    (float delay)))
+
 (defun chat-agent--dispatch-model (run stream &optional retry-attempt)
   "Dispatch RUN through the unified model runtime using STREAM when non-nil.
 RETRY-ATTEMPT counts transport retries for this one model turn."
@@ -527,12 +535,12 @@ RETRY-ATTEMPT counts transport retries for this one model turn."
         (request-messages
          (prog1 (chat-agent--request-messages run)
            (chat-log-timing-mark "budget"))))
-    (setf
-     (chat-agent-run-state-handle run)
-     (chat-model-request-events
-      (chat-agent-run-state-model run)
-      request-messages
-      (lambda (event)
+    (setf (chat-agent-run-state-handle run) nil)
+    (let ((request-handle
+           (chat-model-request-events
+            (chat-agent-run-state-model run)
+            request-messages
+            (lambda (event)
         (unless (chat-agent-run-state-cancelled run)
           (let ((payload (chat-model-event-payload event)))
             (pcase (chat-model-event-type event)
@@ -572,15 +580,29 @@ RETRY-ATTEMPT counts transport retries for this one model turn."
                  (if (and (not received-payload)
                           (< attempt chat-agent-model-transport-retries)
                           (chat-agent--transient-model-error-p message))
-                     (progn
+                     (let* ((retry (1+ attempt))
+                            (delay (chat-agent--transport-retry-delay attempt)))
                        (chat-agent--emit
-                        run 'model-retry :attempt (1+ attempt)
+                        run 'model-retry :attempt retry
+                        :delay-seconds delay
                         :message (truncate-string-to-width
                                   message 256 nil nil t))
-                       (chat-agent--dispatch-model run stream (1+ attempt)))
+                       (setf
+                        (chat-agent-run-state-handle run)
+                        (run-at-time
+                         delay nil
+                         (lambda ()
+                           (unless (or (chat-agent-run-state-cancelled run)
+                                       (chat-agent-run-state-done run))
+                             (chat-agent--dispatch-model
+                              run stream retry))))))
                    (chat-agent--emit run 'error :message message)
                    (chat-agent--finish run 'error message))))))))
-      (plist-put (chat-agent--options-for-turn run) :stream stream)))))
+            (plist-put (chat-agent--options-for-turn run) :stream stream))))
+      ;; A synchronous error callback may already have installed a retry timer.
+      (when (and (null (chat-agent-run-state-handle run))
+                 (not (chat-agent-run-state-done run)))
+        (setf (chat-agent-run-state-handle run) request-handle)))))
 
 (defun chat-agent--collect-tool-calls (result content)
   "Return tool calls from native RESULT or JSON-in-text CONTENT."

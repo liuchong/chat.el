@@ -226,7 +226,11 @@ approval mode、manifest digest、实现 revision、任务数和预期结果数�
 `completion.json`。进程中断或主动取消后，用
 `M-x chat-coding-eval-resume-live` 校验并只补齐缺失 trial。恢复不会接受不同
 manifest、revision、运行配置、重复身份或并发执行，也不能向已有
-`completion.json` 的 campaign 追加结果。分别得到 150 条 M9 与 150 条 M19 结果后运行
+`completion.json` 的 campaign 追加结果。模型请求在未收到任何 payload 的 DNS、TLS、
+连接和超时故障上使用可取消的有界退避。重试耗尽后，live campaign 会把该次结果
+移入 `attempts/` 审计目录、释放运行锁并暂停；它不会占用正式 repetition/task
+身份。网络恢复后对同一目录执行 `M-x chat-coding-eval-resume-live`，即可重试该
+缺失身份。分别得到 150 条 M9 与 150 条 M19 结果后运行
 `M-x chat-coding-acceptance-run-final`。验收会拒绝混合 campaign、相同实现
 revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 token usage 或
 不真实的 large-repo 样本，结果不会被误判为通过。

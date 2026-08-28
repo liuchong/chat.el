@@ -107,12 +107,17 @@ car collects the messages of every request."
     (should (equal finished (list run 'cancelled nil)))))
 
 (ert-deftest chat-agent-retries-transient-model-errors-before-payload ()
-  "A connection-stage failure retries without duplicating model output."
-  (let (callbacks events run)
+  "A connection-stage failure backs off without duplicating model output."
+  (let (callbacks events scheduled retry-delay run)
     (cl-letf (((symbol-function 'chat-model-request-events)
                (lambda (_provider _messages callback _options)
                  (push callback callbacks)
-                 (intern (format "model-handle-%d" (length callbacks))))))
+                 (intern (format "model-handle-%d" (length callbacks)))))
+              ((symbol-function 'run-at-time)
+               (lambda (delay _repeat function &rest arguments)
+                 (setq retry-delay delay
+                       scheduled (cons function arguments))
+                 'retry-timer)))
       (setq run
             (chat-agent-start
              (list :model 'kimi
@@ -124,6 +129,9 @@ car collects the messages of every request."
        (chat-model-event-create
         :type 'error
         :payload '(:message "exited abnormally with code 35")))
+      (should (= (length callbacks) 1))
+      (should (= retry-delay 2.0))
+      (apply (car scheduled) (cdr scheduled))
       (should (= (length callbacks) 2))
       (funcall
        (car callbacks)
@@ -136,7 +144,66 @@ car collects the messages of every request."
                   (lambda (event)
                     (eq (plist-get event :type) 'model-retry))
                   events)
-                 1)))))
+                 1))
+      (let ((retry (seq-find
+                    (lambda (event)
+                      (eq (plist-get event :type) 'model-retry))
+                    events)))
+        (should (= (plist-get retry :delay-seconds) 2.0))))))
+
+(ert-deftest chat-agent-cancel-stops-a-pending-transport-retry ()
+  "Cancellation removes a retry timer and prevents another request."
+  (let (callback scheduled timer-cancelled run)
+    (cl-letf (((symbol-function 'chat-model-request-events)
+               (lambda (_provider _messages function _options)
+                 (setq callback function)
+                 'model-handle))
+              ((symbol-function 'run-at-time)
+               (lambda (_delay _repeat function &rest arguments)
+                 (setq scheduled (cons function arguments))
+                 'retry-timer))
+              ((symbol-function 'timerp)
+               (lambda (value) (eq value 'retry-timer)))
+              ((symbol-function 'cancel-timer)
+               (lambda (value) (setq timer-cancelled value))))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :transport 'stream
+                   :messages (list (chat-agent-test--user-message)))))
+      (funcall callback
+               (chat-model-event-create
+                :type 'error
+                :payload '(:message "exited abnormally with code 6")))
+      (should (eq (chat-agent-run-state-handle run) 'retry-timer))
+      (should (chat-agent-cancel run))
+      (should (eq timer-cancelled 'retry-timer))
+      (apply (car scheduled) (cdr scheduled))
+      (should (chat-agent-run-state-done run))
+      (should (eq (chat-agent-run-state-status run) 'cancelled)))))
+
+(ert-deftest chat-agent-synchronous-transport-error-keeps-retry-timer ()
+  "A callback fired before request return cannot overwrite its retry timer."
+  (let (scheduled run)
+    (cl-letf (((symbol-function 'chat-model-request-events)
+               (lambda (_provider _messages callback _options)
+                 (funcall callback
+                          (chat-model-event-create
+                           :type 'error
+                           :payload '(:message
+                                      "exited abnormally with code 6")))
+                 'stale-model-handle))
+              ((symbol-function 'run-at-time)
+               (lambda (_delay _repeat function &rest arguments)
+                 (setq scheduled (cons function arguments))
+                 'retry-timer)))
+      (setq run
+            (chat-agent-start
+             (list :model 'kimi
+                   :transport 'stream
+                   :messages (list (chat-agent-test--user-message)))))
+      (should scheduled)
+      (should (eq (chat-agent-run-state-handle run) 'retry-timer)))))
 
 (ert-deftest chat-agent-reasoning-only-stream-still-reaches-a-terminal-event ()
   "A completed provider stream cannot leave the run parked on Thinking."

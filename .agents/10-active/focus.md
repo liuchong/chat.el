@@ -16,7 +16,7 @@ permission state: research and plan-state writes are allowed, source mutation
 and unknown effects fail closed, and approval is tied to the exact submitted
 plan revision through a user-only path. Goal and Plan Mode share the existing
 session/event/context/UI infrastructure rather than creating parallel stores.
-The canonical suite passes 1765/1765 after migration, scope-isolation,
+The canonical suite passes 1769/1769 after migration, scope-isolation,
 revision-conflict, 20-turn/two-compaction recovery, 1,000-update UI tests and
 the live-chat stability regressions recorded in the current stage log.
 
@@ -38,8 +38,14 @@ now resume only missing repetition/task identities after validating the frozen
 descriptor, manifest, implementation revision, model capability snapshot,
 runtime configuration and every durable result. Concurrent runs are locked out,
 cancellation leaves resumable evidence, and completion requires the exact
-unique matrix. A fresh post-change M19 current campaign is still required, so no
-paired capability or token claim is accepted yet.
+unique matrix. A second campaign at revision `8ca4ae8` reached 150/150, but a
+host-network incident caused 131 DNS and two TLS transport failures; its 133
+infrastructure-invalid trials make it unusable for final comparison. Model
+transport retries now back off asynchronously and remain cancellable. If those
+retries are exhausted, the attempt is archived and the campaign pauses without
+claiming the trial identity, so a later resume can retry it. A fresh post-change
+M19 current campaign is still required, so no paired capability or token claim
+is accepted yet.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

@@ -45,9 +45,12 @@ the strict immutable paired aggregate. The current campaign must have one clean
 implementation revision, one manifest digest, 150 results and a terminal
 completion record. If its process is interrupted, resume that exact campaign
 with `chat-coding-eval-resume-live`; never mix the earlier 30/150 attempt bound
-to revision `8c45301` into the new result set. The corpus includes a versioned
-task with 10,000 measured indexed files. Do not mark M19 complete while the
-current campaign or its trusted token sample is absent.
+to revision `8c45301`, or the 150/150 attempt with 133 infrastructure failures
+bound to `8ca4ae8`, into the new result set. Exhausted transient transport
+failures must pause with an archived attempt and be resumed after connectivity
+recovers. The corpus includes a versioned task with 10,000 measured indexed
+files. Do not mark M19 complete while the current campaign or its trusted token
+sample is absent.
 
 ## Stage Gate
 

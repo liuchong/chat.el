@@ -221,7 +221,9 @@ Events are delivered synchronously through :on-event.  The final
         (chat-llm-cancel-request handle))
        ((processp handle)
         (when (process-live-p handle)
-          (delete-process handle)))))
+          (delete-process handle)))
+       ((timerp handle)
+        (cancel-timer handle))))
     (chat-agent--finish run 'cancelled nil)
     t))
 

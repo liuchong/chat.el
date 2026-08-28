@@ -22,13 +22,16 @@ productized phase status, actionable diagnostics, strict acceptance and the
 150 expected terminal results; final acceptance is blocked by the missing
 complete comparable M19 current campaign and paired trusted-token evidence. An
 initial M19 attempt stopped after 30/150 results and remains nonterminal evidence.
+The next 150/150 attempt is also excluded: a host-network incident produced 131
+DNS and two TLS transport failures, leaving only 17 non-infrastructure trials.
 Live runs use fresh configuration-frozen baseline/current campaign directories;
 an interrupted directory can resume only its validated missing trial identities.
+Transport retries use cancellable backoff; an exhausted retry is archived as an
+attempt and pauses the campaign without claiming the repetition/task identity.
 Acceptance rejects duplicate identities, mixed configuration or implementation
-revisions. The fixed 30-task
-corpus includes one versioned `large-repo` task with 10,000 indexed source files. No
-capability becomes a default until the fixed task set shows that it does not
-reduce success, safety or responsiveness.
+revisions. The fixed 30-task corpus includes one versioned `large-repo` task with
+10,000 indexed source files. No capability becomes a default until the fixed task
+set shows that it does not reduce success, safety or responsiveness.
 
 M0 through M8 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes the foundational contracts and Spec 014 orders their delivery through

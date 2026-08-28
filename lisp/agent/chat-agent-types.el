@@ -33,9 +33,17 @@
   :type 'boolean
   :group 'chat)
 
-(defcustom chat-agent-model-transport-retries 2
+(defcustom chat-agent-model-transport-retries 4
   "Maximum retries for a model transport failure before any payload arrives."
   :type 'integer
+  :group 'chat)
+
+(defcustom chat-agent-model-transport-retry-delays '(2 5 10 20)
+  "Seconds to wait before successive model transport retries.
+
+When `chat-agent-model-transport-retries' exceeds this list, the final delay is
+reused.  Waiting is asynchronous and remains cancellable."
+  :type '(repeat number)
   :group 'chat)
 
 (defconst chat-agent-truncated-tool-result-text

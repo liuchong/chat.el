@@ -243,6 +243,25 @@
                                            "\\.json\\'"))))
      (should-not (file-directory-p chat-eval-directory)))))
 
+(ert-deftest chat-coding-eval-suite-completion-keeps-state-results-intact ()
+  "Completion ordering cannot destructively shorten the suite state."
+  (chat-coding-eval-test-with-runtime
+   (let* ((task (car (chat-coding-eval-load-suite
+                      chat-coding-eval-test-manifest)))
+          state completed)
+     (setf (chat-coding-eval-task-judges task)
+           '(((type . "no-change") (name . "unchanged"))))
+     (setq state
+           (chat-coding-eval-run-suite
+            (list task)
+            (lambda (_task _workspace done)
+              (funcall done 'completed "done" nil))
+            :repetitions 2
+            :on-complete (lambda (results _state) (setq completed results))))
+     (should (chat-coding-eval-test--wait (lambda () completed)))
+     (should (= 2 (length completed)))
+     (should (= 2 (length (chat-coding-eval-suite-state-results state)))))))
+
 (ert-deftest chat-coding-eval-resume-runs-only-missing-trials ()
   "Resume validates disk state, fills missing identities and completes once."
   (chat-coding-eval-test-with-runtime
@@ -397,6 +416,39 @@
         (eq 'cancelled
             (chat-eval-result-status
              (car (plist-get work :results)))))))))
+
+(ert-deftest chat-coding-eval-transient-failure-pauses-without-claiming-trial ()
+  "A transport outage is archived and leaves its trial resumable."
+  (chat-coding-eval-test-with-runtime
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (manifest (chat-coding-eval-test--small-manifest temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "transient-001" 'provider-a "model-a" 1 manifest
+            :implementation-revision "transient-revision"))
+          (directory (plist-get campaign :directory)))
+     (cl-letf (((symbol-function 'chat-llm-provider-configured-p)
+                (lambda (_provider) t))
+               ((symbol-function 'chat-coding-eval-agent-executor)
+                (lambda (_provider _model)
+                  (lambda (_task _workspace done)
+                    (funcall done 'error "" '((failureReason .
+                                                "exited abnormally with code 6")))))))
+       (chat-coding-eval--start-campaign campaign 'provider-a "model-a")
+       (should
+        (chat-coding-eval-test--wait
+         (lambda ()
+           (not (file-exists-p
+                 (chat-coding-eval--campaign-lock-file directory)))))))
+     (should-not
+      (file-exists-p (expand-file-name "completion.json" directory)))
+     (should (= 1 (length (directory-files
+                           (expand-file-name "attempts/" directory)
+                           nil "\\`eval-.*\\.json\\'"))))
+     (let ((work (chat-coding-eval--campaign-work campaign)))
+       (should-not (plist-get work :results))
+       (should (= 2 (length (plist-get work :pending))))))))
 
 (ert-deftest chat-coding-eval-rejects-unsafe-allowed-and-judge-paths ()
   "Fixture policy rejects traversal before an executor can run."
