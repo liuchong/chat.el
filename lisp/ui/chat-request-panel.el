@@ -88,9 +88,25 @@ keeping the chat as one big buffer that you split yourself."
                    (or (plist-get event :scope) "")
                    (or (plist-get event :pattern) ""))))
     ('tool-result
-     (list (format "- Tool Result %s: %s"
-                   (or (plist-get event :index) "?")
-                   (or (plist-get event :result-summary) ""))))
+     (let ((tool (plist-get event :tool)))
+       (list (format "- %s %s: %s"
+                     (if (memq tool
+                               '(programming_verification_plan
+                                 programming_verification_run
+                                 programming_verification_read_result))
+                         "Verification"
+                       "Tool Result")
+                     (or (plist-get event :index) "?")
+                     (or (plist-get event :result-summary) "")))))
+    ((or 'verification-planned 'verification-step-started
+         'verification-step-completed 'verification-completed
+         'repair-started 'repair-stopped)
+     (list (format "- Verification %s: %s"
+                   (plist-get event :type)
+                   (or (plist-get event :status)
+                       (plist-get event :step-id)
+                       (plist-get event :reason)
+                       "active"))))
     ('tool-error
      (list (format "- Tool Error %s: %s"
                    (or (plist-get event :index) "?")

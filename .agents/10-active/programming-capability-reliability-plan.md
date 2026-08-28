@@ -458,6 +458,21 @@ Review Agent 只能输出以下结构化记录：
 - 所有循环在预算内结束。
 - 执行日志、验证结果、修改 checkpoint 和最终回复可互相追溯。
 
+#### 完成记录（2026-08-28）
+
+- 已落地 schema 化的 profile、step、step result 和 overall result，终态限定为
+  `passed`、`failed`、`cancelled`、`timed-out`、`not-run`、`blocked`。
+- 项目配置、确定性探测和 capability 工具统一生成 argv；旧的扩展名猜测与
+  `bash -c` 路径已收敛为兼容适配器。
+- 验证通过 `chat-execution` 执行，并以 `chat-task`、session event、execution
+  record 和 checkpoint 关联；重启后可由 durable task 重建结果。
+- 有限修复支持 0 到 3 轮、重复失败指纹提前停止、无新 diff 停止、越界修改
+  拒绝与回滚；preflight 指纹区分预存失败和本轮引入失败。
+- request panel、observability view 和 Agent 最终答复均从验证结果投影事实；
+  最终答复的热路径只读取当前进程、当前 session/turn 的验证缓存。
+- 定向模块测试 38/38、Agent 最终投影测试 3/3、隔离 coding fixture 集成测试
+  1/1 通过；canonical suite 1615/1615 通过，零 unexpected result。
+
 ### M13：执行隔离后端
 
 #### 目标

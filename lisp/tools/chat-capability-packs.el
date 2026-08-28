@@ -34,6 +34,9 @@
     programming_flymake_diagnostics
     programming_compile_task
     programming_completion_at_point
+    programming_verification_plan
+    programming_verification_run
+    programming_verification_read_result
     web_eww_read
     files_read files_read_lines files_list files_grep open_file
     files_write files_replace files_patch apply_patch
@@ -180,6 +183,73 @@
 (defun chat-capability-programming-compile-task (command &optional directory)
   "Start compile/test COMMAND as a background task."
   (chat-work-task-start command (or directory default-directory)))
+
+(defun chat-capability--json-string-list (value label)
+  "Decode VALUE as a JSON string list named LABEL."
+  (if (or (null value) (string-empty-p value))
+      nil
+    (let ((items (json-parse-string value :array-type 'list)))
+      (unless (and (listp items) (cl-every #'stringp items))
+        (error "%s must be a JSON string array" label))
+      items)))
+
+(defun chat-capability-programming-verification-plan
+    (project-root &optional changed-files-json)
+  "Plan project verification without running it."
+  (require 'chat-code-verify)
+  (chat-code-verify-profile-to-alist
+   (chat-code-verify-plan
+    project-root
+    (chat-capability--json-string-list changed-files-json "changed_files_json")
+    (chat-capability--verification-context))))
+
+(defun chat-capability--verification-context ()
+  "Return correlation fields for the current capability session."
+  (let* ((session (ignore-errors (chat-capability--current-session)))
+         (context (copy-sequence
+                   (and (boundp 'chat-tool-caller-current-execution-context)
+                        chat-tool-caller-current-execution-context))))
+    (when session
+      (setq context
+            (plist-put context :session-id (chat-session-id session))))
+    context))
+
+(defun chat-capability-programming-verification-run (profile-id)
+  "Run cached verification PROFILE-ID synchronously."
+  (require 'chat-code-verify)
+  (let ((profile (chat-code-verify-get-profile profile-id)))
+    (unless profile (error "Unknown verification profile: %s" profile-id))
+    (chat-code-verify-result-data
+     (chat-code-verify-run-sync
+      profile (chat-capability--verification-context)))))
+
+(defun chat-capability-programming-verification-run-async
+    (argv success error-callback)
+  "Run a verification profile from tool ARGV asynchronously."
+  (require 'chat-code-verify)
+  (let* ((profile-id (car argv))
+         (profile (chat-code-verify-get-profile profile-id))
+         (context (chat-capability--verification-context)))
+    (if (not profile)
+        (progn
+          (funcall error-callback
+                   (format "Unknown verification profile: %s" profile-id))
+          nil)
+      (apply
+       #'chat-code-verify-run profile
+       (append
+        context
+        (list :on-complete
+              (lambda (result)
+                (funcall success
+                         (chat-code-verify-result-data result)))))))))
+
+(defun chat-capability-programming-verification-read-result (verification-id)
+  "Read typed verification result VERIFICATION-ID."
+  (require 'chat-code-verify)
+  (if-let* ((result (chat-code-verify-get verification-id)))
+      (chat-code-verify-result-data result)
+    (error "Unknown verification result: %s" verification-id)))
 
 (defun chat-capability-programming-completion-at-point
     (path line column &optional limit)
@@ -579,6 +649,23 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "column" :type "integer" :required t)
      (:name "limit" :type "integer" :required nil))
    #'chat-capability-programming-completion-at-point 'project '(read))
+  (chat-capability--register-tool
+   'programming_verification_plan "Programming Verification Plan"
+   "Resolve deterministic project checks without executing them."
+   '((:name "project_root" :type "string" :required t)
+     (:name "changed_files_json" :type "string" :required nil))
+   #'chat-capability-programming-verification-plan 'project '(read))
+  (chat-capability--register-tool
+   'programming_verification_run "Programming Verification Run"
+   "Run an existing verification plan with bounded output and timeout."
+   '((:name "profile_id" :type "string" :required t))
+   #'chat-capability-programming-verification-run 'project '(read)
+   #'chat-capability-programming-verification-run-async)
+  (chat-capability--register-tool
+   'programming_verification_read_result "Programming Verification Result"
+   "Read the structured evidence for a verification run."
+   '((:name "verification_id" :type "string" :required t))
+   #'chat-capability-programming-verification-read-result 'project '(read))
   (chat-capability--register-tool
    'web_eww_read "Web EWW Read"
    "Retrieve and render an HTTP(S) page with the Emacs web stack."

@@ -496,5 +496,80 @@
       (chat-eval-view-refresh))
     (pop-to-buffer buffer)))
 
+;; Verification
+
+(defvar-local chat-verification-view-results nil)
+
+(defun chat-verification-view--row (result)
+  "Return a tabulated row for verification RESULT."
+  (let ((status (chat-code-verify-result-status result))
+        (steps (chat-code-verify-result-step-results result)))
+    (list
+     (chat-code-verify-result-id result)
+     (vector
+      (chat-code-verify-result-id result)
+      (propertize (symbol-name status)
+                  'face (chat-observability--status-face status))
+      (symbol-name (chat-code-verify-result-source result))
+      (format "%d/%d"
+              (cl-count 'passed steps
+                        :key #'chat-verification-step-result-status)
+              (length steps))
+      (format "%s" (or (chat-code-verify-result-repair-round result) 0))
+      (truncate-string-to-width
+       (chat-code-verify-result-project-root result) 48 nil nil t)))))
+
+(defun chat-verification-view-refresh ()
+  "Refresh cached and task-backed verification projections."
+  (interactive)
+  (require 'chat-code-verify)
+  (setq chat-verification-view-results (chat-code-verify-list)
+        tabulated-list-entries
+        (mapcar #'chat-verification-view--row
+                chat-verification-view-results))
+  (tabulated-list-print t))
+
+(defun chat-verification-view-show-detail ()
+  "Show complete bounded evidence for the verification at point."
+  (interactive)
+  (let* ((id (tabulated-list-get-id))
+         (result (and id (chat-code-verify-get id))))
+    (unless result (user-error "No verification result at point"))
+    (let ((buffer (get-buffer-create
+                   (format "*chat verification %s*" id))))
+      (with-current-buffer buffer
+        (special-mode)
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (chat-observability--insert-value
+           "Verification" (chat-code-verify-result-data result))
+          (goto-char (point-min))))
+      (pop-to-buffer buffer))))
+
+(define-derived-mode chat-verification-view-mode
+  tabulated-list-mode "Chat Verification"
+  "Major mode for inspecting project verification evidence."
+  (setq tabulated-list-format
+        [("Verification" 34 t) ("Status" 11 t) ("Source" 14 t)
+         ("Steps" 9 t) ("Repairs" 8 t) ("Project" 48 t)])
+  (setq tabulated-list-padding 2)
+  (tabulated-list-init-header))
+
+(define-key chat-verification-view-mode-map (kbd "g")
+            #'chat-verification-view-refresh)
+(define-key chat-verification-view-mode-map (kbd "RET")
+            #'chat-verification-view-show-detail)
+
+;;;###autoload
+(defun chat-verification-view-open ()
+  "Open project verification results."
+  (interactive)
+  (require 'chat-code-verify)
+  (let ((buffer (get-buffer-create "*chat verifications*")))
+    (with-current-buffer buffer
+      (chat-verification-view-mode)
+      (chat-verification-view-refresh))
+    (pop-to-buffer buffer)))
+
 (provide 'chat-observability-view)
 ;;; chat-observability-view.el ends here

@@ -68,6 +68,33 @@ car collects the messages of every request."
       (should (= (length (car calls)) 1))
       (should (chat-agent-run-state-done run)))))
 
+(ert-deftest chat-agent-final-answer-appends-current-turn-verification-facts ()
+  "A coding verification conclusion is projected from runtime evidence."
+  (let ((events nil)
+        (session (make-chat-session :id "verified-session" :model-id 'kimi)))
+    (cl-letf (((symbol-function 'chat-llm-request-async)
+               (chat-agent-test--stub-transport
+                '((:content "Work complete")) (list nil)))
+              ((symbol-function 'chat-code-verify-latest-for-session)
+               (lambda (session-id turn-id)
+                 (should (equal session-id "verified-session"))
+                 (should (= turn-id 1))
+                 'verification-evidence))
+              ((symbol-function 'chat-code-verify-summary)
+               (lambda (result)
+                 (should (eq result 'verification-evidence))
+                 "Verification: failed (0/1 steps passed)")))
+      (chat-agent-start
+       (list :model 'kimi :session session
+             :messages (list (chat-agent-test--user-message))
+             :on-event (lambda (event) (push event events)))))
+    (let ((end (seq-find (lambda (event)
+                           (eq (plist-get event :type) 'agent-end))
+                         events)))
+      (should (string-match-p
+               "Verification: failed"
+               (plist-get end :content))))))
+
 (ert-deftest chat-agent-cancelled-result-returns-from-completion-cleanly ()
   "A transport cancellation finishes without falling through or throwing."
   (let ((run (chat-agent--run-create))

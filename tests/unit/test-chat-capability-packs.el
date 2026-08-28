@@ -170,7 +170,14 @@
       (should tool)
       (should (eq (chat-forged-tool-owner tool) 'capability-packs))
       (should (eq (chat-forged-tool-sensitivity tool) 'correspondence))
-      (should (memq 'write (chat-forged-tool-effects tool))))))
+      (should (memq 'write (chat-forged-tool-effects tool))))
+    (dolist (id '(programming_verification_plan
+                  programming_verification_run
+                  programming_verification_read_result))
+      (let ((tool (chat-tool-forge-get id)))
+        (should tool)
+        (should (eq (chat-forged-tool-owner tool) 'capability-packs))
+        (should (equal (chat-forged-tool-effects tool) '(read)))))))
 
 (ert-deftest chat-capability-profile-filters-provider-tool-schemas ()
   "Test profile overlays control the tools advertised to providers."

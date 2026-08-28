@@ -202,6 +202,7 @@ Returns the list of files that were loaded."
   (require 'chat-code-intelligence)
   (require 'chat-repo-map)
   (require 'chat-code-lsp)
+  (require 'chat-code-verify)
   (require 'chat-code-refactor)
   (require 'chat-code-test)
   (require 'chat-code-git)

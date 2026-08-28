@@ -745,6 +745,20 @@ TRUNCATED is non-nil when tool calls were refused for length."
                                        :tool (plist-get call :name)
                                        :result-summary
                                        chat-agent-truncated-tool-result-text)))))
+  (when (and (null (plist-get processed :tool-calls))
+             (fboundp 'chat-code-verify-latest-for-session)
+             (fboundp 'chat-code-verify-summary))
+    (when-let* ((session-id (chat-agent--event-session-id run))
+                (verification
+                 (chat-code-verify-latest-for-session
+                  session-id (chat-agent--turn-number run))))
+      (setq processed
+            (plist-put
+             processed :content
+             (concat
+              (string-trim-right (or (plist-get processed :content) ""))
+              "\n\n"
+              (chat-code-verify-summary verification))))))
   (chat-agent--append-message
    run
    ;; Reasoning rides on the step that produced it, so it is on the record
