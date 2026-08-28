@@ -36,6 +36,7 @@
   '(programming_git_status
     programming_flymake_diagnostics
     programming_compile_task
+    programming_task_output
     programming_completion_at_point
     programming_verification_plan
     programming_verification_run
@@ -237,6 +238,10 @@
   "Start compile/test COMMAND as a background task."
   (chat-work-task-start command
                         (chat-capability--project-directory directory)))
+
+(defun chat-capability-programming-task-output (id &optional max-chars)
+  "Read bounded output for compile/test task ID in the current session."
+  (chat-work-task-output id max-chars))
 
 (defun chat-capability--json-string-list (value label)
   "Decode VALUE as a JSON string list named LABEL."
@@ -982,6 +987,13 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    '((:name "command" :type "string" :required t)
      (:name "directory" :type "string" :required nil))
    #'chat-capability-programming-compile-task 'project '(write outbound))
+  (chat-capability--register-tool
+   'programming_task_output "Programming Task Output"
+   (concat "Read bounded output from a compile or test task started in "
+           "this session. Use it after the task reaches a terminal state.")
+   '((:name "id" :type "string" :required t)
+     (:name "max_chars" :type "integer" :required nil))
+   #'chat-capability-programming-task-output 'project '(read))
   (chat-capability--register-tool
    'programming_completion_at_point "Programming Completion At Point"
    "Return native completion candidates at a file position."

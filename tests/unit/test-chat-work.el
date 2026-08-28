@@ -76,6 +76,23 @@
          (should (eq (chat-work-task-status task) 'cancelled))
          (should (equal finished id)))))))
 
+(ert-deftest chat-work-task-output-is-scoped-to-its-session ()
+  "A code agent can read its own task output but not another session's."
+  (chat-test-with-temp-dir
+   (let* ((log-file (expand-file-name "task.log" temp-dir))
+          (chat-work--tasks (make-hash-table :test 'equal))
+          (owner (make-chat-session :id "owner"))
+          (other (make-chat-session :id "other"))
+          (task (make-chat-work-task
+                 :id "task-1" :session-id "owner" :log-file log-file)))
+     (write-region "0123456789" nil log-file nil 'silent)
+     (puthash "task-1" task chat-work--tasks)
+     (let ((chat-tool-caller-current-session owner))
+       (should (string-prefix-p "56789"
+                                (chat-work-task-output "task-1" 5))))
+     (let ((chat-tool-caller-current-session other))
+       (should-error (chat-work-task-output "task-1") :type 'error)))))
+
 (ert-deftest chat-work-process-start-failure-closes-both-task-records ()
   "A process creation error cannot leave either task projection running."
   (chat-test-with-temp-dir

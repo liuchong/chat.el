@@ -420,11 +420,17 @@ anything."
     (nreverse tasks)))
 
 (defun chat-work-task-output (id &optional max-chars)
-  "Return bounded output for task ID."
+  "Return bounded output for task ID.
+When called by a tool, ID must belong to the current session."
   (let* ((task (gethash id chat-work--tasks))
+         (session (chat-work--current-session))
          (limit (or max-chars chat-work-task-output-max-chars)))
     (unless task
       (error "Task not found: %s" id))
+    (when (and session
+               (not (equal (chat-work-task-session-id task)
+                           (chat-session-id session))))
+      (error "Task does not belong to the current session: %s" id))
     (if (not (file-exists-p (chat-work-task-log-file task)))
         ""
       (with-temp-buffer

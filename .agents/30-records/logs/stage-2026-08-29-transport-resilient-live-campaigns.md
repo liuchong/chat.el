@@ -34,6 +34,13 @@ color list as a noneditable object and aborted before running tests. Binding
 `CFFIXED_USER_HOME` to the backend-owned temporary home keeps that process
 state inside the sandbox and lets batch Emacs start normally.
 
+The next smoke completed the edit but exposed a verification-loop defect. The
+executor ran the repository's whole test suite instead of the task's targeted
+command, then could not inspect its own background-task log through the file
+tool because that log correctly sits outside the workspace boundary. An
+unrelated intentional test failure consequently turned a correct change into a
+timeout.
+
 ## Contract
 
 - A model request that fails before any payload on a known transient transport
@@ -56,14 +63,26 @@ state inside the sandbox and lets batch Emacs start normally.
 - Darwin execution binds both the shell home and Core Foundation home to the
   managed temporary root. AppKit-backed command-line tools cannot consult the
   developer's per-user application state during an isolated build.
+- Command judges are projected into the executor prompt as exact shell-quoted
+  commands. The executor and judge therefore verify the same target rather
+  than choosing differently scoped suites.
+- The programming capability exposes bounded background-task output, scoped
+  to the current session. An agent can inspect its own compiler or test result
+  without widening workspace file permissions or reading another session's
+  log.
 
 ## Verification
 
-- canonical suite: 1771/1771 passed, zero skipped and zero unexpected
+- canonical suite: 1777/1777 passed, zero skipped and zero unexpected
 - integration: deterministic coding fixtures and work platform passed 2/2;
   two online-provider checks skipped because credentials were absent
 - deterministic end-to-end: 2/2 passed
 - built-in offline Eval: 5/5 passed
+- live post-fix smoke `postfix-smoke-20260829T022300` passed the
+  `elisp-failing-test` scenario in 74.5 seconds. The session wire records the
+  exact targeted command at step 12, a session-scoped
+  `programming_task_output` read at step 13 and a completed final answer at
+  step 14; the independent command judge then passed 1/1
 - regression coverage includes delayed retry, cancellation during retry,
   synchronous callback ordering, transient-attempt quarantine, resumable
   identity preservation, immutable suite result ordering and multi-payload
@@ -78,3 +97,6 @@ Infrastructure failures must remain visible, but they must not consume trial
 identities or allow one outage to cascade through the remaining matrix.
 Likewise, observability must fail open with respect to data collection: a
 missing or broken diagnostics side channel must never discard model output.
+Background task logs are runtime capabilities, not workspace files. Expose
+them through a session-scoped read operation, and make the evaluation command
+part of the task contract instead of expecting the executor to rediscover it.

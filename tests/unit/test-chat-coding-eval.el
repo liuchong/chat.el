@@ -187,6 +187,38 @@
      (should (= 15 (plist-get (alist-get 'tokenUsage metadata)
                               :total-tokens))))))
 
+(ert-deftest chat-coding-eval-agent-projects-exact-command-judges ()
+  "The live agent sees the same targeted argv that judges its result."
+  (chat-test-with-temp-dir
+   (let* ((task
+           (chat-coding-eval-test--task
+            temp-dir
+            '(((type . "command") (name . "targeted")
+               (command . ("emacs" "-Q" "--eval"
+                           "(ert-run-tests-batch-and-exit 'sample-test)"))))))
+          config)
+     (cl-letf (((symbol-function 'chat-agent-start)
+                (lambda (value) (setq config value) nil)))
+       (funcall (chat-coding-eval-agent-executor 'eval-provider "model")
+                task temp-dir #'ignore))
+     (let ((prompt (chat-message-content
+                    (car (plist-get config :messages)))))
+       (should (string-match-p
+                (regexp-quote "Verification commands (run these exact targeted checks):")
+                prompt))
+       (should (string-match-p
+                (regexp-quote
+                 "emacs -Q --eval \\(ert-run-tests-batch-and-exit\\ \\'sample-test\\)")
+                prompt))))))
+
+(ert-deftest chat-coding-eval-agent-omits-guidance-without-command-judge ()
+  "Non-command judges do not invent an executable verification step."
+  (let ((task (chat-coding-eval-test--task
+               default-directory
+               '(((type . "no-change") (name . "unchanged"))))))
+    (should (string-empty-p
+             (chat-coding-eval--verification-guidance task)))))
+
 (ert-deftest chat-coding-eval-campaign-is-isolated-and-immutable ()
   "A live campaign records one reproducible configuration in a fresh directory."
   (chat-test-with-temp-dir

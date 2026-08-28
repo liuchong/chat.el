@@ -1434,6 +1434,23 @@ Return the unique repetition/scenario key."
        (passedCount . ,passed)
        (complete . t)))))
 
+(defun chat-coding-eval--verification-guidance (task)
+  "Return exact command-judge guidance for TASK, or an empty string."
+  (let ((commands
+         (seq-keep
+          (lambda (judge)
+            (when (equal (chat-coding-eval--json-value judge 'type)
+                         "command")
+              (mapconcat #'shell-quote-argument
+                         (chat-coding-eval--json-value judge 'command)
+                         " ")))
+          (chat-coding-eval-task-judges task))))
+    (if commands
+        (concat
+         "\n\nVerification commands (run these exact targeted checks):\n"
+         (mapconcat (lambda (command) (concat "- " command)) commands "\n"))
+      "")))
+
 (defun chat-coding-eval-agent-executor (provider &optional model-name)
   "Return a live Agent executor using PROVIDER and MODEL-NAME."
   (let ((resolved-model (chat-coding-eval--model-name provider model-name)))
@@ -1446,9 +1463,10 @@ Return the unique repetition/scenario key."
             (format
              (concat "%s\n\nWork only inside the current workspace. "
                      "The only paths you may change are: %s. "
-                     "Finish with a concise answer describing the result.")
+                     "Finish with a concise answer describing the result.%s")
              (chat-coding-eval-task-prompt task)
-             (string-join (chat-coding-eval-task-allowed-paths task) ", ")))
+             (string-join (chat-coding-eval-task-allowed-paths task) ", ")
+             (chat-coding-eval--verification-guidance task)))
            (capabilities
             (chat-coding-eval--capability-snapshot provider resolved-model))
            usage

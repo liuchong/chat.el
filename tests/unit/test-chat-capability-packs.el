@@ -86,6 +86,16 @@
        (should (equal captured
                       (cons "make test" (file-name-as-directory temp-dir))))))))
 
+(ert-deftest chat-capability-programming-profile-exposes-task-output ()
+  "The code profile can inspect the result of its own compile task."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (should (memq 'programming_task_output
+                  chat-capability-programming-tools))
+    (let ((tool (chat-tool-forge-get 'programming_task_output)))
+      (should tool)
+      (should (equal (chat-forged-tool-effects tool) '(read))))))
+
 (ert-deftest chat-capability-web-reader-renders-html-with-shr ()
   "Test the shared web tool returns rendered page text."
   (cl-letf (((symbol-function 'url-retrieve-synchronously)
