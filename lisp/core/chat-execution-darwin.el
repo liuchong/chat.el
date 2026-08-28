@@ -128,6 +128,7 @@
            nil
            (append
             (list (concat "HOME=" temp-root)
+                  (concat "CFFIXED_USER_HOME=" temp-root)
                   (concat "TMPDIR=" temp-root)
                   (concat "CHAT_EXECUTION_POLICY="
                           (symbol-name (chat-execution-request-policy request)))
@@ -139,6 +140,7 @@
              (cl-remove-if
               (lambda (entry)
                 (or (string-prefix-p "HOME=" entry)
+                    (string-prefix-p "CFFIXED_USER_HOME=" entry)
                     (string-prefix-p "TMPDIR=" entry)
                     (string-prefix-p "DEVELOPER_DIR=" entry)
                     (string-prefix-p "SDKROOT=" entry)

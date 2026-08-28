@@ -27,6 +27,13 @@ filter. The current payload survived, but every later SSE line delivered in
 the same process output block was skipped. Agent answers consequently arrived
 truncated or scrambled and produced false task failures and timeouts.
 
+The first clean streaming smoke then found a Darwin isolation defect. The
+AppKit Emacs executable resolves its Core Foundation home independently from
+`HOME`. Inside the deny-default build sandbox it reached the developer's named
+color list as a noneditable object and aborted before running tests. Binding
+`CFFIXED_USER_HOME` to the backend-owned temporary home keeps that process
+state inside the sandbox and lets batch Emacs start normally.
+
 ## Contract
 
 - A model request that fails before any payload on a known transient transport
@@ -46,10 +53,13 @@ truncated or scrambled and produced false task failures and timeouts.
 - Request diagnostics are optional telemetry, not part of the stream data
   path. An unregistered request id cannot prevent payload or content callbacks
   from consuming every complete SSE line in a transport block.
+- Darwin execution binds both the shell home and Core Foundation home to the
+  managed temporary root. AppKit-backed command-line tools cannot consult the
+  developer's per-user application state during an isolated build.
 
 ## Verification
 
-- canonical suite: 1770/1770 passed, zero skipped and zero unexpected
+- canonical suite: 1771/1771 passed, zero skipped and zero unexpected
 - integration: deterministic coding fixtures and work platform passed 2/2;
   two online-provider checks skipped because credentials were absent
 - deterministic end-to-end: 2/2 passed
@@ -58,6 +68,8 @@ truncated or scrambled and produced false task failures and timeouts.
   synchronous callback ordering, transient-attempt quarantine, resumable
   identity preservation, immutable suite result ordering and multi-payload
   streaming without a diagnostics trace
+- a real Darwin deny-default build test starts the installed Emacs binary,
+  captures its output and verifies a clean exit under the managed home
 
 ## Operational Lesson
 

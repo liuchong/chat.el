@@ -160,6 +160,35 @@
          (when (buffer-live-p output) (kill-buffer output))
          (when (buffer-live-p errors) (kill-buffer errors))))))))
 
+(ert-deftest chat-execution-isolation-build-runs-emacs-with-managed-home ()
+  "A sandboxed Emacs must not consult the developer's AppKit state."
+  (skip-unless (and (eq system-type 'darwin)
+                    (executable-find "emacs")))
+  (chat-test-with-temp-dir
+   (chat-execution-isolation-test--with-runtime
+     (let* ((project (expand-file-name "project/" temp-dir))
+            (output (generate-new-buffer " *isolation-emacs-output*"))
+            (errors (generate-new-buffer " *isolation-emacs-errors*")))
+       (make-directory project)
+       (unwind-protect
+           (let ((run
+                  (chat-execution-start
+                   (chat-execution-isolation-test--request
+                    project
+                    (list (executable-find "emacs") "-Q" "--batch"
+                          "--eval" "(princ \"sandboxed-emacs-ok\")")
+                    'build nil 10)
+                   :buffer output :stderr errors)))
+             (chat-execution-isolation-test--wait run 10)
+             (ert-info ((concat (with-current-buffer output (buffer-string))
+                                (with-current-buffer errors (buffer-string))))
+               (should (eq 'completed (chat-execution-record-status run))))
+             (should (string-match-p
+                      "sandboxed-emacs-ok"
+                      (with-current-buffer output (buffer-string)))))
+         (when (buffer-live-p output) (kill-buffer output))
+         (when (buffer-live-p errors) (kill-buffer errors)))))))
+
 (ert-deftest chat-execution-isolation-filters-environment-and-denies-network ()
   "Restricted execution sees declared variables only and has no network."
   (skip-unless (eq system-type 'darwin))
