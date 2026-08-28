@@ -8,11 +8,11 @@
 
 ## Doing Now
 
-M13 is complete. Project instruction files and their bounded dependencies now
-form a scoped graph; code context and project rules remain typed until request
-projection; revisioned session work notes survive restart and compaction. M14
-is active: durable TODO plans, evidence-linked transitions, a mutation gate and
-an Emacs-native progress region are the next construction stage.
+M14 is complete. Durable revisioned TODO plans now bind to session/task scope,
+require resolvable completion evidence, gate governed tools at the runtime
+boundary and project a bounded active slice into both Agent context and a stable
+Emacs-native progress region. M15 is active: define and verify execution backend
+capabilities before adding filesystem, network and process isolation policies.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

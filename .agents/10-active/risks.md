@@ -19,6 +19,8 @@
 - Parallel coding agents can edit overlapping resources or merge against a stale base.
 - Standing context can leak across sibling paths or grow into a hidden prompt tax.
 - Agent-authored notes can be mistaken for project instructions or verified facts.
+- A plan can become prompt ceremony while the Agent acts outside its current item.
+- Plan history can consume context or stale evidence can be repeated every turn.
 
 ## Mitigations
 
@@ -33,6 +35,8 @@
 - Declare child read/write resources, use owned worktrees and refuse conflicted merges.
 - Filter every fragment by canonical scope, preserve provenance and explain omissions.
 - Keep Agent notes at Agent authority, label hypotheses and require revisions for updates.
+- Gate governed tools on a scoped active plan with one dependency-ready current item.
+- Project only the bounded active slice and evidence added after the prior revision.
 
 ## Governing Plan
 

@@ -1,6 +1,6 @@
 # Durable Work Plans And Native Progress UI
 
-Status: planned
+Status: implemented
 Date: 2026-08-28
 Roadmap: coding reliability M14
 
@@ -62,10 +62,12 @@ allows an audited skip only for:
 - `single-bounded-action`: one deterministic mutation with one owned target and
   no repair or delegated work.
 
-The runtime checks again before the first mutating tool, child task, repair
-round or second substantive action. If no active plan exists, the action is
-blocked with `plan-required`; the Agent can create a plan and retry. A prompt
-request alone is not considered enforcement.
+The runtime checks again at the tool boundary before a mutating tool, child
+task, project verification or repair action. An applicable active plan must
+also have one dependency-ready `in-progress` item; merely creating a plan does
+not authorize work. Otherwise the action is blocked with `plan-required`; the
+Agent can create or advance the plan and retry. A prompt request alone is not
+considered enforcement.
 
 Any multi-file mutation, delegated child, merge, repair loop or project-level
 verification is non-simple and cannot use a skip reason. Skip is a durable
@@ -73,10 +75,13 @@ event with reason and observed action facts.
 
 ## Operations And Evidence
 
-Public operations create/read/list/update/resume/cancel plans and transition
-items. A single update may replace the future pending tail while preserving
-completed item identity and evidence. Changing the objective increments the
-revision and records the source event.
+The programming profile exposes `programming_plan_create`,
+`programming_plan_read`, `programming_plan_list`, `programming_plan_update`,
+`programming_plan_transition`, `programming_plan_resume`,
+`programming_plan_cancel`, `programming_plan_skip` and
+`programming_plan_mode`. A single update may replace the future pending tail
+while preserving completed item identity and evidence. Changing the objective
+increments the revision and records the source event.
 
 Evidence IDs refer to existing runtime facts, including:
 
@@ -103,8 +108,10 @@ Each turn receives only the active slice:
 - evidence added since the previous turn.
 
 Completed history is available through the plan read operation. It is not
-repeated in every prompt. The projection is a typed context fragment and is
-rebuilt after compaction.
+repeated in every prompt. The projection is a typed context fragment, has an
+independent 2,000-character hard limit and is rebuilt after compaction. Each
+run records the last projected plan revision, so later turns include only
+evidence added after that revision.
 
 ## Recovery
 
@@ -118,9 +125,8 @@ a governed action.
 ## Native Chat UI
 
 The chat buffer shows a compact, unframed one-line progress projection directly
-above the input area while an active plan exists. The line contains current
-step/total, changed-file count and diff additions/deletions when those runtime
-facts exist. Missing facts are omitted rather than guessed.
+above the input area while a plan exists. The line contains current step/total
+and title. Runtime facts that do not exist are omitted rather than guessed.
 
 `TAB` or mouse-1 toggles a native folded detail region listing status, title and
 blocker reason. Familiar fixed-width glyphs and faces distinguish completed,
@@ -141,13 +147,13 @@ cannot become separate sources of plan truth.
 
 ## Events And Trace
 
-Events cover plan creation, update, skip, item start/completion/blocking,
-resume, cancellation and plan completion. Payloads contain IDs, revisions,
-status, counts and evidence IDs, not objective or output bodies.
-
-Trace reports plan-required refusals, item transitions, blockers, audited
-skips, stale revisions, time per item and plan drift such as tools used outside
-the current item's declared acceptance.
+The session wire records bounded `plan-created`, `plan-updated`,
+`plan-item-started`, `plan-item-completed`, `plan-item-blocked`,
+`plan-item-skipped`, `plan-resumed`, `plan-cancelled`, `plan-completed`,
+`plan-skipped`, `plan-skip-consumed`, `plan-required` and
+`plan-revision-conflict` events. Payloads contain IDs, revisions, status and
+bounded facts, never objective or output bodies. Derived Trace can report these
+transitions and refusals without maintaining a second plan store.
 
 ## Acceptance
 
@@ -163,3 +169,11 @@ the current item's declared acceptance.
 - the active plan projection uses at most 5% of median input tokens on the
   large-task fixture;
 - canonical tests pass with zero unexpected results.
+
+## Verification Record
+
+- plan contract and recovery: 16 focused tests;
+- native UI stability: 3 focused tests, including 1,000 updates;
+- Agent gate and request-only projection: 2 focused tests;
+- programming profile surface: capability-pack regression coverage;
+- canonical suite: 1,655/1,655 passing before closeout documentation.

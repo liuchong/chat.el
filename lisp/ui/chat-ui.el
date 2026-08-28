@@ -33,6 +33,7 @@
 (require 'chat-checkpoint)
 (require 'chat-workspace)
 (require 'chat-event)
+(require 'chat-work-plan)
 (require 'chat-transcript)
 (require 'chat-markdown)
 (require 'chat-llm)
@@ -99,6 +100,15 @@ indistinguishable from a hung one."
 
 (defvar-local chat-ui--messages-end nil
   "Marker for end of messages area.")
+
+(defvar-local chat-ui--plan-start nil
+  "Marker before the native work-plan projection.")
+
+(defvar-local chat-ui--plan-end nil
+  "Marker after the native work-plan projection.")
+
+(defvar-local chat-ui--plan-expanded nil
+  "Non-nil when the native work-plan projection shows every item.")
 
 (defvar-local chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
@@ -1004,6 +1014,9 @@ doubles as the answer to why a reply mentioned a file nobody named."
   (setq chat-ui--live-trailers nil)
   (setq chat-ui--last-render nil)
   (setq chat-ui--opened-fold-groups nil)
+  (setq chat-ui--plan-start nil)
+  (setq chat-ui--plan-end nil)
+  (setq chat-ui--plan-expanded nil)
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
@@ -1645,9 +1658,137 @@ where some of it is."
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
   (goto-char (point-max))
+  (setq chat-ui--plan-start (copy-marker (point) nil))
+  (setq chat-ui--plan-end (copy-marker (point) t))
+  (chat-ui--render-work-plan)
+  (set-marker-insertion-type chat-ui--plan-end nil)
   (insert (propertize "───\n" 'face 'shadow))
   (insert (chat-ui--input-prompt))
   (setq chat-ui--input-overlay (point-marker)))
+
+(defvar chat-ui-work-plan-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "TAB") #'chat-ui-toggle-work-plan)
+    (define-key map (kbd "RET") #'chat-ui-toggle-work-plan)
+    (define-key map [mouse-1] #'chat-ui-toggle-work-plan)
+    map)
+  "Keymap attached to the native work-plan projection.")
+
+(defconst chat-ui--work-plan-event-types
+  '(plan-created plan-updated plan-skipped plan-item-started
+    plan-item-completed plan-item-blocked plan-item-skipped plan-resumed
+    plan-cancelled plan-completed plan-skip-consumed)
+  "Events that can change the visible work-plan projection.")
+
+(defun chat-ui--work-plan-status-label (status)
+  "Return a fixed-width native label for item STATUS."
+  (pcase status
+    ('completed "[x]")
+    ('in-progress "[>]")
+    ('blocked "[!]")
+    ('skipped "[-]")
+    (_ "[ ]")))
+
+(defun chat-ui--work-plan-status-face (status)
+  "Return a face for item STATUS."
+  (pcase status
+    ('completed 'success)
+    ('in-progress 'font-lock-keyword-face)
+    ('blocked 'warning)
+    ((or 'skipped 'pending) 'shadow)
+    (_ 'default)))
+
+(defun chat-ui--insert-work-plan-projection (projection)
+  "Insert native text for work-plan PROJECTION at point."
+  (let* ((status (plist-get projection :status))
+         (current (plist-get projection :current-item))
+         (current-index (or (plist-get projection :current-index) 0))
+         (total (plist-get projection :total))
+         (summary
+          (concat
+           (format "Plan %d/%d" current-index total)
+           (when current
+             (format " · %s" (chat-work-plan-item-title current)))
+           (when (eq status 'blocked) " · blocked")
+           "\n"))
+         (start (point)))
+    (insert (propertize summary 'face 'font-lock-keyword-face))
+    (when chat-ui--plan-expanded
+      (dolist (item (plist-get projection :items))
+        (let ((item-status (chat-work-plan-item-status item)))
+          (insert "  "
+                  (propertize (chat-ui--work-plan-status-label item-status)
+                              'face (chat-ui--work-plan-status-face item-status))
+                  " "
+                  (propertize (chat-work-plan-item-title item)
+                              'face (chat-ui--work-plan-status-face item-status)))
+          (when (and (eq item-status 'blocked)
+                     (chat-work-plan-item-blocker-reason item))
+            (insert (propertize
+                     (format " · %s"
+                             (chat-work-plan-item-blocker-reason item))
+                     'face 'warning)))
+          (insert "\n"))))
+    (add-text-properties
+     start (point)
+     `(keymap ,chat-ui-work-plan-map
+       mouse-face highlight
+       help-echo "TAB or click to expand or collapse the work plan"
+       rear-nonsticky (keymap mouse-face help-echo)))))
+
+(defun chat-ui--render-work-plan ()
+  "Render only the native work-plan region without moving UI anchors."
+  (when (and (markerp chat-ui--plan-start)
+             (markerp chat-ui--plan-end)
+             (marker-position chat-ui--plan-start)
+             (marker-position chat-ui--plan-end))
+    (let* ((point-anchor (copy-marker (point) t))
+           (window-anchors
+            (mapcar (lambda (window)
+                      (cons window
+                            (copy-marker (window-start window) nil)))
+                    (get-buffer-window-list (current-buffer) nil t)))
+           (projection (and chat--current-session
+                            (chat-work-plan-ui-projection
+                             chat--current-session))))
+      (unwind-protect
+          (let ((inhibit-read-only t)
+                (inhibit-modification-hooks t))
+            (goto-char chat-ui--plan-start)
+            (delete-region chat-ui--plan-start chat-ui--plan-end)
+            (when (and projection
+                       (memq (plist-get projection :status)
+                             '(active blocked)))
+              (chat-ui--insert-work-plan-projection projection))
+            (set-marker chat-ui--plan-end (point)))
+        (when (marker-position point-anchor)
+          (goto-char point-anchor))
+        (set-marker point-anchor nil)
+        (dolist (entry window-anchors)
+          (when (and (window-live-p (car entry))
+                     (marker-position (cdr entry)))
+            (set-window-start (car entry) (cdr entry) t))
+          (set-marker (cdr entry) nil))))))
+
+(defun chat-ui-toggle-work-plan (&optional event)
+  "Expand or collapse the native work-plan view at EVENT."
+  (interactive (list last-nonmenu-event))
+  (when (and event (mouse-event-p event))
+    (mouse-set-point event))
+  (setq chat-ui--plan-expanded (not chat-ui--plan-expanded))
+  (chat-ui--render-work-plan))
+
+(defun chat-ui--observe-work-plan-event (event)
+  "Refresh chat buffers whose session is affected by work-plan EVENT."
+  (when (memq (chat-event-type event) chat-ui--work-plan-event-types)
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (and chat--current-session
+                     (markerp chat-ui--plan-start)
+                     (equal (chat-session-id chat--current-session)
+                            (chat-event-session-id event)))
+            (chat-ui--render-work-plan)))))))
 
 ;; ------------------------------------------------------------------
 ;; Message Sending
@@ -4244,6 +4385,8 @@ This is an ephemeral query - the result is displayed but not persisted."
       (setq chat-ui--active-stream-process nil)
       (message "Response cancelled")))
   (chat-ui--cleanup-request-state))
+
+(chat-event-add-observer #'chat-ui--observe-work-plan-event)
 
 (provide 'chat-ui)
 ;;; chat-ui.el ends here

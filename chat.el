@@ -114,6 +114,7 @@ Returns the list of files that were loaded."
 (require 'chat-mdp)
   (require 'chat-memory)
   (require 'chat-work-context)
+(require 'chat-work-plan)
 (require 'chat-project)
 (require 'chat-stream)
 (require 'chat-context)

@@ -25,6 +25,7 @@
 (require 'chat-session)
 (require 'chat-tool-forge)
 (require 'chat-work)
+(require 'chat-work-plan)
 
 (defvar chat-capability-mail-drafts nil
   "Local mail draft records.  Sending is intentionally not implemented.")
@@ -44,6 +45,15 @@
     programming_work_note_archive
     programming_work_note_delete
     programming_context_inspect
+    programming_plan_create
+    programming_plan_read
+    programming_plan_list
+    programming_plan_update
+    programming_plan_transition
+    programming_plan_resume
+    programming_plan_cancel
+    programming_plan_skip
+    programming_plan_mode
     web_eww_read
     files_read files_read_lines files_list files_grep open_file
     files_write files_replace files_patch apply_patch
@@ -366,6 +376,92 @@
                            (digest . ,(chat-context-fragment-digest fragment))))
                        (plist-get graph :fragments))))
         (diagnostics . ,(vconcat (plist-get graph :diagnostics)))))))
+
+(defun chat-capability--work-plan-session ()
+  "Return the current execution session for plan tools."
+  (or (chat-capability--current-session)
+      (error "A current session is required")))
+
+(defun chat-capability-programming-plan-create (objective items-json &optional mode)
+  "Create a durable work plan from ITEMS-JSON."
+  (let ((items (json-parse-string items-json :object-type 'alist
+                                  :array-type 'list :null-object nil
+                                  :false-object :json-false)))
+    (chat-work-plan-to-alist
+     (chat-work-plan-create
+      (chat-capability--work-plan-session) objective items
+      :mode (and mode (not (string-empty-p mode)) (intern mode))))))
+
+(defun chat-capability-programming-plan-read (&optional plan-id)
+  "Read PLAN-ID or the selected work plan."
+  (let* ((session (chat-capability--work-plan-session))
+         (plan (if (and plan-id (not (string-empty-p plan-id)))
+                   (chat-work-plan-find session plan-id)
+                 (chat-work-plan-current session t))))
+    (if plan (chat-work-plan-to-alist plan)
+      (error "Work plan not found"))))
+
+(defun chat-capability-programming-plan-list ()
+  "List bounded durable plans for the current session."
+  (vconcat
+   (mapcar #'chat-work-plan-to-alist
+           (chat-work-plan-list (chat-capability--work-plan-session)))))
+
+(defun chat-capability-programming-plan-update
+    (plan-id revision items-json &optional objective)
+  "Replace a plan's unstarted future items from ITEMS-JSON."
+  (let ((items (json-parse-string items-json :object-type 'alist
+                                  :array-type 'list :null-object nil
+                                  :false-object :json-false)))
+    (chat-work-plan-to-alist
+     (chat-work-plan-update-future
+      (chat-capability--work-plan-session) plan-id revision items
+      :objective objective))))
+
+(defun chat-capability-programming-plan-transition
+    (plan-id revision item-id status &optional evidence-json blocker-reason)
+  "Transition one plan item with optional EVIDENCE-JSON."
+  (let ((evidence (and evidence-json
+                       (not (string-empty-p evidence-json))
+                       (chat-capability--json-string-list
+                        evidence-json "evidence_json"))))
+    (chat-work-plan-to-alist
+     (chat-work-plan-transition-item
+      (chat-capability--work-plan-session) plan-id revision item-id
+      (intern status) :evidence evidence :blocker-reason blocker-reason))))
+
+(defun chat-capability-programming-plan-resume (plan-id revision)
+  "Resume a blocked plan."
+  (chat-work-plan-to-alist
+   (chat-work-plan-resume
+    (chat-capability--work-plan-session) plan-id revision)))
+
+(defun chat-capability-programming-plan-cancel (plan-id revision)
+  "Cancel an active or blocked plan."
+  (chat-work-plan-to-alist
+   (chat-work-plan-cancel
+    (chat-capability--work-plan-session) plan-id revision)))
+
+(defun chat-capability-programming-plan-skip
+    (reason &optional tool-name action-facts-json)
+  "Record one audited simple-task plan skip."
+  (let ((facts (and action-facts-json
+                    (not (string-empty-p action-facts-json))
+                    (json-parse-string action-facts-json :object-type 'alist
+                                       :array-type 'list :null-object nil
+                                       :false-object :json-false))))
+    (chat-work-plan-to-alist
+     (chat-work-plan-skip
+      (chat-capability--work-plan-session) (intern reason)
+      :tool-name tool-name :action-facts facts))))
+
+(defun chat-capability-programming-plan-mode (&optional mode)
+  "Read or set the current session plan MODE."
+  (let ((session (chat-capability--work-plan-session)))
+    (when (and mode (not (string-empty-p mode)))
+      (chat-work-plan-set-mode session (intern mode)))
+    `((mode . ,(symbol-name
+                (chat-work-plan-enforcement-mode session))))))
 
 (defun chat-capability-programming-completion-at-point
     (path line column &optional limit)
@@ -834,6 +930,68 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    "Inspect scoped project instruction sources and dependency diagnostics."
    '((:name "target_path" :type "string" :required nil))
    #'chat-capability-programming-context-inspect 'project '(read))
+  (chat-capability--register-tool
+   'programming_plan_create "Programming Plan Create"
+   "Create a durable ordered plan before substantial coding work."
+   '((:name "objective" :type "string" :required t)
+     (:name "items_json" :type "string" :required t)
+     (:name "mode" :type "string" :required nil
+      :enum ("auto" "required" "off")))
+   #'chat-capability-programming-plan-create 'project '(write))
+  (chat-capability--register-tool
+   'programming_plan_read "Programming Plan Read"
+   "Read the selected durable plan or one known plan id."
+   '((:name "plan_id" :type "string" :required nil))
+   #'chat-capability-programming-plan-read 'project '(read))
+  (chat-capability--register-tool
+   'programming_plan_list "Programming Plan List"
+   "List the bounded durable plan history for the current session."
+   nil #'chat-capability-programming-plan-list 'project '(read))
+  (chat-capability--register-tool
+   'programming_plan_update "Programming Plan Update"
+   "Replace only the unstarted future tail of a plan using the observed revision. Started and terminal items remain immutable."
+   '((:name "plan_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t)
+     (:name "items_json" :type "string" :required t)
+     (:name "objective" :type "string" :required nil))
+   #'chat-capability-programming-plan-update 'project '(write))
+  (chat-capability--register-tool
+   'programming_plan_transition "Programming Plan Transition"
+   "Start, complete, block, or skip one plan item using the observed revision. Completion requires known evidence ids."
+   '((:name "plan_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t)
+     (:name "item_id" :type "string" :required t)
+     (:name "status" :type "string" :required t
+      :enum ("in-progress" "completed" "blocked" "skipped"))
+     (:name "evidence_json" :type "string" :required nil)
+     (:name "blocker_reason" :type "string" :required nil))
+   #'chat-capability-programming-plan-transition 'project '(write))
+  (chat-capability--register-tool
+   'programming_plan_resume "Programming Plan Resume"
+   "Explicitly resume a blocked or interrupted plan."
+   '((:name "plan_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t))
+   #'chat-capability-programming-plan-resume 'project '(write))
+  (chat-capability--register-tool
+   'programming_plan_cancel "Programming Plan Cancel"
+   "Cancel a durable plan using the observed revision."
+   '((:name "plan_id" :type "string" :required t)
+     (:name "revision" :type "integer" :required t))
+   #'chat-capability-programming-plan-cancel 'project '(write))
+  (chat-capability--register-tool
+   'programming_plan_skip "Programming Plan Skip"
+   "Audit an allowed simple-task skip. A single bounded mutation must name files_write, files_replace, or files_patch."
+   '((:name "reason" :type "string" :required t
+      :enum ("answer-only" "read-only" "single-bounded-action"))
+     (:name "tool_name" :type "string" :required nil)
+     (:name "action_facts_json" :type "string" :required nil))
+   #'chat-capability-programming-plan-skip 'project '(write))
+  (chat-capability--register-tool
+   'programming_plan_mode "Programming Plan Mode"
+   "Read or explicitly set auto, required, or off plan enforcement."
+   '((:name "mode" :type "string" :required nil
+      :enum ("auto" "required" "off")))
+   #'chat-capability-programming-plan-mode 'project '(write))
   (chat-capability--register-tool
    'web_eww_read "Web EWW Read"
    "Retrieve and render an HTTP(S) page with the Emacs web stack."

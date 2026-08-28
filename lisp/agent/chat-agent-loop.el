@@ -24,6 +24,7 @@
 (require 'chat-transcript)
 (require 'chat-context-budget)
 (require 'chat-work-context)
+(require 'chat-work-plan)
 (require 'chat-event)
 (require 'chat-checkpoint)
 (require 'chat-tool-caller)
@@ -298,6 +299,11 @@ on screen, where the marker would be noise.  It belongs on the wire only."
                         :target-path target-path))
          (notes (and session-id
                      (chat-work-note-fragments session-id context)))
+         (plan-fragment
+          (and session
+               (chat-work-plan-context-fragment
+                session task-id
+                (chat-agent-run-state-work-plan-projection-revision run))))
          (window (chat-context-window-for-model
                   (chat-agent-run-state-model run)))
          (max-chars
@@ -305,11 +311,16 @@ on screen, where the marker would be noise.  It belongs on the wire only."
                   (chat-context-allocation-tokens 'project-notes window))))
          (bundle
           (chat-context-bundle-build
-           (append (chat-agent-run-state-context-fragments run) notes)
+           (append (chat-agent-run-state-context-fragments run) notes
+                   (and plan-fragment (list plan-fragment)))
            :session-id session-id :turn-id turn-id :task-id task-id
            :project-root project-root :target-path target-path
            :max-chars (min chat-work-context-max-projection-chars max-chars))))
     (setf (chat-agent-run-state-last-context-bundle run) bundle)
+    (when plan-fragment
+      (setf (chat-agent-run-state-work-plan-projection-revision run)
+            (cdr (assq 'revision
+                       (chat-context-fragment-metadata plan-fragment)))))
     (chat-agent--emit
      run 'context-bundle :digest (chat-context-bundle-digest bundle)
      :selected-count (length (chat-context-bundle-fragments bundle))
@@ -701,7 +712,8 @@ need approval carry exclusive accesses and therefore remain serialized."
               (accesses (chat-tool-caller-call-resource-accesses call))
               (blocked (chat-agent--hook-until
                         'chat-plugin-before-tool-call-functions
-                        run call)))
+                        run call))
+              plan-refusal)
          (puthash index (list :call call :accesses accesses :handle nil)
                   running)
          (cond
@@ -715,6 +727,10 @@ need approval carry exclusive accesses and therefore remain serialized."
                     (or (plist-get blocked :reason)
                         "Tool execution was blocked")
                     t))
+          ((setq plan-refusal
+                 (chat-work-plan-check-call
+                  (chat-agent-run-state-session run) call))
+           (funcall complete-fn index call plan-refusal t))
           (t
            (condition-case err
                (progn

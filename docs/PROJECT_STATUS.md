@@ -24,11 +24,12 @@ native tree/detail view. Typed image and file content now persists through a
 content-addressed attachment store, capability preflight and provider-specific
 wire adapters. Checkpoints, owned worktrees, execution backends, attributable
 memory, derived Trace reconstruction, deterministic evaluations and the optional
-versioned App Server bridge are implemented. M9-M13 of the active M9-M17
+versioned App Server bridge are implemented. M9-M14 of the active M9-M17
 coding-reliability roadmap are complete: isolated real-task evaluation,
 versioned edits, semantic code intelligence, automatic verification and
-scoped structured work context. Durable TODO plans, execution isolation,
-read-only review, conflict-safe coding subagents and final acceptance remain.
+scoped structured work context, plus durable evidence-linked TODO plans with a
+native progress UI. Execution isolation, read-only review, conflict-safe coding
+subagents and final acceptance remain.
 
 ## Implemented Areas
 
@@ -99,6 +100,7 @@ read-only review, conflict-safe coding subagents and final acceptance remain.
 - scoped project-instruction dependency graphs with cycle and traversal diagnostics
 - revisioned session work notes with key, kind and tag indexes across restart
 - request-only projection of project rules, code context and applicable active notes
+- bounded request-only projection of the active durable work-plan slice and newly added evidence
 
 ### Durable Sessions
 
@@ -155,6 +157,9 @@ read-only review, conflict-safe coding subagents and final acceptance remain.
 - ordered conditional workflows with approval checkpoints, per-step
   persistence, failure pause, cancellation, and durable resume
 - work tools registered with owner and effect metadata
+- revisioned session/task work plans with DAG dependencies, one current item,
+  scoped evidence, restart recovery and tool-boundary enforcement
+- native folded plan progress above the input area with point and scroll stability
 
 ### MCP and Sub-agents
 
@@ -182,8 +187,8 @@ read-only review, conflict-safe coding subagents and final acceptance remain.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1633 regression tests discovered
-- 1633 passing
+- 1655 regression tests discovered
+- 1655 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

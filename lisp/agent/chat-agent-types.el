@@ -43,6 +43,7 @@
                (:copier nil))
   model messages session execution-session profile transport task-id run-id
   project-root context-target-path context-fragments last-context-bundle
+  work-plan-projection-revision
   on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options

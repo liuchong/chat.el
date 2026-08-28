@@ -1334,5 +1334,98 @@ per piece for that to stop being true."
       (should (= before-count 1))
       (should (= complete-count (cdr case))))))
 
+(ert-deftest chat-agent-plan-gate-refuses-write-before-tool-execution ()
+  "A code run feeds a plan refusal back without invoking the write tool."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (chat-llm-providers '((kimi :context-window 100000)))
+         (chat-approval-required-effects nil)
+         (session (chat-session-create "Plan gate" 'kimi))
+         (calls (list nil))
+         (executions 0)
+         run)
+     (chat-session-metadata-set session 'code-enabled t)
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'mutating-demo :name "Mutating Demo" :language 'elisp
+       :effects '(write)
+       :compiled-function (lambda () (cl-incf executions) "changed")
+       :is-active t :usage-count 0))
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport
+                 '((:content "" :tool-calls
+                             ((:id "write-1" :name "mutating-demo"
+                               :arguments nil)))
+                   (:content "I need a plan first."))
+                 calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi :session session
+                    :messages (list (chat-agent-test--user-message))))))
+     (ert-info ((format "calls=%S results=%S status=%S reason=%S"
+                        (car calls) (chat-agent-run-state-tool-results run)
+                        (chat-agent-run-state-status run)
+                        (chat-agent-run-state-reason run)))
+       (should (= executions 0))
+       (should (= 2 (length (car calls)))))
+     (let ((tool-result (car (last (cadr (car calls))))))
+       (should (eq :tool (chat-message-role tool-result)))
+       (should (string-match-p "Plan required"
+                               (chat-message-content tool-result)))))))
+
+(ert-deftest chat-agent-active-plan-allows-write-and-projects-active-slice ()
+  "An active plan admits the write and appears only in request context."
+  (chat-test-with-temp-dir
+   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (chat-llm-providers '((kimi :context-window 100000)))
+         (chat-approval-required-effects nil)
+         (session (chat-session-create "Planned write" 'kimi))
+         (calls (list nil))
+         (executions 0)
+         run)
+     (chat-session-metadata-set session 'code-enabled t)
+     (chat-work-plan-create
+      session "Make the requested change"
+      '(((id . "change") (title . "Change behavior")
+         (acceptance . "Focused test passes"))))
+     (let ((plan (chat-work-plan-current session nil)))
+       (chat-work-plan-transition-item
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+        "change" 'in-progress))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'mutating-demo :name "Mutating Demo" :language 'elisp
+       :effects '(write)
+       :compiled-function (lambda () (cl-incf executions) "changed")
+       :is-active t :usage-count 0))
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport
+                 '((:content "" :tool-calls
+                             ((:id "write-1" :name "mutating-demo"
+                               :arguments nil)))
+                   (:content "done"))
+                 calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi :session session
+                    :messages (list (chat-agent-test--user-message)))))
+       (should-not
+        (seq-some
+         (lambda (message)
+           (plist-get (chat-message-metadata message) :ephemeral))
+         (chat-agent-run-state-messages run))))
+     (ert-info ((format "calls=%S results=%S status=%S reason=%S"
+                        (car calls) (chat-agent-run-state-tool-results run)
+                        (chat-agent-run-state-status run)
+                        (chat-agent-run-state-reason run)))
+       (should (= executions 1)))
+     (should
+      (seq-some
+       (lambda (message)
+         (and (plist-get (chat-message-metadata message) :ephemeral)
+              (string-match-p "Current item 1/1: Change behavior"
+                              (chat-message-content message))))
+       (car (car calls)))))))
+
 (provide 'test-chat-agent)
 ;;; test-chat-agent.el ends here

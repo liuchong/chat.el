@@ -20,7 +20,7 @@ are in `programming-capability-reliability-plan.md`.
 - M0-M6 lifecycle, capability, extension, task, content and recovery contracts
 - M7 attributable memory, derived Trace reconstruction and deterministic evals
 - M8 versioned App Server bridge and optional `termini.el` entry point
-- current canonical verification at 1633/1633
+- current canonical verification at 1655/1655
 
 ## Active Stages
 
@@ -29,16 +29,17 @@ are in `programming-capability-reliability-plan.md`.
 3. M11: semantic code-intelligence facade and deterministic repo map (complete)
 4. M12: project verification plans and bounded repair (complete)
 5. M13: structured work context, scoped instructions and working notes (complete)
-6. M14: durable TODO plans and native chat progress UI (active)
-7. M15: capability-tested execution isolation backends
+6. M14: durable TODO plans and native chat progress UI (complete)
+7. M15: capability-tested execution isolation backends (active)
 8. M16: read-only Review Agent and conflict-safe coding subagents
 9. M17: rollout, performance verification and final acceptance
 
 ## Immediate Next Action
 
-Implement M14's durable plan/item state machine, evidence links, mutation gate
-and native chat progress projection on top of M13's typed context. No later
-default may be enabled until its effect is measurable against M9.
+Implement M15's capability-tested execution isolation contract and foreground,
+timeout-bounded platform probes. Keep policy selection separate from backend
+capability facts, and do not enable a later default until its effect is
+measurable against M9.
 
 ## Stage Gate
 

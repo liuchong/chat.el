@@ -633,6 +633,19 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 - UI 状态与 durable plan 一致，连续 1,000 次状态更新无 point/window 跳动和残留 timer。
 - 计划额外 prompt token 在 large task 中位数不超过总输入的 5%。
 
+#### 完成记录（2026-08-28）
+
+- schema v1、revision 冲突拒绝、DAG、单 `in-progress`、task/session scope、
+  interrupted recovery 和 evidence resolver 已实现。
+- `auto`、`required`、`off` 三种模式及枚举 skip 审计已进入真实 tool boundary；
+  活动计划没有当前执行项时仍然 fail closed。
+- 活动切片是 request-only typed context，独立限制为 2,000 字符，只投影上一轮
+  后新增 evidence；完整历史由 plan read 查询。
+- 输入区上方原生折叠 UI 与 durable revision 同源；CJK 和连续 1,000 次更新的
+  point、window-start、timer、overlay 稳定性测试通过。
+- plan 核心 19/19 定向测试通过；Agent gate、capability surface 和全量回归通过，
+  M14 独立提交保存可复现验收证据。
+
 ### M15：执行隔离后端
 
 #### 目标

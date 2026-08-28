@@ -248,5 +248,17 @@
       (should-not (member "programming_completion_at_point" names))
       (should-not (member "daily_message_draft_buffer" names)))))
 
+(ert-deftest chat-capability-registers-complete-plan-tool-surface ()
+  "The programming profile exposes every durable plan operation."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (dolist (id '(programming_plan_create programming_plan_read
+                  programming_plan_list
+                  programming_plan_update programming_plan_transition
+                  programming_plan_resume programming_plan_cancel
+                  programming_plan_skip programming_plan_mode))
+      (should (chat-tool-forge-get id))
+      (should (memq id chat-capability-programming-tools)))))
+
 (provide 'test-chat-capability-packs)
 ;;; test-chat-capability-packs.el ends here
