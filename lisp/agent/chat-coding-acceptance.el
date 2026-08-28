@@ -107,6 +107,88 @@
           (error nil))))
     (nreverse results)))
 
+(defun chat-coding-acceptance--read-json-file (file)
+  "Read JSON alist from FILE, returning nil on invalid input."
+  (when (file-regular-p file)
+    (condition-case nil
+        (let ((json-object-type 'alist)
+              (json-array-type 'list)
+              (json-key-type 'symbol))
+          (json-read-file file))
+      (error nil))))
+
+(defun chat-coding-acceptance--campaign-directory-gate
+    (directory results expected-role)
+  "Validate campaign DIRECTORY and RESULTS for EXPECTED-ROLE."
+  (let* ((descriptor
+          (and directory
+               (chat-coding-acceptance--read-json-file
+                (expand-file-name "campaign.json" directory))))
+         (completion
+          (and directory
+               (chat-coding-acceptance--read-json-file
+                (expand-file-name "completion.json" directory))))
+         (campaign-id (alist-get 'campaignId descriptor))
+         (configuration-digest (alist-get 'configurationDigest descriptor))
+         (manifest-digest (alist-get 'manifestDigest descriptor))
+         (implementation-revision
+          (alist-get 'implementationRevision descriptor))
+         (expected (alist-get 'expectedResultCount descriptor))
+         (results-match
+          (and results
+               (seq-every-p
+                (lambda (result)
+                  (let ((metadata (chat-eval-result-metadata result)))
+                    (and
+                     (equal campaign-id
+                            (chat-coding-acceptance--field
+                             metadata 'campaignId))
+                     (equal expected-role
+                            (chat-coding-acceptance--field
+                             metadata 'campaignRole))
+                     (equal configuration-digest
+                            (chat-coding-acceptance--field
+                             metadata 'campaignConfigurationDigest))
+                     (equal manifest-digest
+                            (chat-coding-acceptance--field
+                             metadata 'campaignManifestDigest))
+                     (equal implementation-revision
+                            (chat-coding-acceptance--field
+                             metadata 'implementationRevision)))))
+                results)))
+         (passed
+          (and descriptor completion
+               (= (or (alist-get 'schemaVersion descriptor) 0) 1)
+               (= (or (alist-get 'schemaVersion completion) 0) 1)
+               (equal expected-role (alist-get 'role descriptor))
+               (equal campaign-id (alist-get 'campaignId completion))
+               (equal configuration-digest
+                      (alist-get 'configurationDigest completion))
+               (= (or (alist-get 'taskCount descriptor) 0) 30)
+               (= (or (alist-get 'repetitions descriptor) 0) 5)
+               (= (or expected 0) 150)
+               (= (or (alist-get 'expectedResultCount completion) 0) 150)
+               (= (or (alist-get 'resultCount completion) 0) 150)
+               (= (length results) 150)
+               results-match
+               (eq t (alist-get 'complete completion)))))
+    (chat-coding-acceptance-gate-create
+     :name (format "live-eval-%s-campaign-record" expected-role)
+     :status (cond
+              ((null directory) 'blocked)
+              (passed 'passed)
+              (t 'failed))
+     :expected "immutable 30-task x 5 campaign and complete terminal record"
+     :actual
+     `((campaignId . ,campaign-id)
+       (expectedResults . ,expected)
+       (recordedResults . ,(and completion
+                                (alist-get 'resultCount completion)))
+       (loadedResults . ,(length results)))
+     :evidence
+     (unless passed
+       "Use a fresh campaign directory and wait for completion.json."))))
+
 (defun chat-coding-acceptance--task-id (result)
   "Return stable task id from coding RESULT."
   (chat-coding-acceptance--field
@@ -146,6 +228,55 @@
      (chat-coding-acceptance--field executor 'profile)
      (chat-coding-acceptance--field executor 'transport)
      (chat-coding-acceptance--field executor 'approvalMode))))
+
+(defun chat-coding-acceptance--campaign-identity (result)
+  "Return the live campaign identity recorded by RESULT."
+  (let ((metadata (chat-eval-result-metadata result)))
+    (list
+     (chat-coding-acceptance--field metadata 'campaignId)
+     (chat-coding-acceptance--field metadata 'campaignRole)
+     (chat-coding-acceptance--field metadata 'campaignConfigurationDigest)
+     (chat-coding-acceptance--field metadata 'campaignManifestDigest)
+     (chat-coding-acceptance--field metadata 'implementationRevision))))
+
+(defun chat-coding-acceptance--complete-campaign-identity-p (identity)
+  "Return non-nil when every field in campaign IDENTITY is present."
+  (seq-every-p
+   (lambda (value)
+     (and (stringp value) (not (string-empty-p value))))
+   identity))
+
+(defun chat-coding-acceptance--campaign-gate (baseline current)
+  "Return the campaign isolation gate for BASELINE and CURRENT."
+  (let* ((baseline-identities
+          (delete-dups
+           (mapcar #'chat-coding-acceptance--campaign-identity baseline)))
+         (current-identities
+          (delete-dups
+           (mapcar #'chat-coding-acceptance--campaign-identity current)))
+         (left (car baseline-identities))
+         (right (car current-identities))
+         (passed
+          (and (= (length baseline-identities) 1)
+               (= (length current-identities) 1)
+               (chat-coding-acceptance--complete-campaign-identity-p left)
+               (chat-coding-acceptance--complete-campaign-identity-p right)
+               (equal (nth 1 left) "baseline")
+               (equal (nth 1 right) "current")
+               (not (equal (nth 0 left) (nth 0 right)))
+               (not (equal (nth 2 left) (nth 2 right)))
+               (equal (nth 3 left) (nth 3 right))
+               (not (equal (nth 4 left) (nth 4 right))))))
+    (chat-coding-acceptance-gate-create
+     :name "live-eval-campaign-isolation"
+     :status (if passed 'passed 'failed)
+     :expected
+     "one baseline and one current campaign; same manifest; distinct configurations and revisions"
+     :actual `((baseline . ,baseline-identities)
+               (current . ,current-identities))
+     :evidence
+     (unless passed
+       "Generate each result set in a fresh isolated live campaign."))))
 
 (defun chat-coding-acceptance--compatible-identities-p (baseline current)
   "Return non-nil when BASELINE and CURRENT have comparable task identities."
@@ -352,6 +483,7 @@
         :actual (format "raw=%d/%d valid=%d/%d"
                         (length baseline) (length current)
                         (length baseline-valid) (length current-valid)))
+       (chat-coding-acceptance--campaign-gate baseline current)
        (chat-coding-acceptance-gate-create
         :name "live-eval-identity"
         :status (if (chat-coding-acceptance--compatible-identities-p
@@ -651,7 +783,13 @@ is removed before the callback runs."
           (chat-coding-acceptance-load-result-directory current-directory))
          (result
           (chat-coding-acceptance-record
-           (chat-coding-acceptance-live-gates baseline current)
+           (append
+            (list
+             (chat-coding-acceptance--campaign-directory-gate
+              baseline-directory baseline "baseline")
+             (chat-coding-acceptance--campaign-directory-gate
+              current-directory current "current"))
+            (chat-coding-acceptance-live-gates baseline current))
            `((baselineTrials . ,(length baseline))
              (currentTrials . ,(length current))
              (failureSummary .
@@ -717,6 +855,11 @@ adds bounded externally verified facts such as the canonical test count."
                 current-directory)))
          (gates
           (append (chat-coding-acceptance-performance-gates benchmark)
+                  (list
+                   (chat-coding-acceptance--campaign-directory-gate
+                    baseline-directory baseline "baseline")
+                   (chat-coding-acceptance--campaign-directory-gate
+                    current-directory current "current"))
                   (chat-coding-acceptance-live-gates baseline current)))
          (result
           (chat-coding-acceptance-record

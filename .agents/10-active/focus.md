@@ -15,8 +15,9 @@ carry closed error kinds and next actions. The 10,000-file performance gates
 pass, including a known single-file update that no longer rescans the tree.
 The fixed corpus now contains one deterministic large-repository task with
 10,000 indexed Python files, measured rather than trusted from its tag.
-Completion now requires comparable M9 and M17 30-by-5 live results with trusted
-provider token usage; those result sets are not currently available.
+Completion now requires separate immutable M9 `baseline` and M17 `current`
+campaigns, each with 30-by-5 live results and trusted provider token usage;
+those result sets are not currently available.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

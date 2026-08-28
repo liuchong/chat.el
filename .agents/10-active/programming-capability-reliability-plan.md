@@ -32,6 +32,7 @@
 - **allowed paths**：task 或 child task 显式声明可写的 canonical path 集合；只读不等于允许写。
 - **required verification**：profile 中 `required-p` 为真的 step；not-run、blocked、timeout、cancelled 和 failed 都不是通过。
 - **baseline**：M9 使用固定 task revisions、fixture digests、provider/model、capability snapshot、profile 和运行参数产生的结果集合。任一身份变化后不得与旧 baseline 直接比较，必须重跑对应 baseline。
+- **live campaign**：一次独立、不可追加、不可复用的 live Eval 运行目录。开始前固定 role、provider/model、profile、transport、approval mode、manifest digest、implementation revision、重复次数和预期结果数；结束后写入独立 completion record。trial 不得跨 campaign 混合。
 - **large-repo task**：task manifest 明确带有 `large-repo` tag，并使用不少于 10,000 个受索引文件的固定 fixture；不得在看到结果后临时改变该分类。
 - **百分点**：成功率的绝对差，例如 70% 到 85% 为提高 15 个百分点，不是相对提高 15%。
 
@@ -308,12 +309,13 @@ blocked 必须附原因。`auto` 模式只允许 answer-only、read-only 或确�
 
 ### M9：建立真实编程 Eval 基线
 
-实施状态（2026-08-28）：runner、30-task manifest、fixture、确定性 judge 和
-不可变结果合同已经完成；本机没有留存固定 provider/model/capability identity 的
-live 结果集。因此“基线基础设施完成”不等于“可比较 M9 live baseline 已存在”，
-最终验收必须按相同的五次重复重新运行 M9 与 M17。固定任务集中已有一个
-`large-repo` task；其版本化生成描述符物化 10,001 个文件，其中 10,000 个为
-可索引 Python 源文件，结果记录实际文件数和生成器摘要。
+实施状态（2026-08-28）：runner、30-task manifest、fixture、确定性 judge、
+不可变结果和隔离 campaign 合同已经完成；本机没有留存固定
+provider/model/capability identity 的 live 结果集。因此“基线基础设施完成”不等于
+“可比较 M9 live baseline 已存在”，最终验收必须按相同的五次重复重新运行 M9
+与 M17。固定任务集中已有一个 `large-repo` task；其版本化生成描述符物化
+10,001 个文件，其中 10,000 个为可索引 Python 源文件，结果记录实际文件数和
+生成器摘要。
 
 #### 目标
 
@@ -361,6 +363,7 @@ live 结果集。因此“基线基础设施完成”不等于“可比较 M9 li
 4. 运行现有五个离线场景，确认结果兼容。
 5. 运行 canonical suite。
 6. 使用固定 provider、model 和 capability snapshot，对 30 个任务各跑 3 次形成开发基线；最终验收时各跑 5 次。
+7. 每组 live 运行创建独立 campaign 目录；开始前写 immutable configuration，结束后写 completion record，禁止向既有目录追加或混入其他 revision/configuration 的 trial。
 
 #### 退出条件
 
@@ -369,6 +372,7 @@ live 结果集。因此“基线基础设施完成”不等于“可比较 M9 li
 - 同一完成状态重复判定结果一致。
 - 每次运行都可追溯到 session、Trace 和不可变 Eval 结果。
 - 失败和取消后无遗留 worktree、execution 或后台进程。
+- campaign 配置摘要进入每条 trial；同一目录只能包含一个 role、manifest、implementation revision 和 runtime configuration。
 
 ### M10：文件 read set / write set 一致性
 
@@ -769,7 +773,7 @@ large-repo task 已完成并通过实际物化集成测试。实现决策见 Dec
 3. 为 stale write、semantic backend、verification 和 sandbox 增加可操作错误说明。
 4. 更新用户文档、配置示例、帮助命令和故障排查。
 5. 对 10,000 文件 fixture 做索引、增量更新、查询、上下文构建和内存测试。
-6. 对 30 个 live coding tasks 各执行 5 次最终基准。
+6. 对 30 个 live coding tasks 各执行 5 次最终基准；M9 与 M17 分别使用 fresh `baseline` / `current` campaign，禁止复用目录。
 7. 对每个失败分类复核：模型能力、上下文遗漏、工具错误、验证错误、权限阻塞或基础设施错误。
 8. 运行全部 unit、integration、e2e、offline eval 和平台隔离测试。
 9. 生成不可变验收结果和与 M9 基线的比较报告。
@@ -924,6 +928,8 @@ Trace 至少新增：
 - 延迟 p95 使用全部有效样本按毫秒升序排列，取 `ceil(0.95 * N)` 的第 N 项；样本数少于 20 时不得报告 p95 为验收证据。
 - token 指标只比较 provider 返回了可信 usage 的 valid trials；缺少 usage 的比例必须单独报告，超过 5% 时 token 门槛状态为 blocked。
 - 性能测试必须记录机器、操作系统、Emacs 版本、冷/热缓存、fixture digest 和重复次数。最终值取至少 30 次 warm query；环境变化后不得与旧绝对值混用。
+- 最终比较前必须验证两组 task ID、task revision、fixture digest、provider/model、capability snapshot、profile 和运行参数完全一致；不一致时结果为 blocked，不得计算“提升”。
+- 两组结果必须分别来自唯一且角色正确的 campaign；manifest digest 必须相同，campaign/configuration digest 和 implementation revision 必须不同。`campaign.json` 与 `completion.json` 必须匹配且分别确认 30 tasks、5 repetitions、150 results 和 complete。缺字段、混合身份、复用同一 revision 或中断的 campaign 均不得通过。
 
 ### 13.1 正确性
 

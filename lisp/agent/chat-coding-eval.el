@@ -21,6 +21,13 @@
 
 (defconst chat-coding-eval-fixture-generator-schema-version 1)
 
+(defconst chat-coding-eval-campaign-schema-version 1)
+
+(defconst chat-coding-eval--source-root
+  (let ((module (or load-file-name buffer-file-name)))
+    (and module (expand-file-name "../../" (file-name-directory module))))
+  "Source checkout root when this module was loaded from one.")
+
 (defconst chat-coding-eval--indexed-source-pattern
   "\\.\\(?:el\\|py\\|js\\|mjs\\|cjs\\|ts\\|tsx\\|go\\|rs\\)\\'"
   "Source extensions used by the fixed coding Eval corpus.")
@@ -51,13 +58,16 @@
   :type '(choice (const manual) (const guarded) (const dangerous))
   :group 'chat)
 
+(defcustom chat-coding-eval-campaign-directory
+  (expand-file-name "coding-campaigns/" chat-eval-directory)
+  "Parent directory for isolated live coding evaluation campaigns."
+  :type 'directory :group 'chat)
+
 (defcustom chat-coding-eval-default-manifest
-  (let* ((module (or load-file-name buffer-file-name))
-         (root (and module
-                    (expand-file-name "../../" (file-name-directory module))))
-         (candidate (and root
+  (let* ((candidate (and chat-coding-eval--source-root
                          (expand-file-name
-                          "tests/fixtures/coding-eval/manifest.json" root))))
+                          "tests/fixtures/coding-eval/manifest.json"
+                          chat-coding-eval--source-root))))
     (and candidate (file-exists-p candidate) candidate))
   "Default coding evaluation manifest for development checkouts."
   :type '(choice (const nil) file) :group 'chat)
@@ -75,11 +85,12 @@
   started-at setup-duration-ms agent-duration-ms judge-started-at
   judge-duration-ms answer metadata
   changed-files out-of-scope-files checks executor-cancel process timer
-  on-complete cleanup-p done-p)
+  on-complete cleanup-p result-directory result-metadata done-p)
 
 (cl-defstruct (chat-coding-eval-suite-state
                (:constructor chat-coding-eval-suite-state-create-record))
-  pending current results executor on-result on-complete cleanup-p cancelled-p)
+  pending current results executor on-result on-complete cleanup-p
+  result-directory result-metadata campaign-directory cancelled-p)
 
 (defun chat-coding-eval--json-value (object key)
   "Return KEY from JSON alist OBJECT."
@@ -518,6 +529,9 @@
     (let* ((cleanup-ok (chat-coding-eval--cleanup state))
            (task (chat-coding-eval-run-state-task state))
            (finished (funcall chat-eval-clock-function))
+           (chat-eval-directory
+            (or (chat-coding-eval-run-state-result-directory state)
+                chat-eval-directory))
            (checks (append
                     (chat-coding-eval-run-state-checks state)
                     (list (chat-eval-check
@@ -569,7 +583,8 @@
                (timeoutSeconds .
                                ,(chat-coding-eval-task-timeout-seconds task))
                (workspaceCleaned . ,cleanup-ok)
-               (executor . ,(chat-coding-eval-run-state-metadata state))))))
+               (executor . ,(chat-coding-eval-run-state-metadata state))
+               ,@(chat-coding-eval-run-state-result-metadata state)))))
       (when-let ((callback (chat-coding-eval-run-state-on-complete state)))
         (funcall callback result state))
       result)))
@@ -715,7 +730,8 @@
     t))
 
 (cl-defun chat-coding-eval-run
-    (task executor &key on-complete (cleanup chat-coding-eval-clean-workspaces))
+    (task executor &key on-complete (cleanup chat-coding-eval-clean-workspaces)
+          result-directory result-metadata)
   "Run TASK with asynchronous EXECUTOR in a disposable workspace.
 
 EXECUTOR is called with TASK, workspace and a completion callback accepting
@@ -736,7 +752,8 @@ function.  ON-COMPLETE receives the immutable result and run state."
            :task task :fixture-digest "unavailable"
            :workspace workspace :workspace-id (file-name-nondirectory workspace)
            :started-at started :checks nil :on-complete on-complete
-           :cleanup-p cleanup)))
+           :cleanup-p cleanup :result-directory result-directory
+           :result-metadata result-metadata)))
     (condition-case setup-error
         (progn
           (copy-directory (chat-coding-eval-task-fixture-directory task)
@@ -824,6 +841,10 @@ function.  ON-COMPLETE receives the immutable result and run state."
              (funcall done status answer
                       (cons (cons 'repetition repetition) metadata)))))
         :cleanup (chat-coding-eval-suite-state-cleanup-p state)
+        :result-directory
+        (chat-coding-eval-suite-state-result-directory state)
+        :result-metadata
+        (chat-coding-eval-suite-state-result-metadata state)
         :on-complete
         (lambda (result _run)
           (push result (chat-coding-eval-suite-state-results state))
@@ -836,7 +857,8 @@ function.  ON-COMPLETE receives the immutable result and run state."
 
 (cl-defun chat-coding-eval-run-suite
     (tasks executor &key (repetitions 1) on-result on-complete
-           (cleanup chat-coding-eval-clean-workspaces))
+           (cleanup chat-coding-eval-clean-workspaces)
+           result-directory result-metadata campaign-directory)
   "Run TASKS sequentially with EXECUTOR for REPETITIONS.
 
 ON-RESULT receives each result, its one-based repetition and suite state.
@@ -855,7 +877,9 @@ ON-COMPLETE receives results in execution order and the suite state."
             :pending (nreverse pending)
             :results nil :executor executor
             :on-result on-result :on-complete on-complete
-            :cleanup-p cleanup)))
+            :cleanup-p cleanup :result-directory result-directory
+            :result-metadata result-metadata
+            :campaign-directory campaign-directory)))
       (chat-coding-eval--suite-next state))))
 
 (defun chat-coding-eval-cancel-suite (state)
@@ -889,6 +913,145 @@ ON-COMPLETE receives results in execution order and the suite state."
   (or requested
       (plist-get (chat-llm-get-provider-config provider) :model)
       (user-error "Provider %s has no configured model" provider)))
+
+(defun chat-coding-eval--campaign-id ()
+  "Return a filesystem-safe live campaign identifier."
+  (format "coding-%s-%06x"
+          (format-time-string "%Y%m%dT%H%M%S" nil t)
+          (random #x1000000)))
+
+(defun chat-coding-eval--validate-campaign-id (campaign-id)
+  "Validate and return CAMPAIGN-ID."
+  (unless (and (stringp campaign-id)
+               (string-match-p
+                "\\`[[:alnum:]][[:alnum:]_.-]*\\'" campaign-id))
+    (user-error "Campaign id must contain only letters, digits, dot, dash, or underscore"))
+  campaign-id)
+
+(defun chat-coding-eval--git-output (&rest arguments)
+  "Return trimmed Git output for ARGUMENTS at the source root."
+  (when (and chat-coding-eval--source-root
+             (file-exists-p
+              (expand-file-name ".git" chat-coding-eval--source-root)))
+    (let ((default-directory chat-coding-eval--source-root))
+      (with-temp-buffer
+        (when (zerop (apply #'process-file "git" nil t nil arguments))
+          (string-trim (buffer-string)))))))
+
+(defun chat-coding-eval--implementation-revision (&optional requested)
+  "Return trusted REQUESTED or clean checkout implementation revision."
+  (if requested
+      (progn
+        (unless (and (stringp requested) (not (string-empty-p requested)))
+          (user-error "Implementation revision cannot be empty"))
+        requested)
+    (let ((revision (chat-coding-eval--git-output "rev-parse" "HEAD"))
+          (dirty (chat-coding-eval--git-output
+                  "status" "--porcelain" "--untracked-files=no")))
+      (unless revision
+        (user-error "Cannot determine implementation revision"))
+      (unless (stringp dirty)
+        (user-error "Cannot verify whether the implementation checkout is clean"))
+      (unless (string-empty-p dirty)
+        (user-error "Live campaigns require a clean tracked checkout"))
+      revision)))
+
+(defun chat-coding-eval--write-json-exclusive (file data)
+  "Atomically write JSON DATA to new FILE."
+  (when (file-exists-p file)
+    (error "Campaign record already exists: %s" file))
+  (let ((temp (make-temp-file
+               (expand-file-name ".campaign-" (file-name-directory file)))))
+    (unwind-protect
+        (progn
+          (with-temp-file temp
+            (let ((coding-system-for-write 'utf-8))
+              (insert (json-encode data))))
+          (rename-file temp file nil))
+      (when (file-exists-p temp)
+        (delete-file temp)))))
+
+(cl-defun chat-coding-eval-prepare-campaign
+    (campaign-id provider model repetitions manifest
+                 &key implementation-revision (role "current"))
+  "Create and return an isolated live campaign descriptor.
+
+The returned plist contains :directory, :result-metadata and :descriptor."
+  (chat-coding-eval--validate-campaign-id campaign-id)
+  (unless (symbolp provider)
+    (user-error "Campaign provider must be a symbol"))
+  (unless (and (stringp model) (not (string-empty-p model)))
+    (user-error "Campaign model cannot be empty"))
+  (unless (member role '("baseline" "current"))
+    (user-error "Campaign role must be baseline or current"))
+  (unless (and (integerp repetitions) (> repetitions 0))
+    (user-error "Campaign repetitions must be positive"))
+  (unless (file-regular-p manifest)
+    (user-error "Campaign manifest does not exist: %s" manifest))
+  (let* ((tasks (chat-coding-eval-load-suite manifest))
+         (revision
+          (chat-coding-eval--implementation-revision implementation-revision))
+         (manifest-digest (chat-coding-eval--file-digest manifest))
+         (configuration
+          `((provider . ,(symbol-name provider))
+            (model . ,model)
+            (profile . "code")
+            (transport . "stream")
+            (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
+            (repetitions . ,repetitions)
+            (taskCount . ,(length tasks))
+            (manifestDigest . ,manifest-digest)
+            (implementationRevision . ,revision)))
+         (configuration-digest
+          (secure-hash 'sha256
+                       (encode-coding-string (json-encode configuration)
+                                             'utf-8)))
+         (directory
+          (expand-file-name campaign-id chat-coding-eval-campaign-directory))
+         (descriptor
+          `((schemaVersion . ,chat-coding-eval-campaign-schema-version)
+            (campaignId . ,campaign-id)
+            (role . ,role)
+            (createdAt . ,(funcall chat-eval-clock-function))
+            ,@configuration
+            (expectedResultCount . ,(* repetitions (length tasks)))
+            (configurationDigest . ,configuration-digest))))
+    (when (file-exists-p directory)
+      (user-error "Campaign directory already exists: %s" directory))
+    (make-directory directory t)
+    (condition-case err
+        (chat-coding-eval--write-json-exclusive
+         (expand-file-name "campaign.json" directory) descriptor)
+      (error
+       (delete-directory directory t)
+       (signal (car err) (cdr err))))
+    (list
+     :directory directory
+     :descriptor descriptor
+     :tasks tasks
+     :result-metadata
+     `((campaignId . ,campaign-id)
+       (campaignRole . ,role)
+       (campaignConfigurationDigest . ,configuration-digest)
+       (campaignManifestDigest . ,manifest-digest)
+       (implementationRevision . ,revision)))))
+
+(defun chat-coding-eval--complete-campaign (campaign results)
+  "Write terminal evidence for CAMPAIGN and RESULTS."
+  (let* ((directory (plist-get campaign :directory))
+         (descriptor (plist-get campaign :descriptor))
+         (expected (alist-get 'expectedResultCount descriptor))
+         (passed (cl-count 'passed results :key #'chat-eval-result-status)))
+    (chat-coding-eval--write-json-exclusive
+     (expand-file-name "completion.json" directory)
+     `((schemaVersion . ,chat-coding-eval-campaign-schema-version)
+       (campaignId . ,(alist-get 'campaignId descriptor))
+       (configurationDigest . ,(alist-get 'configurationDigest descriptor))
+       (completedAt . ,(funcall chat-eval-clock-function))
+       (expectedResultCount . ,expected)
+       (resultCount . ,(length results))
+       (passedCount . ,passed)
+       (complete . ,(if (= expected (length results)) t :json-false))))))
 
 (defun chat-coding-eval-agent-executor (provider &optional model-name)
   "Return a live Agent executor using PROVIDER and MODEL-NAME."
@@ -966,7 +1129,8 @@ ON-COMPLETE receives results in execution order and the suite state."
         (lambda () (chat-agent-cancel run))))))
 
 (defun chat-coding-eval-run-live
-    (provider repetitions &optional manifest model-name)
+    (provider repetitions &optional manifest model-name campaign-id
+              implementation-revision role)
   "Run the coding suite with PROVIDER for REPETITIONS.
 
 MODEL-NAME defaults to PROVIDER's registered model."
@@ -978,24 +1142,40 @@ MODEL-NAME defaults to PROVIDER's registered model."
      (list provider
            (read-number "Repetitions: " 3)
            chat-coding-eval-default-manifest
-           (read-string "Model name: " default-model))))
-  (let ((file (or manifest chat-coding-eval-default-manifest)))
+           (read-string "Model name: " default-model)
+           (read-string "Campaign id: " (chat-coding-eval--campaign-id))
+           nil
+           (completing-read "Campaign role: " '("baseline" "current")
+                            nil t nil nil "current"))))
+  (let* ((file (or manifest chat-coding-eval-default-manifest))
+         (resolved-model (chat-coding-eval--model-name provider model-name)))
     (unless (and file (file-exists-p file))
       (user-error "No coding evaluation manifest is available"))
     (unless (chat-llm-provider-configured-p provider)
       (user-error "Evaluation provider is not configured: %s" provider))
-    (chat-coding-eval-run-suite
-     (chat-coding-eval-load-suite file)
-     (chat-coding-eval-agent-executor provider model-name)
-     :repetitions repetitions
-     :on-result
-     (lambda (result repetition _state)
-       (message "Coding eval %s repeat %d: %s"
-                (chat-eval-result-scenario-id result) repetition
-                (chat-eval-result-status result)))
-     :on-complete
-     (lambda (results _state)
-       (message "Coding evaluation completed: %d result(s)" (length results))))))
+    (let ((campaign
+           (chat-coding-eval-prepare-campaign
+            (or campaign-id (chat-coding-eval--campaign-id))
+            provider resolved-model repetitions file
+            :implementation-revision implementation-revision
+            :role (or role "current"))))
+      (chat-coding-eval-run-suite
+       (plist-get campaign :tasks)
+       (chat-coding-eval-agent-executor provider resolved-model)
+       :repetitions repetitions
+       :result-directory (plist-get campaign :directory)
+       :result-metadata (plist-get campaign :result-metadata)
+       :campaign-directory (plist-get campaign :directory)
+       :on-result
+       (lambda (result repetition _state)
+         (message "Coding eval %s repeat %d: %s"
+                  (chat-eval-result-scenario-id result) repetition
+                  (chat-eval-result-status result)))
+       :on-complete
+       (lambda (results _state)
+         (chat-coding-eval--complete-campaign campaign results)
+         (message "Coding evaluation completed: %d result(s) in %s"
+                  (length results) (plist-get campaign :directory)))))))
 
 (provide 'chat-coding-eval)
 ;;; chat-coding-eval.el ends here

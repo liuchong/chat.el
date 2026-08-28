@@ -126,6 +126,64 @@
                    (chat-coding-eval--model-name
                     'coding-eval-provider "model-v3")))))
 
+(ert-deftest chat-coding-eval-campaign-is-isolated-and-immutable ()
+  "A live campaign records one reproducible configuration in a fresh directory."
+  (chat-test-with-temp-dir
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "baseline-001" 'provider-a "model-a" 5
+            chat-coding-eval-test-manifest
+            :implementation-revision "baseline-revision"
+            :role "baseline"))
+          (directory (plist-get campaign :directory))
+          (descriptor (plist-get campaign :descriptor)))
+     (should (file-exists-p (expand-file-name "campaign.json" directory)))
+     (should (= 150 (alist-get 'expectedResultCount descriptor)))
+     (should (= 64 (length (alist-get 'configurationDigest descriptor))))
+     (should (equal "baseline-revision"
+                    (alist-get 'implementationRevision descriptor)))
+     (chat-coding-eval--complete-campaign campaign nil)
+     (let ((json-object-type 'alist)
+           (json-key-type 'symbol))
+       (should (= 0 (alist-get 'resultCount
+                               (json-read-file
+                                (expand-file-name "completion.json"
+                                                  directory))))))
+     (should-error
+      (chat-coding-eval-prepare-campaign
+       "baseline-001" 'provider-a "model-a" 5
+       chat-coding-eval-test-manifest
+       :implementation-revision "baseline-revision"
+       :role "baseline")))))
+
+(ert-deftest chat-coding-eval-suite-persists-only-in-its-result-directory ()
+  "Suite result routing cannot mix campaign records into the global store."
+  (chat-coding-eval-test-with-runtime
+   (let* ((task (car (chat-coding-eval-load-suite
+                      chat-coding-eval-test-manifest)))
+          (campaign-directory (expand-file-name "campaign/" temp-dir))
+          results)
+     (make-directory campaign-directory t)
+     (setf (chat-coding-eval-task-judges task)
+           '(((type . "no-change") (name . "unchanged"))))
+     (chat-coding-eval-run-suite
+      (list task)
+      (lambda (_task _workspace done)
+        (funcall done 'completed "done" '((model . "fixed"))))
+      :result-directory campaign-directory
+      :result-metadata '((campaignId . "campaign-001"))
+      :on-complete (lambda (value _state) (setq results value)))
+     (should (chat-coding-eval-test--wait (lambda () results)))
+     (should (= 1 (length results)))
+     (should (equal "campaign-001"
+                    (alist-get 'campaignId
+                               (chat-eval-result-metadata (car results)))))
+     (should (= 1 (length (directory-files campaign-directory nil
+                                           "\\.json\\'"))))
+     (should-not (file-directory-p chat-eval-directory)))))
+
 (ert-deftest chat-coding-eval-rejects-unsafe-allowed-and-judge-paths ()
   "Fixture policy rejects traversal before an executor can run."
   (let* ((fixture (expand-file-name "coding-eval/python"

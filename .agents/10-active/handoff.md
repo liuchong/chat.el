@@ -15,7 +15,8 @@
 ## Continue With
 
 - M17 runtime status, diagnostics, performance runner and strict gate code are complete
-- Keep M17 blocked until both comparable 30-by-5 live result sets exist
+- Keep M17 blocked until isolated M9 baseline and M17 current campaigns each
+  contain a comparable 30-by-5 live result set with trusted token usage
 - The fixed tagged large-repository task now materializes 10,000 indexed files
 - Reproduce the aggregate with `M-x chat-coding-acceptance-run-final`
 

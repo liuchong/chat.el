@@ -18,7 +18,9 @@ native progress UI, tested execution isolation, read-only review and
 conflict-safe coding subagents. M9-M16 implementations are complete. M17 has
 productized phase status, actionable diagnostics, strict acceptance and the
 10,000-file performance path, but final acceptance is blocked by missing
-comparable M9/M17 live token evidence. The fixed 30-task corpus now includes
+comparable M9/M17 live token evidence. Live runs use fresh immutable
+baseline/current campaign directories and acceptance rejects mixed
+configuration or implementation revisions. The fixed 30-task corpus includes
 one versioned `large-repo` task with 10,000 indexed source files. No
 capability becomes a default until the fixed task set shows that it does not
 reduce success, safety or responsiveness.
@@ -73,7 +75,7 @@ second remote state store. Native session and job views read only through the
 bridge. Loading `chat.el` alone neither loads the integration nor starts a
 sidecar.
 
-The canonical offline suite passes 1697/1697. A separate foreground live smoke
+The canonical offline suite passes 1701/1701. A separate foreground live smoke
 negotiated protocol `2026-07-08`, read RuntimeSessions, shut down cleanly and
 left no App Server process behind.
 

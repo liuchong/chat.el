@@ -16,6 +16,10 @@
 - strict immutable M17 acceptance gates in the existing Eval store
 - exact 30-by-5 live sample validation, identity comparison, success, scope,
   verification and token gates
+- isolated live campaign directories with immutable configuration and terminal
+  completion records
+- campaign gates that reject mixed roles, manifests, configurations or
+  implementation revisions
 - closed failure taxonomy: model ability, context omission, tool error,
   verification error, permission block and infrastructure
 - standalone 10,000-file benchmark covering cold index, single-file update,
@@ -47,8 +51,8 @@ repo-map cache entry were removed before completion.
 
 ## Verification Evidence
 
-- focused coding Eval and acceptance tests: 22/22 passed
-- canonical unit suite: 1697/1697 passed, zero skipped and zero unexpected
+- focused coding Eval and acceptance tests: 26/26 passed
+- canonical unit suite: 1701/1701 passed, zero skipped and zero unexpected
 - integration: deterministic coding fixtures and work platform passed 2/2;
   two online-provider checks explicitly skipped because credentials are absent
 - deterministic end-to-end: 2/2 passed
@@ -71,22 +75,25 @@ and workspace cleanup.
 
 ## Blocking Evidence
 
-No immutable M9 live result set exists on this machine, and no configured
-provider credentials are available for a compatible replay. Therefore the
-required M9 and M17 30-by-5 comparison and the 15 percent large-repository token
-reduction gate remain blocked by missing live token evidence. They are not
-reported as failed model trials and are not replaced with synthetic data.
+No immutable M9 or M17 live campaign exists on this machine. The running Emacs
+session has configured providers, but a clean historical M9 runtime with the
+current campaign harness has not been prepared, and no 300-trial comparison has
+been executed. Therefore the required M9 and M17 30-by-5 comparison and the 15
+percent large-repository token reduction gate remain blocked by missing live
+token evidence. They are not reported as failed model trials and are not
+replaced with synthetic data.
 
 Immutable final acceptance record
-`eval-20260828T080109731698000-0f7eaf` preserves the passing performance
-gates, the final test metadata and both blocked evidence gates. Its overall
-status is `blocked`.
+`eval-20260828T081821940433000-365782` preserves the four passing performance
+gates, final test metadata, two missing campaign-record gates, the missing live
+comparison and the blocked large-repository token gate. Its overall status is
+`blocked`.
 
 ## Unblock Procedure
 
 1. Configure one provider and freeze provider, concrete model, capability
    snapshot, profile and task revisions.
-2. Run `M-x chat-coding-eval-run-live` with five repetitions for the M9
-   configuration and again for M17.
+2. Run `M-x chat-coding-eval-run-live` with five repetitions in a fresh M9
+   `baseline` campaign and again in a fresh M17 `current` campaign.
 3. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
 4. Mark M17 complete only if the immutable aggregate result is `passed`.

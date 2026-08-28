@@ -37,10 +37,13 @@ are in `programming-capability-reliability-plan.md`.
 ## Immediate Next Action
 
 Produce the missing comparable live evidence: freeze one
-provider/model/capability identity, run both M9 and M17 over the fixed 30 tasks
-five times, then record the strict immutable aggregate result. The corpus now
-includes a versioned task with 10,000 measured indexed files. Do not mark M17
-complete while either result set or its trusted token sample is absent.
+provider/model/capability identity, create separate immutable `baseline` and
+`current` campaigns, run both M9 and M17 over the fixed 30 tasks five times,
+then record the strict immutable aggregate result. Each campaign must have one
+clean implementation revision, one manifest digest, 150 results and a terminal
+completion record. The corpus includes a versioned task with 10,000 measured
+indexed files. Do not mark M17 complete while either campaign or its trusted
+token sample is absent.
 
 ## Stage Gate
 

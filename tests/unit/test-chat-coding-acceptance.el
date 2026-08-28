@@ -142,6 +142,94 @@
      (chat-coding-acceptance--compatible-identities-p
       (list baseline) (list current)))))
 
+(ert-deftest chat-coding-acceptance-requires-isolated-versioned-campaigns ()
+  "Live comparison rejects mixed, reused, or same-revision campaigns."
+  (let* ((check (chat-eval-check "judge" t t t))
+         (baseline
+          (chat-coding-acceptance-test--result
+           'passed (list check) '((model . fixed))))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list check) '((model . fixed))))
+         (baseline-metadata (chat-eval-result-metadata baseline))
+         (current-metadata (chat-eval-result-metadata current)))
+    (setq baseline-metadata
+          (append baseline-metadata
+                  '((campaignId . "baseline-001")
+                    (campaignRole . "baseline")
+                    (campaignConfigurationDigest . "config-a")
+                    (campaignManifestDigest . "manifest")
+                    (implementationRevision . "revision-a"))))
+    (setq current-metadata
+          (append current-metadata
+                  '((campaignId . "current-001")
+                    (campaignRole . "current")
+                    (campaignConfigurationDigest . "config-b")
+                    (campaignManifestDigest . "manifest")
+                    (implementationRevision . "revision-b"))))
+    (setf (chat-eval-result-metadata baseline) baseline-metadata
+          (chat-eval-result-metadata current) current-metadata)
+    (should
+     (eq 'passed
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance--campaign-gate
+           (list baseline) (list current)))))
+    (setf (alist-get 'implementationRevision current-metadata) "revision-a")
+    (should
+     (eq 'failed
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance--campaign-gate
+           (list baseline) (list current)))))))
+
+(ert-deftest chat-coding-acceptance-requires-terminal-campaign-record ()
+  "A partial or mismatched campaign directory cannot satisfy final acceptance."
+  (chat-test-with-temp-dir
+   (let* ((directory (expand-file-name "baseline/" temp-dir))
+          (metadata
+           '((campaignId . "baseline-001")
+             (campaignRole . "baseline")
+             (campaignConfigurationDigest . "config")
+             (campaignManifestDigest . "manifest")
+             (implementationRevision . "revision-a")))
+          (results
+           (cl-loop repeat 150 collect
+                    (chat-eval-result-create-record :metadata metadata))))
+     (make-directory directory t)
+     (with-temp-file (expand-file-name "campaign.json" directory)
+       (insert
+        (json-encode
+         '((schemaVersion . 1) (campaignId . "baseline-001")
+           (role . "baseline") (configurationDigest . "config")
+           (manifestDigest . "manifest")
+           (implementationRevision . "revision-a")
+           (taskCount . 30) (repetitions . 5)
+           (expectedResultCount . 150)))))
+     (should
+      (eq 'failed
+          (chat-coding-acceptance-gate-status
+           (chat-coding-acceptance--campaign-directory-gate
+            directory results "baseline"))))
+     (with-temp-file (expand-file-name "completion.json" directory)
+       (insert
+        (json-encode
+         '((schemaVersion . 1) (campaignId . "baseline-001")
+           (configurationDigest . "config")
+           (expectedResultCount . 150) (resultCount . 150)
+           (complete . t)))))
+     (should
+      (eq 'passed
+          (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance--campaign-directory-gate
+            directory results "baseline"))))
+     (setf (alist-get 'campaignId
+                      (chat-eval-result-metadata (car results)))
+           "mismatch")
+     (should
+      (eq 'failed
+          (chat-coding-acceptance-gate-status
+           (chat-coding-acceptance--campaign-directory-gate
+            directory results "baseline")))))))
+
 (ert-deftest chat-coding-acceptance-sample-gate-requires-valid-trials ()
   "Infrastructure-invalid trials do not satisfy the exact 30-by-5 sample."
   (let (baseline current)
