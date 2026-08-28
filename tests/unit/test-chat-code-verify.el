@@ -73,6 +73,16 @@
      (should (null (chat-verification-profile-steps profile)))
      (should (eq (chat-code-verify-result-status result) 'not-run)))))
 
+(ert-deftest chat-code-verify-accepts-agent-run-correlation-context ()
+  "Agent run correlation metadata must not break asynchronous verification."
+  (chat-test-with-temp-dir
+   (let* ((profile (chat-code-verify-plan temp-dir nil))
+          (handle (chat-code-verify-run
+                   profile :session-id "session" :turn-id 1
+                   :task-id "task" :run-id "run"))
+          (result (plist-get handle :result)))
+     (should (eq (chat-code-verify-result-status result) 'not-run)))))
+
 (ert-deftest chat-code-verify-runtime-evidence-correlates-task-execution-and-wire ()
   "A real check is traceable through all existing runtime authorities."
   (chat-test-with-temp-dir

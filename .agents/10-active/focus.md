@@ -16,7 +16,7 @@ permission state: research and plan-state writes are allowed, source mutation
 and unknown effects fail closed, and approval is tied to the exact submitted
 plan revision through a user-only path. Goal and Plan Mode share the existing
 session/event/context/UI infrastructure rather than creating parallel stores.
-The canonical suite passes 1769/1769 after migration, scope-isolation,
+The canonical suite passes 1782/1782 after migration, scope-isolation,
 revision-conflict, 20-turn/two-compaction recovery, 1,000-update UI tests and
 the live-chat stability regressions recorded in the current stage log.
 
@@ -43,9 +43,15 @@ host-network incident caused 131 DNS and two TLS transport failures; its 133
 infrastructure-invalid trials make it unusable for final comparison. Model
 transport retries now back off asynchronously and remain cancellable. If those
 retries are exhausted, the attempt is archived and the campaign pauses without
-claiming the trial identity, so a later resume can retry it. A fresh post-change
-M19 current campaign is still required, so no paired capability or token claim
-is accepted yet.
+claiming the trial identity, so a later resume can retry it. The clean
+`m19-current-20260829T022800` campaign at revision `aa4698a` then completed
+150/150 with 112 passed, 37 cancelled and one failed, and no transport or
+framework errors. Its measured 74.67 percent success misses the 80 percent
+floor; five cancelled Rust trials leaked temporary files outside the allowed
+paths, and M9 lacks trusted token usage for 10/150 trials. Verification now
+accepts the supplied run identity and known compile-task commands use the
+existing exact command gate. A fresh campaign at the next implementation
+revision is required before M19 can be reconsidered.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a

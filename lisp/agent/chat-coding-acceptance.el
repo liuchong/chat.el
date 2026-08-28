@@ -50,10 +50,33 @@
     (if (numberp value) value 0)))
 
 (defun chat-coding-acceptance--field (data key)
-  "Read KEY from JSON alist or keyword plist DATA."
+  "Read KEY from JSON alist, JSON array, or keyword plist DATA."
+  (when (vectorp data)
+    (setq data (append data nil)))
   (when (listp data)
-    (or (alist-get key data)
-        (plist-get data (intern (concat ":" (symbol-name key)))))))
+    (let* ((name (symbol-name key))
+           (keyword (intern (concat ":" name)))
+           (json-key (concat ":" name)))
+      (or (alist-get key data)
+          (plist-get data keyword)
+          (cl-loop for (candidate value) on data by #'cddr
+                   when (and (stringp candidate)
+                             (member candidate (list name json-key)))
+                   return value)))))
+
+(defun chat-coding-acceptance--capability-identity (executor)
+  "Return comparable capability identity from EXECUTOR metadata.
+
+The provider and model are already independent identity fields.  Remove the
+redundant snapshot model added by newer serializers so historical snapshots
+with otherwise identical capabilities remain comparable."
+  (let ((snapshot
+         (copy-tree
+          (chat-coding-acceptance--field
+           executor 'modelCapabilitySnapshot))))
+    (when (listp snapshot)
+      (setq snapshot (assq-delete-all 'model snapshot)))
+    snapshot))
 
 (defun chat-coding-acceptance-classify-failure (result)
   "Classify failed coding RESULT into one public failure kind."
@@ -70,13 +93,12 @@
                         (or (chat-eval-check-detail check) "")))
               (seq-remove #'chat-eval-check-passed checks) " "))))
       (cond
-       ((or (memq (chat-eval-result-status result) '(blocked cancelled))
-            (> (chat-coding-acceptance--number 'approvalCount executor) 0)
+       ((or (eq (chat-eval-result-status result) 'blocked)
             (string-match-p "\\(?:permission\\|approval\\|blocked\\|denied\\)" text))
         'permission-block)
        ((> (chat-coding-acceptance--number 'toolErrorCount executor) 0)
         'tool-error)
-       ((string-match-p "\\(?:fixture-setup\\|workspace-cleanup\\|executor-status\\)" text)
+       ((string-match-p "\\(?:fixture-setup\\|workspace-cleanup\\)" text)
         'infrastructure)
        ((string-match-p "\\(?:judge\\|verification\\|test\\|build\\|lint\\|typecheck\\)" text)
         'verification-error)
@@ -258,7 +280,7 @@
      (chat-eval-result-fixture-digest result)
      (chat-coding-acceptance--field executor 'provider)
      (chat-coding-acceptance--field executor 'model)
-     (chat-coding-acceptance--field executor 'modelCapabilitySnapshot)
+     (chat-coding-acceptance--capability-identity executor)
      (chat-coding-acceptance--field executor 'profile)
      (chat-coding-acceptance--field executor 'transport)
      (chat-coding-acceptance--field executor 'approvalMode))))

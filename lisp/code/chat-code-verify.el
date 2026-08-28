@@ -658,14 +658,14 @@ configuration and deterministic detection."
   result)
 
 (cl-defun chat-code-verify-run
-    (profile &key session-id turn-id task-id parent-id checkpoint-id
+    (profile &key session-id turn-id task-id run-id parent-id checkpoint-id
              changed-files preflight-fingerprints on-complete)
   "Run PROFILE asynchronously and invoke ON-COMPLETE with its typed result."
   (chat-code-verify-validate-profile profile)
   (let* ((id (chat-code-verify--new-id "verification"))
          (task-id (or task-id id))
          (context (list :session-id session-id :turn-id turn-id
-                        :task-id task-id :parent-id parent-id
+                        :task-id task-id :run-id run-id :parent-id parent-id
                         :project-root
                         (chat-verification-profile-project-root profile)))
          (task

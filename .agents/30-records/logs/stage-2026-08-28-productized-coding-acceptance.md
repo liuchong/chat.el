@@ -80,7 +80,7 @@ source corpus. The resulting fixture digest is
 Two integration repetitions passed deterministic judging, actual count checks
 and workspace cleanup.
 
-## Blocking Evidence
+## Current Acceptance Evidence
 
 The immutable M9 baseline campaign
 `m9-baseline-20260828T180819` completed against implementation revision
@@ -90,32 +90,38 @@ all 150 expected results: 3 passed, 107 failed, 23 errored and 17 cancelled.
 This is real baseline evidence and must not be rewritten as a synthetic or
 successful result.
 
-The first M19 `current` attempt, `m19-current-20260828T210105`, stopped after
-the first repetition produced 30/150 terminal results at revision `8c45301`.
-It has no `completion.json`, remains preserved as incomplete evidence and cannot
-be mixed with the post-change implementation revision. Therefore the
-required paired comparison and the 15 percent large-repository token-reduction
-gate remain blocked. The M9 result alone is not enough to attribute failures to
-model ability, runtime behavior or infrastructure; the typed M19 comparison and
-failure classification must be run before making that claim.
+The completed M19 `current` campaign `m19-current-20260829T022800` ran at
+revision `aa4698a` with the same provider, concrete model, manifest and five
+repetitions. It contains the exact 150-result matrix: 112 passed, 37 cancelled
+and one failed, with no transport or framework errors. This makes the campaign
+valid evidence rather than a successful acceptance result.
 
-Immutable final acceptance record
-`eval-20260828T081821940433000-365782` preserves the four passing performance
-gates, final test metadata, two missing campaign-record gates, the missing live
-comparison and the blocked large-repository token gate. Its overall status is
-`blocked`.
+Strict comparison record `eval-20260828T215245858158000-82dab4` reports a
+74.67 percent current success rate, below the required 80 percent floor. It also
+reports five out-of-scope temporary files left by cancelled Rust trials. M9
+token usage is absent from 10 of 150 baseline results, so its 6.67 percent
+missing-usage rate exceeds the five percent limit and blocks token gates. The
+sample matrix, campaign isolation, identity, no-regression, improvement and
+verification-evidence gates pass. M19 remains incomplete because failed and
+blocked gates may not be averaged away.
+
+Acceptance parsing was corrected after this comparison to read JSON-roundtrip
+keyword plists, normalize a redundant model field in capability snapshots and
+keep generic executor failures and cancellations in the valid model sample.
+Allowed approval counts no longer imply a permission block. These changes fix
+classification and evidence handling; they do not rewrite either immutable
+campaign or raise its measured success rate.
 
 ## Unblock Procedure
 
-1. Freeze one configured provider, concrete model, capability snapshot, profile
-   and task revisions.
-2. In the clean M9 checkout, load the current campaign harness and set
-   `chat-coding-eval-max-fixture-files` to 12,000 before loading the fixed
-   manifest. Run five repetitions in a fresh `baseline` campaign.
-3. In the clean M19 checkout, run `M-x chat-coding-eval-run-live` with the same
-   provider, concrete model and five repetitions in a fresh `current` campaign.
-4. If the process is interrupted, run `M-x chat-coding-eval-resume-live` on that
-   exact directory. Do not reuse the earlier 30-result campaign after the
-   implementation revision changes.
-5. Run `M-x chat-coding-acceptance-run-final` with the two result directories.
+1. Keep the completed M9 baseline and `aa4698a` current campaign immutable.
+2. Remove the five cancellation-path scope leaks and reduce or prevent the 37
+   task cancellations without weakening deterministic judges.
+3. Run a fresh 30-by-5 current campaign after those implementation changes;
+   never resume a campaign across an implementation revision.
+4. Establish trusted token coverage for at least 95 percent of both comparison
+   sets. A replacement baseline is required if the missing M9 usage cannot be
+   recovered from original provider evidence.
+5. Save same-revision `runtimeReliability` measurements, including the Goal
+   projection median ratio, then run `chat-coding-acceptance-run-final`.
 6. Mark M19 complete only if the immutable aggregate result is `passed`.

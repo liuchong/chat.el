@@ -52,7 +52,7 @@ changed.
 
 ## Verification
 
-- canonical unit suite: 1777/1777 passed, zero skipped and zero unexpected
+- canonical unit suite: 1782/1782 passed, zero skipped and zero unexpected
 - deterministic integration: 2/2 passed; two credentialed provider checks
   skipped explicitly because credentials are absent
 - deterministic end-to-end: 2/2 passed
@@ -81,3 +81,11 @@ changed.
   them incorrectly.
 - A performance fallback may reduce layout work, but it must preserve the
   common inline syntax users can already see arriving.
+
+## Follow-up Verification
+
+The later coding-acceptance repair retained every UI and Markdown regression.
+The canonical suite passed 1782/1782, deterministic integration passed 2/2
+with two credentialed checks skipped, deterministic end-to-end passed 2/2 and
+the built-in offline Eval passed 5/5. No table renderer or visible-width logic
+changed during the acceptance repair.

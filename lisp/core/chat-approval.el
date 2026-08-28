@@ -244,12 +244,14 @@ imagine today."
 
 (defcustom chat-approval-command-refusal-functions
   '((shell_execute . chat-tool-shell-refusal)
-    (work_task_start . chat-work-task-refusal))
+    (work_task_start . chat-work-task-refusal)
+    (programming_compile_task . chat-work-task-refusal))
   "How to ask a tool whether it would refuse a command.
 
 Keyed by tool id because the policy differs: `shell_execute' takes one
-command and `work_task_start' allows `&&' between several.  Each function
-takes the command string and returns a `chat-command-gate-refusal' or nil.
+command, while the two background compile/task entries allow `&&' between
+several.  Each function takes the command string and returns a
+`chat-command-gate-refusal' or nil.
 
 The answer belongs to the tool, so it is asked rather than recomputed
 here.  A copy of the policy in this module would drift from the one that

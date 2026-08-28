@@ -45,6 +45,50 @@
     (should (= 6 (length (chat-coding-acceptance-failure-summary
                           (list tool verification blocked)))))))
 
+(ert-deftest chat-coding-acceptance-does-not-hide-terminal-errors-as-infrastructure ()
+  "Generic executor failures and cancellations remain valid capability trials."
+  (let ((errored
+         (chat-coding-acceptance-test--result
+          'error
+          (list (chat-eval-check "executor-status" nil 'completed 'error))))
+        (cancelled
+         (chat-coding-acceptance-test--result
+          'cancelled
+          (list (chat-eval-check "executor-status" nil 'completed
+                                 'cancelled))
+          '((approvalCount . 3)))))
+    (should (eq 'model-ability
+                (chat-coding-acceptance-classify-failure errored)))
+    (should (eq 'model-ability
+                (chat-coding-acceptance-classify-failure cancelled)))
+    (should (= 2 (length (chat-coding-acceptance--valid-results
+                          (list errored cancelled)))))))
+
+(ert-deftest chat-coding-acceptance-reads-json-round-tripped-token-plists ()
+  "Token usage remains measurable after a plist is serialized as a JSON array."
+  (let ((result
+         (chat-coding-acceptance-test--result
+          'passed (list (chat-eval-check "judge" t t t))
+          '((tokenUsage . [":input-tokens" 4321
+                           ":output-tokens" 123])))))
+    (should (= 4321 (chat-coding-acceptance--input-tokens result)))))
+
+(ert-deftest chat-coding-acceptance-normalizes-redundant-snapshot-model ()
+  "Adding the outer model to a capability snapshot does not break identity."
+  (let* ((check (chat-eval-check "judge" t t t))
+         (baseline
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((provider . "provider") (model . "model")
+             (modelCapabilitySnapshot . ((tools . t))))))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((provider . "provider") (model . "model")
+             (modelCapabilitySnapshot . ((model . "model") (tools . t)))))))
+    (should (chat-coding-acceptance--compatible-identities-p
+             (list baseline) (list current)))))
+
 (ert-deftest chat-coding-acceptance-never-passes-a-missing-live-comparison ()
   "Absent M9 or M19 trials produce a blocked gate, never an invented score."
   (let ((gates (chat-coding-acceptance-live-gates nil nil)))
@@ -314,7 +358,7 @@
                  (if invalid 'failed 'passed)
                  (if invalid
                      (list (chat-eval-check
-                            "executor-status" nil 'completed 'failed))
+                            "fixture-setup" nil 'completed 'failed))
                    (list judge))
                  executor nil task-id)
                 current))))

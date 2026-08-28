@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 ## Summary
 
@@ -41,10 +41,11 @@ campaign with immutable configuration and completion records. Interrupted
 campaigns can resume only validated missing repetition/task identities; stale
 locks recover, concurrent runs and configuration drift fail closed, and terminal
 evidence requires the exact unique result matrix. The immutable M9 baseline is
-complete with 150/150 results. An initial M19 attempt stopped after 30/150 and
-remains incomplete evidence; final acceptance remains blocked until a complete
-post-change M19 current campaign and paired trusted-token comparison exist. The fixed corpus now
-includes a measured 10,000-indexed-file large-repository task.
+complete with 150/150 results. The latest valid M19 current campaign also
+completed 150/150 with 112 passed, 37 cancelled and one failed, but its 74.67
+percent success rate misses the 80 percent floor. Five out-of-scope temporary
+files and incomplete baseline token usage also keep final acceptance open. The
+fixed corpus includes a measured 10,000-indexed-file large-repository task.
 
 ## Implemented Areas
 
@@ -216,8 +217,8 @@ includes a measured 10,000-indexed-file large-repository task.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1769 regression tests discovered
-- 1769 passing
+- 1782 regression tests discovered
+- 1782 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
@@ -378,9 +379,9 @@ includes a measured 10,000-indexed-file large-repository task.
 
 ## Recommended Next Work
 
-- run a fresh post-change M19 current 30-by-5 campaign with the same frozen
-  provider/model/capability identity as the completed M9 baseline; resume only
-  that campaign's validated missing trials if interrupted
+- remove cancellation-path scope leaks and reduce task cancellations, then run
+  a fresh post-change M19 current 30-by-5 campaign with the same frozen
+  provider/model/capability identity as the completed M9 baseline
 - record the immutable comparison, trusted usage sample and failure taxonomy;
   do not mark M19 complete before every strict acceptance gate passes
 - make true provider streaming and fallback behavior share one transport abstraction

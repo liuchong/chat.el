@@ -73,7 +73,7 @@ timeout.
 
 ## Verification
 
-- canonical suite: 1777/1777 passed, zero skipped and zero unexpected
+- canonical suite: 1782/1782 passed, zero skipped and zero unexpected
 - integration: deterministic coding fixtures and work platform passed 2/2;
   two online-provider checks skipped because credentials were absent
 - deterministic end-to-end: 2/2 passed
@@ -100,3 +100,20 @@ missing or broken diagnostics side channel must never discard model output.
 Background task logs are runtime capabilities, not workspace files. Expose
 them through a session-scoped read operation, and make the evaluation command
 part of the task contract instead of expecting the executor to rediscover it.
+
+## Completed Current Campaign
+
+Campaign `m19-current-20260829T022800` completed the immutable 30-by-5 matrix at
+revision `aa4698a` with provider `kimi-code` and model `k3`: 112 passed, 37
+cancelled and one failed. None of its 150 results was classified as a transport
+or framework error. This is valid current evidence, but its 74.67 percent
+success rate is below the 80 percent floor and therefore does not complete M19.
+
+The run exposed two measurable execution costs after transport was stable.
+Generic verification supplied a run identity that the verification dispatcher
+did not accept, and known-safe `programming_compile_task` commands still went
+through a second model review even though they execute through the same exact
+command gate as background work tasks. The dispatcher now accepts and carries
+the run identity, while the approval mapping sends compile tasks through that
+existing exact allow/refusal decision. Unknown commands continue to fail
+closed. Regression tests cover both contracts.
