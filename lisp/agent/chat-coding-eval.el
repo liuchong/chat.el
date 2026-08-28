@@ -76,7 +76,7 @@
 (cl-defstruct (chat-coding-eval-task
                (:constructor chat-coding-eval-task-create-record))
   schema-version id revision category language description fixture-id
-  fixture-directory prompt allowed-paths timeout-seconds judges tags
+  fixture-directory prompt allowed-paths generated-paths timeout-seconds judges tags
   fixture-generator fixture-generator-digest)
 
 (cl-defstruct (chat-coding-eval-run-state
@@ -85,7 +85,7 @@
   fixture-file-count fixture-indexed-file-count
   started-at setup-duration-ms agent-duration-ms judge-started-at
   judge-duration-ms answer metadata
-  changed-files out-of-scope-files checks executor-cancel process timer
+  changed-files generated-files out-of-scope-files checks executor-cancel process timer
   on-complete cleanup-p result-directory result-metadata done-p)
 
 (cl-defstruct (chat-coding-eval-suite-state
@@ -256,6 +256,19 @@
                (seq-every-p #'chat-coding-eval--safe-relative-path-p
                             (chat-coding-eval-task-allowed-paths task)))
     (error "Coding evaluation task requires safe allowed paths"))
+  (unless (and (listp (chat-coding-eval-task-generated-paths task))
+               (seq-every-p #'chat-coding-eval--safe-relative-path-p
+                            (chat-coding-eval-task-generated-paths task)))
+    (error "Coding evaluation generated paths must be safe relative paths"))
+  (when (seq-some
+         (lambda (generated)
+           (seq-some
+            (lambda (allowed)
+              (or (chat-coding-eval--allowed-path-p generated (list allowed))
+                  (chat-coding-eval--allowed-path-p allowed (list generated))))
+            (chat-coding-eval-task-allowed-paths task)))
+         (chat-coding-eval-task-generated-paths task))
+    (error "Coding evaluation generated paths cannot overlap allowed paths"))
   (unless (and (numberp (chat-coding-eval-task-timeout-seconds task))
                (> (chat-coding-eval-task-timeout-seconds task) 0))
     (error "Coding evaluation task timeout must be positive"))
@@ -293,6 +306,8 @@
                       manifest-directory)
     :prompt (chat-coding-eval--json-value data 'prompt)
     :allowed-paths (chat-coding-eval--json-value data 'allowedPaths)
+    :generated-paths (or (chat-coding-eval--json-value data 'generatedPaths)
+                         nil)
     :timeout-seconds (or (chat-coding-eval--json-value data 'timeoutSeconds)
                          120)
       :judges (chat-coding-eval--json-value data 'judges)
@@ -578,6 +593,9 @@
                                         ,(chat-coding-eval-run-state-judge-duration-ms
                                           state))))
                (changedFiles . ,(chat-coding-eval-run-state-changed-files state))
+               (generatedFiles .
+                               ,(chat-coding-eval-run-state-generated-files
+                                 state))
                (outOfScopeFiles .
                                 ,(chat-coding-eval-run-state-out-of-scope-files
                                   state))
@@ -696,13 +714,22 @@
              (chat-coding-eval-run-state-baseline state)
              (chat-coding-eval--snapshot
               (chat-coding-eval-run-state-workspace state))))
+           (generated
+            (seq-filter
+             (lambda (path)
+               (chat-coding-eval--allowed-path-p
+                path (chat-coding-eval-task-generated-paths task)))
+             changed))
+           (source-changed
+            (seq-remove (lambda (path) (member path generated)) changed))
            (out-of-scope
             (seq-remove
              (lambda (path)
                (chat-coding-eval--allowed-path-p
                 path (chat-coding-eval-task-allowed-paths task)))
-             changed)))
-      (setf (chat-coding-eval-run-state-changed-files state) changed
+             source-changed)))
+      (setf (chat-coding-eval-run-state-changed-files state) source-changed
+            (chat-coding-eval-run-state-generated-files state) generated
             (chat-coding-eval-run-state-out-of-scope-files state) out-of-scope
             (chat-coding-eval-run-state-checks state)
             (list

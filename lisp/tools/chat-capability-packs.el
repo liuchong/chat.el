@@ -71,6 +71,22 @@
     emacs_buffers emacs_read_buffer emacs_imenu emacs_xref emacs_project)
   "Tools exposed by the programming profile.")
 
+(defconst chat-capability--work-plan-item-schema
+  '((type . "object")
+    (properties
+     . (("id" . ((type . "string")
+                  (description . "Stable item id used by dependencies.")))
+        ("title" . ((type . "string")
+                     (description . "One concrete implementation step.")))
+        ("acceptance" . ((type . "string")
+                          (description . "Observable evidence that completes this step.")))
+        ("dependencies" . ((type . "array")
+                            (description . "Ids of prerequisite items.")
+                            (items . ((type . "string")))))))
+    (required . ["title" "acceptance"])
+    (additionalProperties . :json-false))
+  "Provider schema for one durable work-plan item.")
+
 (defconst chat-capability-office-tools
   '(office_org_headlines
     office_org_agenda
@@ -251,6 +267,20 @@
       (unless (and (listp items) (cl-every #'stringp items))
         (error "%s must be a JSON string array" label))
       items)))
+
+(defun chat-capability--work-plan-items (value label)
+  "Normalize native or legacy JSON work-plan item VALUE named LABEL."
+  (let ((items
+         (cond
+          ((stringp value)
+           (json-parse-string value :object-type 'alist :array-type 'list
+                              :null-object nil :false-object :json-false))
+          ((vectorp value) (append value nil))
+          ((proper-list-p value) value)
+          (t (error "%s must be an array of plan item objects" label)))))
+    (unless items
+      (error "%s must contain at least one plan item" label))
+    items))
 
 (defun chat-capability-programming-verification-plan
     (project-root &optional changed-files-json)
@@ -492,11 +522,9 @@
    (chat-goal-complete
     (chat-capability--work-plan-session) goal-id revision)))
 
-(defun chat-capability-programming-plan-create (objective items-json &optional mode)
-  "Create a durable work plan from ITEMS-JSON."
-  (let ((items (json-parse-string items-json :object-type 'alist
-                                  :array-type 'list :null-object nil
-                                  :false-object :json-false)))
+(defun chat-capability-programming-plan-create (objective items &optional mode)
+  "Create a durable work plan from structured ITEMS."
+  (let ((items (chat-capability--work-plan-items items "items")))
     (chat-work-plan-to-alist
      (chat-work-plan-create
       (chat-capability--work-plan-session) objective items
@@ -518,11 +546,9 @@
            (chat-work-plan-list (chat-capability--work-plan-session)))))
 
 (defun chat-capability-programming-plan-update
-    (plan-id revision items-json &optional objective)
-  "Replace a plan's unstarted future items from ITEMS-JSON."
-  (let ((items (json-parse-string items-json :object-type 'alist
-                                  :array-type 'list :null-object nil
-                                  :false-object :json-false)))
+    (plan-id revision items &optional objective)
+  "Replace a plan's unstarted future ITEMS."
+  (let ((items (chat-capability--work-plan-items items "items")))
     (chat-work-plan-to-alist
      (chat-work-plan-update-future
       (chat-capability--work-plan-session) plan-id revision items
@@ -1118,14 +1144,18 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    #'chat-capability-programming-goal-complete 'project '(state))
   (chat-capability--register-tool
    'programming_plan_mode_enter "Programming Plan Mode Enter"
-   "Enter read-only Plan Mode to research and submit a structured plan. This tool cannot approve, reject, cancel, or leave Plan Mode."
+   "Enter read-only Plan Mode only when the user explicitly requests planning without implementation. Never call this as a prerequisite for programming_plan_create; ordinary coding uses a durable work plan without Plan Mode. This tool cannot approve, reject, cancel, or leave Plan Mode."
    nil #'chat-capability-programming-plan-mode-enter 'project '(state))
   (chat-capability--register-tool
    'programming_plan_create "Programming Plan Create"
-   "Create a durable ordered plan before substantial coding work."
-   '((:name "objective" :type "string" :required t)
-     (:name "items_json" :type "string" :required t)
+   "Create the durable TODO plan for substantial coding. This does not enter read-only Plan Mode. Each item needs a concrete title and observable acceptance evidence."
+   `((:name "objective" :type "string" :required t
+      :description "The bounded outcome this work plan must achieve.")
+     (:name "items" :type "array" :required t :min-items 1
+      :description "Ordered implementation steps with acceptance evidence."
+      :items ,chat-capability--work-plan-item-schema)
      (:name "mode" :type "string" :required nil
+      :description "Plan enforcement for this work."
       :enum ("auto" "required" "off")))
    #'chat-capability-programming-plan-create 'project '(state))
   (chat-capability--register-tool
@@ -1140,9 +1170,11 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
   (chat-capability--register-tool
    'programming_plan_update "Programming Plan Update"
    "Replace only the unstarted future tail of a plan using the observed revision. Started and terminal items remain immutable."
-   '((:name "plan_id" :type "string" :required t)
+   `((:name "plan_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t)
-     (:name "items_json" :type "string" :required t)
+     (:name "items" :type "array" :required t :min-items 1
+      :description "Replacement future steps with acceptance evidence."
+      :items ,chat-capability--work-plan-item-schema)
      (:name "objective" :type "string" :required nil))
    #'chat-capability-programming-plan-update 'project '(state))
   (chat-capability--register-tool

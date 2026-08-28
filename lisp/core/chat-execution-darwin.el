@@ -35,8 +35,15 @@
 (defconst chat-execution-darwin--standard-read-roots
   '("/System" "/Library/Apple" "/Library/Developer" "/Applications/Xcode.app"
     "/bin" "/sbin" "/usr/bin" "/usr/lib" "/usr/libexec" "/usr/share"
-    "/usr/local" "/opt/homebrew" "/dev")
+    "/usr/local" "/opt/homebrew" "/private/etc/ssl" "/dev")
   "System locations required by ordinary compiler and test processes.")
+
+(defconst chat-execution-darwin--rust-command-regexp
+  (concat "\\(?:\\`\\|[;&|]\\)[[:space:]]*"
+          "\\(?:[[:alnum:]_]+=[^[:space:]]+[[:space:]]+\\)*"
+          "\\(?:cargo\\|rustc\\|rustdoc\\|rustup\\)"
+          "\\(?:[[:space:]]\\|\\'\\)")
+  "Shell command pattern for tools whose location is managed by rustup.")
 
 (defun chat-execution-darwin--environment-value (request name)
   "Return NAME from REQUEST's supplied environment, if present."
@@ -54,6 +61,28 @@
          (or (chat-execution-darwin--environment-value request "DEVELOPER_DIR")
              "/Applications/Xcode.app/Contents/Developer")))
     (and (file-directory-p directory) (file-truename directory))))
+
+(defun chat-execution-darwin--rust-command-p (request)
+  "Return non-nil when REQUEST invokes a rustup-managed command."
+  (seq-some
+   (lambda (argument)
+     (and (stringp argument)
+          (string-match-p chat-execution-darwin--rust-command-regexp
+                          argument)))
+   (chat-execution-request-command request)))
+
+(defun chat-execution-darwin--rustup-home (request)
+  "Return REQUEST's existing rustup home for a Rust command, if any."
+  (when (chat-execution-darwin--rust-command-p request)
+    (let* ((developer-home
+            (chat-execution-darwin--environment-value request "HOME"))
+           (directory
+            (or (chat-execution-darwin--environment-value request
+                                                           "RUSTUP_HOME")
+                (and developer-home
+                     (expand-file-name ".rustup" developer-home)))))
+      (and (file-directory-p (or directory ""))
+           (file-truename directory)))))
 
 (defun chat-execution-darwin--scheme-string (value)
   "Return VALUE escaped as one sandbox profile string literal."
@@ -79,6 +108,7 @@
                    standard
                    (delq nil (list (chat-execution-darwin--developer-directory
                                     request)
+                                   (chat-execution-darwin--rustup-home request)
                                    temp-root)))))
          (write-roots
           (delete-dups
@@ -116,6 +146,7 @@
                (expand-file-name
                 "Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
                 developer-directory)))
+         (rustup-home (chat-execution-darwin--rustup-home request))
          result)
     (dolist (entry source)
       (let ((name (and (stringp entry)
@@ -135,7 +166,8 @@
                   (and developer-directory
                        (concat "DEVELOPER_DIR=" developer-directory))
                   (and (file-directory-p (or sdk-root ""))
-                       (concat "SDKROOT=" (file-truename sdk-root))))
+                       (concat "SDKROOT=" (file-truename sdk-root)))
+                  (and rustup-home (concat "RUSTUP_HOME=" rustup-home)))
             (nreverse
              (cl-remove-if
               (lambda (entry)
@@ -144,6 +176,7 @@
                     (string-prefix-p "TMPDIR=" entry)
                     (string-prefix-p "DEVELOPER_DIR=" entry)
                     (string-prefix-p "SDKROOT=" entry)
+                    (string-prefix-p "RUSTUP_HOME=" entry)
                     (string-prefix-p "CHAT_EXECUTION_POLICY=" entry)))
               result)))))
     (when developer-directory

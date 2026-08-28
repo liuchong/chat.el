@@ -496,6 +496,17 @@
              (path . "../outside") (regexp . "x"))))
     (should-error (chat-coding-eval--validate-task task))))
 
+(ert-deftest chat-coding-eval-rejects-unsafe-or-overlapping-generated-paths ()
+  "Generated output policy cannot escape or hide an allowed source path."
+  (let* ((fixture (expand-file-name "coding-eval/python"
+                                    chat-test-fixtures-dir))
+         (task (chat-coding-eval-test--task
+                fixture '(((type . "no-change") (name . "safe"))))))
+    (setf (chat-coding-eval-task-generated-paths task) '("../outside"))
+    (should-error (chat-coding-eval--validate-task task))
+    (setf (chat-coding-eval-task-generated-paths task) '("sample.py/cache"))
+    (should-error (chat-coding-eval--validate-task task))))
+
 (ert-deftest chat-coding-eval-read-only-run-is-traced-and-cleaned ()
   "A synchronous fake executor still enters the async result contract."
   (chat-coding-eval-test-with-runtime
@@ -594,6 +605,39 @@
      (should (equal '("unexpected.txt")
                     (alist-get 'outOfScopeFiles
                                (chat-eval-result-metadata result)))))))
+
+(ert-deftest chat-coding-eval-separates-declared-build-artifacts-from-source ()
+  "Declared build outputs are audited without becoming source scope failures."
+  (chat-coding-eval-test-with-runtime
+   (let* ((fixture (expand-file-name "coding-eval/python"
+                                     chat-test-fixtures-dir))
+          (task (chat-coding-eval-test--task
+                 fixture '(((type . "file-regexp") (name . "fixed")
+                            (path . "sample.py") (regexp . "fixed")))))
+          result)
+     (setf (chat-coding-eval-task-generated-paths task)
+           '("build" "generated.lock"))
+     (chat-coding-eval-run
+      task
+      (lambda (_task workspace done)
+        (write-region "fixed\n" nil (expand-file-name "sample.py" workspace)
+                      nil 'silent)
+        (make-directory (expand-file-name "build/cache" workspace) t)
+        (write-region "artifact" nil
+                      (expand-file-name "build/cache/output" workspace)
+                      nil 'silent)
+        (write-region "lock" nil
+                      (expand-file-name "generated.lock" workspace)
+                      nil 'silent)
+        (funcall done 'completed "done" nil))
+      :on-complete (lambda (value _state) (setq result value)))
+     (should result)
+     (should (eq 'passed (chat-eval-result-status result)))
+     (should (equal '("build/cache/output" "generated.lock")
+                    (alist-get 'generatedFiles
+                               (chat-eval-result-metadata result))))
+     (should-not (alist-get 'outOfScopeFiles
+                            (chat-eval-result-metadata result))))))
 
 (ert-deftest chat-coding-eval-records-crash-cancel-and-timeout ()
   "Every executor terminal path produces evidence and removes its workspace."

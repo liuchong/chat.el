@@ -189,6 +189,78 @@
          (when (buffer-live-p output) (kill-buffer output))
          (when (buffer-live-p errors) (kill-buffer errors)))))))
 
+(ert-deftest chat-execution-isolation-build-runs-rust-tests-with-system-ssl ()
+  "A sandboxed Rust build may use rustup and the system SSL configuration."
+  (skip-unless (and (eq system-type 'darwin)
+                    (executable-find "rustup")))
+  (chat-test-with-temp-dir
+   (chat-execution-isolation-test--with-runtime
+     (let* ((rustup (executable-find "rustup"))
+            (cargo-home
+             (file-name-directory
+              (directory-file-name (file-name-directory rustup))))
+            (developer-home
+             (file-name-directory (directory-file-name cargo-home)))
+            (project (expand-file-name "project/" temp-dir))
+            (fixture (expand-file-name "tests/fixtures/coding-eval/rust/"
+                                       chat-test-root-dir))
+            (environment
+             (list (concat "HOME=" developer-home)
+                   (concat "PATH=" cargo-home "bin:/usr/bin:/bin")))
+            (request
+             (chat-execution-isolation-test--request
+              project
+              (list "/bin/sh" "-c"
+                    "cargo test normalize_collapses_space --quiet")
+              'build environment 20))
+            (output (generate-new-buffer " *isolation-rust-output*"))
+            (errors (generate-new-buffer " *isolation-rust-errors*")))
+       (make-directory project)
+       (copy-directory fixture project nil t t)
+       (unwind-protect
+           (let ((run (chat-execution-start
+                       request :buffer output :stderr errors)))
+             (chat-execution-isolation-test--wait run 20)
+             (ert-info ((concat (with-current-buffer output (buffer-string))
+                                (with-current-buffer errors (buffer-string))))
+               (should (eq 'completed (chat-execution-record-status run)))))
+         (when (buffer-live-p output) (kill-buffer output))
+         (when (buffer-live-p errors) (kill-buffer errors)))))))
+
+(ert-deftest chat-execution-isolation-rustup-read-root-is-command-scoped ()
+  "Only Rust commands gain read access to the developer's rustup home."
+  (skip-unless (and (eq system-type 'darwin)
+                    (executable-find "rustup")))
+  (chat-test-with-temp-dir
+   (let* ((rustup (executable-find "rustup"))
+          (cargo-home
+           (file-name-directory
+            (directory-file-name (file-name-directory rustup))))
+          (developer-home
+           (file-name-directory (directory-file-name cargo-home)))
+          (rustup-home (expand-file-name ".rustup" developer-home))
+          (project (expand-file-name "project/" temp-dir))
+          (environment
+           (list (concat "HOME=" developer-home)
+                 (concat "PATH=" cargo-home "bin:/usr/bin:/bin"))))
+     (make-directory project)
+     (let* ((rust
+             (chat-execution-isolation-test--request
+              project (list "/bin/sh" "-c" "cargo test --quiet")
+              'build environment))
+            (ordinary
+             (chat-execution-isolation-test--request
+              project (list "/bin/sh" "-c" "printf cargo")
+              'build environment))
+            (rust-profile (chat-execution-darwin--profile rust temp-dir))
+            (ordinary-profile
+             (chat-execution-darwin--profile ordinary temp-dir)))
+       (should (string-match-p (regexp-quote (file-truename rustup-home))
+                               rust-profile))
+       (should-not
+        (string-match-p (regexp-quote (file-truename rustup-home))
+                        ordinary-profile))))))
+
 (ert-deftest chat-execution-isolation-filters-environment-and-denies-network ()
   "Restricted execution sees declared variables only and has no network."
   (skip-unless (eq system-type 'darwin))

@@ -393,7 +393,7 @@ needs-attention 投影，不伪装为完成，也不无限重启 Agent run。
 
 ### M9：建立真实编程 Eval 基线
 
-实施状态（2026-08-28）：runner、30-task manifest、fixture、确定性 judge、
+实施状态（2026-08-29）：runner、30-task manifest、fixture、确定性 judge、
 不可变结果和隔离 campaign 合同已经完成；本机没有留存固定
 provider/model/capability identity 的 live 结果集。因此“基线基础设施完成”不等于
 “可比较 M9 live baseline 已存在”，最终验收必须按相同的五次重复重新运行 M9
@@ -424,7 +424,7 @@ provider/model/capability identity 的 live 结果集。因此“基线基础设
 5. 根据失败测试修复；
 6. 只读审查并定位预埋缺陷。
 
-任务至少覆盖 Emacs Lisp、Python、JavaScript/TypeScript、Go、Rust 五类项目形态。fixture 可以很小，但每个任务必须有确定性 setup、判定命令、允许修改范围和超时。
+任务至少覆盖 Emacs Lisp、Python、JavaScript/TypeScript、Go、Rust 五类项目形态。fixture 可以很小，但每个任务必须有确定性 setup、判定命令、允许修改范围和超时。验证会产生文件的任务还必须显式声明 `generatedPaths`；生成路径必须是安全相对路径，不得与允许源码路径重叠。生成物单独审计，不得伪装成允许的源码修改，也不得被计入越界源码修改。
 
 #### 结果字段
 
@@ -435,7 +435,7 @@ provider/model/capability identity 的 live 结果集。因此“基线基础设
 - setup、Agent、judge 各阶段耗时；
 - 输入、输出、reasoning 和 cache token；
 - turn、step、tool error、approval、stale write、verification retry 次数；
-- changed files 和越界修改数；
+- source changed files、声明式 generated files 和越界修改数；
 - 最终判定命令及 exit status；
 - session、task、workspace、checkpoint、Trace 标识。
 
@@ -456,6 +456,7 @@ provider/model/capability identity 的 live 结果集。因此“基线基础设
 - 同一完成状态重复判定结果一致。
 - 每次运行都可追溯到 session、Trace 和不可变 Eval 结果。
 - 失败和取消后无遗留 worktree、execution 或后台进程。
+- `allowedPaths` 与 `generatedPaths` 分离且无重叠；未声明生成物仍按越界修改 fail closed。
 - campaign 配置摘要、模型能力快照和 repetition 进入每条 trial；同一目录只能包含一个 role、manifest、implementation revision 和 runtime configuration，完成记录只能在全部唯一 trial 落盘后生成。
 
 ### M10：文件 read set / write set 一致性
@@ -941,7 +942,7 @@ merge gate；合并后重新运行 M12 verification。决策与验收证据见 D
 
 ### M19：产品化、性能与最终验收
 
-实施状态（2026-08-28）：runtime phase、可操作诊断、已知路径增量 repo map、
+实施状态（2026-08-29）：runtime phase、可操作诊断、已知路径增量 repo map、
 10,000 文件基准和严格不可变验收聚合已经完成。性能门槛通过；30-by-5 live
 对比和 large-repo token usage 对照因真实模型结果缺失保持 blocked。固定
 large-repo task 已完成并通过实际物化集成测试。实现决策见 Decision 0031，
@@ -949,6 +950,18 @@ large-repo task 已完成并通过实际物化集成测试。实现决策见 Dec
 revision `e4e6cbc` 已通过当前 harness 的无网络 30-task/150-result 契约预检；
 因旧 checkout 会保留 2,000 文件上限，baseline 运行必须显式注入当前 12,000
 文件上限。该预检不替代任何真实模型样本或 token evidence。
+
+2026-08-29 对已完成 current campaign 的失败链复核确认：Rust 取消主要来自
+Darwin deny-default 环境替换 `HOME` 后 rustup 无法定位工具链；反复诊断又耗尽
+任务预算。后端现仅对实际 Rust 命令注入原开发者 `RUSTUP_HOME` 的只读根，仍
+保持临时 `HOME`、项目内写根和默认断网。work-plan provider 参数已从不透明
+JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Plan Mode 的
+边界。Eval 新增不重叠的 `generatedPaths` 合同，将验证生成物与源码范围分别
+审计。真实 `rust-refactor` smoke 在 120 秒任务预算内 27 秒通过，5/5 checks
+通过，源码变更仅 `src/lib.rs`，越界文件为 0。canonical suite 1789/1789
+通过。M19 仍需在提交后的固定 revision 上重跑完整 30-by-5 baseline/current；
+历史 baseline 缺少足够 token usage，且 manifest 合同已升级，不得复用旧比较
+冒充最终通过。
 
 #### 目标
 

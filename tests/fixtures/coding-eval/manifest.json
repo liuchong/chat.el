@@ -186,28 +186,28 @@
       "id": "rust-single-fix", "revision": 1, "category": "single-file-fix", "language": "rust",
       "description": "Correct integer division behavior.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Fix divide for positive integers so non-exact results round up. Preserve the existing zero-divisor panic.",
-      "allowedPaths": ["src/lib.rs"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "divide-tests", "command": ["cargo", "test", "divide_rounds_up", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}]
     },
     {
       "id": "rust-multi-file", "revision": 1, "category": "multi-file-change", "language": "rust",
       "description": "Change a label contract and its documentation.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["src/lib.rs", "README.md"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs", "README.md"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "label-tests", "command": ["cargo", "test", "label_uses_entry_prefix", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
       "id": "rust-refactor", "revision": 1, "category": "refactor", "language": "rust",
       "description": "Extract normalization detail.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Refactor normalize_name by extracting whitespace cleanup into a private helper named clean_name. Preserve behavior.",
-      "allowedPaths": ["src/lib.rs"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["cargo", "test", "normalize_collapses_space", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}, {"type": "file-regexp", "name": "helper-extracted", "path": "src/lib.rs", "regexp": "clean_name"}]
     },
     {
       "id": "rust-failing-test", "revision": 1, "category": "failing-test-fix", "language": "rust",
       "description": "Repair an activity-state regression.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "The active_reads_state test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["src/lib.rs"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "active-tests", "command": ["cargo", "test", "active_reads_state", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}]
     },
     {

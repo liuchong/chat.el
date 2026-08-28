@@ -195,6 +195,20 @@ The vector is empty when tool calling is disabled."
      "- If a write tool needs approval, wait for approval instead of printing the intended file body in chat.")
    "\n"))
 
+(defun chat-tool-caller--plan-usage-guidance (tools)
+  "Return plan guidance when TOOLS expose the programming plan surface."
+  (when (seq-some
+         (lambda (tool)
+           (eq (chat-forged-tool-id tool) 'programming_plan_create))
+         tools)
+    (mapconcat
+     #'identity
+     '("Programming plan boundaries:"
+       "- Use `programming_plan_create` as the durable TODO list for substantial coding, then advance its items while implementing."
+       "- Do not enter Plan Mode merely to create or use that TODO list."
+       "- Call `programming_plan_mode_enter` only when the user explicitly asks for read-only planning before implementation.")
+     "\n")))
+
 (defun chat-tool-caller--storage-note-variant (session terse)
   "Build the storage block for SESSION at one verbosity, TERSE or not.
 
@@ -354,6 +368,10 @@ will ask again for something it was already told."
          "Use files_find for recursive directory text search and use files_grep for one known file.\n"
          "After editing, inspect the result or diff before declaring success.\n"
          (chat-tool-caller--tool-usage-guidance)
+         (if-let ((plan-guidance
+                   (chat-tool-caller--plan-usage-guidance tools)))
+             (concat "\n" plan-guidance)
+           "")
          "\n"
          "Use this exact shape:\n"
          "{\"function_call\": {\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"value\"}}}\n"
@@ -669,6 +687,75 @@ merely mentions JSON in prose has not."
                        (cl-every #'consp value))))
     (_ t)))
 
+(defun chat-tool-caller--schema-get (schema key)
+  "Return KEY from JSON SCHEMA with symbol or string keys."
+  (or (cdr (assoc key schema))
+      (and (symbolp key) (cdr (assoc (symbol-name key) schema)))
+      (and (stringp key) (cdr (assoc (intern key) schema)))))
+
+(defun chat-tool-caller--object-entries (value)
+  "Return JSON object VALUE as an alist."
+  (cond
+   ((hash-table-p value)
+    (let (entries)
+      (maphash (lambda (key item) (push (cons key item) entries)) value)
+      entries))
+   ((listp value) value)
+   (t nil)))
+
+(defun chat-tool-caller--validate-schema-value (value schema path)
+  "Validate VALUE against nested JSON SCHEMA at PATH."
+  (let* ((type (chat-tool-caller--schema-get schema 'type))
+         (enum (chat-tool-caller--schema-get schema 'enum)))
+    (unless (chat-tool-caller--argument-type-valid-p value type)
+      (error "Argument '%s' must be %s" path type))
+    (when (and enum (not (member value (append enum nil))))
+      (error "Argument '%s' must be one of: %s"
+             path
+             (mapconcat (lambda (item) (format "%s" item))
+                        (append enum nil) ", ")))
+    (pcase type
+      ("array"
+       (let* ((values (if (vectorp value) (append value nil) value))
+              (minimum (chat-tool-caller--schema-get schema 'minItems))
+              (items (chat-tool-caller--schema-get schema 'items)))
+         (when (and minimum (< (length values) minimum))
+           (error "Argument '%s' needs at least %d item%s"
+                  path minimum (if (= minimum 1) "" "s")))
+         (when items
+           (cl-loop for item in values
+                    for index from 0
+                    do (chat-tool-caller--validate-schema-value
+                        item items (format "%s[%d]" path index))))))
+      ("object"
+       (let* ((entries (chat-tool-caller--object-entries value))
+              (properties (chat-tool-caller--schema-get schema 'properties))
+              (required (append
+                         (or (chat-tool-caller--schema-get schema 'required)
+                             nil)
+                         nil))
+              (additional
+               (chat-tool-caller--schema-get schema 'additionalProperties))
+              (names (mapcar (lambda (entry)
+                               (let ((key (car entry)))
+                                 (if (symbolp key) (symbol-name key) key)))
+                             entries)))
+         (dolist (name required)
+           (unless (member name names)
+             (error "Missing required argument: %s.%s" path name)))
+         (dolist (entry entries)
+           (let* ((key (car entry))
+                  (name (if (symbolp key) (symbol-name key) key))
+                  (property (or (cdr (assoc name properties))
+                                (cdr (assoc (intern name) properties)))))
+             (cond
+              (property
+               (chat-tool-caller--validate-schema-value
+                (cdr entry) property (format "%s.%s" path name)))
+              ((eq additional :json-false)
+               (error "Unknown argument: %s.%s" path name))))))))
+    value))
+
 (defun chat-tool-caller--argument-name (entry)
   "Return ENTRY key as a string."
   (let ((key (car entry)))
@@ -701,7 +788,9 @@ enumerated values."
       (let* ((name (plist-get param :name))
              (value (chat-tool-caller--argument-raw-value arguments name))
              (type (or (plist-get param :type) "string"))
-             (enum (plist-get param :enum)))
+             (enum (plist-get param :enum))
+             (items (plist-get param :items))
+             (min-items (plist-get param :min-items)))
         (unless (eq value chat-tool-caller--missing-argument)
           (unless (chat-tool-caller--argument-type-valid-p value type)
             (error "Argument '%s' must be %s" name type))
@@ -709,7 +798,14 @@ enumerated values."
             (error "Argument '%s' must be one of: %s"
                    name
                    (mapconcat (lambda (item) (format "%s" item))
-                              enum ", ")))))))
+                              enum ", "))))
+          (when (or items min-items)
+            (chat-tool-caller--validate-schema-value
+             value
+             (append `((type . ,type))
+                     (when items `((items . ,items)))
+                     (when min-items `((minItems . ,min-items))))
+             name)))))
   arguments)
 
 (defun chat-tool-caller--arguments-to-argv (tool arguments)

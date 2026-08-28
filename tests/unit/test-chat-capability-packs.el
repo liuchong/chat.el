@@ -284,7 +284,9 @@
           (chat-tool-caller-current-state-session execution))
       (chat-capability-programming-plan-create
        "Execution plan"
-       "[{\"id\":\"step\",\"title\":\"Run in execution session\"}]"))
+       '(((id . "step")
+          (title . "Run in execution session")
+          (acceptance . "Execution session contains the plan.")))))
     (should (chat-work-plan-current execution))
     (should-not (chat-work-plan-current ambient))))
 
@@ -301,6 +303,28 @@
                   programming_plan_skip programming_plan_mode))
       (should (chat-tool-forge-get id))
       (should (memq id chat-capability-programming-tools)))))
+
+(ert-deftest chat-capability-plan-tools-advertise-native-item-schema ()
+  "Plan calls expose item structure instead of asking for encoded JSON."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (dolist (id '(programming_plan_create programming_plan_update))
+      (let* ((tool (chat-tool-forge-get id))
+             (params (chat-forged-tool-parameters tool))
+             (items (seq-find (lambda (param)
+                                (equal (plist-get param :name) "items"))
+                              params))
+             (schema (plist-get items :items))
+             (required (cdr (assoc 'required schema))))
+        (should items)
+        (should (equal "array" (plist-get items :type)))
+        (should (= 1 (plist-get items :min-items)))
+        (should (equal '("title" "acceptance")
+                       (append required nil)))
+        (should-not (seq-find
+                     (lambda (param)
+                       (equal (plist-get param :name) "items_json"))
+                     params))))))
 
 (ert-deftest chat-capability-registers-bounded-goal-tool-surface ()
   "The Agent can advance Goals but cannot pause, resume or clear them."

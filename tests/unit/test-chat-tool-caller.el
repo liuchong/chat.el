@@ -824,6 +824,42 @@ being a thing the reader could do when the two surfaces merged."
        (should (equal (chat-forged-tool-effects tool)
                       '(read outbound)))))))
 
+(ert-deftest chat-tool-caller-validates-nested-array-object-schema ()
+  "Nested provider schemas fail locally with the exact invalid item path."
+  (let ((tool
+         (make-chat-forged-tool
+          :id 'nested-tool :name "Nested" :language 'elisp
+          :parameters
+          '((:name "items" :type "array" :required t :min-items 1
+             :items ((type . "object")
+                     (properties
+                      . (("title" . ((type . "string")))
+                         ("acceptance" . ((type . "string")))))
+                     (required . ["title" "acceptance"])
+                     (additionalProperties . :json-false))))
+          :compiled-function #'identity :is-active t)))
+    (condition-case err
+        (progn
+          (chat-tool-caller--validate-arguments
+           tool '(("items" . ((("title" . "Implement"))))))
+          (ert-fail "Expected missing nested acceptance field"))
+      (error
+       (should (string-match-p
+                "items\\[0\\]\\.acceptance"
+                (error-message-string err)))))))
+
+(ert-deftest chat-tool-caller-distinguishes-work-plan-from-plan-mode ()
+  "The system prompt keeps TODO planning separate from read-only Plan Mode."
+  (let ((tools
+         (list
+          (make-chat-forged-tool
+           :id 'programming_plan_create :name "Plan" :language 'elisp
+           :is-active t))))
+    (let ((guidance (chat-tool-caller--plan-usage-guidance tools)))
+      (should (string-match-p "durable TODO list" guidance))
+      (should (string-match-p "Do not enter Plan Mode" guidance))
+      (should (string-match-p "explicitly asks" guidance)))))
+
 (ert-deftest chat-tool-caller-restores-execution-context-after-async-approval ()
   "A delayed guard verdict keeps the task correlation of the original call."
   (chat-test-with-temp-dir

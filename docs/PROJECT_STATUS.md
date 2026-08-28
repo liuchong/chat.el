@@ -41,11 +41,15 @@ campaign with immutable configuration and completion records. Interrupted
 campaigns can resume only validated missing repetition/task identities; stale
 locks recover, concurrent runs and configuration drift fail closed, and terminal
 evidence requires the exact unique result matrix. The immutable M9 baseline is
-complete with 150/150 results. The latest valid M19 current campaign also
-completed 150/150 with 112 passed, 37 cancelled and one failed, but its 74.67
-percent success rate misses the 80 percent floor. Five out-of-scope temporary
-files and incomplete baseline token usage also keep final acceptance open. The
-fixed corpus includes a measured 10,000-indexed-file large-repository task.
+complete with 150/150 results. The latest valid historical M19 current campaign
+also completed 150/150 with 112 passed, 37 cancelled and one failed, but its
+74.67 percent success rate misses the 80 percent floor. Post-run diagnosis fixed
+rustup access in the Darwin sandbox, native work-plan item schemas and explicit
+build-output accounting. A live Rust smoke now passes all five checks with one
+scoped source change and no scope leak. The historical campaigns remain
+immutable; final acceptance still needs fresh same-manifest baseline/current
+campaigns with complete trusted token usage. The fixed corpus includes a
+measured 10,000-indexed-file large-repository task.
 
 ## Implemented Areas
 
@@ -379,9 +383,9 @@ fixed corpus includes a measured 10,000-indexed-file large-repository task.
 
 ## Recommended Next Work
 
-- remove cancellation-path scope leaks and reduce task cancellations, then run
-  a fresh post-change M19 current 30-by-5 campaign with the same frozen
-  provider/model/capability identity as the completed M9 baseline
+- freeze the updated coding manifest and implementation, then run fresh
+  baseline and current 30-by-5 campaigns with the same provider, model and
+  capability identity
 - record the immutable comparison, trusted usage sample and failure taxonomy;
   do not mark M19 complete before every strict acceptance gate passes
 - make true provider streaming and fallback behavior share one transport abstraction

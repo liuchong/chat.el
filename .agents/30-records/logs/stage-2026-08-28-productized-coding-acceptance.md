@@ -112,16 +112,37 @@ Allowed approval counts no longer imply a permission block. These changes fix
 classification and evidence handling; they do not rewrite either immutable
 campaign or raise its measured success rate.
 
+Post-campaign diagnosis on 2026-08-29 found that the Rust cancellations were
+not normal model failures. The Darwin sandbox replaced `HOME`, so the rustup
+shim could not locate its configured toolchain. The model then spent its
+remaining budget on retries and external-path diagnostics. Restricted Rust
+commands now receive read-only access to the resolved developer `RUSTUP_HOME`;
+the sandbox still uses a managed home, project-only writes and no network.
+
+The same investigation exposed two evaluation and tool-contract problems.
+Work-plan tools advertised an opaque JSON string, which caused malformed calls
+and unnecessary Plan Mode entry; they now expose a native nested item schema
+with required acceptance evidence, while prompt guidance keeps durable TODO
+plans separate from read-only Plan Mode. Coding Eval now requires explicit,
+non-overlapping `generatedPaths` for build outputs and records those separately
+from source changes and out-of-scope files.
+
+A live `rust-refactor` smoke completed in about 27 seconds with status `passed`.
+All five checks passed, `src/lib.rs` was the only source change, 118 declared
+Rust build outputs were audited separately and the out-of-scope list was empty.
+The canonical suite passed 1789/1789. This evidence validates the remediation,
+but it is one smoke task rather than the required 30-by-5 comparison.
+
 ## Unblock Procedure
 
-1. Keep the completed M9 baseline and `aa4698a` current campaign immutable.
-2. Remove the five cancellation-path scope leaks and reduce or prevent the 37
-   task cancellations without weakening deterministic judges.
-3. Run a fresh 30-by-5 current campaign after those implementation changes;
-   never resume a campaign across an implementation revision.
-4. Establish trusted token coverage for at least 95 percent of both comparison
-   sets. A replacement baseline is required if the missing M9 usage cannot be
-   recovered from original provider evidence.
+1. Keep the completed M9 baseline and `aa4698a` current campaign immutable as
+   historical evidence; do not append or rewrite either campaign.
+2. Commit the Rust runtime, plan schema and generated-output contract together,
+   then freeze the resulting implementation and manifest revisions.
+3. Run fresh 30-by-5 baseline and current campaigns against that exact manifest;
+   never resume a campaign across an implementation or manifest revision.
+4. Establish trusted token coverage for at least 95 percent of both replacement
+   comparison sets. The historical baseline cannot satisfy this gate.
 5. Save same-revision `runtimeReliability` measurements, including the Goal
    projection median ratio, then run `chat-coding-acceptance-run-final`.
 6. Mark M19 complete only if the immutable aggregate result is `passed`.

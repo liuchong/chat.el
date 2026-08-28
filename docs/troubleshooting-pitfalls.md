@@ -2599,4 +2599,42 @@ store.
 system must preserve the difference between bad evidence and no evidence,
 because only the second can be fixed by rerunning the measurement.
 
-Last updated: 2026-08-28
+### A Managed HOME Can Hide A Language Toolchain
+
+**Problem**: a sandboxed `cargo test` was approved but failed because rustup
+reported that no default toolchain was configured. The Agent then consumed the
+task budget probing toolchain directories.
+
+**Cause**: deny-default execution correctly replaced `HOME` with a managed
+temporary directory, but rustup stores its active toolchain under the
+developer's `RUSTUP_HOME`. System compiler roots and SSL files were available;
+the language-manager state was not.
+
+**Solution**: detect actual Rust tool invocations, add only the existing
+`RUSTUP_HOME` as a read-only sandbox root and pass that variable explicitly.
+Keep the managed home, project-only write roots and default network denial. Add
+a real `sh -c "cargo test ..."` isolation test plus a negative test proving an
+ordinary command cannot see the Rust root.
+
+**General rule**: replacing `HOME` is necessary isolation, but executable
+discovery and language-manager state are separate capabilities. Grant the
+smallest command-scoped read root instead of restoring the developer home.
+
+### Build Outputs Are Not Source Scope
+
+**Problem**: a successful coding Eval was marked failed because `cargo test`
+created `target/**` and `Cargo.lock`, even though the only source edit was the
+declared file.
+
+**Cause**: the evaluator used one changed-file set for source edits, build
+outputs and scope enforcement. A successful verification therefore looked like
+an out-of-scope source mutation.
+
+**Solution**: require each task to declare safe, non-overlapping
+`generatedPaths`. Record generated files separately, apply `allowedPaths` only
+to source changes and continue to fail closed for every undeclared path.
+
+**General rule**: generated output is evidence, not permission. Keep it visible
+and bounded, but never let it widen the source edit contract.
+
+Last updated: 2026-08-29
