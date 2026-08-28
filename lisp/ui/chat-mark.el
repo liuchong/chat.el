@@ -221,14 +221,60 @@ future providers possible without changing chat.el."
    (file-name-directory (or load-file-name buffer-file-name default-directory)))
   "Directory containing logos for the providers chat.el registers.")
 
-(defconst chat-mark-packaged-provider-logos
-  '(ark claude deepseek doubao gemini glm grok hunyuan kimi kimi-code
-        minimax mistral openai qwen)
-  "Provider identities covered by the built-in logo set.")
+(defconst chat-mark-packaged-logo-identities
+  '(ai21 ark baichuan cerebras claude cohere deepseek doubao ernie gemini
+         glm grok groq hunyuan kimi llama mimo minimax mistral nova nvidia
+         openai pangu perplexity qwen sambanova sensenova spark stepfun yi)
+  "Canonical product identities covered by the built-in logo set.")
 
 (defconst chat-mark-provider-logo-aliases
-  '((kimi-code . kimi))
-  "Provider identities that intentionally share a packaged logo.")
+  '((alibaba-qwen . qwen)
+    (anthropic . claude)
+    (anthropic-claude . claude)
+    (amazon-nova . nova)
+    (aws-nova . nova)
+    (baidu . ernie)
+    (bytedance . doubao)
+    (byteplus . ark)
+    (chatglm . glm)
+    (dashscope . qwen)
+    (google-ai . gemini)
+    (google-gemini . gemini)
+    (huawei . pangu)
+    (huawei-cloud . pangu)
+    (huaweicloud . pangu)
+    (iflytek . spark)
+    (iflytek-spark . spark)
+    (kimi-code . kimi)
+    (lingyi . yi)
+    (lingyiwanwu . yi)
+    (meta . llama)
+    (meta-llama . llama)
+    (minimaxi . minimax)
+    (mistralai . mistral)
+    (moonshot . kimi)
+    (open-ai . openai)
+    (sense-nova . sensenova)
+    (sensetime . sensenova)
+    (step . stepfun)
+    (tencent . hunyuan)
+    (volcengine . ark)
+    (wenxin . ernie)
+    (x-ai . grok)
+    (xai . grok)
+    (xiaomi . mimo)
+    (xiaomi-mimo . mimo)
+    (xiaomimimo . mimo)
+    (z-ai . glm)
+    (zai . glm)
+    (zhipu . glm)
+    (zhipu-ai . glm))
+  "Provider identities that intentionally share a product logo.")
+
+(defconst chat-mark-packaged-provider-logos
+  (append chat-mark-packaged-logo-identities
+          (mapcar #'car chat-mark-provider-logo-aliases))
+  "All provider identities resolved by the built-in logo catalogue.")
 
 (defcustom chat-mark-logo-enabled t
   "Whether provider marks may be drawn as images.
@@ -407,7 +453,12 @@ caller puts what comes back over the glyph, so nil leaves the glyph."
                      ;; resembles nothing.
                      (not (assq provider chat-mark-provider-marks))))
         (when-let* ((size (chat-mark--line-height)))
-          (let* ((key (list provider glyph colour size))
+          (let* ((file-stamp
+                 (and file
+                       (ignore-errors
+                         (file-attribute-modification-time
+                          (file-attributes file)))))
+                 (key (list provider glyph colour size file file-stamp))
                  (cached (gethash key chat-mark--image-cache 'missing)))
             (if (not (eq cached 'missing))
                 cached

@@ -91,17 +91,43 @@ that back."
   (should-not (cdr (chat-mark-for-provider 'qwen "Qwen"))))
 
 (ert-deftest chat-mark-every-catalogued-vendor-has-a-packaged-logo ()
-  "Every vendor in the built-in logo catalogue has a readable SVG mark."
-  (dolist (provider chat-mark-packaged-provider-logos)
-    (let ((file (chat-mark--logo-file provider)))
+  "Every vendor in the built-in logo catalogue has a readable image mark."
+  (dolist (provider chat-mark-packaged-logo-identities)
+    (let* ((file (chat-mark--logo-file provider))
+           (extension (and file (file-name-extension file))))
       (should file)
       (should (file-readable-p file))
-      (should (string-equal "svg" (file-name-extension file))))))
+      (should (member extension chat-mark--logo-extensions))
+      (should (string-equal (symbol-name provider)
+                            (file-name-base file)))
+      (if (string-equal extension "svg")
+          (with-temp-buffer
+            (insert-file-contents file)
+            (should (search-forward "<svg" nil t))
+            (should (search-forward "currentColor" nil t)))
+        ;; Qwen publishes its current compact product mark as a colour PNG.
+        (should (eq provider 'qwen))
+        (should (> (file-attribute-size (file-attributes file)) 100))))))
 
-(ert-deftest chat-mark-protocol-aliases-share-the-vendor-logo ()
-  "A second protocol must not make one company look like another company."
-  (should (equal (chat-mark--logo-file 'kimi)
-                 (chat-mark--logo-file 'kimi-code))))
+(ert-deftest chat-mark-provider-aliases-resolve-to-canonical-products ()
+  "Transport, company and former names must resolve to product identities."
+  (dolist (entry chat-mark-provider-logo-aliases)
+    (let ((alias (car entry))
+          (product (cdr entry)))
+      (should (memq product chat-mark-packaged-logo-identities))
+      (should (memq alias chat-mark-packaged-provider-logos))
+      (should (equal (chat-mark--logo-file product)
+                     (chat-mark--logo-file alias))))))
+
+(ert-deftest chat-mark-model-products-do-not-collapse-into-company-marks ()
+  "The prompt names Qwen, Gemini, GLM and MiMo rather than parent companies."
+  (dolist (entry '((alibaba-qwen . qwen)
+                   (google-gemini . gemini)
+                   (zhipu-ai . glm)
+                   (xiaomi-mimo . mimo)))
+    (should (string-equal
+             (symbol-name (cdr entry))
+             (file-name-base (chat-mark--logo-file (car entry)))))))
 
 (ert-deftest chat-mark-a-known-brand-colour-is-given-for-both-backgrounds ()
   "A brand colour unreadable on a dark theme is worse than no colour."
@@ -268,6 +294,27 @@ to clear the cache."
       (should first)
       (should (eq first again))
       (should (= 1 (hash-table-count chat-mark--image-cache))))))
+
+(ert-deftest chat-mark-changing-a-logo-invalidates-its-image-cache ()
+  "Replacing a wrong logo must take effect without restarting Emacs."
+  (chat-test-with-temp-dir
+   (let* ((chat-mark-logo-directory temp-dir)
+          (chat-mark-packaged-logo-directory temp-dir)
+          (file (expand-file-name "deepseek.svg" temp-dir))
+          (calls 0))
+     (with-temp-file file
+       (insert "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"))
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+               ((symbol-function 'default-font-height) (lambda (&rest _) 19))
+               ((symbol-function 'face-foreground)
+                (lambda (&rest _) "#ABCDEF"))
+               ((symbol-function 'chat-mark--build-image)
+                (lambda (&rest _) (cl-incf calls))))
+       (clrhash chat-mark--image-cache)
+       (should (= 1 (chat-mark-provider-image 'deepseek "D" nil)))
+       (should (= 1 (chat-mark-provider-image 'deepseek "D" nil)))
+       (set-file-times file (time-add (current-time) 2))
+       (should (= 2 (chat-mark-provider-image 'deepseek "D" nil)))))))
 
 (ert-deftest chat-mark-the-cache-has-a-ceiling ()
   "A cache with no bound is a leak that happens slowly."
