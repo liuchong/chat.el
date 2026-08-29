@@ -17,6 +17,7 @@
 (require 'cl-lib)
 (require 'tabulated-list)
 (require 'chat-session)
+(require 'chat-session-export)
 
 (cl-defstruct chat-session-tree-node
   session
@@ -124,6 +125,12 @@
       (chat-session-tree-refresh)
       (message "Recovery action applied: %s" action))))
 
+(defun chat-session-tree-export ()
+  "Export the public transcript for the session at point."
+  (interactive)
+  (chat-session-export-interactive
+   (chat-session-tree-session-at-point)))
+
 (define-derived-mode chat-session-tree-mode tabulated-list-mode "Chat Session Tree"
   "Major mode for browsing chat session branches."
   (setq tabulated-list-format
@@ -135,6 +142,8 @@
   (setq tabulated-list-padding 2)
   (define-key chat-session-tree-mode-map
               (kbd "R") #'chat-session-tree-recover-interrupted)
+  (define-key chat-session-tree-mode-map
+              (kbd "e") #'chat-session-tree-export)
   (tabulated-list-init-header))
 
 ;;;###autoload

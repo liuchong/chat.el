@@ -97,6 +97,7 @@ Returns the list of files that were loaded."
 (require 'chat-command)
 (require 'chat-content)
 (require 'chat-session)
+(require 'chat-session-export)
 (require 'chat-session-wire)
 (require 'chat-event)
 (require 'chat-trace)
@@ -889,6 +890,13 @@ the header and in which commands do anything."
                        (upcase (symbol-name (chat-message-role msg)))
                        (chat-message-content msg))))
       (insert "\n> "))))
+
+;;;###autoload
+(defun chat-export-session ()
+  "Export the current session as a privacy-safe Markdown transcript."
+  (interactive)
+  (chat-session-export-interactive
+   (and (boundp 'chat--current-session) chat--current-session)))
 
 ;; ------------------------------------------------------------------
 ;; Auto-Approval Commands
