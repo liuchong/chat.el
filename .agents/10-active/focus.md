@@ -21,10 +21,13 @@ The first DeepSeek v4 Flash current repetition passed 30/30; repetition 2 passed
 29/30 before `rust-refactor` exposed an omitted curl code 16 HTTP/2 transport
 retry. The run was stopped with 63 durable results and no workspace residue.
 It is diagnostic evidence only. Runtime retry and harness-level quarantine now
-pass focused coverage and the 1859-test canonical suite. Fresh campaign
-identities will be created after this change is committed. Earlier runtime,
-quality and canonical records remain stage evidence but must be regenerated on
-the final clean implementation revision before aggregation.
+pass focused coverage and the 1859-test canonical suite. A fresh `16bbffd`
+campaign proved the quarantine with curl code 18 and passed repetition 1 at
+30/30, then exposed an undeclared `sample.elc` output in the Elisp fixture.
+The four Elisp mutation tasks are advancing their revisions and declaring that
+bytecode as generated output without widening source scope. The manifest digest
+will change, so fresh campaign identities and deterministic evidence are
+required after the next commit.
 
 M19 final acceptance remains blocked only on fresh live evidence. Baseline and
 current must each run 30 tasks five times with one identical concrete

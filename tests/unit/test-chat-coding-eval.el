@@ -222,6 +222,10 @@
         (when (member category '("single-file-fix" "multi-file-change"
                                  "refactor" "failing-test-fix"))
           (pcase language
+            ("elisp"
+             (should (equal '("sample.elc") generated))
+             (should-not (member "sample.elc"
+                                 (chat-coding-eval-task-allowed-paths task))))
             ("python"
              (should (equal '("__pycache__" ".pytest_cache") generated))
              (should-not (member "__pycache__"

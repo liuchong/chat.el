@@ -9,31 +9,31 @@
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "sample-find-user"}, {"type": "no-change", "name": "read-only"}]
     },
     {
-      "id": "elisp-single-fix", "revision": 1, "category": "single-file-fix", "language": "elisp",
+      "id": "elisp-single-fix", "revision": 2, "category": "single-file-fix", "language": "elisp",
       "description": "Correct division behavior.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Fix sample-divide so it preserves fractional results and signals an error when the divisor is zero.",
-      "allowedPaths": ["sample.el"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "divide-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-divide)"], "expectedExit": 0, "timeoutSeconds": 30}]
     },
     {
-      "id": "elisp-multi-file", "revision": 1, "category": "multi-file-change", "language": "elisp",
+      "id": "elisp-multi-file", "revision": 2, "category": "multi-file-change", "language": "elisp",
       "description": "Change a label contract and its documentation.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.el", "README.md"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el", "README.md"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "label-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-label)"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
-      "id": "elisp-refactor", "revision": 1, "category": "refactor", "language": "elisp",
+      "id": "elisp-refactor", "revision": 2, "category": "refactor", "language": "elisp",
       "description": "Extract normalization detail.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Refactor sample-normalize-name by extracting the whitespace cleanup into a private helper named sample--clean-name. Preserve behavior.",
-      "allowedPaths": ["sample.el"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-normalize)"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.el", "regexp": "sample--clean-name"}]
     },
     {
-      "id": "elisp-failing-test", "revision": 1, "category": "failing-test-fix", "language": "elisp",
+      "id": "elisp-failing-test", "revision": 2, "category": "failing-test-fix", "language": "elisp",
       "description": "Repair an activity-state regression.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "The sample-test-active test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.el"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "active-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-active)"], "expectedExit": 0}]
     },
     {

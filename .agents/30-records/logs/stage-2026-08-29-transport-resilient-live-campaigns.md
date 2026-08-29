@@ -150,3 +150,19 @@ Agent classifier to return false and proves the harness still quarantines code
 directories are required after the fix. The coding Eval unit set passed 28/28,
 the documentation contract passed 4/4 and the full canonical suite passed
 1859/1859 with zero unexpected result.
+
+The fresh `16bbffd` current campaign then validated both the retry boundary and
+the corpus boundary. Repetition 1 passed 30/30, including all Rust tasks. During
+repetition 2, `go-refactor` ended with curl code 18; the harness moved the
+attempt into `attempts/`, paused with 39 durable results and left the task
+identity pending. No source, build or process residue remained.
+
+One of the 39 valid trials, `elisp-refactor` repetition 2, failed for a separate
+reason: the Agent made the correct allowed source edit but byte compilation
+created `sample.elc`. The core manifest had not declared the standard Emacs
+Lisp build output, so the scope judge correctly reported it as out of scope.
+This is a fixture contract defect, not evidence that byte compilation should be
+discouraged. All four mutation tasks now declare `sample.elc` as generated
+output and advance their task revision. The source allowlist remains unchanged;
+the runner audits and removes the bytecode. The old manifest digest and campaign
+are diagnostic only, so both comparison roles require fresh identities.

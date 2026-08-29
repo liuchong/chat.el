@@ -1074,6 +1074,13 @@ JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Pl
 也会隔离并暂停，不消耗 trial identity。实现 revision 改变后，该 campaign 不得续跑；
 定向回归、canonical 和可靠性证据必须重建，再创建 fresh baseline/current。
 
+修复后的 `16bbffd` campaign 第 1 轮 30/30 通过；第 2 轮的 curl code 18 被正确
+隔离并暂停，证明 transport quarantine 生效。暂停前 39 个有效 trial 中唯一失败是
+`elisp-refactor`：源码修改正确，但 Agent 的字节编译产生 `sample.elc`，core manifest
+未声明该标准构建产物。四个 Elisp mutation task 现声明 `sample.elc` 为
+`generatedPaths` 并提升 task revision，源码 allowlist 不变。manifest digest 改变后，
+`16bbffd` campaign 只能作为诊断证据；重新提交并验证后建立新的两侧 campaign。
+
 同日第一次 replacement current campaign 在 10/150 时主动中止：8 个任务通过，
 `elisp-multi-file` 与 `go-multi-file` 取消。复核证明多文件任务已经成功创建并推进
 TODO，但 provider schema 要求模型把 evidence 二次编码成 JSON 字符串，同时成功

@@ -57,6 +57,11 @@ hold:
 - no undeclared generated file or owned process remains;
 - infrastructure failures are quarantined and do not claim a trial identity.
 
+Standard compiler output belongs in `generatedPaths`, not in `allowedPaths` and
+not in a prompt that discourages normal verification. For example, Emacs Lisp
+mutation tasks declare `sample.elc`: it is audited and removed, while only the
+source and explicitly requested documentation may count as product edits.
+
 Campaign reports use one of these bounded verdict forms:
 
 ```text
