@@ -6,6 +6,20 @@
 - Scope: project
 - Tags: current, phase, runtime, bridge, termini
 
+## Permanent Product Invariant
+
+This repository is pre-1.0, unreleased and has no installed-user contract.
+Product-history compatibility is therefore forbidden by default. A changed
+design replaces the old schema, command, data path, test and documentation in
+one direction; it does not add migrations, fallbacks, aliases, wrappers,
+dual-write periods or silent format guessing. Rebuildable state is discarded.
+This is not permission to change accepted design implicitly: unchanged Specs,
+decisions and rules remain binding. A clean break begins only after the affected
+design has been explicitly revised into one complete, conflict-free contract;
+implementation then follows that contract without compatibility baggage.
+Platform support and required external wire contracts are separate concerns and
+must still be explicit. `AGENTS.md` is the authoritative full rule.
+
 ## Current Phase
 
 The completed M0-M8 Agent Runtime foundation is now followed by the active
