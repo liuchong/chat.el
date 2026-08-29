@@ -991,11 +991,11 @@ gate-linked 检查（15 个唯一 ERT 场景），测量 20 轮 Goal 投影占�
 `CHAT_RELIABILITY_ALLOW_DIRTY=1` 诊断，但此类输出会明确记录
 `implementationTreeClean: false`，不得进入最终验收。开发态实测九个 gate 全部
 通过，Goal projection median ratio 为 `0.0032043746`。冻结 revision
-`251706ebab8950ec89301e610ad0b2ce0de47d8f` 的 clean record 已于
+`875433ce249d0c7f3fc72126ec74b076b73392ef` 的 clean record 已于
 2026-08-29 生成：`implementationTreeClean` 为 true，九个 gate 全部通过，所有率为
 `1.0`、安全计数为 `0`，Goal projection median ratio 为
 `0.0032043746239855107`；完整 JSON 的 SHA-256 为
-`fb5156cff6abbefd8617cb66d049db16a3545a49409b1798b752f0e08139eb8f`。最终聚合器现
+`4118104d2e0f8ee0810a8ccd6f4b7ca39fcdd5a9fcc824c0f1b4fdff44e52cc8`。最终聚合器现
 新增 `runtime-reliability-record` 来源门：九个值之外还必须校验 clean 标记、与 current
 campaign 相同的 implementation revision、九个重算 gate、17 次定向检查及 20 个连续
 Goal 投影样本；手工拼接九字段 metadata 保持 blocked。
@@ -1007,10 +1007,19 @@ Go 和 Rust 五种语言的 definition accuracy、reference precision/recall 和
 expected/reported finding set 重算 Review 指标。冻结 revision 的 clean record 中，五种
 语言及整体的四项语义指标均为 `1.0`，Review recall 为 `1.0`、precision 为 `0.875`，
 prompt 中位占比为 `0.003149300780049963`，20/20 quality gates 全部通过；完整 JSON 的
-SHA-256 为 `1f3228bc39d9b381ff566aaf005bb0e66436e9aab13eb86b88bbe6b55f695c62`。
+SHA-256 为 `adba31d88705a349a4f7057f291c249b3c3cb7b7aad8a97ab1e6c5587303e795`。
 `quality-reliability-record` 来源门会拒绝 dirty、revision 不符、语言缺失、场景跳过、
-样本不足、finding set 或汇总 gate 被改写的记录。acceptance 定向测试 28/28、canonical
-suite 1808/1808 通过。
+样本不足、finding set 或汇总 gate 被改写的记录。
+
+canonical suite 现在也生成独立的、revision-bound JSON。`tests/run-tests.el` 从所有
+`tests/unit/test-*.el` 顶层 Lisp form 读取精确 `ert-deftest` 清单，在同一次运行后记录
+每个测试的 pass 状态、总计、跳过和异常计数；expected failure、skip、abort 或任一
+清单缺失都会让命令失败。冻结 revision 的记录包含 1810/1810 passed、0 failed、
+0 skipped、0 unexpected，SHA-256 为
+`b7f57145c6510ecb4c3409edf00e2b49264b9575b87cab53c7d0ce67d728d91b`。
+`canonical-suite-record` 来源门会重新读取仓库精确清单，拒绝 dirty、revision 不符、
+缺项、重复、改名或伪造汇总。acceptance 定向测试 30/30、canonical suite 1810/1810
+通过。
 
 最终 live 对比使用仓库内 `tests/live/run-coding-campaign.el`，不再依赖临时 runner。
 入口要求显式给出 campaign role、provider、具体 model、implementation checkout 与
@@ -1022,13 +1031,13 @@ revision、当前 harness revision；真实运行同时拒绝任一 checkout 的
 service unavailable、capacity 等 provider 可用性故障时，当前 attempt 进入审计目录，
 锁被释放，campaign 保留全部缺失 trial 后暂停；不得把后续矩阵批量记成模型失败。
 当前与 baseline 已在 harness revision
-`251706ebab8950ec89301e610ad0b2ce0de47d8f` 上通过 clean descriptor 预检：current
+`875433ce249d0c7f3fc72126ec74b076b73392ef` 上通过 clean descriptor 预检：current
 implementation 为同一 revision，baseline implementation 为
 `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`；两者均为 30 tasks、5 repetitions、
 150 expected results，并共享 manifest digest
 `4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`。current 与
 baseline configuration digest 分别为
-`95dde876ab3408ddf705fc8af6f4d29b4ba98e914aa0f44b2be9cdb6ce36337e` 和
+`cf5bc65e878ed32645347f341c43a803f669778962e511576007f727a17749a4` 和
 `eb36461d214c64719d15e36478a4f1eefa96a143011b347ebe9ece763b01c3e7`。真实 readiness
 请求已明确返回 provider 七天配额耗尽的 HTTP 403，且在 campaign 目录创建前停止。
 
@@ -1058,13 +1067,18 @@ CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json \
 CHAT_QUALITY_RELIABILITY_OUTPUT=/absolute/path/quality-reliability.json \
   /Users/liu/projects/.agent-tools/capped.sh 4096 \
   emacs -Q -batch -l tests/performance/run-quality-reliability.el
+
+CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json \
+  /Users/liu/projects/.agent-tools/capped.sh 4096 \
+  emacs -Q -batch -l tests/run-tests.el
 ```
 
 命令必须在将要验收的 clean implementation revision 上运行。最终调用
-`chat-coding-acceptance-run-final` 时，读取两份 JSON，把完整 runtime 顶层对象作为
+`chat-coding-acceptance-run-final` 时，读取三份 JSON，把完整 runtime 顶层对象作为
 第三个参数 `metadata`、完整 quality 顶层对象作为第四个参数 `quality-metadata`
-传入；只手工摘录数值或缺少 `acceptanceGates`、原始样本、定向测试证据、revision、
-clean 标记的记录均不合格。
+、完整 canonical 顶层对象作为第五个参数 `canonical-metadata` 传入；只手工摘录数值
+或缺少 `acceptanceGates`、原始样本、精确测试清单、定向测试证据、revision、clean
+标记的记录均不合格。
 
 #### 退出条件
 
@@ -1091,7 +1105,7 @@ clean 标记的记录均不合格。
 - 异步测试有明确 timeout；
 - 进程输出和 fixture 大小有上限；
 - 禁止用 sleep 猜测完成，必须等待事件或 sentinel；
-- canonical suite 继续使用 `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`。
+- canonical suite 使用 `emacs -Q -batch -l tests/run-tests.el`；入口自行执行严格结果判定并退出。
 
 ## 9. 施工提交规则
 

@@ -55,26 +55,33 @@ Goal and Plan acceptance facts now have a standalone producer rather than a
 hand-authored metadata contract. The runner executes 17 gate-linked checks over
 15 unique directed scenarios, measures 20 Goal prompt projections, validates
 all nine facts through the final aggregator and refuses to certify a dirty
-worktree. A clean run at revision `251706ebab8950ec89301e610ad0b2ce0de47d8f`
+worktree. A clean run at revision `875433ce249d0c7f3fc72126ec74b076b73392ef`
 passed all nine gates with rates of `1.0`, safety counts of `0`, and a
 `0.0032043746239855107` Goal projection median. Its complete JSON record is
 stored outside the repository under the coding-acceptance evidence directory
 with SHA-256
-`fb5156cff6abbefd8617cb66d049db16a3545a49409b1798b752f0e08139eb8f`.
+`4118104d2e0f8ee0810a8ccd6f4b7ca39fcdd5a9fcc824c0f1b4fdff44e52cc8`.
 The final aggregator now adds a provenance gate that recomputes the nine
 measurements and requires the exact clean current revision, 17 directed checks
 and 20 projection samples; a hand-written nine-field object remains blocked.
 
 Deterministic non-live quality gates now have the same provenance discipline.
-The clean quality record at revision `251706e` contains 48 exact directed
+The clean quality record at revision `875433c` contains 48 exact directed
 scenarios, raw semantic rows for five languages, 20 plan/work-note prompt
 samples and raw Review finding sets. Definition accuracy, reference
 precision/recall and Top-5 are all `1.0` overall and per language; Review recall
 is `1.0`, precision is `0.875`, and prompt median ratio is
 `0.003149300780049963`. All 20 quality gates pass, and the record SHA-256 is
-`1f3228bc39d9b381ff566aaf005bb0e66436e9aab13eb86b88bbe6b55f695c62`.
+`adba31d88705a349a4f7057f291c249b3c3cb7b7aad8a97ab1e6c5587303e795`.
 Final aggregation rejects a dirty or mismatched record, missing language,
 skipped scenario, incomplete sample set, or rewritten source facts.
+
+The canonical batch now produces its own clean revision-bound record. The
+current artifact contains the exact 1810 declared test identities, 1810 passed,
+zero failed, zero skipped and zero unexpected; its SHA-256 is
+`b7f57145c6510ecb4c3409edf00e2b49264b9575b87cab53c7d0ce67d728d91b`.
+Final aggregation re-reads the repository declarations and refuses missing,
+renamed, failed, dirty or revision-mismatched canonical evidence.
 
 An initial replacement current run exposed one more live reliability defect:
 multi-file TODO items could not be completed because evidence was double-encoded,
@@ -83,7 +90,7 @@ scope was mistaken for Agent-task scope. Progress tools now accept native
 Evidence ID arrays, successful tracked tools return exact IDs, and post-tool
 events carry a separately resolved `agent_task_id`. The incomplete 10-result
 campaign is retained only as incident evidence. The canonical suite passes
-1808/1808. A focused multi-file trace confirms scoped post-tool identities and
+1810/1810. A focused multi-file trace confirms scoped post-tool identities and
 native plan transitions; runtime now also accepts the explicitly declared
 legacy JSON-string evidence shape without weakening the provider array schema.
 The provider exhausted its seven-day allowance before the smoke could write or
@@ -98,7 +105,7 @@ quota, service-unavailable and capacity failures archive the attempt and pause
 without consuming a trial identity, preventing one availability outage from
 filling the remaining matrix with infrastructure errors.
 Both replacement roles pass clean descriptor preflight under harness revision
-`251706ebab8950ec89301e610ad0b2ce0de47d8f`: the current implementation uses
+`875433ce249d0c7f3fc72126ec74b076b73392ef`: the current implementation uses
 that same revision and the baseline uses `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`.
 Each descriptor contains 30 tasks, five repetitions and 150 expected results,
 with the shared manifest digest
@@ -275,9 +282,9 @@ seven-day quota response before creating a campaign directory.
 
 ### Test Status
 
-- canonical command: `emacs -Q -batch -l tests/run-tests.el -f ert-run-tests-batch-and-exit`
-- 1782 regression tests discovered
-- 1782 passing
+- canonical command: `emacs -Q -batch -l tests/run-tests.el`
+- 1810 regression tests discovered
+- 1810 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

@@ -190,13 +190,13 @@ was `0.0032043746239855107` of measured input tokens. It remains diagnostic
 evidence because it records a dirty implementation tree.
 
 A clean replacement record was generated at implementation revision
-`251706ebab8950ec89301e610ad0b2ce0de47d8f` on 2026-08-29. It records
+`875433ce249d0c7f3fc72126ec74b076b73392ef` on 2026-08-29. It records
 `implementationTreeClean: true`, passes all nine acceptance gates, preserves
 the same `1.0` rates, zero safety counts and
 `0.0032043746239855107` Goal projection median, and is stored at
-`~/.chat/evaluations/coding-acceptance/runtime-reliability-251706e.json`.
+`~/.chat/evaluations/coding-acceptance/runtime-reliability-875433c.json`.
 Its SHA-256 is
-`fb5156cff6abbefd8617cb66d049db16a3545a49409b1798b752f0e08139eb8f`.
+`4118104d2e0f8ee0810a8ccd6f4b7ca39fcdd5a9fcc824c0f1b4fdff44e52cc8`.
 Final aggregation must consume this complete JSON object rather than a manual
 transcription.
 
@@ -206,7 +206,7 @@ requires the clean current implementation revision, the exact 17 directed test
 records across 15 unique scenarios, and all 20 ordered Goal projection samples.
 Missing provenance, a dirty tree, a revision mismatch, rewritten gate records
 or incomplete samples remain blocked even if the nine summary values pass.
-Focused acceptance tests pass 28/28 and the canonical suite passes 1808/1808.
+Focused acceptance tests pass 30/30 and the canonical suite passes 1810/1810.
 
 Canonical command:
 
@@ -224,13 +224,13 @@ TypeScript, Emacs Lisp, Go and Rust, measures 20 plan/work-note prompt samples,
 and recomputes Review precision/recall from expected and reported finding IDs.
 
 The clean record at revision
-`251706ebab8950ec89301e610ad0b2ce0de47d8f` passes all 20 quality gates. Every
+`875433ce249d0c7f3fc72126ec74b076b73392ef` passes all 20 quality gates. Every
 semantic metric is `1.0` overall and per language, Review recall is `1.0`,
 Review precision is `0.875`, and the prompt median is
 `0.003149300780049963`. It is stored at
-`~/.chat/evaluations/coding-acceptance/quality-reliability-251706e.json`; its
+`~/.chat/evaluations/coding-acceptance/quality-reliability-875433c.json`; its
 SHA-256 is
-`1f3228bc39d9b381ff566aaf005bb0e66436e9aab13eb86b88bbe6b55f695c62`.
+`adba31d88705a349a4f7057f291c249b3c3cb7b7aad8a97ab1e6c5587303e795`.
 
 The `quality-reliability-record` gate rejects a dirty or mismatched revision,
 missing language, skipped or incomplete directed scenario, insufficient prompt
@@ -239,6 +239,28 @@ producer command is:
 
 ```text
 CHAT_QUALITY_RELIABILITY_OUTPUT=/absolute/path/quality-reliability.json /Users/liu/projects/.agent-tools/capped.sh 4096 emacs -Q -batch -l tests/performance/run-quality-reliability.el
+```
+
+## Canonical Suite Evidence
+
+`tests/run-tests.el` now writes an optional strict record through
+`CHAT_CANONICAL_OUTPUT`. It structurally reads every top-level `ert-deftest`
+declaration under `tests/unit`, records every exact test identity and result,
+and exits nonzero for expected failures, unexpected results, skips or aborts.
+The clean record for revision `875433ce249d0c7f3fc72126ec74b076b73392ef`
+contains 1810/1810 passed, zero failed, zero skipped and zero unexpected. It is
+stored at `~/.chat/evaluations/coding-acceptance/canonical-875433c.json`; its
+SHA-256 is
+`b7f57145c6510ecb4c3409edf00e2b49264b9575b87cab53c7d0ce67d728d91b`.
+
+The final aggregator's `canonical-suite-record` gate requires the same clean
+current revision and an exact ordered match to the repository's current test
+declarations. A passing summary cannot hide a removed, renamed or failed test.
+
+Canonical command:
+
+```text
+CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json /Users/liu/projects/.agent-tools/capped.sh 4096 emacs -Q -batch -l tests/run-tests.el
 ```
 
 ## Frozen Campaign Runner
@@ -260,13 +282,13 @@ and the campaign pauses without consuming that repetition/task identity. Agent
 request retries remain narrower than this campaign-level stop boundary.
 
 Clean no-network preflight passed for both replacement roles under harness
-revision `251706ebab8950ec89301e610ad0b2ce0de47d8f`. The current role uses that
+revision `875433ce249d0c7f3fc72126ec74b076b73392ef`. The current role uses that
 same implementation revision; the baseline role uses
 `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`. Both descriptors contain 30
 tasks, five repetitions and 150 expected results with manifest digest
 `4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`.
 Their configuration digests are respectively
-`95dde876ab3408ddf705fc8af6f4d29b4ba98e914aa0f44b2be9cdb6ce36337e`
+`cf5bc65e878ed32645347f341c43a803f669778962e511576007f727a17749a4`
 and `eb36461d214c64719d15e36478a4f1eefa96a143011b347ebe9ece763b01c3e7`.
 The subsequent live readiness request returned the provider's explicit HTTP
 403 seven-day quota error, and the runner confirmed that no campaign directory
@@ -284,7 +306,7 @@ was created.
    resume a campaign across an implementation or manifest revision.
 4. Establish trusted token coverage for at least 95 percent of both replacement
    comparison sets. The historical baseline cannot satisfy this gate.
-5. From a clean frozen revision, run both standalone reliability commands and
-   pass both complete JSON objects to `chat-coding-acceptance-run-final`; do not
-   transcribe runtime or quality summary values by hand.
+5. From a clean frozen revision, run all three standalone evidence commands and
+   pass the complete runtime, quality and canonical JSON objects to
+   `chat-coding-acceptance-run-final`; do not transcribe summary values by hand.
 6. Mark M19 complete only if the immutable aggregate result is `passed`.

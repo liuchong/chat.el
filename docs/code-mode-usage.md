@@ -258,11 +258,13 @@ manifest、revision、运行配置、重复身份或并发执行，也不能向�
 `M-x chat-coding-acceptance-run-final`。验收会拒绝混合 campaign、相同实现
 revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 token usage 或
 不真实的 large-repo 样本，结果不会被误判为通过。最终验收还必须读取同一 clean
-implementation revision 上生成的完整 runtime 与 quality JSON 记录。聚合器会复算
+implementation revision 上生成的完整 runtime、quality 与 canonical JSON 记录。聚合器会复算
 runtime 的九个 gate，检查 17 次 Goal/Plan 定向检查和 20 个 Goal 投影样本；同时从
 quality 原始语义查询、48 个固定场景、20 个 plan/work-note prompt 样本和 Review
 finding sets 重算 20 个质量 gate。手工填写汇总字段、遗漏语言或把 skip 当 pass 都会
-得到 blocked。
+得到 blocked。canonical 来源门还会读取仓库中精确的 `ert-deftest` 清单，逐项核对
+同一次全量运行的结果；缺项、改名、expected failure、skip、abort、dirty 或 revision
+不符同样会得到 blocked。
 
 标准生产命令为：
 
@@ -274,10 +276,15 @@ CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json \
 CHAT_QUALITY_RELIABILITY_OUTPUT=/absolute/path/quality-reliability.json \
   /Users/liu/projects/.agent-tools/capped.sh 4096 \
   emacs -Q -batch -l tests/performance/run-quality-reliability.el
+
+CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json \
+  /Users/liu/projects/.agent-tools/capped.sh 4096 \
+  emacs -Q -batch -l tests/run-tests.el
 ```
 
 调用 `chat-coding-acceptance-run-final` 时，runtime 完整顶层对象作为第三个
-`metadata` 参数，quality 完整顶层对象作为第四个 `quality-metadata` 参数传入。
+`metadata` 参数，quality 完整顶层对象作为第四个 `quality-metadata` 参数，canonical
+完整顶层对象作为第五个 `canonical-metadata` 参数传入。
 
 固定 manifest 保持 30 个任务的语言和类别平衡，其中 `python-locate` 是
 `large-repo` task。版本化生成描述符在隔离 workspace 内物化 10,000 个可索引
