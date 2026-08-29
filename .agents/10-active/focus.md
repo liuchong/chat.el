@@ -108,12 +108,20 @@ directions. The one-way version passed while four live commands were
 undocumented; both directions failed on their first run, the second
 catching `/help` being dropped from the help while it was restructured.
 
-Spec 026 is accepted and pending implementation after the current input-staging
-and passive-hint stage. It replaces separate input-adjacent work projections with
+The structured input-staging and passive-hint stage is complete. Spec 026 is
+accepted and pending implementation next. It replaces separate input-adjacent work projections with
 a default-closed two-level work shelf: one stable prompt disclosure controls the
 whole region, while non-empty TODO, changed-files, Goal and Plan sections remain
 independently collapsed. Changed files must come from current-session successful
 runtime write evidence, never a repository-wide dirty-file scan.
+
+Spec 027 records the deferred application-wide session collaboration design. Its
+admission layer captures every new requirement and preempts current work only for
+explicit or genuinely urgent conditions; normal follow-ups wait behind the current
+atomic plan item. It also defines a per-session user-only input ledger, isolated
+runtime failure evidence, pre-compaction snapshots, guarded default-five session
+catalogs, local channels, session relations, roles, topics and a later Termini JM
+adapter. The current objective requires this design record, not its implementation.
 
 Six problems reported from real use are fixed, and five of them were on
 the path a person takes in their first minute: `C-a` landing before the

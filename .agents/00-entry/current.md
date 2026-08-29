@@ -247,6 +247,17 @@ hints: bounded overlay text with no focus, selected row or keymap, placed above
 or below according to available rows. It never changes `RET`; optional frequency
 ordering affects display only.
 
+Spec 027 is the accepted deferred contract for session collaboration, recall and
+requirement admission. New user requirements are always captured, but normal
+follow-ups do not displace the current atomic plan item; only explicit preemption,
+critical runtime risk, blocking correction or a real urgent deadline may interrupt
+through a recorded decision. Each session receives a separate immutable user-only
+input ledger and isolated runtime evidence, both queried on demand rather than
+injected into standing context. The same Spec defines pre-compaction snapshots,
+a guarded default-five global session catalog, local channels, parent/child roles,
+parallel topics and a later Termini JM transport adapter. This objective requires
+the design record only; implementation remains deferred.
+
 Output format is now stated rather than assumed. Every model writes
 Markdown by habit and the renderer was built around that habit, so the
 system prompt asks for it and narrows it to the subset a buffer displays
