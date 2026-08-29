@@ -80,6 +80,14 @@
     `((test . ,(symbol-name name))
       (passed . ,(if passed t :json-false)))))
 
+(defun chat-quality-reliability--validate-scenarios ()
+  "Fail before measurement when a directed scenario is not loaded."
+  (dolist (group chat-coding-acceptance-quality-scenarios)
+    (dolist (test-name (cddr group))
+      (unless (ert-test-boundp test-name)
+        (error "Quality scenario is unavailable: %s/%s"
+               (car group) test-name)))))
+
 (defun chat-quality-reliability--await-map (root)
   "Refresh ROOT and return its terminal repository-map result."
   (let ((deadline (+ (float-time) 10.0)) result)
@@ -234,7 +242,9 @@
     (actual . ,(chat-coding-acceptance-gate-actual gate))))
 
 (unwind-protect
-    (let* ((semantic-corpus (chat-quality-reliability--semantic-corpus))
+    (progn
+      (chat-quality-reliability--validate-scenarios)
+      (let* ((semantic-corpus (chat-quality-reliability--semantic-corpus))
            (review-corpus (chat-quality-reliability--review-corpus))
            (prompt-samples (chat-quality-reliability--prompt-samples))
            (semantic
@@ -296,7 +306,7 @@
           (with-temp-file output (insert encoded "\n")))
         (princ encoded)
         (princ "\n")
-        (unless all-passed (kill-emacs 1))))
+        (unless all-passed (kill-emacs 1)))))
   (when (file-directory-p chat-quality-reliability--state)
     (delete-directory chat-quality-reliability--state t)))
 

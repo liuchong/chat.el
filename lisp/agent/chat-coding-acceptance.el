@@ -129,7 +129,7 @@
      chat-work-plan-rejects-evidence-from-another-session-or-task
      chat-work-plan-resolves-tool-events-by-agent-task-scope)
     (planUiStability "plan-ui-stability"
-     chat-work-plan-ui-thousand-updates-preserve-input-and-window)
+     chat-work-shelf-thousand-updates-preserve-input-and-window)
     (reviewReadOnly "review-read-only"
      chat-code-review-profile-has-zero-write-effects)
     (collaborationConflicts "collaboration-conflicts"

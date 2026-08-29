@@ -6,6 +6,17 @@
 (require 'test-helper)
 (require 'chat-coding-acceptance)
 
+(ert-deftest chat-coding-acceptance-quality-scenarios-use-current-shelf-contract ()
+  "The quality record measures the current input work-shelf stability test."
+  (let ((tests (apply #'append
+                      (mapcar #'cddr
+                              chat-coding-acceptance-quality-scenarios))))
+    (should (memq 'chat-work-shelf-thousand-updates-preserve-input-and-window
+                  tests))
+    (should-not
+     (memq 'chat-work-plan-ui-thousand-updates-preserve-input-and-window
+           tests))))
+
 (defun chat-coding-acceptance-test--result
     (status checks &optional executor tags task-id)
   "Return a coding result with STATUS, CHECKS, EXECUTOR, TAGS, and TASK-ID."
