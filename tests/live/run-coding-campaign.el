@@ -63,6 +63,18 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
   (equal (file-name-as-directory (file-truename left))
          (file-name-as-directory (file-truename right))))
 
+(defun chat-campaign-runner--install-runtime-home (runtime-home)
+  "Install isolated RUNTIME-HOME without leaving a stale tilde directory."
+  (when runtime-home
+    (let ((home (file-name-as-directory (expand-file-name runtime-home))))
+      (make-directory home t)
+      (setenv "HOME" home)
+      ;; `default-directory' may have been recorded as ~/... before HOME was
+      ;; replaced.  A subprocess expands it after the replacement and then
+      ;; cannot start, even though the checkout itself still exists.
+      (setq default-directory chat-campaign-runner--harness-root)
+      home)))
+
 (defun chat-campaign-runner--provider-readiness (provider model)
   "Require one minimal successful response from PROVIDER and MODEL."
   (let* ((message
@@ -138,10 +150,8 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
         (chat-campaign-runner--validate-checkout
          chat-campaign-runner--harness-root harness-revision "Harness"
          allow-dirty))
-  (when runtime-home
-    (setq runtime-home (file-name-as-directory (expand-file-name runtime-home)))
-    (make-directory runtime-home t)
-    (setenv "HOME" runtime-home))
+  (setq runtime-home
+        (chat-campaign-runner--install-runtime-home runtime-home))
   (load (expand-file-name "chat.el" implementation-root) nil nil t)
   (unless (chat-campaign-runner--same-root-p
            implementation-root chat-campaign-runner--harness-root)

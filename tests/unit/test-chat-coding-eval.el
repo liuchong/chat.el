@@ -125,6 +125,20 @@
        (chat-campaign-runner--provider-readiness
         'provider-a "model-a")))))
 
+(ert-deftest chat-campaign-runner-runtime-home-keeps-an-absolute-directory ()
+  "Changing HOME cannot leave subprocesses resolving an obsolete ~/ path."
+  (chat-test-with-temp-dir
+   (let* ((process-environment (copy-sequence process-environment))
+          (harness (file-name-as-directory (expand-file-name "harness" temp-dir)))
+          (home (expand-file-name "home" temp-dir))
+          (chat-campaign-runner--harness-root harness)
+          (default-directory "~/project/"))
+     (make-directory harness t)
+     (should (equal (file-name-as-directory home)
+                    (chat-campaign-runner--install-runtime-home home)))
+     (should (equal (file-name-as-directory home) (getenv "HOME")))
+     (should (equal harness default-directory)))))
+
 (ert-deftest chat-coding-eval-suite-has-fixed-balanced-coverage ()
   "The baseline contains thirty tasks with balanced category coverage."
   (let* ((tasks (chat-coding-eval-load-suite
