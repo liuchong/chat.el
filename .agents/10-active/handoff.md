@@ -14,40 +14,24 @@
 
 ## Continue With
 
-- M17 durable Goal Mode and M18 read-only Plan Mode are complete; the canonical
-  suite passes 1782/1782
+- M9-M18 and deterministic M19 implementation are complete; implementation
+  revision `875433c` passes the canonical suite 1810/1810
 - Goal state is the completion contract; work plan/TODO is the execution path;
   Plan Mode is a permission boundary. Do not merge these concepts or stores
-- The isolated M9 baseline is complete with 150 terminal results: 3 passed,
-  107 failed, 23 errored and 17 cancelled
-- `m19-current-20260829T022800` is complete at revision `aa4698a`: 112 passed,
-  37 cancelled and one failed, with no transport or framework errors
-- Keep M19 incomplete: the measured 74.67 percent success rate misses the 80
-  percent floor, five cancelled Rust trials leaked temporary files outside the
-  allowed paths, and the M9 baseline lacks trusted token usage for 10/150 trials
-- The interrupted `m19-current-20260828T210105` attempt contains only the first
-  30/150 terminal results at revision `8c45301` and no completion record; keep it
-  as incomplete evidence and do not mix it into the post-change campaign
-- `m19-current-20260828T220053` reached 150/150 at revision `8ca4ae8`, but 131
-  DNS and two TLS failures left 133 infrastructure-invalid trials; retain it as
-  incident evidence and never use it for the final comparison
-- New live campaigns support validated missing-trial recovery through
-  `chat-coding-eval-resume-live`; resume rejects revision, manifest, capability,
-  runtime, duplicate-result and concurrent-run drift
-- Model transport retries use cancellable `2/5/10/20s` backoff. Exhausted
-  transient failures move to `attempts/`, release the lock and leave the trial
-  missing for a later resume
-- The fixed tagged large-repository task now materializes 10,000 indexed files
-- The M9 baseline is bound to implementation revision `e4e6cbc`, provider
-  `kimi-code`, model `k3` and the fixed manifest
-- Generic verification now accepts a run identity, and compile-task commands
-  use the same deterministic exact command gate as background tasks; unknown
-  commands still fail closed
-- Run a fresh current campaign after further fixes, then reproduce the aggregate
-  with `M-x chat-coding-acceptance-run-final`; do not reuse the `aa4698a`
-  campaign after the implementation revision changes
+- Clean runtime, quality and canonical JSON records are stored outside the
+  repository and all production provenance gates pass for `875433c`
+- Current and baseline no-network descriptors each contain 30 tasks, five
+  repetitions and 150 expected results with the same frozen manifest
+- M19 remains incomplete until fresh baseline/current live campaigns use one
+  identical concrete provider/model identity and the strict aggregate passes
+- DeepSeek Flash may be used, but it requires fresh campaign identities for
+  both roles; never mix it with Kimi or historical campaign samples
+- While live work is deferred, implement the provider transport abstraction
+  listed in project status, directly on `master`, with focused tests and timely
+  Conventional Commit submissions
 
 ## Avoid
 
+- Creating a development worktree; the user directed development on `master`
 - Creating new session records in `docs/ai-contexts/`
 - Treating imported legacy logs as a substitute for current active focus files

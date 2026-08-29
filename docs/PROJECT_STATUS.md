@@ -450,8 +450,8 @@ seven-day quota response before creating a campaign directory.
   capability identity
 - record the immutable comparison, trusted usage sample and failure taxonomy;
   do not mark M19 complete before every strict acceptance gate passes
-- retain both complete runtime and quality reliability JSON records from the
-  same clean frozen revision and pass them intact to final aggregation
+- retain the complete runtime, quality and canonical JSON records from the same
+  clean frozen revision and pass them intact to final aggregation
 - make true provider streaming and fallback behavior share one transport abstraction
 - extend the reading workflow from code mode into other surfaces only when the shared capture model stays intact
 - consider a current-file reading command after the new region, defun, and near-point captures settle

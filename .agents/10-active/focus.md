@@ -8,50 +8,30 @@
 
 ## Doing Now
 
-M17 durable Goal Mode and M18 read-only Plan Mode are implemented. Goal is a
-versioned completion contract with scoped evidence, pause/resume/block/complete,
-bounded automatic continuation, restart/compaction recovery and independent
-links to TODO plans, notes and runtime tasks. Plan Mode is a separate persisted
-permission state: research and plan-state writes are allowed, source mutation
-and unknown effects fail closed, and approval is tied to the exact submitted
-plan revision through a user-only path. Goal and Plan Mode share the existing
-session/event/context/UI infrastructure rather than creating parallel stores.
-The canonical suite passes 1782/1782 after migration, scope-isolation,
-revision-conflict, 20-turn/two-compaction recovery, 1,000-update UI tests and
-the live-chat stability regressions recorded in the current stage log.
+M9-M18 implementation and the deterministic part of M19 are complete. Goal is
+the versioned completion contract; work plan/TODO is its replaceable execution
+path; Plan Mode is an independent read-only permission state. Scoped context,
+notes, evidence, restart/compaction recovery, verification, isolation, Review
+and collaboration contracts are implemented on the shared session/event/UI
+infrastructure.
 
-M19 final acceptance remains blocked. The unified
-chat surface projects planning, understanding, editing, verifying, repairing
-and reviewing without moving the input point or visible window. Diagnostics
-carry closed error kinds and next actions. The 10,000-file performance gates
-pass, including a known single-file update that no longer rescans the tree.
-The fixed corpus now contains one deterministic large-repository task with
-10,000 indexed Python files, measured rather than trusted from its tag.
-Completion now requires separate immutable M9 `baseline` and M19 `current`
-campaigns, each with 30-by-5 live results and trusted provider token usage. The
-M9 baseline campaign is now complete at revision `e4e6cbc`: 150/150 terminal
-results, with 3 passed, 107 failed, 23 errored and 17 cancelled. The first M19
-current attempt at revision `8c45301` was interrupted after its first 30/150
-terminal results and has no completion record. It remains preserved as
-incomplete evidence and cannot be mixed with another revision. Campaigns can
-now resume only missing repetition/task identities after validating the frozen
-descriptor, manifest, implementation revision, model capability snapshot,
-runtime configuration and every durable result. Concurrent runs are locked out,
-cancellation leaves resumable evidence, and completion requires the exact
-unique matrix. A second campaign at revision `8ca4ae8` reached 150/150, but a
-host-network incident caused 131 DNS and two TLS transport failures; its 133
-infrastructure-invalid trials make it unusable for final comparison. Model
-transport retries now back off asynchronously and remain cancellable. If those
-retries are exhausted, the attempt is archived and the campaign pauses without
-claiming the trial identity, so a later resume can retry it. The clean
-`m19-current-20260829T022800` campaign at revision `aa4698a` then completed
-150/150 with 112 passed, 37 cancelled and one failed, and no transport or
-framework errors. Its measured 74.67 percent success misses the 80 percent
-floor; five cancelled Rust trials leaked temporary files outside the allowed
-paths, and M9 lacks trusted token usage for 10/150 trials. Verification now
-accepts the supplied run identity and known compile-task commands use the
-existing exact command gate. A fresh campaign at the next implementation
-revision is required before M19 can be reconsidered.
+Implementation revision `875433c` has three clean, revision-bound evidence
+records: runtime passes all nine gates, quality passes all 20 gates, and the
+canonical suite passes 1810/1810 with zero failed, skipped or unexpected
+results. The strict final aggregator independently validates all three records.
+Current and historical-baseline descriptors also pass the clean 30-by-5
+no-network preflight with the same 30-task manifest.
+
+M19 final acceptance remains blocked only on fresh live evidence. Baseline and
+current must each run 30 tasks five times with one identical concrete
+provider/model/capability identity and trusted usage. Historical campaigns stay
+immutable incident or comparison evidence and cannot be mixed into the final
+aggregate. A DeepSeek Flash campaign is an allowed replacement identity only if
+both roles use it from fresh campaign directories and readiness succeeds.
+
+Until live execution resumes, continue the next engineering item directly on
+`master`: make true provider streaming and fallback behavior share one tested
+transport abstraction. Do not create a development worktree.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a
