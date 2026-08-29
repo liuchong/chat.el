@@ -1,7 +1,7 @@
-# Spec 025: Passive Slash Command Hints
+# Spec 025: Passive Input Hints
 
 - Status: accepted
-- Scope: chat input surface
+- Scope: reusable chat input hint engine and slash-command provider
 - Replaces: no existing command or message contract
 - Depends on: Decision 0012, the canonical slash command table and chat i18n
 
@@ -13,7 +13,8 @@ keyboard focus, gives `RET` a candidate-selection meaning, introduces a second
 commit step and can move the chat window while the developer is typing.
 
 The input surface instead needs a passive hint. It may show possible continuations,
-but it must never become an interactive control.
+but it must never become an interactive control. Slash commands are the first
+provider, not a one-off renderer.
 
 ## Interaction Contract
 
@@ -71,14 +72,28 @@ must work with the hint disabled.
 
 ## Architecture
 
-The implementation is a buffer-local zero-width overlay owned by `chat-mode`.
-One post-command observer computes a pure hint model containing prefix, ordered
-candidates, annotations, direction and visible row count. A renderer projects
-that model to `before-string` or `after-string`; cleanup deletes the overlay.
+The reusable implementation lives in an input-hint module independent of slash
+parsing. It owns a buffer-local zero-width overlay and a provider contract. A
+provider receives the current buffer/input facts and returns either no model or a
+pure hint model containing source identity, prefix and bounded candidates with
+display text, completion text and optional annotation. Providers run in declared
+priority order; the first applicable provider owns the current hint.
+
+`chat-mode` supplies the slash-command provider and the geometry adapter. One
+post-command observer asks the engine for a model, adds deterministic ordering,
+direction and visible row count, then projects it to `before-string` or
+`after-string`; cleanup deletes the overlay.
 
 The observer must be bounded by the number of registered commands. It performs no
 I/O, timer polling or model work. Session command-usage counters are updated only
 after a known command handler has been invoked successfully.
+
+Future providers may cover in-memory subcommands, configured model names, loaded
+tool names or other bounded vocabularies. Every provider must remain synchronous
+and pure: no filesystem scan, process, network request, model request, minibuffer
+or unbounded session-history walk may occur from the typing observer. I/O-backed
+sources such as path completion stay user-triggered through `TAB` unless they
+later gain an already-warm bounded cache with explicit invalidation.
 
 ## Non-Goals
 
@@ -88,6 +103,7 @@ after a known command handler has been invoked successfully.
 - automatically inserting a candidate because it ranks first;
 - changing slash parsing, unknown-command fallback, sticky command ownership,
   send modes or message staging.
+- synchronous I/O or model work while observing ordinary typing.
 
 ## Acceptance
 
@@ -105,4 +121,3 @@ Automated tests must prove:
   completion session;
 - command and path completion still exclude each other at the slash/path boundary;
 - command-table/help/i18n consistency and the full canonical suite remain green.
-
