@@ -12,6 +12,13 @@ collaboration. Historical indexing commands remain compatibility wrappers.
 Runtime source files live under `lisp/agent`, `lisp/core`, `lisp/llm`, `lisp/tools`, `lisp/plugin`, `lisp/ui`, and `lisp/code`, with `chat.el` kept at the repository root as the single entry point.
 The agent loop is extracted from UI and code mode. Tool results reenter the transcript as ordered `:tool` messages instead of bundled assistant fields for new runs. Emacs-native read-only tools are registered through the plugin host with default project-scoped buffer access, owner metadata, and rollback on plugin stop.
 The provider layer now supports mainstream official models across domestic and international vendors, with `kimi` kept as the default and local config files loaded from user and project locations.
+Saved sessions now expose a deterministic Markdown export from both the active
+chat buffer and the session tree.  The export is a public projection rather
+than a copy of session persistence: it includes visible user/assistant text and
+bounded attachment summaries while excluding prompts, reasoning, tool traffic,
+raw transport data, approval state, working paths, and internal metadata.
+Writes use a same-directory temporary file, atomic rename, and explicit
+overwrite confirmation.
 The repository now uses `.agents/` as the formal agent knowledge base, with legacy workflow logs migrated out of `docs/ai-contexts/`.
 The Agent Runtime roadmap M0 through M8 is complete: a versioned
 lifecycle event contract now unifies runtime hooks and session-scoped audit for
@@ -436,7 +443,8 @@ seven-day quota response before creating a campaign directory.
 ## Known Boundaries
 
 - token counting is still heuristic rather than model exact
-- streaming currently falls back to the async request path in `chat-llm-stream`
+- providers without native streaming intentionally use the asynchronous
+  fallback; native and fallback paths emit the same normalized model events
 - default providers still depend on external API availability and local keys
 - some provider default remote model names are best effort defaults and may need local adjustment as vendor catalogs change
 - provider integration tests now live outside the canonical batch suite and should be run explicitly with credentials and network access
@@ -452,23 +460,15 @@ seven-day quota response before creating a campaign directory.
   do not mark M19 complete before every strict acceptance gate passes
 - retain the complete runtime, quality and canonical JSON records from the same
   clean frozen revision and pass them intact to final aggregation
-- make true provider streaming and fallback behavior share one transport abstraction
-- extend the reading workflow from code mode into other surfaces only when the shared capture model stays intact
-- consider a current-file reading command after the new region, defun, and near-point captures settle
-- expose the shared reading capture model to plain chat without duplicating formatting or session bootstrap logic
 - keep increasing focused unit coverage around new workflow modules rather than only growing end-to-end surface area
-- keep growing test density around shared reading helpers and remaining refusal edges without fragmenting the shared reading workflow
-- add denser tests around plain-chat reading commands beyond the current helper and bootstrap matrix
-- keep growing deterministic refusal and fallback coverage before adding more reading-surface features
-- keep adding helper-level tests that can still expose real metadata and reuse bugs instead of only increasing broad end-to-end coverage
-- keep pushing helper-level refusal and naming coverage before widening the reading workflow surface again
-- keep closing blank-context edge cases before spending more effort on wider reading-surface discoverability
-- keep treating whitespace-only context as invalid input so helper-level guardrails match actual AI usefulness
-- keep pushing helper-level blank-context coverage until quoted reading prompts cannot be created from useless input
 - add live-server integration cases only for intentionally provisioned
   environments; deterministic workflow, remote-tool, and nested-agent
   paths are covered
-- consider a richer session browser and export flow
+- add session-tree filtering and explicit open/inspect actions only after the
+  current tree and export workflow have real-use feedback
+- keep machine-readable or full-fidelity session archives separate from the
+  public Markdown projection; any broader export requires an explicit secrets
+  and authorization contract
 
 ## Key Files
 
@@ -479,6 +479,7 @@ seven-day quota response before creating a campaign directory.
 | `lisp/plugin/chat-plugin.el` | plugin host |
 | `lisp/ui/chat-ui.el` | UI and response lifecycle |
 | `lisp/core/chat-session.el` | persistence |
+| `lisp/core/chat-session-export.el` | privacy-safe public transcript export |
 | `lisp/core/chat-goal.el` | durable Goal contracts and lifecycle |
 | `lisp/core/chat-plan-mode.el` | read-only planning permission state |
 | `lisp/llm/chat-llm.el` | provider abstraction |

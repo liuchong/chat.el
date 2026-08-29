@@ -33,6 +33,7 @@ Code Mode 是 chat.el 的 AI 编程功能，提供代码生成、重构、测试
 | [../specs/002-code-mode-summary.md](../specs/002-code-mode-summary.md) | 一页总结 |
 | [../specs/002-code-mode-quickstart.md](../specs/002-code-mode-quickstart.md) | 快速入门 |
 | [../specs/003-reading-workflow-and-navigation.md](../specs/003-reading-workflow-and-navigation.md) | 阅读代码、引用提问与 AI 导航文件工作流 Spec |
+| [../specs/024-privacy-safe-session-export.md](../specs/024-privacy-safe-session-export.md) | 会话浏览与隐私安全 Markdown 导出 Spec |
 
 ### 实现文档
 

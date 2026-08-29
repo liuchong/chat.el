@@ -173,6 +173,7 @@ Layout rules:
 | `M-x chat-new-session` | Create a new session |
 | `M-x chat-list-sessions` | Switch to an existing session |
 | `M-x chat-session-tree-open` | Browse saved sessions as a parent/branch tree |
+| `M-x chat-export-session` | Export the current visible transcript as privacy-safe Markdown |
 | `M-x chat-context-compact-current-session` | Summarize compactable history with the session model |
 | `M-x chat-show-help` | Open the native chat help buffer |
 | `M-x chat-view-raw-message` | Inspect the last raw API exchange |
@@ -188,6 +189,12 @@ Layout rules:
 | `M-x chat-ask-defun` | Ask AI about the defun at point in a chat session |
 | `M-x chat-ask-near-point` | Ask AI about nearby context in a chat session |
 | `M-x chat-ask-current-file` | Ask AI about the current file in a chat session |
+
+In the session tree, press `e` to export the session at point.  Session
+exports preserve visible user and assistant Markdown plus bounded attachment
+summaries.  They omit system prompts, reasoning, tool traffic, raw provider
+payloads, approval state, working paths, and internal metadata.  Writes are
+atomic, and an existing destination is never replaced without confirmation.
 
 ## In-Buffer Commands
 
