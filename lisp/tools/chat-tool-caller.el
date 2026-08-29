@@ -208,6 +208,7 @@ The vector is empty when tool calling is disabled."
      '("Programming plan boundaries:"
        "- Use `programming_plan_create` as the durable TODO list for substantial coding, then advance its items while implementing."
        "- Successful tools return an exact Evidence ID. Pass that ID in `evidence` when completing a plan item or recording Goal evidence; never invent one."
+       "- Plan transitions are revisioned and only one item may be active. Never batch dependent transitions; wait for each result and use its returned revision for the next transition."
        "- Do not enter Plan Mode merely to create or use that TODO list."
        "- Call `programming_plan_mode_enter` only when the user explicitly asks for read-only planning before implementation.")
      "\n")))

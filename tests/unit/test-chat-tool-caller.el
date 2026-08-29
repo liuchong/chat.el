@@ -881,6 +881,8 @@ being a thing the reader could do when the two surfaces merged."
            :is-active t))))
     (let ((guidance (chat-tool-caller--plan-usage-guidance tools)))
       (should (string-match-p "durable TODO list" guidance))
+      (should (string-match-p "Never batch dependent transitions" guidance))
+      (should (string-match-p "returned revision" guidance))
       (should (string-match-p "Do not enter Plan Mode" guidance))
       (should (string-match-p "explicitly asks" guidance)))))
 

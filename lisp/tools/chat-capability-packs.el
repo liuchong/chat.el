@@ -1203,7 +1203,10 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    #'chat-capability-programming-plan-submit 'project '(state))
   (chat-capability--register-tool
    'programming_plan_transition "Programming Plan Transition"
-   "Start, complete, block, or skip one plan item using the observed revision. Completion requires known evidence ids."
+   (concat "Start, complete, block, or skip one plan item using the observed "
+           "revision. Completion requires known evidence ids. Transitions are "
+           "serial: wait for each result and use its returned revision before "
+           "requesting the next transition.")
    '((:name "plan_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t)
      (:name "item_id" :type "string" :required t)

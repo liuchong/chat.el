@@ -355,6 +355,16 @@
     (should-error
      (chat-capability--string-list '((id . "not-a-string")) "evidence"))))
 
+(ert-deftest chat-capability-plan-transition-advertises-serial-revisions ()
+  "Dependent plan transitions cannot safely share an observed revision."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (let ((description
+           (chat-forged-tool-description
+            (chat-tool-forge-get 'programming_plan_transition))))
+      (should (string-match-p "Transitions are serial" description))
+      (should (string-match-p "returned revision" description)))))
+
 (ert-deftest chat-capability-registers-bounded-goal-tool-surface ()
   "The Agent can advance Goals but cannot pause, resume or clear them."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))

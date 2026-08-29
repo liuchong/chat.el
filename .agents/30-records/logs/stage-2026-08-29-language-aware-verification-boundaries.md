@@ -55,10 +55,29 @@ unavailable. The Guard did not receive those facts.
 
 - focused verification module suite: 17/17 passed before the final duplicate
   JavaScript identity case was added;
-- final canonical batch: 1824/1824 passed with zero unexpected results; this
+- canonical batch after the boundary change: 1824/1824 passed with zero
+  unexpected results; this
   includes the Guard boundary, polyglot composition, conventional language
   checks, duplicate rejection and multiple JavaScript entrypoint cases;
+- canonical batch after the evidence-driven plan guidance adjustment:
+  1825/1825 passed with zero unexpected results;
 - `git diff --check` passed.
+
+## Focused Live Feedback
+
+Committed revision `eb1b56f` passed campaign
+`m19-smoke-go-boundary-20260829T201500` for `go-multi-file` in 44.803 seconds.
+The result changed only `sample.go` and `README.md`, produced no generated or
+out-of-scope files, and cleaned its workspace. The Guard allowed the original
+targeted `go test` command and explicitly reasoned about the project and private
+temporary environment. No cache relocation or cleanup command appeared.
+
+The same trace exposed two unrelated plan tool errors: the model batched two
+dependent transitions with one observed revision, then attempted the next item
+before the prior transition was valid. Tool and prompt guidance now state that
+plan transitions are serial, only one item may be active, and each next call
+must use the revision returned by the previous result. This is a soft guidance
+change supported by an exact trace rather than a new hard-coded exception.
 
 ## Lessons
 
@@ -78,8 +97,7 @@ unavailable. The Guard did not receive those facts.
 
 ## Follow-Up
 
-Run one Go multi-file and one Python multi-file live smoke on the committed
-candidate. Inspect tool count, approvals, Guard rationale, cache paths and task
-duration, not only pass/fail. If the loop is gone, preserve the smoke evidence
-and continue with the remaining goal work before freezing the final M19
-campaign revision.
+Commit the serial plan guidance, then run one Python multi-file live smoke on
+that candidate. Inspect tool count, approvals, Guard rationale, cache paths and
+task duration, not only pass/fail. If the loop remains gone, continue with the
+remaining goal work before freezing the final M19 campaign revision.

@@ -72,8 +72,14 @@ backend. The implementation revision changed, so focused live smoke and fresh
 frozen campaigns are still required.
 
 The language-aware verification boundary change passes the complete canonical
-batch at 1824/1824 with zero unexpected results. It remains a development
-result until committed and followed by the planned Go/Python live smoke.
+batch at 1824/1824 with zero unexpected results. Its committed Go multi-file
+smoke passed in 44.803 seconds with only the two requested source changes, no
+generated or out-of-scope files and a cleaned workspace. The Guard allowed the
+original targeted Go test using the real private temporary boundary; the former
+cache migration and cleanup loop did not occur. The trace also showed two plan
+errors caused by batching revision-dependent transitions, so plan tool guidance
+now requires serial transitions using each returned revision. That adjustment
+passes the canonical batch at 1825/1825; a Python multi-file smoke remains.
 
 Goal and Plan acceptance facts now have a standalone producer rather than a
 hand-authored metadata contract. The runner executes 17 gate-linked checks over
