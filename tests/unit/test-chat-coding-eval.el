@@ -141,6 +141,39 @@
      (should (equal (file-name-as-directory home) (getenv "HOME")))
      (should (equal harness default-directory)))))
 
+(ert-deftest chat-campaign-runner-starts-new-and-resumes-existing-campaigns ()
+  "The batch runner resumes only an existing validated campaign directory."
+  (chat-test-with-temp-dir
+   (let ((existing (expand-file-name "existing" temp-dir))
+         (new (expand-file-name "new" temp-dir))
+         calls)
+     (make-directory existing)
+     (cl-letf (((symbol-function 'chat-coding-eval-resume-live)
+                (lambda (&rest arguments)
+                  (push (cons 'resume arguments) calls)
+                  'resumed))
+               ((symbol-function 'chat-coding-eval-run-live)
+                (lambda (&rest arguments)
+                  (push (cons 'start arguments) calls)
+                  'started)))
+       (should
+        (eq 'resumed
+            (chat-campaign-runner--start-or-resume
+             existing 'provider-a 5 "/manifest.json" "model-a" "campaign-a"
+             "revision-a" "current")))
+       (should
+        (equal (list 'resume existing "/manifest.json" "revision-a")
+               (car calls)))
+       (should
+        (eq 'started
+            (chat-campaign-runner--start-or-resume
+             new 'provider-a 5 "/manifest.json" "model-a" "campaign-b"
+             "revision-a" "baseline")))
+       (should
+        (equal (list 'start 'provider-a 5 "/manifest.json" "model-a"
+                     "campaign-b" "revision-a" "baseline")
+               (car calls)))))))
+
 (ert-deftest chat-coding-eval-suite-has-fixed-balanced-coverage ()
   "The baseline contains thirty tasks with balanced category coverage."
   (let* ((tasks (chat-coding-eval-load-suite

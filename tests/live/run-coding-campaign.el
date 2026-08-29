@@ -102,6 +102,19 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
      (manifestDigest . ,(alist-get 'manifestDigest descriptor))
      (configurationDigest . ,(alist-get 'configurationDigest descriptor)))))
 
+(defun chat-campaign-runner--start-or-resume
+    (campaign-directory provider repetitions manifest model campaign-id
+                        implementation-revision role)
+  "Start a new campaign or resume validated missing work in CAMPAIGN-DIRECTORY."
+  (if (file-exists-p campaign-directory)
+      (progn
+        (unless (file-directory-p campaign-directory)
+          (error "Campaign path is not a directory: %s" campaign-directory))
+        (chat-coding-eval-resume-live
+         campaign-directory manifest implementation-revision))
+    (chat-coding-eval-run-live
+     provider repetitions manifest model campaign-id implementation-revision role)))
+
 (defun chat-campaign-runner-main ()
   "Validate configuration, then preflight or run one live campaign."
   (let* ((preflight (equal "1" (getenv "CHAT_CAMPAIGN_PREFLIGHT")))
@@ -197,9 +210,9 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
       (unwind-protect
           (progn
             (setq suite
-                  (chat-coding-eval-run-live
-                   provider repetitions manifest model campaign-id
-                   implementation-revision role))
+                  (chat-campaign-runner--start-or-resume
+                   campaign-directory provider repetitions manifest model
+                   campaign-id implementation-revision role))
             (while (and (file-exists-p lock) (< (float-time) deadline))
               (accept-process-output nil 1))
             (cond
