@@ -65,6 +65,56 @@
                                    (chat-verification-step-argv step)))
                        steps)))))
 
+(ert-deftest chat-code-verify-detects-conventional-language-tests ()
+  "Conventional small projects get argv-only checks without project config."
+  (dolist (case '(("test_sample.py" . ("python3" "-m" "unittest"))
+                  ("test.js" . ("node" "test.js"))
+                  ("sample-test.el" . ("emacs" "-Q" "--batch" "-L" "."
+                                        "-l" "sample-test.el" "--eval"
+                                        "(ert-run-tests-batch-and-exit)"))))
+    (chat-test-with-temp-dir
+     (with-temp-file (expand-file-name (car case) temp-dir)
+       (insert ""))
+     (let* ((profile (chat-code-verify-plan temp-dir nil))
+            (steps (chat-verification-profile-steps profile)))
+       (should (= (length steps) 1))
+       (should (equal (chat-verification-step-argv (car steps))
+                      (cdr case)))))))
+
+(ert-deftest chat-code-verify-composes-multiple-language-ecosystems ()
+  "A polyglot repository keeps checks for every detected ecosystem."
+  (chat-test-with-temp-dir
+   (with-temp-file (expand-file-name "go.mod" temp-dir)
+     (insert "module example.test/polyglot\n"))
+   (with-temp-file (expand-file-name "test_sample.py" temp-dir)
+     (insert ""))
+   (let* ((profile (chat-code-verify-plan temp-dir nil))
+          (steps (chat-verification-profile-steps profile)))
+     (should (equal (mapcar #'chat-verification-step-id steps)
+                    '("go-test" "python-test" "go-build"))))))
+
+(ert-deftest chat-code-verify-keeps-conventional-javascript-steps-distinct ()
+  "Multiple conventional JavaScript entrypoints retain stable identities."
+  (chat-test-with-temp-dir
+   (dolist (name '("test.js" "test.mjs"))
+     (with-temp-file (expand-file-name name temp-dir)
+       (insert "")))
+   (let* ((profile (chat-code-verify-plan temp-dir nil))
+          (steps (chat-verification-profile-steps profile)))
+     (should (equal (mapcar #'chat-verification-step-id steps)
+                    '("javascript-test-js" "javascript-test-mjs")))
+     (should (equal (mapcar #'chat-verification-step-argv steps)
+                    '(("node" "test.js") ("node" "test.mjs")))))))
+
+(ert-deftest chat-code-verify-rejects-duplicate-step-identities ()
+  "Polyglot profile composition cannot create ambiguous result identities."
+  (chat-test-with-temp-dir
+   (let ((left (chat-code-verify-test--step 'test t))
+         (right (chat-code-verify-test--step 'test t)))
+     (should-error
+      (chat-code-verify-validate-profile
+       (chat-code-verify-test--profile left right))))))
+
 (ert-deftest chat-code-verify-unrecognized-project-is-not-run ()
   "No recognizable command never becomes a false pass."
   (chat-test-with-temp-dir

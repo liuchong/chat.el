@@ -387,6 +387,53 @@ needs-attention 投影，不伪装为完成，也不无限重启 Agent run。
   完成 Goal，除非用户另行显式确认 Goal 合同；
 - Plan Mode 状态跨 session reload 保存；恢复时仍保持只读，不因进程重启自动批准。
 
+### 6.10 语言画像、工具链适配与提示包
+
+通用 Agent loop、权限、版本化编辑、验证和证据合同保持语言无关；语言特化只能作为
+有作用域、可解释、可度量的增量层，不能把语言名称直接写进主循环分支。统一画像至少
+包含以下字段：
+
+```elisp
+(cl-defstruct chat-code-language-profile
+  schema-version project-root revision
+  repository-languages dominant-language
+  current-file-language target-languages planned-languages
+  ecosystems toolchains generated-paths
+  evidence confidence conflicts source updated-at)
+```
+
+其中四类语言不得混为一个字段：
+
+- `repository-languages` 来自受版本约束的文件、manifest 和 repo map，表示仓库事实；
+- `current-file-language` 来自当前 buffer/file，仅表示用户当前观察位置；
+- `target-languages` 来自本轮允许修改范围、changed files 和任务对象，决定验证范围；
+- `planned-languages` 来自用户明确目标和已批准计划，只用于候选生成，不能覆盖仓库事实。
+
+检测证据必须记录来源、作用域、revision、confidence 和冲突。多语言仓库要组合多个
+ecosystem，不能按第一个 manifest 短路；生成代码、vendor、fixture、文档内代码块和
+嵌入语言分别标记，不能把宿主语言误当作目标语言。低置信度或证据冲突时，硬层只运行
+安全的共同检查，软层向模型暴露不确定性；不得猜测并强制套用某种语言规范。
+
+语言特化分为三个边界清楚的层：
+
+1. 硬规则层只处理可确定验证的事实，例如 argv schema、项目根、生成路径、缓存与临时
+   目录边界、工具链存在性、格式/lint/typecheck/test/build 顺序和结果解析。规则失败必须
+   返回结构化原因，不能伪装为模型失败。
+2. 软提示包是有版本、作用域和 token budget 的建议，内容包括语言惯例、常见失败模式、
+   推荐查询和验证策略。它不能扩大权限、修改验收标准，也不能压过用户或项目规则。
+3. 工具链 adapter 把 manifest、命令能力和运行结果转为验证步骤与证据；Agent 优先消费
+   adapter 结果，不自行移动缓存、清理未跟踪目录或重复发明项目命令。
+
+一条语言规则只有在固定任务或真实失败中重复出现、存在可复现根因、加入后没有降低其他
+语言成功率时才能进入默认提示包或硬规则。一次样本先进入阶段记录；可确定且安全相关的
+事实进入代码，启发式经验进入软提示包，项目特有要求留在 scoped rules。每次 promotion
+记录来源样本、预期收益、反例、适用版本和回滚条件，避免 prompt 膨胀与过拟合。
+
+验收按语言和跨语言分别统计：检测准确率、错误激活率、验证覆盖率、假通过、超时、工具
+调用数、approval/guard 循环、token 和成功率。最终要求单语言任务不回退，多语言任务的
+所有已检测 ecosystem 均有稳定且唯一的验证 step identity，任何提示包关闭后通用能力仍
+完整可用。
+
 ## 7. 施工阶段
 
 阶段编号延续已完成的 M0-M8。每个阶段必须遵循：先测试合同，再实现；阶段测试和规范测试全部通过后立即提交；未满足退出条件不得开始依赖它的下一阶段。
@@ -619,6 +666,23 @@ provider/model/capability identity 的 live 结果集。因此“基线基础设
   最终答复的热路径只读取当前进程、当前 session/turn 的验证缓存。
 - 定向模块测试 38/38、Agent 最终投影测试 3/3、隔离 coding fixture 集成测试
   1/1 通过；canonical suite 1615/1615 通过，零 unexpected result。
+
+#### 可靠性加固记录（2026-08-29）
+
+- `deepseek-v4-flash` 固定 30-by-5 current 诊断 campaign 完成 150/150，143 通过、
+  7 取消；取消全部在约 120 秒触发，集中于多文件和 failing-test 任务。
+- trace 显示 Agent 已完成源码修改和目标测试，但 Guard 把静态命令清单的拒绝误当成
+  运行隔离不存在，促使 Agent 把 Go/Python 缓存移入项目后再反复清理，浪费 task budget。
+- build backend 实际强制项目写边界、私有临时 `HOME/TMPDIR`、断网和进程树清理，且能力
+  不可用时拒绝启动。Guard payload 现携带这些系统测量事实，并明确静态 gate 只提供
+  list-membership evidence。
+- 验证探测由单 ecosystem 短路改为组合式；Go、Rust、Python、JavaScript 和 Emacs Lisp
+  步骤使用稳定命名空间，支持常见无 manifest 测试入口，并拒绝重复 step identity。
+- Agent 工具说明优先要求 `programming_verification_plan` 后接
+  `programming_verification_run`，只有画像缺少精确检查时才使用 compile task；不得主动
+  移动或清理隔离环境的缓存。
+- 该 campaign 是修改前的诊断证据，不能进入最终 M19 对比。实现变化后必须先做少量定向
+  live smoke，再在 clean frozen revision 上重跑完整 current campaign。
 
 ### M13：结构化工作上下文、笔记与作用域规则图
 
@@ -982,6 +1046,15 @@ revision 改变后禁止续跑；最终验收仍须创建新的 replacement camp
 请求收到同一 403 后按 fail-closed 拒绝两次写入，Eval 正确记录为 infrastructure
 `error`，不得当作任务失败或通过。canonical suite 1793/1793 通过。完整 live
 验收需等待同一 provider/model 恢复可用，不能改用不同身份的样本混入比较。
+
+同日恢复 provider 后，revision `26e7738` 的诊断 current campaign
+`m19-current-deepseek-v4-flash-20260829T095121Z` 完成全部 150 个样本：143 passed、
+7 cancelled、0 failed/error/out-of-scope/stale/infrastructure，trusted token usage
+150/150。7 个取消均在约 120 秒，弱项为 Go/Python multi-file 3/5，以及 Emacs Lisp
+multi-file、Go/Python failing-test 4/5。逐步 trace 证明主要损耗来自 Guard 未获得 build
+backend 的真实隔离事实，模型随后迁移和清理缓存，产生额外 approvals、tool errors 和
+步骤。该结果冻结为诊断证据；修复 Guard execution facts、组合式语言验证和 Agent 工具
+指导后 implementation revision 已改变，禁止把 143/150 直接当作最终验收结果。
 
 Goal/Plan 可靠性现有独立、可复现的测量入口
 `tests/performance/run-runtime-reliability.el`。它在隔离状态目录中执行 17 次

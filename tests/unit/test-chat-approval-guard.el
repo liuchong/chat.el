@@ -351,6 +351,20 @@ is outside a hand-written list -- and used to have the last word on it."
     (should (string-match-p "command gate would refuse" payload))
     (should (string-match-p "totally-unknown-program" payload))))
 
+(ert-deftest chat-approval-guard-build-payload-carries-enforced-boundary ()
+  "The guard judges build caches using the tool's real sandbox boundary."
+  (let* ((env (test-chat-guard-env))
+         (tool (test-chat-guard-tool 'programming_compile_task '(write outbound)))
+         (call '(:arguments (("command" . "go test ./...")
+                             ("directory" . "."))))
+         (payload (chat-approval-guard--payload
+                   tool call env "go is outside the static list")))
+    (should (string-match-p "enforced execution boundary" payload))
+    (should (string-match-p "private temporary HOME/TMPDIR" payload))
+    (should (string-match-p "network: denied" payload))
+    (should (string-match-p "refuses to start" payload))
+    (should (string-match-p "list-membership evidence" payload))))
+
 (ert-deftest chat-approval-guard-the-payload-leaves-out-the-conversation ()
   "History, task text and the assistant's reasoning are never sent.
 

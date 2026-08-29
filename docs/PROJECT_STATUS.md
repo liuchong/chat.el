@@ -58,6 +58,23 @@ immutable; final acceptance still needs fresh same-manifest baseline/current
 campaigns with complete trusted token usage. The fixed corpus includes a
 measured 10,000-indexed-file large-repository task.
 
+A later immutable diagnostic current campaign at revision `26e7738` completed
+150/150 results with 143 passed, 7 cancelled and trusted token usage for every
+sample. The 95.33 percent result is useful diagnosis, not final acceptance:
+all cancellations reached the task budget and concentrated in multi-file and
+failing-test cells. Trace review found that the Guard lacked the build backend's
+enforced isolation facts, so otherwise successful tasks relocated and cleaned
+language caches through extra approval loops. The Guard now receives the real
+project/private-temp/network/process boundary; verification detection composes
+polyglot ecosystems with unique language-scoped step identities; tool guidance
+prefers deterministic verification plans and leaves isolated caches to the
+backend. The implementation revision changed, so focused live smoke and fresh
+frozen campaigns are still required.
+
+The language-aware verification boundary change passes the complete canonical
+batch at 1824/1824 with zero unexpected results. It remains a development
+result until committed and followed by the planned Go/Python live smoke.
+
 Goal and Plan acceptance facts now have a standalone producer rather than a
 hand-authored metadata contract. The runner executes 17 gate-linked checks over
 15 unique directed scenarios, measures 20 Goal prompt projections, validates

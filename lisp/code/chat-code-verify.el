@@ -181,10 +181,20 @@ configuration and deterministic detection."
           (chat-verification-profile-steps profile)
           (sort (copy-sequence (chat-verification-profile-steps profile))
                 (lambda (left right)
-                  (< (cl-position (chat-verification-step-kind left)
-                                  chat-code-verification-kinds)
-                     (cl-position (chat-verification-step-kind right)
-                                  chat-code-verification-kinds)))))
+                  (let ((left-kind
+                         (cl-position (chat-verification-step-kind left)
+                                      chat-code-verification-kinds))
+                        (right-kind
+                         (cl-position (chat-verification-step-kind right)
+                                      chat-code-verification-kinds)))
+                    (if (= left-kind right-kind)
+                        (string< (chat-verification-step-id left)
+                                 (chat-verification-step-id right))
+                      (< left-kind right-kind))))))
+    (let ((ids (mapcar #'chat-verification-step-id
+                       (chat-verification-profile-steps profile))))
+      (unless (= (length ids) (length (delete-dups (copy-sequence ids))))
+        (error "Verification step ids must be unique")))
     (mapc (lambda (step) (chat-code-verify-validate-step step root))
           (chat-verification-profile-steps profile)))
   profile)
@@ -233,7 +243,7 @@ configuration and deterministic detection."
                           (alist-get name scripts nil nil #'string=))))
         (when present
           (push (chat-code-verify--step
-                 root name (cdr entry)
+                 root (concat "javascript-" name) (cdr entry)
                  (append (list "npm" "run" name)
                          (when (and (eq (cdr entry) 'test) targeted)
                            (append '("--") targeted)))
@@ -245,71 +255,127 @@ configuration and deterministic detection."
   "Build conservative Python steps from MANIFEST text."
   (let* ((python-files
           (chat-code-verify--changed-with-extension changed '("py")))
+         (conventional-tests
+          (directory-files root nil
+                           "\\`test_.*\\.py\\'\\|_test\\.py\\'" t))
          (test-targets
           (or (seq-filter
                (lambda (path)
                  (string-match-p
                   "\\(?:^\\|/\\)test[^/]*\\.py\\|_test\\.py\\'" path))
                python-files)
+              conventional-tests
               '(".")))
          (targets (or python-files '(".")))
         steps)
     (when (string-match-p "\\(?:tool\\.ruff\\|ruff\\)" manifest)
       (push (chat-code-verify--step
-             root "lint" 'lint
-             (append '("python" "-m" "ruff" "check") targets) t)
+             root "python-lint" 'lint
+             (append '("python3" "-m" "ruff" "check") targets) t)
             steps))
     (when (string-match-p "\\(?:tool\\.mypy\\|mypy\\)" manifest)
       (push (chat-code-verify--step
-             root "typecheck" 'typecheck
-             (append '("python" "-m" "mypy") targets) t)
+             root "python-typecheck" 'typecheck
+             (append '("python3" "-m" "mypy") targets) t)
             steps))
-    (when (or (file-exists-p (expand-file-name "pytest.ini" root))
+    (when (or conventional-tests
+              (file-exists-p (expand-file-name "pytest.ini" root))
               (string-match-p "pytest" manifest))
       (push (chat-code-verify--step
-             root "test" 'test
-             (append '("python" "-m" "pytest") test-targets) t)
+             root "python-test" 'test
+             (if (or (file-exists-p (expand-file-name "pytest.ini" root))
+                     (string-match-p "pytest" manifest))
+                 (append '("python3" "-m" "pytest") test-targets)
+               '("python3" "-m" "unittest"))
+             t)
             steps))
     (nreverse steps)))
 
+(defun chat-code-verify--javascript-convention-steps (root)
+  "Return conservative JavaScript checks detected directly below ROOT."
+  (seq-keep
+   (lambda (name)
+     (when (file-readable-p (expand-file-name name root))
+       (chat-code-verify--step
+        root (concat "javascript-test-" (file-name-extension name))
+        'test (list "node" name) t)))
+   '("test.js" "test.mjs" "test.cjs")))
+
+(defun chat-code-verify--elisp-convention-steps (root)
+  "Return one batch ERT check for top-level test files below ROOT."
+  (when-let ((tests (directory-files root nil "-test\\.el\\'" t)))
+    (list
+     (chat-code-verify--step
+      root "elisp-test" 'test
+      (append '("emacs" "-Q" "--batch" "-L" ".")
+              (apply #'append
+                     (mapcar (lambda (path) (list "-l" path)) tests))
+              '("--eval" "(ert-run-tests-batch-and-exit)"))
+      t))))
+
 (defun chat-code-verify--detected-steps (root changed)
   "Return deterministic verification steps for ROOT and CHANGED files."
-  (cond
-   ((file-readable-p (expand-file-name "package.json" root))
-    (let ((json-object-type 'alist)
-          (json-array-type 'list))
-      (chat-code-verify--package-profile
-       root changed
-       (json-read-from-string
-        (chat-code-verify--read-small-file
-         (expand-file-name "package.json" root))))))
-   ((or (file-readable-p (expand-file-name "pyproject.toml" root))
-        (file-readable-p (expand-file-name "pytest.ini" root)))
-    (chat-code-verify--python-profile
-     root changed
-     (or (chat-code-verify--read-small-file
-          (expand-file-name "pyproject.toml" root)) "pytest")))
-   ((file-readable-p (expand-file-name "go.mod" root))
-    (list (chat-code-verify--step root "test" 'test
-                                  '("go" "test" "./...") t)
-          (chat-code-verify--step root "build" 'build
-                                  '("go" "build" "./...") t)))
-   ((file-readable-p (expand-file-name "Cargo.toml" root))
-    (list (chat-code-verify--step root "format" 'format
-                                  '("cargo" "fmt" "--check") t)
-          (chat-code-verify--step root "test" 'test
-                                  '("cargo" "test") t)
-          (chat-code-verify--step root "build" 'build
-                                  '("cargo" "build") t)))
-   ((file-readable-p (expand-file-name "tests/run-tests.sh" root))
-    (list (chat-code-verify--step root "test" 'test
-                                  '("bash" "tests/run-tests.sh") t)))
-   ((file-readable-p (expand-file-name "tests/run-tests.el" root))
-    (list (chat-code-verify--step
-           root "test" 'test
-           '("emacs" "-Q" "--batch" "-L" "." "-L" "lisp"
-             "-l" "tests/run-tests.el") t)))
-   (t nil)))
+  (let (steps)
+    (when (file-readable-p (expand-file-name "package.json" root))
+      (let ((json-object-type 'alist)
+            (json-array-type 'list))
+        (setq steps
+              (append
+               steps
+               (chat-code-verify--package-profile
+                root changed
+                (json-read-from-string
+                 (chat-code-verify--read-small-file
+                  (expand-file-name "package.json" root))))))))
+    (unless (file-readable-p (expand-file-name "package.json" root))
+      (setq steps
+            (append steps
+                    (chat-code-verify--javascript-convention-steps root))))
+    (let ((python-manifest
+           (or (chat-code-verify--read-small-file
+                (expand-file-name "pyproject.toml" root))
+               (and (file-readable-p (expand-file-name "pytest.ini" root))
+                    "pytest")
+               "")))
+      (when (or (not (string-empty-p python-manifest))
+                (directory-files root nil
+                                 "\\`test_.*\\.py\\'\\|_test\\.py\\'" t))
+        (setq steps
+              (append steps
+                      (chat-code-verify--python-profile
+                       root changed python-manifest)))))
+    (when (file-readable-p (expand-file-name "go.mod" root))
+      (setq steps
+            (append
+             steps
+             (list (chat-code-verify--step
+                    root "go-test" 'test '("go" "test" "./...") t)
+                   (chat-code-verify--step
+                    root "go-build" 'build '("go" "build" "./...") t)))))
+    (when (file-readable-p (expand-file-name "Cargo.toml" root))
+      (setq steps
+            (append
+             steps
+             (list (chat-code-verify--step
+                    root "rust-format" 'format
+                    '("cargo" "fmt" "--check") t)
+                   (chat-code-verify--step
+                    root "rust-test" 'test '("cargo" "test") t)
+                   (chat-code-verify--step
+                    root "rust-build" 'build '("cargo" "build") t)))))
+    (setq steps
+          (append steps (chat-code-verify--elisp-convention-steps root)))
+    (cond
+     (steps steps)
+     ((file-readable-p (expand-file-name "tests/run-tests.sh" root))
+      (list (chat-code-verify--step
+             root "project-test" 'test '("bash" "tests/run-tests.sh") t)))
+     ((file-readable-p (expand-file-name "tests/run-tests.el" root))
+      (list (chat-code-verify--step
+             root "project-test" 'test
+             '("emacs" "-Q" "--batch" "-L" "." "-L" "lisp"
+               "-l" "tests/run-tests.el") t)))
+     (t nil))))
 
 (defun chat-code-verify--json-bool (value)
   "Return non-nil for JSON VALUE representing true."

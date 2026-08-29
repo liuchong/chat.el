@@ -192,6 +192,8 @@ The vector is empty when tool calling is disabled."
      "- `apply_patch` is for targeted multi-hunk edits to existing files using codex patch text."
      "- `files_patch` is a legacy structured search/replace tool. Prefer `apply_patch` for complex existing-file edits."
      "- `shell_execute` is only for lightweight readonly inspection when file tools are not enough."
+     "- After code edits, prefer `programming_verification_plan` followed by `programming_verification_run`; use `programming_compile_task` only for an exact check the resolved profile does not contain."
+     "- Build and test tools use an isolated temporary HOME and TMPDIR. Do not move caches into the project or clean generated caches unless they are tracked or the user asked for cleanup."
      "- If a write tool needs approval, wait for approval instead of printing the intended file body in chat.")
    "\n"))
 

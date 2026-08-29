@@ -1018,7 +1018,11 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    #'chat-capability-programming-review-repo-map 'project '(read))
   (chat-capability--register-tool
    'programming_compile_task "Programming Compile Task"
-   "Start a compile or test command as a background task."
+   (concat "Start one exact compile or test command as a background task. "
+           "Prefer Programming Verification Plan and Run for detected project "
+           "checks. Execution uses an isolated temporary HOME/TMPDIR; do not "
+           "relocate or clean generated caches unless they are tracked or the "
+           "user requested cleanup.")
    '((:name "command" :type "string" :required t)
      (:name "directory" :type "string" :required nil))
    #'chat-capability-programming-compile-task 'project '(write outbound))
@@ -1039,13 +1043,16 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    #'chat-capability-programming-completion-at-point 'project '(read))
   (chat-capability--register-tool
    'programming_verification_plan "Programming Verification Plan"
-   "Resolve deterministic project checks without executing them."
+   (concat "Resolve deterministic, language-aware project checks without "
+           "executing them. Use this after code edits before inventing a shell "
+           "command.")
    '((:name "project_root" :type "string" :required t)
      (:name "changed_files_json" :type "string" :required nil))
    #'chat-capability-programming-verification-plan 'project '(read))
   (chat-capability--register-tool
    'programming_verification_run "Programming Verification Run"
-   "Run an existing verification plan with bounded output and timeout."
+   (concat "Run an existing language-aware verification plan with bounded "
+           "output, timeout, isolated caches and structured evidence.")
    '((:name "profile_id" :type "string" :required t))
    #'chat-capability-programming-verification-run 'project '(read)
    #'chat-capability-programming-verification-run-async)
