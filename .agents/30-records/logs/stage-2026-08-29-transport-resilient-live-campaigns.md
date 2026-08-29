@@ -117,3 +117,36 @@ command gate as background work tasks. The dispatcher now accepts and carries
 the run identity, while the approval mapping sends compile tasks through that
 existing exact allow/refusal decision. Unknown commands continue to fail
 closed. Regression tests cover both contracts.
+
+## DeepSeek HTTP/2 Framing Incident
+
+The replacement current campaign
+`m19-current-deepseek-v4-flash-a1b1302` used the committed 30-task core
+manifest with DeepSeek v4 Flash. Repetition 1 passed 30/30. Repetition 2 passed
+29/30; `rust-refactor` ended during its second provider request after one
+successful tool call with `exited abnormally with code 16`. Three tasks from
+repetition 3 had already completed when the run was stopped, leaving 63 durable
+results. The copied workspaces contained no source residue, undeclared build
+output or out-of-scope write.
+
+Wire evidence showed a complete first model turn followed by an empty failed
+request. Curl exit code 16 is a transport-level HTTP/2 framing failure. The
+Agent retry set covered DNS, connection, partial-transfer, timeout, TLS and
+other HTTP/2 transport codes but omitted 16, so the attempt was incorrectly
+allowed to claim a formal task identity. The campaign is diagnostic evidence
+only and must not be resumed after the implementation revision changes.
+
+The correction has two independent layers. The Agent retries code 16 within
+the existing bounded 2, 5, 10 and 20 second schedule when no model payload has
+arrived. The current campaign harness also recognizes the bounded curl
+transport set itself, quarantines an exhausted attempt and pauses without
+claiming the repetition/task identity. This second rule remains effective when
+the harness measures a frozen historical Agent that predates the retry.
+
+Regression tests inject code 16 into the model event path and prove one delayed
+retry reaches a completed terminal answer. A separate campaign test stubs the
+Agent classifier to return false and proves the harness still quarantines code
+16 while rejecting a non-transient HTTP 403. Fresh baseline/current campaign
+directories are required after the fix. The coding Eval unit set passed 28/28,
+the documentation contract passed 4/4 and the full canonical suite passed
+1859/1859 with zero unexpected result.

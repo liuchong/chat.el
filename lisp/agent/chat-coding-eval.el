@@ -1569,11 +1569,13 @@ Return the unique repetition/scenario key."
 
 (defconst chat-coding-eval--campaign-pause-error-pattern
   (concat
-   "\\(?:http error \\(?:429\\|50[234]\\)\\b"
+   "\\(?:exited abnormally with code "
+   "\\(?:6\\|7\\|16\\|18\\|28\\|35\\|52\\|55\\|56\\|92\\)\\b"
+   "\\|http error \\(?:429\\|50[234]\\)\\b"
    "\\|rate limit\\|too many requests\\|usage limit\\|quota"
    "\\|service unavailable\\|temporarily unavailable"
    "\\|overloaded\\|capacity\\)")
-  "Provider availability failures that pause a live campaign.")
+  "Transport and provider failures that pause a live campaign.")
 
 (defun chat-coding-eval--transient-infrastructure-result-p (result)
   "Return non-nil when RESULT should pause without claiming its trial.

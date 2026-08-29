@@ -42,6 +42,11 @@ Raw transcripts, provider payloads, credentials and disposable build output do
 not enter Git. A stage record may quote bounded, privacy-safe metrics and exact
 task IDs so a later developer can reproduce the conclusion.
 
+`tests/fixtures/coding-eval/README.md` is the stable human entry point. It keeps
+the language registry, reusable task wording patterns, verdict vocabulary and
+retention boundary next to the executable corpus. A manifest cannot refer to a
+sample that exists only in a local evaluation directory or an old transcript.
+
 ## 3. Task Matrix
 
 Every language has exactly one task in each category:
@@ -170,6 +175,25 @@ The core 30-by-5 comparison and the extended 42-by-5 qualification remain
 separate immutable campaigns. A combined report may summarize 360 trials, but
 must not average away a failing language or substitute one manifest for the
 other.
+
+### 6.1 Acceptance Record
+
+Every significant campaign record includes:
+
+- campaign ID and role, implementation revision and clean-tree state;
+- provider, concrete model, capability snapshot and configuration digest;
+- manifest path, manifest digest, task revisions and expected sample count;
+- valid, passed, failed, cancelled, timed-out, errored and quarantined counts;
+- per-language and per-category rates, safety violations and cleanup residue;
+- latency and token metrics when the provider exposes trusted usage;
+- exact failed task identities, root-cause class and whether a code, prompt,
+  fixture or infrastructure change followed;
+- a final `PASS`, `FAIL`, `BLOCKED` or `INVALID` verdict using the repository
+  vocabulary in the fixture README.
+
+Large raw results remain in session evaluation storage. The committed record is
+a bounded audit index, not an unauditable claim and not a copy of sensitive
+provider traffic.
 
 ## 7. Language-Specific Optimization
 

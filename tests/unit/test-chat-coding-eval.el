@@ -671,14 +671,17 @@
 
 (ert-deftest chat-coding-eval-campaign-pause-errors-are-bounded ()
   "Only transport and provider availability failures pause campaigns."
-  (dolist (reason '("HTTP error 429: too many requests"
-                    "HTTP error 503: service unavailable"
-                    "provider capacity is temporarily unavailable"))
-    (should
-     (chat-coding-eval--transient-infrastructure-result-p
-      (chat-eval-result-create-record
-       :status 'error
-       :metadata `((executor . ((failureReason . ,reason))))))))
+  (cl-letf (((symbol-function 'chat-agent--transient-model-error-p)
+             (lambda (_reason) nil)))
+    (dolist (reason '("exited abnormally with code 16"
+                      "HTTP error 429: too many requests"
+                      "HTTP error 503: service unavailable"
+                      "provider capacity is temporarily unavailable"))
+      (should
+       (chat-coding-eval--transient-infrastructure-result-p
+        (chat-eval-result-create-record
+         :status 'error
+         :metadata `((executor . ((failureReason . ,reason)))))))))
   (should-not
    (chat-coding-eval--transient-infrastructure-result-p
     (chat-eval-result-create-record

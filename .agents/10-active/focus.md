@@ -15,12 +15,16 @@ notes, evidence, restart/compaction recovery, verification, isolation, Review
 and collaboration contracts are implemented on the shared session/event/UI
 infrastructure.
 
-Implementation revision `3139395` bounds verification to the narrowest
-sufficient deterministic evidence. A fresh DeepSeek v4 Flash `go-refactor`
-smoke passed in 25.783 seconds, ran only the required targeted command, changed
-one allowed source file and left no generated residue. Earlier runtime, quality
-and canonical records remain stage evidence but must be regenerated on the
-final clean implementation revision before aggregation.
+Implementation revision `a1b1302` defines the reusable 12-language corpus and
+keeps the 30-task core comparison separate from the future 42-task extension.
+The first DeepSeek v4 Flash current repetition passed 30/30; repetition 2 passed
+29/30 before `rust-refactor` exposed an omitted curl code 16 HTTP/2 transport
+retry. The run was stopped with 63 durable results and no workspace residue.
+It is diagnostic evidence only. Runtime retry and harness-level quarantine now
+pass focused coverage and the 1859-test canonical suite. Fresh campaign
+identities will be created after this change is committed. Earlier runtime,
+quality and canonical records remain stage evidence but must be regenerated on
+the final clean implementation revision before aggregation.
 
 M19 final acceptance remains blocked only on fresh live evidence. Baseline and
 current must each run 30 tasks five times with one identical concrete

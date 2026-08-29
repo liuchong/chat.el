@@ -1066,6 +1066,14 @@ JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Pl
 历史 baseline 缺少足够 token usage，且 manifest 合同已升级，不得复用旧比较
 冒充最终通过。
 
+2026-08-30 DeepSeek v4 Flash replacement current campaign 的第 1 轮 30/30
+通过，第 2 轮 29/30；`rust-refactor` 第二次 provider 请求遇到 curl code 16，另有
+第 3 轮 3 个任务已完成，共保留 63 个结果后主动停止。该错误发生在任何新 payload
+之前，属于 HTTP/2 framing 基础设施故障，不是编程能力失败。Agent 现按既有有限退避
+重试 code 16；campaign harness 独立识别有限 curl 传输错误，使冻结历史实现的失败尝试
+也会隔离并暂停，不消耗 trial identity。实现 revision 改变后，该 campaign 不得续跑；
+定向回归、canonical 和可靠性证据必须重建，再创建 fresh baseline/current。
+
 同日第一次 replacement current campaign 在 10/150 时主动中止：8 个任务通过，
 `elisp-multi-file` 与 `go-multi-file` 取消。复核证明多文件任务已经成功创建并推进
 TODO，但 provider schema 要求模型把 evidence 二次编码成 JSON 字符串，同时成功
@@ -1271,6 +1279,8 @@ Clojure、Java、TypeScript、C、C++ 和 SQL 七种语言。每种语言都覆�
 8. 使用同一 provider/model/capability snapshot 对 extended manifest 分别建立 baseline
    和 current，开发各 task 三次，最终各 task 五次。
 9. 只有重复证据支持的经验才进入硬规则或语言提示包，并记录前后指标和反例。
+10. 每个可重复样例、任务话术、judge、语言清单和清理声明必须进入仓库内 fixture；
+    重要阶段指标与失败分类写入有 revision/campaign identity 的精简记录，禁止只留在临时会话。
 
 #### 退出条件
 

@@ -128,7 +128,7 @@ car collects the messages of every request."
        (car callbacks)
        (chat-model-event-create
         :type 'error
-        :payload '(:message "exited abnormally with code 35")))
+        :payload '(:message "exited abnormally with code 16")))
       (should (= (length callbacks) 1))
       (should (= retry-delay 2.0))
       (apply (car scheduled) (cdr scheduled))

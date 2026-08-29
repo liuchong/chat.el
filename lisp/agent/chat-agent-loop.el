@@ -521,7 +521,7 @@ single pending piece becomes the delta without being copied."
        (string-match-p
         (concat
          "\\(?:exited abnormally with code "
-         "\\(?:6\\|7\\|18\\|28\\|35\\|52\\|55\\|56\\|92\\)\\b"
+         "\\(?:6\\|7\\|16\\|18\\|28\\|35\\|52\\|55\\|56\\|92\\)\\b"
          "\\|connection reset\\|connection refused\\|temporary failure"
          "\\|timed? out\\)")
         (downcase message))))
