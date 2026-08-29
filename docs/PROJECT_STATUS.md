@@ -55,15 +55,26 @@ Goal and Plan acceptance facts now have a standalone producer rather than a
 hand-authored metadata contract. The runner executes 17 gate-linked checks over
 15 unique directed scenarios, measures 20 Goal prompt projections, validates
 all nine facts through the final aggregator and refuses to certify a dirty
-worktree. A clean run at revision `fab4bd177fc61f936d6c47d31662912717608276`
+worktree. A clean run at revision `251706ebab8950ec89301e610ad0b2ce0de47d8f`
 passed all nine gates with rates of `1.0`, safety counts of `0`, and a
 `0.0032043746239855107` Goal projection median. Its complete JSON record is
 stored outside the repository under the coding-acceptance evidence directory
 with SHA-256
-`a215a298cf5766fa32389cb6ee9fd8c3d70c8df045a54d8732347bee0050d9ce`.
+`fb5156cff6abbefd8617cb66d049db16a3545a49409b1798b752f0e08139eb8f`.
 The final aggregator now adds a provenance gate that recomputes the nine
 measurements and requires the exact clean current revision, 17 directed checks
 and 20 projection samples; a hand-written nine-field object remains blocked.
+
+Deterministic non-live quality gates now have the same provenance discipline.
+The clean quality record at revision `251706e` contains 48 exact directed
+scenarios, raw semantic rows for five languages, 20 plan/work-note prompt
+samples and raw Review finding sets. Definition accuracy, reference
+precision/recall and Top-5 are all `1.0` overall and per language; Review recall
+is `1.0`, precision is `0.875`, and prompt median ratio is
+`0.003149300780049963`. All 20 quality gates pass, and the record SHA-256 is
+`1f3228bc39d9b381ff566aaf005bb0e66436e9aab13eb86b88bbe6b55f695c62`.
+Final aggregation rejects a dirty or mismatched record, missing language,
+skipped scenario, incomplete sample set, or rewritten source facts.
 
 An initial replacement current run exposed one more live reliability defect:
 multi-file TODO items could not be completed because evidence was double-encoded,
@@ -72,7 +83,7 @@ scope was mistaken for Agent-task scope. Progress tools now accept native
 Evidence ID arrays, successful tracked tools return exact IDs, and post-tool
 events carry a separately resolved `agent_task_id`. The incomplete 10-result
 campaign is retained only as incident evidence. The canonical suite passes
-1803/1803. A focused multi-file trace confirms scoped post-tool identities and
+1808/1808. A focused multi-file trace confirms scoped post-tool identities and
 native plan transitions; runtime now also accepts the explicitly declared
 legacy JSON-string evidence shape without weakening the provider array schema.
 The provider exhausted its seven-day allowance before the smoke could write or
@@ -87,7 +98,7 @@ quota, service-unavailable and capacity failures archive the attempt and pause
 without consuming a trial identity, preventing one availability outage from
 filling the remaining matrix with infrastructure errors.
 Both replacement roles pass clean descriptor preflight under harness revision
-`fab4bd177fc61f936d6c47d31662912717608276`: the current implementation uses
+`251706ebab8950ec89301e610ad0b2ce0de47d8f`: the current implementation uses
 that same revision and the baseline uses `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`.
 Each descriptor contains 30 tasks, five repetitions and 150 expected results,
 with the shared manifest digest
@@ -432,8 +443,8 @@ seven-day quota response before creating a campaign directory.
   capability identity
 - record the immutable comparison, trusted usage sample and failure taxonomy;
   do not mark M19 complete before every strict acceptance gate passes
-- generate the complete runtime reliability JSON on the same clean frozen
-  revision and pass it intact to final aggregation
+- retain both complete runtime and quality reliability JSON records from the
+  same clean frozen revision and pass them intact to final aggregation
 - make true provider streaming and fallback behavior share one transport abstraction
 - extend the reading workflow from code mode into other surfaces only when the shared capture model stays intact
 - consider a current-file reading command after the new region, defun, and near-point captures settle

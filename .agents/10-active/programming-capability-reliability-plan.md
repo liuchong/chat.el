@@ -991,15 +991,26 @@ gate-linked 检查（15 个唯一 ERT 场景），测量 20 轮 Goal 投影占�
 `CHAT_RELIABILITY_ALLOW_DIRTY=1` 诊断，但此类输出会明确记录
 `implementationTreeClean: false`，不得进入最终验收。开发态实测九个 gate 全部
 通过，Goal projection median ratio 为 `0.0032043746`。冻结 revision
-`fab4bd177fc61f936d6c47d31662912717608276` 的 clean record 已于
+`251706ebab8950ec89301e610ad0b2ce0de47d8f` 的 clean record 已于
 2026-08-29 生成：`implementationTreeClean` 为 true，九个 gate 全部通过，所有率为
 `1.0`、安全计数为 `0`，Goal projection median ratio 为
 `0.0032043746239855107`；完整 JSON 的 SHA-256 为
-`a215a298cf5766fa32389cb6ee9fd8c3d70c8df045a54d8732347bee0050d9ce`。最终聚合器现
+`fb5156cff6abbefd8617cb66d049db16a3545a49409b1798b752f0e08139eb8f`。最终聚合器现
 新增 `runtime-reliability-record` 来源门：九个值之外还必须校验 clean 标记、与 current
 campaign 相同的 implementation revision、九个重算 gate、17 次定向检查及 20 个连续
-Goal 投影样本；手工拼接九字段 metadata 保持 blocked。acceptance 定向测试 23/23、
-canonical suite 1803/1803 通过。
+Goal 投影样本；手工拼接九字段 metadata 保持 blocked。
+
+代码理解、编辑安全、验证闭环、隔离清理、上下文、计划和 Review 另有独立生产器
+`tests/performance/run-quality-reliability.el`。它重算 Python、TypeScript、Emacs Lisp、
+Go 和 Rust 五种语言的 definition accuracy、reference precision/recall 和 Top-5 命中，
+执行 48 个具有固定身份的定向场景，测量 20 个 plan/work-note prompt 样本，并从原始
+expected/reported finding set 重算 Review 指标。冻结 revision 的 clean record 中，五种
+语言及整体的四项语义指标均为 `1.0`，Review recall 为 `1.0`、precision 为 `0.875`，
+prompt 中位占比为 `0.003149300780049963`，20/20 quality gates 全部通过；完整 JSON 的
+SHA-256 为 `1f3228bc39d9b381ff566aaf005bb0e66436e9aab13eb86b88bbe6b55f695c62`。
+`quality-reliability-record` 来源门会拒绝 dirty、revision 不符、语言缺失、场景跳过、
+样本不足、finding set 或汇总 gate 被改写的记录。acceptance 定向测试 28/28、canonical
+suite 1808/1808 通过。
 
 最终 live 对比使用仓库内 `tests/live/run-coding-campaign.el`，不再依赖临时 runner。
 入口要求显式给出 campaign role、provider、具体 model、implementation checkout 与
@@ -1011,11 +1022,14 @@ revision、当前 harness revision；真实运行同时拒绝任一 checkout 的
 service unavailable、capacity 等 provider 可用性故障时，当前 attempt 进入审计目录，
 锁被释放，campaign 保留全部缺失 trial 后暂停；不得把后续矩阵批量记成模型失败。
 当前与 baseline 已在 harness revision
-`fab4bd177fc61f936d6c47d31662912717608276` 上通过 clean descriptor 预检：current
+`251706ebab8950ec89301e610ad0b2ce0de47d8f` 上通过 clean descriptor 预检：current
 implementation 为同一 revision，baseline implementation 为
 `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`；两者均为 30 tasks、5 repetitions、
 150 expected results，并共享 manifest digest
-`4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`。真实 readiness
+`4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`。current 与
+baseline configuration digest 分别为
+`95dde876ab3408ddf705fc8af6f4d29b4ba98e914aa0f44b2be9cdb6ce36337e` 和
+`eb36461d214c64719d15e36478a4f1eefa96a143011b347ebe9ece763b01c3e7`。真实 readiness
 请求已明确返回 provider 七天配额耗尽的 HTTP 403，且在 campaign 目录创建前停止。
 
 #### 目标
@@ -1040,12 +1054,17 @@ implementation 为同一 revision，baseline implementation 为
 CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json \
   /Users/liu/projects/.agent-tools/capped.sh 2048 \
   emacs -Q -batch -l tests/performance/run-runtime-reliability.el
+
+CHAT_QUALITY_RELIABILITY_OUTPUT=/absolute/path/quality-reliability.json \
+  /Users/liu/projects/.agent-tools/capped.sh 4096 \
+  emacs -Q -batch -l tests/performance/run-quality-reliability.el
 ```
 
 命令必须在将要验收的 clean implementation revision 上运行。最终调用
-`chat-coding-acceptance-run-final` 时，读取该 JSON 并把完整顶层对象作为
-`metadata` 参数传入；只手工摘录数值或缺少 `acceptanceGates`、定向测试证据、
-revision、clean 标记的记录均不合格。
+`chat-coding-acceptance-run-final` 时，读取两份 JSON，把完整 runtime 顶层对象作为
+第三个参数 `metadata`、完整 quality 顶层对象作为第四个参数 `quality-metadata`
+传入；只手工摘录数值或缺少 `acceptanceGates`、原始样本、定向测试证据、revision、
+clean 标记的记录均不合格。
 
 #### 退出条件
 
@@ -1335,6 +1354,24 @@ Trace 至少新增：
 `runtime-reliability-record` gate，把该完整记录绑定到 current campaign 中唯一的
 implementation revision；记录缺失、dirty、revision 不符、测试集合变化、gate 被改写或
 样本不足时一律 blocked。
+
+## 14. 非在线质量记录契约
+
+最终聚合器从独立 quality record 重算第 13.2 至 13.7 节中不依赖 live 模型的门槛。
+记录必须与 current campaign 使用同一 clean implementation revision，并包含：
+
+- 五种语言逐项及整体的 definition、reference precision/recall、Top-5 原始查询结果；
+- editing safety、verification closure、isolation/cleanup、AGENTS scope、context
+  continuity、plan、Review、collaboration 和 post-merge verification 的 48 个固定场景；
+- 20 个连续 plan/work-note prompt 投影样本；
+- Review 的 expected critical/high finding IDs 和实际 reported finding IDs；
+- 由上述原始事实重算得到的 20 个 `acceptanceGates`。
+
+`quality-reliability-record` 只有在 schema、revision、clean 标记、语言集合、场景身份、
+样本数量、原始集合和所有重算 gate 完全一致时通过。skip 不等于 pass；缺失某种语言、
+遗漏场景、伪造汇总值或复用其他 revision 的记录一律 blocked。该记录只关闭确定性、
+非在线质量门，不能替代 30-by-5 live campaign、真实 token usage 或 baseline/current
+比较。
 
 ## 15. 开工顺序
 
