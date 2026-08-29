@@ -294,6 +294,27 @@ The subsequent live readiness request returned the provider's explicit HTTP
 403 seven-day quota error, and the runner confirmed that no campaign directory
 was created.
 
+Provider availability returned on 2026-08-29. Replacement current campaign
+`m19-current-deepseek-v4-flash-20260829T055205Z` recorded 124 immutable trials
+at revision `8c54ac0`: 104 passed, 15 cancelled, four failed and one errored.
+A truncated stream was correctly quarantined as an attempt and paused the run
+without consuming its trial identity. The pause then exposed a runner defect:
+the batch entry called the new-campaign API for an existing directory instead
+of the strict resume API. The runner now selects start or resume explicitly,
+and regression tests prove the paths are mutually exclusive.
+
+All 15 cancelled results ended at the exact 120-second task timeout. Rust wire
+traces showed repeated `no installed toolchains`: isolated runtime HOME was set
+before the Darwin backend could resolve the original developer `.rustup` root.
+The runner now preserves the resolved `RUSTUP_HOME` before replacing HOME;
+sandbox policy still grants only command-scoped read access for Rust commands.
+Campaign `m19-smoke-rust-refactor-20260829T075142Z` at revision `1230618`
+completed 1/1 in 27.735 seconds with the targeted cargo test passing, five of
+five checks passing, 12 tool calls and results, zero tool errors and trusted
+usage. Canonical development tests pass 1818/1818. The 124-result campaign is
+incident evidence only because its implementation revision predates these
+fixes; final acceptance still requires fresh 30-by-5 comparison campaigns.
+
 ## Unblock Procedure
 
 1. Keep the completed M9 baseline and `aa4698a` current campaign immutable as

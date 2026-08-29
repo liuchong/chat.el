@@ -1041,6 +1041,33 @@ baseline configuration digest 分别为
 `eb36461d214c64719d15e36478a4f1eefa96a143011b347ebe9ece763b01c3e7`。真实 readiness
 请求已明确返回 provider 七天配额耗尽的 HTTP 403，且在 campaign 目录创建前停止。
 
+2026-08-29 provider availability returned and replacement current campaign
+`m19-current-deepseek-v4-flash-20260829T055205Z` ran against implementation
+revision `8c54ac0`. It durably recorded 124 trials before a code-18 truncated
+stream was quarantined and paused the campaign: 104 passed, 15 cancelled, four
+failed and one errored. All 15 cancellations measured 120,05x--120,065 ms,
+proving exact task-budget exhaustion rather than random termination. The
+cancelled Rust traces showed `rustup` reporting no installed toolchains because
+the batch runner replaced HOME before the Darwin backend resolved the original
+developer `.rustup` root. The same interruption also proved that the batch
+runner called the new-campaign entry for an existing directory even though the
+core already had strict missing-trial resume support.
+
+The runner now chooses new or resume paths from campaign-directory existence;
+the resume path still revalidates the immutable descriptor, manifest, runtime
+configuration, implementation revision and every durable result. Runtime HOME
+installation resolves and preserves an existing explicit or developer
+`RUSTUP_HOME` before changing HOME; Darwin policy continues to expose it only
+as a read-only root for recognized Rust commands. Canonical development tests
+pass 1818/1818. Diagnostic campaign
+`m19-smoke-rust-refactor-20260829T075142Z` at revision `1230618` completed 1/1
+in 27.735 seconds: the targeted cargo test exited zero, all five checks passed,
+12 tool calls had 12 results and zero errors, scope checks passed and provider
+usage was present. This focused smoke validates the remediation but cannot
+replace fresh same-manifest 30-by-5 baseline/current campaigns. The incomplete
+124-result campaign is immutable incident evidence and must not be resumed
+after the implementation revision changed.
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。

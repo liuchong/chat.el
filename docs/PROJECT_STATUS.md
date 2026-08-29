@@ -117,8 +117,19 @@ that same revision and the baseline uses `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965
 Each descriptor contains 30 tasks, five repetitions and 150 expected results,
 with the shared manifest digest
 `4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`.
-The live readiness gate currently stops on the provider's explicit HTTP 403
-seven-day quota response before creating a campaign directory.
+Provider readiness is available again. A replacement current campaign at
+implementation revision `8c54ac0` reached 124 durable trials before a truncated
+stream paused it: 104 passed, 15 cancelled, four failed and one errored. Every
+cancelled trial ended at the exact 120-second task budget. The run exposed two
+batch-only defects: the frozen runner always tried to create an existing
+campaign instead of invoking its strict resume path, and isolated runtime HOME
+installation discarded the developer Rust toolchain location before Darwin
+sandbox policy could add it as a command-scoped read-only root. Both are fixed
+and the canonical development suite passes 1818/1818. A committed one-task
+`rust-refactor` live campaign then passed in 27.735 seconds with all checks,
+12/12 tool results, zero tool errors and trusted token usage. The incomplete
+124-result campaign remains immutable incident evidence; fresh final campaigns
+are still required at the next frozen revision.
 
 ## Implemented Areas
 
