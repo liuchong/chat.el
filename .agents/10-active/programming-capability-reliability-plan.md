@@ -990,8 +990,12 @@ gate-linked 检查（15 个唯一 ERT 场景），测量 20 轮 Goal 投影占�
 结果重新送入最终聚合器验证每个 gate。默认只接受 clean worktree；开发中可以用
 `CHAT_RELIABILITY_ALLOW_DIRTY=1` 诊断，但此类输出会明确记录
 `implementationTreeClean: false`，不得进入最终验收。开发态实测九个 gate 全部
-通过，Goal projection median ratio 为 `0.0032043746`；提交后必须在冻结 revision
-上重新生成 clean record。
+通过，Goal projection median ratio 为 `0.0032043746`。冻结 revision
+`6d7e8150cd0ac32863301ed987959c8c7f5930f4` 的 clean record 已于
+2026-08-29 生成：`implementationTreeClean` 为 true，九个 gate 全部通过，所有率为
+`1.0`、安全计数为 `0`，Goal projection median ratio 为
+`0.0032043746239855107`；完整 JSON 的 SHA-256 为
+`2bf86607004629e28cbb45138198200f542776ec9d9d8daf6719c7fd079d4b55`。
 
 最终 live 对比使用仓库内 `tests/live/run-coding-campaign.el`，不再依赖临时 runner。
 入口要求显式给出 campaign role、provider、具体 model、implementation checkout 与
@@ -1002,6 +1006,13 @@ revision、当前 harness revision；真实运行同时拒绝任一 checkout 的
 分别加载。运行中遇到 DNS/TLS/连接/超时重试耗尽，或 429、502/503/504、quota、
 service unavailable、capacity 等 provider 可用性故障时，当前 attempt 进入审计目录，
 锁被释放，campaign 保留全部缺失 trial 后暂停；不得把后续矩阵批量记成模型失败。
+当前与 baseline 已在 harness revision
+`6d7e8150cd0ac32863301ed987959c8c7f5930f4` 上通过 clean descriptor 预检：current
+implementation 为同一 revision，baseline implementation 为
+`e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`；两者均为 30 tasks、5 repetitions、
+150 expected results，并共享 manifest digest
+`4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`。真实 readiness
+请求已明确返回 provider 七天配额耗尽的 HTTP 403，且在 campaign 目录创建前停止。
 
 #### 目标
 

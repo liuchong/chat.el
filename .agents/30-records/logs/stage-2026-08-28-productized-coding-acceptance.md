@@ -186,10 +186,19 @@ drift fails the command rather than creating plausible-looking evidence.
 
 The development run passed every directed scenario and all nine acceptance
 gates. Rates were `1.0`, safety counts were `0`, and the Goal projection median
-was `0.0032043746239855107` of measured input tokens. This run deliberately
-records `implementationTreeClean: false` because the runner itself was not yet
-committed, so it is verification evidence only. A clean same-revision record
-must be generated after commit and supplied intact to final aggregation.
+was `0.0032043746239855107` of measured input tokens. It remains diagnostic
+evidence because it records a dirty implementation tree.
+
+A clean replacement record was generated at implementation revision
+`6d7e8150cd0ac32863301ed987959c8c7f5930f4` on 2026-08-29. It records
+`implementationTreeClean: true`, passes all nine acceptance gates, preserves
+the same `1.0` rates, zero safety counts and
+`0.0032043746239855107` Goal projection median, and is stored at
+`~/.chat/evaluations/coding-acceptance/runtime-reliability-6d7e815.json`.
+Its SHA-256 is
+`2bf86607004629e28cbb45138198200f542776ec9d9d8daf6719c7fd079d4b55`.
+Final aggregation must consume this complete JSON object rather than a manual
+transcription.
 
 Canonical command:
 
@@ -214,6 +223,19 @@ transport exhaustion, rate limiting, quota exhaustion, service unavailability
 or capacity pressure, the failed attempt is archived, the run lock is released
 and the campaign pauses without consuming that repetition/task identity. Agent
 request retries remain narrower than this campaign-level stop boundary.
+
+Clean no-network preflight passed for both replacement roles under harness
+revision `6d7e8150cd0ac32863301ed987959c8c7f5930f4`. The current role uses that
+same implementation revision; the baseline role uses
+`e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`. Both descriptors contain 30
+tasks, five repetitions and 150 expected results with manifest digest
+`4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`.
+Their configuration digests are respectively
+`8890c2bff2cfbe5a83a654cd1bd1ef16fa3b6a8c2f34b56199100f01a6f97d42`
+and `eb36461d214c64719d15e36478a4f1eefa96a143011b347ebe9ece763b01c3e7`.
+The subsequent live readiness request returned the provider's explicit HTTP
+403 seven-day quota error, and the runner confirmed that no campaign directory
+was created.
 
 ## Unblock Procedure
 
