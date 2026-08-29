@@ -190,15 +190,23 @@ was `0.0032043746239855107` of measured input tokens. It remains diagnostic
 evidence because it records a dirty implementation tree.
 
 A clean replacement record was generated at implementation revision
-`6d7e8150cd0ac32863301ed987959c8c7f5930f4` on 2026-08-29. It records
+`fab4bd177fc61f936d6c47d31662912717608276` on 2026-08-29. It records
 `implementationTreeClean: true`, passes all nine acceptance gates, preserves
 the same `1.0` rates, zero safety counts and
 `0.0032043746239855107` Goal projection median, and is stored at
-`~/.chat/evaluations/coding-acceptance/runtime-reliability-6d7e815.json`.
+`~/.chat/evaluations/coding-acceptance/runtime-reliability-fab4bd1.json`.
 Its SHA-256 is
-`2bf86607004629e28cbb45138198200f542776ec9d9d8daf6719c7fd079d4b55`.
+`a215a298cf5766fa32389cb6ee9fd8c3d70c8df045a54d8732347bee0050d9ce`.
 Final aggregation must consume this complete JSON object rather than a manual
 transcription.
+
+The final aggregator now enforces that requirement with a separate
+`runtime-reliability-record` gate. It recomputes the nine value gates and
+requires the clean current implementation revision, the exact 17 directed test
+records across 15 unique scenarios, and all 20 ordered Goal projection samples.
+Missing provenance, a dirty tree, a revision mismatch, rewritten gate records
+or incomplete samples remain blocked even if the nine summary values pass.
+Focused acceptance tests pass 23/23 and the canonical suite passes 1803/1803.
 
 Canonical command:
 
@@ -225,13 +233,13 @@ and the campaign pauses without consuming that repetition/task identity. Agent
 request retries remain narrower than this campaign-level stop boundary.
 
 Clean no-network preflight passed for both replacement roles under harness
-revision `6d7e8150cd0ac32863301ed987959c8c7f5930f4`. The current role uses that
+revision `fab4bd177fc61f936d6c47d31662912717608276`. The current role uses that
 same implementation revision; the baseline role uses
 `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`. Both descriptors contain 30
 tasks, five repetitions and 150 expected results with manifest digest
 `4ef1e36f8ae44456e2bc4dcf8f661adfdbe916e3a57024dca384107773e3fd38`.
 Their configuration digests are respectively
-`8890c2bff2cfbe5a83a654cd1bd1ef16fa3b6a8c2f34b56199100f01a6f97d42`
+`de928f8b260283a26229bd016b6ce12c5c7eeab1c1c5e1b5deb3e488d8ddd31b`
 and `eb36461d214c64719d15e36478a4f1eefa96a143011b347ebe9ece763b01c3e7`.
 The subsequent live readiness request returned the provider's explicit HTTP
 403 seven-day quota error, and the runner confirmed that no campaign directory

@@ -55,12 +55,15 @@ Goal and Plan acceptance facts now have a standalone producer rather than a
 hand-authored metadata contract. The runner executes 17 gate-linked checks over
 15 unique directed scenarios, measures 20 Goal prompt projections, validates
 all nine facts through the final aggregator and refuses to certify a dirty
-worktree. A clean run at revision `6d7e8150cd0ac32863301ed987959c8c7f5930f4`
+worktree. A clean run at revision `fab4bd177fc61f936d6c47d31662912717608276`
 passed all nine gates with rates of `1.0`, safety counts of `0`, and a
 `0.0032043746239855107` Goal projection median. Its complete JSON record is
 stored outside the repository under the coding-acceptance evidence directory
 with SHA-256
-`2bf86607004629e28cbb45138198200f542776ec9d9d8daf6719c7fd079d4b55`.
+`a215a298cf5766fa32389cb6ee9fd8c3d70c8df045a54d8732347bee0050d9ce`.
+The final aggregator now adds a provenance gate that recomputes the nine
+measurements and requires the exact clean current revision, 17 directed checks
+and 20 projection samples; a hand-written nine-field object remains blocked.
 
 An initial replacement current run exposed one more live reliability defect:
 multi-file TODO items could not be completed because evidence was double-encoded,
@@ -69,7 +72,7 @@ scope was mistaken for Agent-task scope. Progress tools now accept native
 Evidence ID arrays, successful tracked tools return exact IDs, and post-tool
 events carry a separately resolved `agent_task_id`. The incomplete 10-result
 campaign is retained only as incident evidence. The canonical suite passes
-1799/1799. A focused multi-file trace confirms scoped post-tool identities and
+1803/1803. A focused multi-file trace confirms scoped post-tool identities and
 native plan transitions; runtime now also accepts the explicitly declared
 legacy JSON-string evidence shape without weakening the provider array schema.
 The provider exhausted its seven-day allowance before the smoke could write or
@@ -84,7 +87,7 @@ quota, service-unavailable and capacity failures archive the attempt and pause
 without consuming a trial identity, preventing one availability outage from
 filling the remaining matrix with infrastructure errors.
 Both replacement roles pass clean descriptor preflight under harness revision
-`6d7e8150cd0ac32863301ed987959c8c7f5930f4`: the current implementation uses
+`fab4bd177fc61f936d6c47d31662912717608276`: the current implementation uses
 that same revision and the baseline uses `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3`.
 Each descriptor contains 30 tasks, five repetitions and 150 expected results,
 with the shared manifest digest

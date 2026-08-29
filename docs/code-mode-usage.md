@@ -257,7 +257,10 @@ manifest、revision、运行配置、重复身份或并发执行，也不能向�
 分别得到 150 条 M9 与 150 条 M19 结果后运行
 `M-x chat-coding-acceptance-run-final`。验收会拒绝混合 campaign、相同实现
 revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 token usage 或
-不真实的 large-repo 样本，结果不会被误判为通过。
+不真实的 large-repo 样本，结果不会被误判为通过。Goal/Plan 可靠性 metadata 必须
+直接读取 clean 测量脚本生成的完整 JSON；聚合器会复算九个 gate，并检查其中的
+implementation revision 与 current campaign 一致、17 次定向检查全部通过且 20 个
+Goal 投影样本完整。只手工填写九个汇总字段会得到 blocked。
 
 固定 manifest 保持 30 个任务的语言和类别平衡，其中 `python-locate` 是
 `large-repo` task。版本化生成描述符在隔离 workspace 内物化 10,000 个可索引
