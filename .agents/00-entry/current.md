@@ -17,6 +17,10 @@ This is not permission to change accepted design implicitly: unchanged Specs,
 decisions and rules remain binding. A clean break begins only after the affected
 design has been explicitly revised into one complete, conflict-free contract;
 implementation then follows that contract without compatibility baggage.
+Implementation, refactoring and test cleanup cannot declare an unrevised design
+obsolete. Clean-break work must preserve every contract outside the explicitly
+revised scope, and it cannot lower acceptance or remove tests that still verify
+the current design.
 Platform support and required external wire contracts are separate concerns and
 must still be explicit. `AGENTS.md` is the authoritative full rule.
 

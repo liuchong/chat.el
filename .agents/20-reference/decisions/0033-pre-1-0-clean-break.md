@@ -28,6 +28,11 @@ that scope remains binding. Only then does the clean break apply: the same chang
 removes the old schema, command, configuration, cache shape, alias, implementation
 path, tests and documentation.
 
+Implementation work, refactoring and test cleanup cannot declare an unrevised
+design obsolete. The clean-break rule is not grounds for removing tests that
+still assert the current contract, weakening acceptance, bypassing constraints,
+or changing behavior outside the formally revised scope.
+
 Do not add migrations, fallback readers, compatibility wrappers, shims,
 dual-writing, deprecation periods or permissive format guessing. Reject stale
 state when rejection is useful; discard and rebuild it when it is derived.
