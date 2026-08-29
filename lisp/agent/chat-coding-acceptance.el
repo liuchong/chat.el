@@ -36,6 +36,37 @@
                   permission-block infrastructure)
   "Closed failure taxonomy for coding trials.")
 
+(defconst chat-coding-acceptance-reliability-scenarios
+  '((goalContinuityRate
+     chat-goal-plan-notes-survive-two-compactions-and-restart)
+    (goalCompletionEvidenceRate
+     chat-goal-progress-requires-known-scoped-evidence
+     chat-goal-completion-is-deterministic-and-evidence-backed)
+    (goalInvalidTransitionCount
+     chat-goal-refuses-incomplete-contracts
+     chat-goal-pause-block-resume-and-stale-revision)
+    (goalScopeLeakCount
+     chat-goal-project-scope-fails-closed-without-content-leakage)
+    (planUnauthorizedMutationCount
+     chat-plan-mode-tool-boundary-allows-read-and-refuses-effects
+     chat-plan-mode-allows-only-dedicated-planning-state-tools)
+    (planNonUserApprovalCount
+     chat-capability-agent-can-enter-but-not-approve-plan-mode
+     chat-plan-mode-submit-requires-complete-plan-and-user-approval)
+    (planTransitionConsistencyRate
+     chat-plan-mode-persists-read-only-state-across-reload
+     chat-plan-mode-submit-requires-complete-plan-and-user-approval
+     chat-plan-mode-approval-refuses-a-changed-submitted-plan
+     chat-plan-mode-rejection-feedback-returns-to-research
+     chat-plan-mode-rejects-invalid-plan-and-stale-transitions)
+    (planReadyImplicitExecutionCount
+     chat-plan-mode-persists-read-only-state-across-reload))
+  "Exact directed scenarios required by the reliability evidence contract.")
+
+(defconst chat-coding-acceptance-reliability-projection-scenario
+  'chat-goal-projection-is-protected-bounded-and-state-aware
+  "Directed scenario required beside the Goal projection samples.")
+
 (cl-defstruct (chat-coding-acceptance-gate
                (:constructor chat-coding-acceptance-gate-create))
   name status expected actual evidence)
@@ -678,7 +709,164 @@ fail it."
      (chat-coding-acceptance--reliability-gate
       "plan-mode-ready-implicit-execution" 0 plan-implicit
       (funcall count-p plan-implicit) (equal plan-implicit 0)
-      "Count executions triggered merely by restoring a ready plan."))))
+     "Count executions triggered merely by restoring a ready plan."))))
+
+(defun chat-coding-acceptance--sequence-list (value)
+  "Return proper list represented by sequence VALUE, or nil."
+  (cond
+   ((vectorp value) (append value nil))
+   ((proper-list-p value) value)))
+
+(defun chat-coding-acceptance--passing-status-p (value)
+  "Return non-nil when VALUE represents a passed status."
+  (or (eq value 'passed) (equal value "passed")))
+
+(defun chat-coding-acceptance--reliability-gate-records-valid-p (metadata)
+  "Return non-nil when METADATA carries the exact recomputed gate records."
+  (let ((records
+         (chat-coding-acceptance--sequence-list
+          (chat-coding-acceptance--field metadata 'acceptanceGates)))
+        (gates (chat-coding-acceptance-reliability-gates metadata)))
+    (and (= (length records) (length gates))
+         (cl-every
+          (lambda (pair)
+            (let ((record (car pair)) (gate (cdr pair)))
+              (and
+               (equal (chat-coding-acceptance--field record 'name)
+                      (chat-coding-acceptance-gate-name gate))
+               (chat-coding-acceptance--passing-status-p
+                (chat-coding-acceptance--field record 'status))
+               (eq 'passed (chat-coding-acceptance-gate-status gate))
+               (equal (chat-coding-acceptance--field record 'expected)
+                      (chat-coding-acceptance-gate-expected gate))
+               (equal (chat-coding-acceptance--field record 'actual)
+                      (chat-coding-acceptance-gate-actual gate)))))
+          (cl-mapcar #'cons records gates)))))
+
+(defun chat-coding-acceptance--reliability-tests-valid-p
+    (records expected)
+  "Return non-nil when RECORDS exactly prove EXPECTED test names."
+  (let ((items (chat-coding-acceptance--sequence-list records)))
+    (and (= (length items) (length expected))
+         (cl-every
+          (lambda (pair)
+            (let ((record (car pair)) (test (cdr pair)))
+              (and
+               (equal (chat-coding-acceptance--field record 'test)
+                      (symbol-name test))
+               (eq t (chat-coding-acceptance--field record 'passed)))))
+          (cl-mapcar #'cons items expected)))))
+
+(defun chat-coding-acceptance--reliability-samples-valid-p
+    (samples expected-median)
+  "Return non-nil when SAMPLES are the complete measured projection series."
+  (let ((items (chat-coding-acceptance--sequence-list samples)))
+    (and (= (length items) 20)
+         (equal (mapcar (lambda (sample)
+                          (chat-coding-acceptance--field sample 'turn))
+                        items)
+                (number-sequence 1 20))
+         (cl-every
+          (lambda (sample)
+            (let ((goal (chat-coding-acceptance--field sample 'goalTokens))
+                  (input (chat-coding-acceptance--field sample 'inputTokens))
+                  (ratio (chat-coding-acceptance--field sample 'ratio)))
+              (and (numberp goal) (> goal 0)
+                   (numberp input) (> input 0)
+                   (numberp ratio) (<= 0.0 ratio) (<= ratio 1.0)
+                   (<= (abs (- ratio (/ (float goal) input))) 1e-9))))
+          items)
+         (numberp expected-median)
+         (<= (abs
+              (- expected-median
+                 (chat-coding-acceptance--median
+                  (mapcar
+                   (lambda (sample)
+                     (chat-coding-acceptance--field sample 'ratio))
+                   items))))
+             1e-9))))
+
+(defun chat-coding-acceptance--reliability-evidence-valid-p (metadata)
+  "Return non-nil when METADATA contains every directed evidence record."
+  (let* ((evidence (chat-coding-acceptance--field metadata 'evidence))
+         (projection
+          (chat-coding-acceptance--field
+           evidence 'goalProjectionMedianRatio))
+         (facts (chat-coding-acceptance--field metadata 'runtimeReliability)))
+    (and
+     (cl-every
+      (lambda (group)
+        (chat-coding-acceptance--reliability-tests-valid-p
+         (chat-coding-acceptance--field evidence (car group))
+         (cdr group)))
+      chat-coding-acceptance-reliability-scenarios)
+     (chat-coding-acceptance--reliability-tests-valid-p
+      (chat-coding-acceptance--field projection 'tests)
+      (list chat-coding-acceptance-reliability-projection-scenario))
+     (chat-coding-acceptance--reliability-samples-valid-p
+      (chat-coding-acceptance--field projection 'samples)
+      (chat-coding-acceptance--field facts 'goalProjectionMedianRatio)))))
+
+(defun chat-coding-acceptance-reliability-record-gate
+    (metadata expected-revision)
+  "Validate complete reliability METADATA for EXPECTED-REVISION."
+  (let* ((schema (chat-coding-acceptance--field metadata 'schemaVersion))
+         (revision
+          (chat-coding-acceptance--field metadata 'implementationRevision))
+         (tree-clean
+          (chat-coding-acceptance--field metadata 'implementationTreeClean))
+         (measured-at (chat-coding-acceptance--field metadata 'measuredAt))
+         (records
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field metadata 'acceptanceGates)))
+         (projection
+          (chat-coding-acceptance--field
+           (chat-coding-acceptance--field metadata 'evidence)
+           'goalProjectionMedianRatio))
+         (samples
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field projection 'samples)))
+         (valid
+          (and (= (or schema 0) 1)
+               (stringp expected-revision)
+               (not (string-empty-p expected-revision))
+               (equal revision expected-revision)
+               (eq t tree-clean)
+               (stringp measured-at)
+               (not (string-empty-p measured-at))
+               (chat-coding-acceptance--reliability-gate-records-valid-p
+                metadata)
+               (chat-coding-acceptance--reliability-evidence-valid-p
+                metadata))))
+    (chat-coding-acceptance-gate-create
+     :name "runtime-reliability-record"
+     :status (if valid 'passed 'blocked)
+     :expected "clean complete measured record for current implementation"
+     :actual `((implementationRevision . ,revision)
+               (expectedRevision . ,expected-revision)
+               (treeClean . ,tree-clean)
+               (gateCount . ,(length records))
+               (projectionSampleCount . ,(length samples)))
+     :evidence
+     (unless valid
+       "Load the complete clean reliability JSON for the current campaign revision."))))
+
+(defun chat-coding-acceptance--single-implementation-revision (results)
+  "Return the one nonempty implementation revision in RESULTS, or nil."
+  (let ((revisions
+         (delete-dups
+          (delq nil
+                (mapcar
+                 (lambda (result)
+                   (let ((revision
+                          (chat-coding-acceptance--field
+                           (chat-eval-result-metadata result)
+                           'implementationRevision)))
+                     (and (stringp revision)
+                          (not (string-empty-p revision))
+                          revision)))
+                 results)))))
+    (when (= (length revisions) 1) (car revisions))))
 
 (defun chat-coding-acceptance--gate-check (gate)
   "Convert acceptance GATE to an immutable Eval check."
@@ -995,6 +1183,8 @@ adds bounded externally verified facts, including `runtimeReliability'."
                (file-directory-p current-directory)
                (chat-coding-acceptance-load-result-directory
                 current-directory)))
+         (current-revision
+          (chat-coding-acceptance--single-implementation-revision current))
          (gates
           (append (chat-coding-acceptance-performance-gates benchmark)
                   (list
@@ -1003,6 +1193,9 @@ adds bounded externally verified facts, including `runtimeReliability'."
                    (chat-coding-acceptance--campaign-directory-gate
                     current-directory current "current"))
                   (chat-coding-acceptance-live-gates baseline current)
+                  (list
+                   (chat-coding-acceptance-reliability-record-gate
+                    metadata current-revision))
                   (chat-coding-acceptance-reliability-gates metadata)))
          (result
           (chat-coding-acceptance-record

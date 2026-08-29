@@ -114,6 +114,74 @@
                           (planTransitionConsistencyRate . 1.0)
                           (planReadyImplicitExecutionCount . 0))))))
 
+(defun chat-coding-acceptance-test--reliability-record (&optional revision)
+  "Return one complete clean reliability record for REVISION."
+  (let* ((metadata (chat-coding-acceptance-test--reliability-facts))
+         (facts (alist-get 'runtimeReliability metadata))
+         (groups
+          '((goalContinuityRate
+             chat-goal-plan-notes-survive-two-compactions-and-restart)
+            (goalCompletionEvidenceRate
+             chat-goal-progress-requires-known-scoped-evidence
+             chat-goal-completion-is-deterministic-and-evidence-backed)
+            (goalInvalidTransitionCount
+             chat-goal-refuses-incomplete-contracts
+             chat-goal-pause-block-resume-and-stale-revision)
+            (goalScopeLeakCount
+             chat-goal-project-scope-fails-closed-without-content-leakage)
+            (planUnauthorizedMutationCount
+             chat-plan-mode-tool-boundary-allows-read-and-refuses-effects
+             chat-plan-mode-allows-only-dedicated-planning-state-tools)
+            (planNonUserApprovalCount
+             chat-capability-agent-can-enter-but-not-approve-plan-mode
+             chat-plan-mode-submit-requires-complete-plan-and-user-approval)
+            (planTransitionConsistencyRate
+             chat-plan-mode-persists-read-only-state-across-reload
+             chat-plan-mode-submit-requires-complete-plan-and-user-approval
+             chat-plan-mode-approval-refuses-a-changed-submitted-plan
+             chat-plan-mode-rejection-feedback-returns-to-research
+             chat-plan-mode-rejects-invalid-plan-and-stale-transitions)
+            (planReadyImplicitExecutionCount
+             chat-plan-mode-persists-read-only-state-across-reload)))
+         (gates (chat-coding-acceptance-reliability-gates metadata))
+         (evidence
+          (mapcar
+           (lambda (group)
+             (cons
+              (car group)
+              (vconcat
+               (mapcar
+                (lambda (test)
+                  `((test . ,(symbol-name test)) (passed . t)))
+                (cdr group)))))
+           groups))
+         (samples
+          (vconcat
+           (cl-loop for turn from 1 to 20 collect
+                    `((turn . ,turn) (goalTokens . 3) (inputTokens . 100)
+                      (ratio . 0.03))))))
+    (push
+     `(goalProjectionMedianRatio
+       . ((tests . [((test . "chat-goal-projection-is-protected-bounded-and-state-aware")
+                     (passed . t))])
+          (samples . ,samples)))
+     evidence)
+    `((schemaVersion . 1)
+      (implementationRevision . ,(or revision "revision-current"))
+      (implementationTreeClean . t)
+      (measuredAt . "2026-08-29T10:10:41+0800")
+      (runtimeReliability . ,facts)
+      (acceptanceGates
+       . ,(vconcat
+           (mapcar
+            (lambda (gate)
+              `((name . ,(chat-coding-acceptance-gate-name gate))
+                (status . "passed")
+                (expected . ,(chat-coding-acceptance-gate-expected gate))
+                (actual . ,(chat-coding-acceptance-gate-actual gate))))
+            gates)))
+      (evidence . ,evidence))))
+
 (ert-deftest chat-coding-acceptance-reliability-evidence-is-required ()
   "Missing Goal and Plan Mode measurements block every reliability gate."
   (let ((gates (chat-coding-acceptance-reliability-gates nil)))
@@ -147,6 +215,95 @@
               (eq 'failed (chat-coding-acceptance-gate-status gate)))
             (chat-coding-acceptance-reliability-gates metadata))))
       (should (= 3 (length failed))))))
+
+(ert-deftest chat-coding-acceptance-reliability-record-provenance-is-required ()
+  "Nine hand-written values cannot substitute for the measured record."
+  (let ((gate
+         (chat-coding-acceptance-reliability-record-gate
+          (chat-coding-acceptance-test--reliability-facts)
+          "revision-current")))
+    (should (eq 'blocked (chat-coding-acceptance-gate-status gate)))))
+
+(ert-deftest chat-coding-acceptance-reliability-record-is-revision-bound ()
+  "A complete clean record passes only for its measured implementation."
+  (let* ((record (chat-coding-acceptance-test--reliability-record))
+         (passing
+          (chat-coding-acceptance-reliability-record-gate
+           record "revision-current"))
+         (mismatch
+          (chat-coding-acceptance-reliability-record-gate
+           record "another-revision")))
+    (should (eq 'passed (chat-coding-acceptance-gate-status passing)))
+    (should (eq 'blocked (chat-coding-acceptance-gate-status mismatch)))))
+
+(ert-deftest chat-coding-acceptance-reliability-record-requires-clean-full-evidence ()
+  "Dirty measurements and incomplete projection samples remain blocked."
+  (let ((dirty (chat-coding-acceptance-test--reliability-record))
+        (short (chat-coding-acceptance-test--reliability-record)))
+    (setf (alist-get 'implementationTreeClean dirty) :json-false)
+    (setf (alist-get 'samples
+                     (alist-get 'goalProjectionMedianRatio
+                                (alist-get 'evidence short)))
+          [])
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-reliability-record-gate
+           dirty "revision-current"))))
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-reliability-record-gate
+           short "revision-current"))))))
+
+(ert-deftest chat-coding-acceptance-final-binds-reliability-to-current-campaign ()
+  "Final aggregation derives the reliability revision from current trials."
+  (chat-test-with-temp-dir
+   (let* ((baseline-directory (expand-file-name "baseline/" temp-dir))
+          (current-directory (expand-file-name "current/" temp-dir))
+          (baseline (chat-coding-acceptance-test--result 'passed nil))
+          (current (chat-coding-acceptance-test--result 'passed nil))
+          (record (chat-coding-acceptance-test--reliability-record)))
+     (make-directory baseline-directory t)
+     (make-directory current-directory t)
+     (setf (alist-get 'implementationRevision
+                      (chat-eval-result-metadata baseline))
+           "revision-baseline"
+           (alist-get 'implementationRevision
+                      (chat-eval-result-metadata current))
+           "revision-current")
+     (cl-letf (((symbol-function 'chat-coding-acceptance-benchmark-sync)
+                (lambda (&rest _) nil))
+               ((symbol-function
+                 'chat-coding-acceptance-performance-gates)
+                (lambda (_) nil))
+               ((symbol-function
+                 'chat-coding-acceptance-load-result-directory)
+                (lambda (directory)
+                  (if (equal directory current-directory)
+                      (list current)
+                    (list baseline))))
+               ((symbol-function
+                 'chat-coding-acceptance--campaign-directory-gate)
+                (lambda (&rest _)
+                  (chat-coding-acceptance-gate-create
+                   :name "campaign" :status 'passed)))
+               ((symbol-function 'chat-coding-acceptance-live-gates)
+                (lambda (&rest _) nil))
+               ((symbol-function 'chat-coding-acceptance-record)
+                (lambda (gates &optional _) gates)))
+       (let* ((gates
+               (chat-coding-acceptance-run-final
+                baseline-directory current-directory record))
+              (provenance
+               (seq-find
+                (lambda (gate)
+                  (equal "runtime-reliability-record"
+                         (chat-coding-acceptance-gate-name gate)))
+                gates)))
+         (should provenance)
+         (should (eq 'passed
+                     (chat-coding-acceptance-gate-status provenance))))))))
 
 (ert-deftest chat-coding-acceptance-record-is-immutable-and-strict ()
   "A blocked gate yields an immutable blocked Eval result."

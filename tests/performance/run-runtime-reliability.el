@@ -50,30 +50,7 @@
         nil t))
 
 (defconst chat-runtime-reliability--groups
-  '((goalContinuityRate
-     chat-goal-plan-notes-survive-two-compactions-and-restart)
-    (goalCompletionEvidenceRate
-     chat-goal-progress-requires-known-scoped-evidence
-     chat-goal-completion-is-deterministic-and-evidence-backed)
-    (goalInvalidTransitionCount
-     chat-goal-refuses-incomplete-contracts
-     chat-goal-pause-block-resume-and-stale-revision)
-    (goalScopeLeakCount
-     chat-goal-project-scope-fails-closed-without-content-leakage)
-    (planUnauthorizedMutationCount
-     chat-plan-mode-tool-boundary-allows-read-and-refuses-effects
-     chat-plan-mode-allows-only-dedicated-planning-state-tools)
-    (planNonUserApprovalCount
-     chat-capability-agent-can-enter-but-not-approve-plan-mode
-     chat-plan-mode-submit-requires-complete-plan-and-user-approval)
-    (planTransitionConsistencyRate
-     chat-plan-mode-persists-read-only-state-across-reload
-     chat-plan-mode-submit-requires-complete-plan-and-user-approval
-     chat-plan-mode-approval-refuses-a-changed-submitted-plan
-     chat-plan-mode-rejection-feedback-returns-to-research
-     chat-plan-mode-rejects-invalid-plan-and-stale-transitions)
-    (planReadyImplicitExecutionCount
-     chat-plan-mode-persists-read-only-state-across-reload))
+  chat-coding-acceptance-reliability-scenarios
   "Directed scenarios that produce each non-token reliability value.")
 
 (defun chat-runtime-reliability--run-test (name)
@@ -183,8 +160,9 @@
           (push (cons field value) facts)
           (push (cons field (vconcat results)) evidence)))
       (let* ((projection-results
-              (list (chat-runtime-reliability--run-test
-                     'chat-goal-projection-is-protected-bounded-and-state-aware)))
+              (list
+               (chat-runtime-reliability--run-test
+                chat-coding-acceptance-reliability-projection-scenario)))
              (samples (chat-runtime-reliability--projection-samples))
              (median
               (chat-runtime-reliability--median
