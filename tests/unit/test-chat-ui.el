@@ -661,37 +661,6 @@ from wherever the buffer happens to sit."
          (should (string= (buffer-substring-no-properties start end) "docs/gu"))
          (should (member "docs/guide.md" candidates)))))))
 
-(ert-deftest chat-ui-auto-path-completion-only-triggers-for-path-like-input ()
-  "Typing an ordinary word does not open a file completion popup.
-
-Only reachable when the option is on, which it is not by default; bound
-here because the narrowing to path-like tokens still has to hold for
-anyone who turns it back on."
-  (chat-test-with-temp-dir
-   (let* ((chat-session-directory temp-dir)
-          (chat-ui-auto-path-completion t)
-          (session (chat-session-create "Auto Path Session" 'kimi))
-          path-triggered
-          plain-triggered)
-     (with-temp-buffer
-       (setq-local chat--current-session session)
-       (chat-ui-setup-buffer session)
-       (goto-char (point-max))
-       (insert "docs/gu")
-       (let ((last-command-event ?u))
-         (cl-letf (((symbol-function 'completion-at-point)
-                    (lambda () (setq path-triggered t))))
-           (chat-ui--maybe-complete-path-after-insert)))
-       (delete-region (marker-position chat-ui--input-overlay) (point-max))
-       (goto-char (point-max))
-       (insert "plainword")
-       (let ((last-command-event ?d))
-         (cl-letf (((symbol-function 'completion-at-point)
-                    (lambda () (setq plain-triggered t))))
-           (chat-ui--maybe-complete-path-after-insert))))
-     (should path-triggered)
-     (should-not plain-triggered))))
-
 (ert-deftest chat-ui-fence-safe-prefix-length-tracks-unfinished-blocks ()
   "A streaming cut never lands inside a block that is still arriving.
 
@@ -995,14 +964,10 @@ gone by the next command."
          (chat-ui--handle-shell-command "printenv CHAT_TEST_EXPORTED")
          (should-not seen))))))
 
-(ert-deftest chat-ui-completion-does-not-arrive-uninvited ()
-  "Auto completion is off, so RET sends and the buffer does not shift.
-
-A completion UI that is open takes RET for itself, so the key that sends
-becomes the key that picks a candidate.  TAB is still bound to
-`completion-at-point', which is where a terminal puts it."
-  (should-not chat-ui-auto-path-completion)
-  (should (eq (lookup-key chat-mode-map (kbd "TAB")) 'completion-at-point)))
+(ert-deftest chat-ui-tab-never-starts-a-selection-session ()
+  "TAB expands a prefix without giving RET a second meaning."
+  (should (eq (lookup-key chat-mode-map (kbd "TAB"))
+              'chat-ui-complete-input)))
 
 (ert-deftest chat-ui-repeat-shell-command-reruns-the-last-one ()
   "A doubled bang reruns the previous command and reports when there is none."
@@ -1054,7 +1019,7 @@ becomes the key that picks a candidate.  TAB is still bound to
 (ert-deftest chat-ui-slash-commands-cover-the-documented-names ()
   "Every command named in the help text has a handler."
   (dolist (name '("cancel" "help" "model" "send" "quick" "?" "cmd" "!"
-                  "queue" "flush" "drop" "cd" "pwd" "new" "list" "save"
+                  "stage" "cd" "pwd" "new" "list" "save"
                   "clear" "goal" "plan" "auto"))
     (let ((handler (chat-ui--command-handler name)))
       (should handler)
@@ -1090,7 +1055,8 @@ becomes the key that picks a candidate.  TAB is still bound to
               ((symbol-function 'chat-ui--command-cd)
                (lambda (arg) (push (cons 'cd arg) calls)))
               ((symbol-function 'chat-ui--send-user-message)
-               (lambda (arg) (push (cons 'message arg) calls))))
+               (lambda (arg &optional _parts _metadata)
+                 (push (cons 'message arg) calls))))
       (chat-ui--dispatch-command (chat-command-parse "！ls -l"))
       (chat-ui--dispatch-command (chat-command-parse "！！"))
       (chat-ui--dispatch-command (chat-command-parse "？why"))
@@ -1169,6 +1135,82 @@ is answering a different question."
       (should (equal (buffer-substring-no-properties (nth 0 completion)
                                                      (nth 1 completion))
                      "he")))))
+
+(ert-deftest chat-ui-passive-command-hints-use-prefix-and-lexical-order ()
+  "The hint is a view of the command table, not a second command registry."
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "/s")
+    (let* ((chat-input-hint-sort-order 'alphabetical)
+           (model (chat-ui--command-hint-model))
+           (names (mapcar #'chat-input-hint-candidate-display
+                          (chat-input-hint-visible-candidates model))))
+      (should (equal names '("/save" "/send" "/stage"))))
+    (insert " argument")
+    (should-not (chat-ui--command-hint-model))))
+
+(ert-deftest chat-ui-passive-command-hints-can-sort-by-session-frequency ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-auto-save nil)
+          (session (chat-session-create "Hints" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui--setup-input-area)
+       (chat-ui--record-command-usage "stage")
+       (chat-ui--record-command-usage "send")
+       (chat-ui--record-command-usage "send")
+       (insert "/s")
+       (let* ((chat-input-hint-sort-order 'frequency)
+              (model (chat-ui--command-hint-model))
+              (names (mapcar #'chat-input-hint-candidate-display
+                             (chat-input-hint-visible-candidates model))))
+         (should (equal names '("/send" "/stage" "/save"))))))))
+
+(ert-deftest chat-ui-tab-completes-one-command-without-a-frontend ()
+  (with-temp-buffer
+    (chat-ui--setup-input-area)
+    (insert "/he")
+    (setq-local completion-at-point-functions
+                '(chat-ui--command-completion-at-point))
+    (let (frontend-called)
+      (cl-letf (((symbol-function 'completion-at-point)
+                 (lambda () (setq frontend-called t)))
+                ((symbol-function 'completion-in-region)
+                 (lambda (&rest _) (setq frontend-called t))))
+        (chat-ui-complete-input))
+      (should-not frontend-called))
+    (should (string-suffix-p "/help" (buffer-string)))))
+
+(ert-deftest chat-ui-tab-stops-at-the-longest-common-prefix ()
+  (with-temp-buffer
+    (insert "s")
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (point-min) (point-max)
+                              '("send" "sender" "sending")))))
+    (chat-ui-complete-input)
+    (should (equal (buffer-string) "send"))
+    ;; A second TAB has no additional common prefix and remains a no-op.
+    (chat-ui-complete-input)
+    (should (equal (buffer-string) "send"))))
+
+(ert-deftest chat-ui-tab-completes-a-path-only-when-explicitly-pressed ()
+  (chat-test-with-temp-dir
+   (let* ((doc-dir (expand-file-name "docs" temp-dir))
+          (session (chat-session-create "Path TAB" 'kimi)))
+     (make-directory doc-dir t)
+     (with-temp-file (expand-file-name "guide.md" doc-dir) (insert "hello"))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (setq-local default-directory temp-dir)
+       (chat-ui--setup-input-area)
+       (insert "docs/gu")
+       (setq-local completion-at-point-functions
+                   '(chat-ui--command-completion-at-point
+                     chat-ui--path-completion-at-point))
+       (chat-ui-complete-input)
+       (should (string-suffix-p "docs/guide.md" (buffer-string)))))))
 
 (ert-deftest chat-ui-a-second-slash-makes-it-a-path-again ()
   "`/Users/liu' is a path.  The ambiguity resolves as soon as it can."
@@ -1306,10 +1348,25 @@ request for the command list with a tool error."
         (setq-local chat--current-session session)
         (chat-ui-setup-buffer session)
         (cl-letf (((symbol-function 'chat-ui--handle-shell-command)
-                   (lambda (command) (push command shell-calls)))
+                  (lambda (command) (push command shell-calls)))
                   ((symbol-function 'chat-ui--send-user-message)
-                   (lambda (content) (push content sent))))
+                   (lambda (content &optional _parts metadata)
+                     (when (plist-get metadata :staged-message-ids)
+                       (chat-ui--set-stage nil))
+                     (push content sent))))
           ,@body)))))
+
+(ert-deftest chat-ui-ret-sends-once-while-a-passive-hint-exists ()
+  "A display overlay cannot turn RET into candidate acceptance."
+  (chat-ui-auto-test--with-session
+    (goto-char (point-max))
+    (insert "/send hello")
+    (setq-local chat-input-hint--overlay
+                (make-overlay (point) (point)))
+    (overlay-put chat-input-hint--overlay 'after-string "\n  /send")
+    (chat-ui-send-message)
+    (should (equal sent '("hello")))
+    (should-not chat-input-hint--overlay)))
 
 (ert-deftest chat-ui-auto-is-off-until-a-repeatable-command-runs ()
   "Plain input goes to the model until something claims it."
@@ -1497,11 +1554,11 @@ symbol and not its display name."
                    prompt)))))
 
 (ert-deftest chat-ui-a-queued-line-carries-the-queue-mark ()
-  "The third mode that can hold plain input."
+  "Runtime queue mode is visible without pretending it is a command."
   (chat-ui-auto-test--with-session
-    (chat-ui--set-default-command "queue")
-    (should (string-prefix-p "\u2261 " (chat-ui--input-prompt)))
-    (should (string-suffix-p "queue> " (chat-ui--input-prompt)))))
+    (chat-ui--set-send-mode 'queue)
+    (should (string-match-p " queue> \\'" (chat-ui--input-prompt)))
+    (should-not (string-match-p "queue> queue>" (chat-ui--input-prompt)))))
 
 (ert-deftest chat-ui-a-drawn-mark-changes-pixels-and-nothing-else ()
   "The invariant that makes an image safe in the prompt.
@@ -1532,8 +1589,8 @@ written to hand it to them."
 (ert-deftest chat-ui-a-mode-with-no-mark-still-gets-a-prompt ()
   "An unmarked command is a supported state, not an error."
   (chat-ui-auto-test--with-session
-    (chat-ui--set-default-command "drop")
-    (should (equal "drop> " (chat-ui--input-prompt)))))
+    (chat-ui--set-default-command "stage")
+    (should (equal "stage> " (chat-ui--input-prompt)))))
 
 (ert-deftest chat-ui-an-undisplayable-mark-leaves-a-usable-prompt ()
   "On a frame that cannot draw the glyph, the prompt is the old one."
@@ -2046,129 +2103,214 @@ distinguishes an answer that was recorded from one that was not."
   ;; The recorded path may hold it, because holding it changes nothing.
   (should (chat-ui--command-repeatable-p "send"))
   (should (chat-ui--command-repeatable-p "cmd"))
-  (should (chat-ui--command-repeatable-p "queue"))
+  (should (chat-ui--command-repeatable-p "stage"))
   ;; A command you reach for once says nothing about the next line.
   (should-not (chat-ui--command-default-effect "cd"))
   (should-not (chat-ui--command-default-effect "pwd"))
   (should-not (chat-ui--command-default-effect "help")))
 
 ;; ------------------------------------------------------------------
-;; The queue: several notes, one turn
+;; Staging: several editable drafts, one turn
 ;; ------------------------------------------------------------------
 
-(ert-deftest chat-ui-a-queued-note-does-not-reach-the-model ()
+(ert-deftest chat-ui-a-staged-draft-does-not-reach-the-model ()
   "Collecting is the whole point: nothing goes out until it is flushed."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue check the tests"))
-    (should (equal (chat-ui--queue-entries) '("check the tests")))
+    (chat-ui--dispatch-command (chat-command-parse "/stage check the tests"))
+    (should (equal (chat-ui--stage-entries) '("check the tests")))
     (should-not sent)
-    (chat-ui--dispatch-command (chat-command-parse "/queue and the docs"))
-    (should (equal (chat-ui--queue-entries) '("check the tests" "and the docs")))
+    (chat-ui--dispatch-command (chat-command-parse "/stage and the docs"))
+    (should (equal (chat-ui--stage-entries) '("check the tests" "and the docs")))
     (should-not sent)))
 
-(ert-deftest chat-ui-queueing-claims-plain-input ()
+(ert-deftest chat-ui-staging-claims-plain-input ()
   "Notes come in runs, the same way shell commands do."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
-    (should (equal (chat-ui-default-command) "queue"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
+    (should (equal (chat-ui-default-command) "stage"))
     (chat-ui--dispatch-command (chat-command-parse "second"))
     (chat-ui--dispatch-command (chat-command-parse "third"))
-    (should (equal (chat-ui--queue-entries) '("first" "second" "third")))
+    (should (equal (chat-ui--stage-entries) '("first" "second" "third")))
     (should-not sent)))
 
-(ert-deftest chat-ui-flushing-sends-one-message-and-empties-the-queue ()
+(ert-deftest chat-ui-send-merges-and-empties-the-stage ()
   "One message rather than several: not every provider accepts two user
 messages in a row, and a batch that works on some models is worse than
 one that reads slightly less faithfully on all of them."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
     (chat-ui--dispatch-command (chat-command-parse "second"))
-    (chat-ui--dispatch-command (chat-command-parse "/flush"))
+    (chat-ui--dispatch-command (chat-command-parse "/send"))
     (should (= 1 (length sent)))
     (should (string-match-p "1\\. first" (car sent)))
     (should (string-match-p "2\\. second" (car sent)))
-    (should-not (chat-ui--queue-entries))
+    (should-not (chat-ui--stage-entries))
     ;; And plain input is back with the model, so the next line is not
     ;; silently queued after the batch went out.
     (should-not (chat-ui-default-command-claimed-p))))
 
-(ert-deftest chat-ui-a-queue-of-one-is-not-numbered ()
+(ert-deftest chat-ui-a-stage-of-one-is-not-numbered ()
   "Numbering a list of one is noise the model has to read past."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue just this"))
-    (chat-ui--dispatch-command (chat-command-parse "/flush"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage just this"))
+    (chat-ui--dispatch-command (chat-command-parse "/send"))
     (should (equal sent '("just this")))))
 
-(ert-deftest chat-ui-flush-can-add-a-last-note ()
+(ert-deftest chat-ui-send-can-add-a-last-staged-draft ()
   "The thought that makes you send is often the last item."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
-    (chat-ui--dispatch-command (chat-command-parse "/flush and finally this"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
+    (chat-ui--dispatch-command (chat-command-parse "/send and finally this"))
     (should (string-match-p "and finally this" (car sent)))
-    (should-not (chat-ui--queue-entries))))
+    (should-not (chat-ui--stage-entries))))
 
-(ert-deftest chat-ui-send-with-no-argument-flushes-the-queue ()
+(ert-deftest chat-ui-send-with-no-argument-triggers-the-stage ()
   "Having collected notes, `send' is the word you reach for."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue something"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage something"))
     (chat-ui--dispatch-command (chat-command-parse "/send"))
     (should (equal sent '("something")))))
 
+(ert-deftest chat-ui-send-appends-a-closing-note-to-the-staged-batch ()
+  "A final thought belongs to the batch instead of replacing it."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
+    (chat-ui--dispatch-command (chat-command-parse "/send finally"))
+    (should (= (length sent) 1))
+    (should (string-match-p "1\\. first" (car sent)))
+    (should (string-match-p "2\\. finally" (car sent)))))
+
+(ert-deftest chat-ui-stage-treats-send-mode-words-as-closing-text ()
+  "A staged batch has one trigger and cannot be bypassed by mode parsing."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
+    (chat-ui--dispatch-command (chat-command-parse "/send queue finally"))
+    (should (= (length sent) 1))
+    (should (string-match-p "1\\. first" (car sent)))
+    (should (string-match-p "2\\. queue finally" (car sent)))))
+
+(ert-deftest chat-ui-staged-send-waits-behind-an-active-run ()
+  "Staging remains inert while its triggered turn waits in runtime queue."
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/stage after this"))
+    (cl-letf (((symbol-function 'chat-agent-active-p) (lambda (_) t)))
+      (chat-ui--send-stage ""))
+    (should (equal (chat-ui--stage-entries) '("after this")))
+    (should (= (length chat-ui--queued-sends) 1))
+    (let ((draft (car chat-ui--queued-sends)))
+      (should (equal (chat-ui--draft-text draft) "after this"))
+      (should (= (plist-get (chat-ui--draft-metadata draft)
+                            :staged-message-count)
+                 1)))))
+
+(ert-deftest chat-ui-staged-items-can-be-edited-moved-and-dropped-by-position ()
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/stage one"))
+    (chat-ui--dispatch-command (chat-command-parse "two"))
+    (chat-ui--dispatch-command (chat-command-parse "three"))
+    (let* ((before (chat-ui--stage-items))
+           (one-id (chat-message-stage-item-id (car before)))
+           (one-order (chat-message-stage-item-original-order (car before))))
+      (chat-ui--dispatch-command (chat-command-parse "/stage edit 1 ONE"))
+      (chat-ui--dispatch-command (chat-command-parse "/stage move 1 3"))
+      (should (equal (chat-ui--stage-entries) '("two" "three" "ONE")))
+      (should (equal (chat-message-stage-item-id
+                      (car (last (chat-ui--stage-items))))
+                     one-id))
+      (should (= (chat-message-stage-item-original-order
+                  (car (last (chat-ui--stage-items))))
+                 one-order))
+      (chat-ui--dispatch-command (chat-command-parse "/stage drop 2"))
+      (should (equal (chat-ui--stage-entries) '("two" "ONE"))))))
+
+(ert-deftest chat-ui-staged-item-can-be-recalled-to-input ()
+  (chat-ui-auto-test--with-session
+    (chat-ui--dispatch-command (chat-command-parse "/stage restore me"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage recall 1"))
+    (should-not (chat-ui--stage-items))
+    (should (equal (chat-ui--input-text) "restore me"))))
+
+(ert-deftest chat-ui-checkpoint-failure-keeps-the-staged-batch ()
+  "A request that never becomes a turn must remain recoverable."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Stage failure" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-ui--command-stage "keep me")
+       (cl-letf (((symbol-function 'chat-ui--checkpoint-user-message)
+                  (lambda (_message) (error "checkpoint unavailable"))))
+         (chat-ui--send-stage ""))
+       (should (equal (chat-ui--stage-entries) '("keep me")))
+       (should-not (chat-session-messages session))))))
+
+(ert-deftest chat-ui-recorded-staged-batch-keeps-provenance-and-clears ()
+  "The canonical user message acknowledges the durable staged items."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Stage success" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-ui--command-stage "one")
+       (chat-ui--command-stage "two")
+       (cl-letf (((symbol-function 'chat-ui--checkpoint-user-message) #'ignore)
+                 ((symbol-function 'chat-ui--get-response) #'ignore))
+         (chat-ui--send-stage ""))
+       (let* ((message (car (last (chat-session-messages session))))
+              (metadata (chat-message-metadata message)))
+         (should-not (chat-ui--stage-items))
+         (should (= (plist-get metadata :staged-message-count) 2))
+         (should (= (length (plist-get metadata :staged-message-ids)) 2)))))))
+
 (ert-deftest chat-ui-dropping-takes-back-the-last-note ()
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
     (chat-ui--dispatch-command (chat-command-parse "second"))
-    (chat-ui--dispatch-command (chat-command-parse "/drop"))
-    (should (equal (chat-ui--queue-entries) '("first")))
-    (chat-ui--dispatch-command (chat-command-parse "/drop all"))
-    (should-not (chat-ui--queue-entries))))
+    (chat-ui--dispatch-command (chat-command-parse "/stage drop"))
+    (should (equal (chat-ui--stage-entries) '("first")))
+    (chat-ui--dispatch-command (chat-command-parse "/stage clear"))
+    (should-not (chat-ui--stage-entries))))
 
-(ert-deftest chat-ui-dropping-all-accepts-a-fullwidth-keyword ()
-  "`all' is a keyword the command compares against, not text to keep."
+(ert-deftest chat-ui-clearing-accepts-a-fullwidth-command ()
+  "Fullwidth command syntax must still reach the canonical stage operation."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue first"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage first"))
     (chat-ui--dispatch-command (chat-command-parse "second"))
-    (chat-ui--dispatch-command (chat-command-parse "／ｄｒｏｐ\u3000ａｌｌ"))
-    (should-not (chat-ui--queue-entries))))
+    (chat-ui--dispatch-command (chat-command-parse "／ｓｔａｇｅ\u3000ｃｌｅａｒ"))
+    (should-not (chat-ui--stage-entries))))
 
-(ert-deftest chat-ui-a-queued-note-keeps-its-fullwidth-characters ()
+(ert-deftest chat-ui-a-staged-draft-keeps-its-fullwidth-characters ()
   "A note is data.  Folding it would rewrite what the user is sending."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue 搜索 ＡＢＣ"))
-    (should (equal (chat-ui--queue-entries) '("搜索 ＡＢＣ")))))
+    (chat-ui--dispatch-command (chat-command-parse "/stage 搜索 ＡＢＣ"))
+    (should (equal (chat-ui--stage-entries) '("搜索 ＡＢＣ")))))
 
-(ert-deftest chat-ui-the-queue-survives-a-reopen ()
+(ert-deftest chat-ui-the-stage-survives-a-reopen ()
   "Notes are on the session.  Losing them on reopen would lose typing."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue remember this"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage remember this"))
     (chat-session-save session)
     (let ((reloaded (chat-session-load (chat-session-id session))))
       (with-temp-buffer
         (setq-local chat--current-session reloaded)
         (chat-ui-setup-buffer reloaded)
-        (should (equal (chat-ui--queue-entries) '("remember this")))
+        (should (equal (chat-ui--stage-entries) '("remember this")))
         ;; A round trip through JSON hands a list of strings back as a
         ;; vector, and code that appended to it would fail here.
-        (chat-ui--command-queue "and this")
-        (should (equal (chat-ui--queue-entries)
+        (chat-ui--command-stage "and this")
+        (should (equal (chat-ui--stage-entries)
                        '("remember this" "and this")))))))
 
-(ert-deftest chat-ui-the-queue-count-is-on-screen ()
+(ert-deftest chat-ui-the-stage-count-is-on-screen ()
   "Text that was typed and not sent has to be visible somewhere."
   (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/queue one"))
+    (chat-ui--dispatch-command (chat-command-parse "/stage one"))
     (chat-ui--dispatch-command (chat-command-parse "two"))
-    (should (string-match-p "queued: 2" (chat-ui--status-line session)))
+    (should (string-match-p "staged: 2" (chat-ui--status-line session)))
     (should (string-match-p
-             "queued: 2"
-             (buffer-substring-no-properties (point-min) (point-max))))))
-
-(ert-deftest chat-ui-flushing-nothing-says-so ()
-  (chat-ui-auto-test--with-session
-    (chat-ui--dispatch-command (chat-command-parse "/flush"))
-    (should-not sent)
-    (should (string-match-p
-             "Nothing queued"
+             "staged: 2"
              (buffer-substring-no-properties (point-min) (point-max))))))
 
 (ert-deftest chat-ui-tool-result-lines-truncate-long-results ()

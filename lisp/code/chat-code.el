@@ -109,8 +109,6 @@ Set to 0 to never auto-apply."
   'chat-ui-tool-followup-timeout "chat.el 2026-08")
 (define-obsolete-variable-alias 'chat-code-tool-result-summary-max-chars
   'chat-ui-tool-summary-max-chars "chat.el 2026-08")
-(define-obsolete-variable-alias 'chat-code-auto-path-completion
-  'chat-ui-auto-path-completion "chat.el 2026-08")
 (define-obsolete-variable-alias 'chat-code-use-streaming
   'chat-ui-use-streaming "chat.el 2026-08")
 

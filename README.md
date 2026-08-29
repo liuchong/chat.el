@@ -212,7 +212,8 @@ command prefix.
 | `/send <message>` | Send and record it, as plain input does |
 | `/send insert\|queue\|interrupt <message>` | Send it, saying what to do about a reply already running |
 | `/quick <q>`, `?<q>` | Ask the model without recording the exchange |
-| `/queue <note>`, `/flush`, `/drop` | Collect notes and send them as one |
+| `/stage <draft>` | Keep an editable draft inert; use `/stage` to inspect or revise it |
+| `/send` | Send all staged drafts as one canonical user turn |
 | `/model [name]` | Retarget this session; with no name, prompt for one |
 | `/new`, `/list`, `/save`, `/clear` | Session housekeeping |
 | `/goal` | Show the selected durable Goal and its stopping condition |
@@ -223,6 +224,13 @@ command prefix.
 | `/plan reject <feedback>` | Return the submitted plan for revision while remaining read-only |
 | `/plan cancel` | Leave Plan Mode without approving execution |
 | `/cancel` | Cancel the response in flight |
+
+Typing a slash-command prefix displays up to eight passive hints near the
+input. The list never takes focus or changes what `RET` means: `RET` always
+dispatches the text exactly once. `TAB` expands only a unique candidate or
+the candidates' longest common prefix; it never starts a selection session.
+Hints are alphabetical by default and may instead use successful command
+frequency, with names as the deterministic tie-breaker.
 | `\<text>` | Send text as is, even when it starts with `!` or `/` |
 
 A slash command that is not listed here stays ordinary text and reaches
@@ -318,11 +326,11 @@ not.
 | Position | Folded | Whose is it |
 | --- | --- | --- |
 | Prefix, slash command name, separator | yes | chat.el's syntax |
-| `/auto`, `/drop`, `/model`, `/help` argument | yes | names a chat.el command, keyword, model or topic |
+| `/auto`, `/stage`, `/model`, `/help` argument | yes | names a chat.el command, keyword, model or topic |
 | `/cd` argument | `／` and `～` only | separator and home are syntax; the rest is a name on disk |
 | Shell body, prompt, queued note, literal | no | on its way out |
 
-So `!echo "你好，世界"` reaches the shell unchanged and `/queue 搜索 ＡＢＣ`
+So `!echo "你好，世界"` reaches the shell unchanged and `/stage 搜索 ＡＢＣ`
 sends the characters you meant. A command named in Chinese is untouched
 too: the fold covers one Unicode block and ideographs are outside it, so
 `/发送` and `/自动` are unaffected.
@@ -829,29 +837,42 @@ be eaten. To send a message that starts with a mode name, name a mode:
 The prompt shows the mode when it is not the default, and shows how many
 messages are waiting when any are.
 
-`/send queue` is not `/queue`. `/queue` collects notes *before* sending
-and `/flush` sends them as one message; `queue` mode waits for a reply
-that is already running. Same word, different moment.
+`queue` is a runtime send strategy, not staging. `/send queue <message>`
+registers executable work which starts after the active reply. `/stage`
+keeps drafts inert until an explicit `/send`, even when the
+executor is idle.
 
-## Deferred Send
+## Staged Send
 
 A request rarely arrives in one piece. It arrives as "also check X", "and
 the file is at Y" -- each of which, sent on its own, spends a turn on a
 fragment. Collect them instead:
 
 ```
-/queue check the tests   ; collected, not sent; /queue also claims plain input
-and the docs             ; another note
-/queue                   ; list what is collected
-/drop                    ; take the last one back (/drop all for everything)
-/flush                   ; send them as one message
-/send                    ; same thing, if that is the word you reach for
+/stage check the tests   ; staged, not sent; /stage also claims plain input
+and the docs             ; another staged item
+/stage                   ; list identity, original order, time and current order
+/stage edit 2 and docs   ; edit without creating a new identity
+/stage move 2 1          ; reorder without changing original order
+/stage recall 1          ; return an item and its attachments to the input
+/stage drop 2            ; discard a position; omit 2 to discard the last item
+/stage clear             ; discard every staged item
+/send one last constraint ; append this final item and send one message
+/send                    ; send the staged items without adding another
 ```
 
 They go out as a single numbered user message rather than as several,
 because consecutive messages in one role are not something every provider
-accepts. The count shows in the status line, and the queue lives on the
-session, so closing the buffer does not lose what you typed.
+accepts. The count shows in the status line, and the stage lives on the
+session, so closing the buffer does not lose what you typed. Each item has
+a stable ID, timestamp and original order; editing and reordering only change
+the fields they name. Attachments travel with their item. A checkpoint failure
+leaves the batch staged, and a successful recorded turn keeps its item IDs as
+message provenance before clearing the stage.
+
+Use `/stage add <text>` when the literal item itself begins with `edit`,
+`move`, `recall`, `drop` or `clear` and could otherwise be read as a staging
+operation.
 
 ## Auto: The Default Command
 

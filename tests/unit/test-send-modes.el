@@ -47,7 +47,8 @@ so a handler that reads mode words from both would send \"the build\" and
 queue it, silently eating the word the user typed."
   (let ((sent nil))
     (cl-letf (((symbol-function 'chat-ui--send-user-message)
-               (lambda (content) (setq sent content)))
+               (lambda (content &optional _parts _metadata)
+                 (setq sent content)))
               ((symbol-function 'chat-agent-active-p) (lambda (_) nil)))
       (let ((chat-ui--input-was-typed t))
         (chat-ui--command-send "queue the build for tomorrow"))
@@ -67,7 +68,8 @@ queue it, silently eating the word the user typed."
   (dolist (mode chat-ui-send-modes)
     (let ((sent nil))
       (cl-letf (((symbol-function 'chat-ui--send-user-message)
-                 (lambda (content) (setq sent content)))
+                 (lambda (content &optional _parts _metadata)
+                   (setq sent content)))
                 ((symbol-function 'chat-agent-active-p) (lambda (_) nil)))
         (chat-ui--send-in-mode "问题" mode)
         (should (equal "问题" sent))))))
@@ -86,7 +88,9 @@ queue it, silently eating the word the user typed."
         (setq-local chat-ui--queued-sends nil)
         (chat-ui--send-in-mode "等会儿再说" 'queue)
         (should-not steered)
-        (should (equal '("等会儿再说") chat-ui--queued-sends))))))
+        (should (equal '("等会儿再说")
+                       (mapcar #'chat-ui--draft-text
+                               chat-ui--queued-sends)))))))
 
 (ert-deftest chat-send-queue-keeps-arrival-order-and-does-not-merge ()
   "Two queued messages become two runs, in the order they arrived.
@@ -94,18 +98,22 @@ Merging them would be `insert', and choosing `queue' is choosing not to."
   (let ((sent nil))
     (cl-letf (((symbol-function 'chat-agent-active-p) (lambda (_) t))
               ((symbol-function 'chat-ui--send-user-message)
-               (lambda (c) (push c sent))))
+               (lambda (c &optional _parts _metadata) (push c sent))))
       (with-temp-buffer
         (setq-local chat-ui--queued-sends nil)
         (chat-ui--send-in-mode "第一件" 'queue)
         (chat-ui--send-in-mode "第二件" 'queue)
-        (should (equal '("第一件" "第二件") chat-ui--queued-sends))
+        (should (equal '("第一件" "第二件")
+                       (mapcar #'chat-ui--draft-text
+                               chat-ui--queued-sends)))
         (chat-ui--drain-queued-sends)
         ;; Through a timer, so that it does not run inside the handler of
         ;; the run it was waiting for.
         (sit-for 0.05)
         (should (equal '("第一件") sent))
-        (should (equal '("第二件") chat-ui--queued-sends))
+        (should (equal '("第二件")
+                       (mapcar #'chat-ui--draft-text
+                               chat-ui--queued-sends)))
         (chat-ui--drain-queued-sends)
         (sit-for 0.05)
         (should (equal '("第二件" "第一件") sent))))))
@@ -126,7 +134,7 @@ Merging them would be `insert', and choosing `queue' is choosing not to."
          sent-parts)
     (cl-letf (((symbol-function 'chat-agent-active-p) (lambda (_) t))
               ((symbol-function 'chat-ui--send-user-message)
-               (lambda (text &optional parts)
+               (lambda (text &optional parts _metadata)
                  (setq sent-text text sent-parts parts))))
       (with-temp-buffer
         (setq-local chat-ui--queued-sends nil)
@@ -159,7 +167,7 @@ nothing to point at."
                 (lambda () (setq cancelled t)))
                ((symbol-function 'chat-ui--redraw-conversation) #'ignore)
                ((symbol-function 'chat-ui--send-user-message)
-                (lambda (c) (setq sent c))))
+                (lambda (c &optional _parts _metadata) (setq sent c))))
        (with-temp-buffer
          (setq-local chat--current-session session)
          (setq-local chat-ui--live-response-content
@@ -203,7 +211,8 @@ nothing to point at."
                (lambda () (setq cancelled t)))
               ((symbol-function 'chat-ui--redraw-conversation) #'ignore)
               ((symbol-function 'chat-ui--send-user-message)
-               (lambda (_text &optional parts) (setq sent-parts parts))))
+               (lambda (_text &optional parts _metadata)
+                 (setq sent-parts parts))))
       (with-temp-buffer
         (setq-local chat-ui--live-response-content "")
         (chat-ui--send-in-mode "replace it" 'interrupt (list part))))

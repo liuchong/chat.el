@@ -96,6 +96,7 @@ Returns the list of files that were loaded."
 (require 'chat-runtime-status)
 (require 'chat-command)
 (require 'chat-content)
+(require 'chat-message-stage)
 (require 'chat-session)
 (require 'chat-session-export)
 (require 'chat-session-wire)
@@ -256,13 +257,16 @@ size when the user chooses the more-sessions action."
   "Talking to the Model:
   /send <message>       - Send and record it; the model may use tools and
                           take several steps. Same as typing with no prefix.
-  /send                 - Send whatever /queue has collected
+  /send                 - Send all inert /stage drafts as one user turn
   /quick <question>     - Ask once, without recording it or using tools.
                           Also /? and the shorthand ?<question>
-  /queue <note>         - Collect a note to go out with the next /flush
-  /queue                - List what is queued
-  /flush [note]         - Send the queue as one message
-  /drop [all]           - Discard the last queued note, or all of them
+  /stage <draft>        - Store an editable draft without requesting the model
+  /stage                - List staged drafts with order and time
+  /stage edit N <draft> - Edit a draft without changing its identity
+  /stage move N M       - Move draft N to display position M
+  /stage recall N       - Restore draft N to the input area
+  /stage drop [N|all]   - Discard a position, the last draft, or all drafts
+  /stage clear          - Discard every staged draft
   /cancel               - Cancel current AI request
   /help [topic]         - This help, or only the lines mentioning topic
   /model <name>         - Switch this session's model (C-c C-m, no name prompts)
@@ -331,14 +335,14 @@ Keys:
   C-c C-u               - Show or hide the Markdown markers
   M-p / M-n             - Recall earlier / later input
   C-a                   - Go to the start of what you typed
-  TAB                   - Complete: slash commands after /, paths otherwise
+  TAB                   - Expand the common command or path prefix; never select
   C-c C-h               - This help
 
 Auto (Default Command):
   Plain input runs through one command, and by default that command is
   /send. Work that comes in runs claims it: `!ls' makes /cmd the default
-  so the next line is another shell command, and /queue does the same for
-  notes. Anything that asks the model hands it back to /send, so a
+  so the next line is another shell command, and /stage does the same for
+  drafts. Anything that asks the model hands it back to /send, so a
   question always gets you out of shell mode.
   /auto            - Say what plain input currently runs through
   /auto cmd        - Send plain input to the shell
@@ -702,9 +706,9 @@ somewhere else is the same as advice that is wrong."
     ;; Keep `C-g' as the shortest route, but do not make cancellation depend
     ;; on the reader having first opened the help buffer.
     (define-key map (kbd "C-c C-c") 'chat-ui-cancel-response)
-    ;; Completion is the point of the command and path tables; without a
-    ;; key it was reachable only through `M-x'.
-    (define-key map (kbd "TAB") 'completion-at-point)
+    ;; Prefix expansion is intentionally not `completion-at-point': a
+    ;; completion session can own RET and turn sending into two steps.
+    (define-key map (kbd "TAB") 'chat-ui-complete-input)
     ;; Sessions.
     (define-key map (kbd "C-c C-n") 'chat-new-session)
     (define-key map (kbd "C-c C-l") 'chat-list-sessions)
@@ -870,9 +874,9 @@ the header and in which commands do anything."
   (setq-local completion-at-point-functions
               '(chat-ui--command-completion-at-point
                 chat-ui--path-completion-at-point))
-  (add-hook 'post-self-insert-hook
-            #'chat-ui--maybe-complete-path-after-insert
-            nil t)
+  (setq-local chat-input-hint-providers nil)
+  (chat-input-hint-register-provider #'chat-ui--command-hint-model t)
+  (add-hook 'post-command-hook #'chat-input-hint-refresh t t)
   ;; The prompt is read-only text, so re-running the mode over a buffer
   ;; that already has one has to be allowed to clear it.
   (let ((inhibit-read-only t))

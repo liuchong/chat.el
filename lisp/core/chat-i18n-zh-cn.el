@@ -42,9 +42,7 @@
    ("发送" . "send")
    ("快问" . "quick")
    ("命令" . "cmd")
-   ("暂存" . "queue")
-   ("发出" . "flush")
-   ("撤回" . "drop")
+   ("暂存" . "stage")
    ("目录" . "cd")
    ("当前目录" . "pwd")
    ("新建" . "new")
@@ -62,13 +60,16 @@
  '((help-text . "与模型对话：
   /send <消息>          - 发送并记入会话；模型可以调工具、分多步完成。
                           等同于不带前缀直接输入。
-  /send                 - 把 /queue 攒下的内容一次发出
+  /send                 - 把 /stage 暂存的内容一次发出
   /quick <问题>         - 只问一次，不记入会话、不调工具。
                           也可写 /? 或简写 ?<问题>
-  /queue <条目>         - 攒一条，等下次 /flush 一起发出
-  /queue                - 列出已攒的内容
-  /flush [条目]         - 把攒下的内容合成一条消息发出
-  /drop [all]           - 丢掉最后一条已攒内容，或全部丢掉
+  /stage <草稿>         - 暂存一条，不会自动请求模型
+  /stage                - 列出暂存草稿及其顺序和时间
+  /stage edit N <草稿>  - 修改第 N 条，保留原始身份
+  /stage move N M       - 把第 N 条移动到第 M 个位置
+  /stage recall N       - 把第 N 条召回输入区继续编辑
+  /stage drop [N|all]   - 丢掉指定、最后一条或全部暂存内容
+  /stage clear          - 丢掉全部暂存内容
   /cancel               - 取消当前 AI 请求
   /help [关键词]        - 本帮助，或只看含关键词的行
   /model <名称>         - 切换本会话的模型（C-c C-m，不给名称则提示选择）
@@ -133,12 +134,12 @@
   C-c C-u               - 显示或隐藏 Markdown 标记
   M-p / M-n             - 召回更早 / 更晚的输入
   C-a                   - 跳到你输入内容的开头（不是行首）
-  TAB                   - 补全：/ 之后补命令，其余补路径
+  TAB                   - 扩展命令或路径的公共前缀，不进入选择
   C-c C-h               - 本帮助
 
 Auto（默认命令）：
   直接输入会走某一个命令，默认是 /send。成串出现的活儿会把它抢过去：
-  `!ls' 会把 /cmd 设为默认，于是下一行也当 shell 命令；/queue 对攒条目
+  `!ls' 会把 /cmd 设为默认，于是下一行也当 shell 命令；/stage 对暂存草稿
   同理。而任何问模型的动作都会把它交还给 /send —— 所以问一句就能从
   shell 模式里出来。
   /auto            - 说明当前直接输入会走哪个命令
@@ -189,7 +190,8 @@ Auto（默认命令）：
   - 请求面板显示执行细节，不把这些细节堆进对话正文。
   - 接受修改前，可以先在 *chat-preview* 里预览。
   - 文件写入的审批可以一次放行一个目录子树。
-  - 在输入区输入路径样式的内容会自动补全文件名。
+  - 斜线命令提示只供查看，不接管焦点；RET 始终直接执行当前输入。
+  - TAB 只补到唯一候选或最长公共前缀；路径补全也只在显式按 TAB 时计算。
   - 长文档按段推进，不要一次要一大篇；已有文件用定向修改，
     整体写入只留给新文件。
 
@@ -253,7 +255,7 @@ Wiki（/wiki <子命令>）：
    ;; Status line.
    (status-model . "模型：%s")
    (status-auto . "auto：/%s")
-   (status-queued . "已攒：%d")
+   (status-staged . "已暂存：%d")
 
    ;; The prompt, and switching provider from it.
    (prompt-model-switch . "%s —— 鼠标左键切换模型")
@@ -291,12 +293,15 @@ Wiki（/wiki <子命令>）：
    (query-asking . "🤖 正在问 AI……")
    (error-note . "❌ 出错：%s")
 
-   ;; The queue.
-   (queue-added . "已攒第 %d 条：%s（/flush 发出，/queue 查看）")
-   (queue-empty . "还没有攒任何内容。/queue <条目> 可以攒起来一起发。")
-   (queue-heading . "已攒 %d 条，/flush 发出：")
-   (queue-dropped . "已丢掉：%s")
-   (queue-dropped-all . "已丢掉全部 %d 条。")
+   ;; Staging.
+   (stage-added . "已暂存第 %d 条：%s（/send 发出，/stage 查看）")
+   (stage-empty . "还没有暂存内容。/stage <草稿> 会保存但不会请求模型。")
+   (stage-heading . "已暂存 %d 条，/send 发出：")
+   (stage-edited . "已修改暂存项 %d：%s")
+   (stage-moved . "已把暂存项 %d 移到 %d。")
+   (stage-recalled . "已把暂存项 %d 召回输入区。")
+   (stage-dropped . "已丢掉：%s")
+   (stage-dropped-all . "已丢掉全部 %d 条。")
 
    ;; Sessions.
    (no-session . "这里没有会话。")

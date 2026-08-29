@@ -17,6 +17,7 @@
 (require 'chat-i18n)
 (require 'chat-command)
 (require 'chat-input-history)
+(require 'chat-input-hint)
 (require 'chat-mark)
 (require 'chat-shell-builtins)
 ;; Owned by `chat.el', which loads after this file.
@@ -30,6 +31,7 @@
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
 (require 'chat-content)
+(require 'chat-message-stage)
 (require 'chat-checkpoint)
 (require 'chat-workspace)
 (require 'chat-event)
@@ -247,7 +249,7 @@ belong to the turn as a whole rather than to any one part of it.")
          (auto (and (chat-ui-default-command-claimed-p session)
                     (chat-ui--display-command-name
                      (chat-ui-default-command session))))
-         (queued (chat-ui--queue-length session)))
+         (staged (chat-ui--stage-length session)))
     (concat (chat-i18n 'status-model "Model: %s" model)
             (when-let ((phase (and chat-ui--runtime-status
                                    (chat-runtime-status-phase
@@ -255,8 +257,8 @@ belong to the turn as a whole rather than to any one part of it.")
               (format " | %s"
                       (chat-runtime-status-phase-label phase)))
             (when auto (format " | %s" (chat-i18n 'status-auto "auto: /%s" auto)))
-            (when (> queued 0)
-              (format " | %s" (chat-i18n 'status-queued "queued: %d" queued)))
+            (when (> staged 0)
+              (format " | %s" (chat-i18n 'status-staged "staged: %d" staged)))
             (when-let ((approval (chat-ui--status-approval session)))
               (format " | %s" approval))
             (when label (format " | %s" label)))))
@@ -580,25 +582,6 @@ improvement."
    chat-ui--current-request-id
    chat-ui--request-tool-events))
 
-(defcustom chat-ui-auto-path-completion nil
-  "Whether typing a path-like token in the input offers completion.
-
-Off, because a popup that arrives uninvited costs more than it saves. A
-completion UI that is open takes RET for itself, so the key that sends a
-message becomes the key that picks a candidate and the message needs a
-second RET; and the popup window moves the buffer under the reader while
-they are still typing.
-
-A terminal completes on TAB and never before, and TAB is bound to
-`completion-at-point' here, which fills in the common prefix on the first
-press and lists the candidates on the second -- what a shell does. Set
-this if you want the popup back."
-  :type 'boolean
-  :group 'chat-ui)
-
-(defvar chat-ui--auto-path-completion-active nil
-  "Non-nil while auto path completion is running, to avoid recursion.")
-
 (defun chat-ui--point-in-input-p (&optional position)
   "Return non-nil when POSITION is inside the editable input area."
   (let ((pos (or position (point))))
@@ -628,12 +611,10 @@ design was.")
   '((:name "cancel"   :handler chat-ui--command-cancel :while-busy t)
     (:name "help"     :handler chat-ui--command-help   :while-busy t)
     (:name "model"    :handler chat-ui--command-model  :while-busy t)
-    (:name "send"     :handler chat-ui--command-send   :default sticky)
+    (:name "send"     :handler chat-ui--command-send   :default sticky :while-busy t)
     (:name "quick"    :handler chat-ui--command-quick  :default reset)
     (:name "cmd"      :handler chat-ui--command-shell  :default sticky)
-    (:name "queue"    :handler chat-ui--command-queue  :default sticky)
-    (:name "flush"    :handler chat-ui--command-flush  :default reset)
-    (:name "drop"     :handler chat-ui--command-drop)
+    (:name "stage"    :handler chat-ui--command-stage  :default sticky :while-busy t)
     (:name "cd"       :handler chat-ui--command-cd)
     (:name "pwd"      :handler chat-ui--command-pwd)
     (:name "new"      :handler chat-ui--command-new)
@@ -773,6 +754,69 @@ whoever is reading it."
                                    "works while busy"))
          ""))))
 
+(defconst chat-ui--command-usage-schema-version 1
+  "Current session-local command usage schema.")
+
+(defun chat-ui--command-usage-records (&optional session)
+  "Return current-schema command usage records for SESSION."
+  (let ((stored (chat-session-metadata-get
+                 (or session chat--current-session)
+                 :chat-ui-command-usage)))
+    (when (and (listp stored)
+               (= (or (alist-get 'schemaVersion stored) 0)
+                  chat-ui--command-usage-schema-version))
+      (append (alist-get 'counts stored) nil))))
+
+(defun chat-ui--command-usage-count (name &optional session)
+  "Return successful dispatch count for canonical command NAME in SESSION."
+  (let ((record
+         (seq-find
+          (lambda (entry) (equal (alist-get 'name entry) name))
+          (chat-ui--command-usage-records session))))
+    (or (and record (alist-get 'count record)) 0)))
+
+(defun chat-ui--record-command-usage (name)
+  "Record one successful dispatch of canonical command NAME."
+  (when (and chat--current-session (chat-ui--command-entry name))
+    (let* ((records (chat-ui--command-usage-records))
+           (record (seq-find
+                    (lambda (entry) (equal (alist-get 'name entry) name))
+                    records)))
+      (if record
+          (setcdr (assq 'count record)
+                  (1+ (or (alist-get 'count record) 0)))
+        (setq records
+              (append records
+                      (list `((name . ,name) (count . 1))))))
+      (chat-ui--session-metadata-set
+       :chat-ui-command-usage
+       `((schemaVersion . ,chat-ui--command-usage-schema-version)
+         (counts . ,(vconcat records)))))))
+
+(defun chat-ui--command-hint-model ()
+  "Return a passive slash-command hint model at point, or nil."
+  (when-let ((bounds (chat-ui--command-token-bounds)))
+    (when (= (point) (cdr bounds))
+      (let ((prefix (buffer-substring-no-properties
+                     (1+ (car bounds)) (cdr bounds))))
+        (make-chat-input-hint-model
+         :source 'slash-command
+         :prefix prefix
+         :anchor-start (car bounds)
+         :anchor-end (cdr bounds)
+         :candidates
+         (mapcar
+          (lambda (entry)
+            (let* ((canonical (plist-get entry :name))
+                   (display (chat-ui--display-command-name canonical)))
+              (make-chat-input-hint-candidate
+               :key canonical
+               :completion display
+               :display (concat "/" display)
+               :annotation (chat-ui--command-annotation canonical)
+               :frequency (chat-ui--command-usage-count canonical))))
+          chat-ui--command-table))))))
+
 (defun chat-ui--path-token-p (token)
   "Return non-nil when TOKEN looks like a file path fragment."
   (and (stringp token)
@@ -831,23 +875,38 @@ not always the directory the buffer sits in."
        :exclusive 'no
        :company-kind (lambda (_candidate) 'file)))))
 
-(defun chat-ui--maybe-complete-path-after-insert ()
-  "Auto-trigger completion for path-like or command-like input."
-  (when (and chat-ui-auto-path-completion
-             (not chat-ui--auto-path-completion-active)
-             (chat-ui--point-in-input-p)
-             (not (minibufferp))
-             (let ((char last-command-event))
-               (or (memq char '(?/ ?. ?~))
-                   (and (characterp char)
-                        (or (and (>= char ?0) (<= char ?9))
-                            (and (>= char ?A) (<= char ?Z))
-                            (and (>= char ?a) (<= char ?z))
-                            (memq char '(?_ ?-)))))))
-    (when (or (chat-ui--command-completion-at-point)
-              (chat-ui--path-completion-at-point))
-      (let ((chat-ui--auto-path-completion-active t))
-        (completion-at-point)))))
+(defun chat-ui--common-prefix (strings)
+  "Return the exact longest common prefix of non-empty STRINGS."
+  (let ((prefix (copy-sequence (car strings))))
+    (dolist (string (cdr strings))
+      (let ((limit (min (length prefix) (length string)))
+            (index 0))
+        (while (and (< index limit)
+                    (= (aref prefix index) (aref string index)))
+          (setq index (1+ index)))
+        (setq prefix (substring prefix 0 index))))
+    prefix))
+
+(defun chat-ui-complete-input ()
+  "Expand the current input token without opening a selection session."
+  (interactive)
+  (chat-input-hint-clear)
+  (when-let* ((capf (run-hook-with-args-until-success
+                     'completion-at-point-functions))
+              (start (nth 0 capf))
+              (end (nth 1 capf))
+              (table (nth 2 capf)))
+    (let* ((predicate (plist-get (nthcdr 3 capf) :predicate))
+           (input (buffer-substring-no-properties start end))
+           (candidates (all-completions input table predicate))
+           (target (cond
+                    ((null candidates) nil)
+                    ((null (cdr candidates)) (car candidates))
+                    (t (chat-ui--common-prefix candidates)))))
+      (when (and target (> (length target) (length input)))
+        (delete-region start end)
+        (goto-char start)
+        (insert target)))))
 
 (defun chat-ui-insert-newline ()
   "Insert a newline in the input area without sending the message."
@@ -2104,6 +2163,7 @@ long transcript never scans the whole conversation."
 (defun chat-ui-send-message ()
   "Act on the input area, either as a command or as a message."
   (interactive)
+  (chat-input-hint-clear)
   (when chat--current-session
     (chat-ui--clock-start (chat-session-id chat--current-session))
     ;; Before reading the input rather than after clearing it, so a prompt
@@ -2516,18 +2576,24 @@ two settings nobody can talk about."
     (pcase (plist-get command :kind)
       ('shell
        (chat-ui--command-shell arg)
+       (chat-ui--record-command-usage "cmd")
        (chat-ui--note-command-default command))
       ('shell-repeat
        (chat-ui--repeat-shell-command)
+       (chat-ui--record-command-usage "cmd")
        (chat-ui--note-command-default command))
       ('query
        (chat-ui--command-quick arg)
+       (chat-ui--record-command-usage "quick")
        (chat-ui--note-command-default command))
       ('slash
        (let ((handler (chat-ui--command-handler (plist-get command :name))))
          (if handler
              (progn
                (funcall handler arg)
+               (chat-ui--record-command-usage
+                (chat-ui--command-canonical-name
+                 (plist-get command :name)))
                (chat-ui--note-command-default command))
            ;; An unknown name is not an error: the model may still make
            ;; sense of it, and refusing would break slash-prefixed prose.
@@ -2566,8 +2632,9 @@ two settings nobody can talk about."
           (when mode (cons 'mode (format "%s" mode)))))
    :subject message))
 
-(defun chat-ui--send-user-message (content &optional content-parts)
-  "Record CONTENT and CONTENT-PARTS as a user message, then respond."
+(defun chat-ui--send-user-message (content &optional content-parts metadata)
+  "Record CONTENT and CONTENT-PARTS as a user message, then respond.
+METADATA records provenance supplied by the input surface."
   (let* ((attachments (or content-parts chat-ui--send-content-parts))
          (parts (chat-content-parts-with-text attachments content)))
     (if (and (string-empty-p content) (null parts))
@@ -2581,6 +2648,7 @@ two settings nobody can talk about."
                            :role :user
                            :content content
                            :content-parts parts
+                           :metadata metadata
                            :timestamp (current-time))))
                (event (chat-ui--prompt-event
                        'user-prompt-submitted user-msg))
@@ -2608,6 +2676,10 @@ two settings nobody can talk about."
                           (error-message-string err))))
               (unless checkpoint-error
                 (chat-session-add-message chat--current-session user-msg)
+                ;; A staged batch remains recoverable until its canonical
+                ;; user message has passed the checkpoint and been recorded.
+                (when (plist-get metadata :staged-message-ids)
+                  (chat-ui--set-stage nil))
                 (setq chat-ui--send-content-parts-consumed
                       (and attachments t))
                 (chat-ui--clock "record")
@@ -2664,113 +2736,226 @@ is what lets the display group them instead of guessing from position."
       (message "%s" (chat-i18n 'message-queued
                             "Message queued for the active response.")))))
 
-;;; The queue: several notes, one turn
+;;; Staging: several editable drafts, one turn
 ;;
 ;; Writing a request in one go is not how a request arrives.  It arrives
 ;; as `also check X', `and the file is at Y' -- each of which, sent on its
 ;; own, spends a whole turn on a fragment and gets an answer to the
-;; fragment.  The queue lets those land as notes and go out together.
+;; fragment.  Staging keeps those drafts inert until an explicit send.
 ;;
 ;; They are joined into a single user message rather than sent as several,
 ;; because consecutive messages in the same role are not something every
 ;; provider accepts, and a batching feature that works on some models is
 ;; worse than one that reads slightly less faithfully on all of them.
 
-(defun chat-ui--queue-entries (&optional session)
-  "Return the notes queued in SESSION, oldest first."
+(defun chat-ui--stage-items (&optional session)
+  "Return structured staged items in SESSION, in display order."
   (when-let ((session (or session chat--current-session)))
-    (let ((stored (chat-session-metadata-get session :chat-ui-queued-messages)))
-      ;; A round trip through JSON brings a list of strings back as a
-      ;; vector, and a queue that empties itself on reopen would be a
-      ;; quiet way to lose what someone typed.
-      (append (if (vectorp stored) (append stored nil) stored) nil))))
+    (let ((stored (chat-session-metadata-get session :chat-ui-staged-messages)))
+      (chat-message-stage-items-from-json stored))))
 
-(defun chat-ui--queue-length (&optional session)
-  "Return how many notes are queued in SESSION."
-  (length (chat-ui--queue-entries session)))
+(defun chat-ui--stage-entries (&optional session)
+  "Return the staged text projection in SESSION, in display order."
+  (chat-message-stage-texts (chat-ui--stage-items session)))
 
-(defun chat-ui--set-queue (entries)
-  "Make ENTRIES the queued notes of the current session."
-  (chat-ui--session-metadata-set :chat-ui-queued-messages entries)
+(defun chat-ui--stage-length (&optional session)
+  "Return how many inert drafts are staged in SESSION."
+  (length (chat-ui--stage-entries session)))
+
+(defun chat-ui--set-stage (entries)
+  "Make ENTRIES the staged drafts of the current session."
+  (chat-ui--session-metadata-set
+   :chat-ui-staged-messages
+   (chat-message-stage-items-to-json
+    (chat-message-stage-items-from-json entries)))
   (chat-ui--render-status-line))
 
-(defun chat-ui--queue-joined-text (entries)
-  "Return ENTRIES as the text of one message.
+(defun chat-ui--stage-next-original-order (items)
+  "Return and reserve the next original order after ITEMS."
+  (let* ((stored (chat-ui--session-metadata-get
+                  :chat-ui-staged-message-next-order))
+         (next (max (if (integerp stored) stored 1)
+                    (chat-message-stage-next-original-order items))))
+    (chat-ui--session-metadata-set
+     :chat-ui-staged-message-next-order (1+ next))
+    next))
 
-Numbered when there are several, so the model can see it was given
-distinct requests rather than one rambling one; left alone when there is
-only one, because numbering a list of one is noise."
-  (if (cdr entries)
-      (string-join
-       (seq-map-indexed (lambda (entry index)
-                          (format "%d. %s" (1+ index) entry))
-                        entries)
-       "\n\n")
-    (car entries)))
+(defun chat-ui--stage-new-item (text &optional content-parts)
+  "Return a new staged item holding TEXT and CONTENT-PARTS."
+  (let ((items (chat-ui--stage-items)))
+    (chat-message-stage-create
+     text (chat-ui--stage-next-original-order items) content-parts 'chat-ui)))
 
-(defun chat-ui--command-queue (arg)
-  "Queue ARG to go out later, or list what is queued when ARG is empty."
-  (let ((note (string-trim (or arg ""))))
-    (if (string-empty-p note)
-        (chat-ui--report-queue)
-      (let ((entries (append (chat-ui--queue-entries) (list note))))
-        (chat-ui--set-queue entries)
-        (chat-event-publish
-         (chat-ui--prompt-event
-          'user-prompt-queued note (length entries) 'session))
-        (chat-ui--insert-system-message
-         (chat-i18n 'queue-added
-                    "Queued %d: %s  (/flush to send, /queue to review)"
-                    (length entries) note))))))
+(defun chat-ui--stage-position (text)
+  "Read a positive one-based stage position from TEXT."
+  (let ((position (and (string-match-p "\\`[0-9]+\\'" text)
+                       (string-to-number text))))
+    (unless (and position (> position 0))
+      (user-error "Stage position must be a positive number: %s" text))
+    position))
 
-(defun chat-ui--report-queue ()
-  "Say what is queued, and how to send or discard it."
-  (let ((entries (chat-ui--queue-entries)))
+(defun chat-ui--stage-add (text &optional content-parts)
+  "Append TEXT and CONTENT-PARTS as one structured staged item."
+  (let* ((items (chat-ui--stage-items))
+         (item (chat-ui--stage-new-item text content-parts))
+         (updated (append items (list item))))
+    (chat-ui--set-stage updated)
+    (setq chat-ui--send-content-parts-consumed (and content-parts t))
+    (chat-event-publish
+     (chat-ui--prompt-event
+      'user-prompt-staged text (length updated) 'session))
     (chat-ui--insert-system-message
-     (if (null entries)
-         (chat-i18n 'queue-empty
-                    "Nothing queued. /queue <note> collects notes to send together.")
-       (concat (chat-i18n 'queue-heading "Queued (%d), /flush to send:"
-                          (length entries))
+     (chat-i18n 'stage-added
+                "Staged %d: %s  (/send to send, /stage to review)"
+                (length updated) text))))
+
+(defun chat-ui--stage-edit (position text)
+  "Replace the staged text at POSITION with TEXT."
+  (chat-ui--set-stage
+   (chat-message-stage-edit (chat-ui--stage-items) position text))
+  (chat-ui--insert-system-message
+   (chat-i18n 'stage-edited "Edited staged item %d: %s" position text)))
+
+(defun chat-ui--stage-move (from-position to-position)
+  "Move staged item FROM-POSITION to TO-POSITION."
+  (chat-ui--set-stage
+   (chat-message-stage-move
+    (chat-ui--stage-items) from-position to-position))
+  (chat-ui--insert-system-message
+   (chat-i18n 'stage-moved "Moved staged item %d to %d."
+              from-position to-position)))
+
+(defun chat-ui--stage-recall (position)
+  "Remove staged item at POSITION and restore it to the input area."
+  (let* ((removed (chat-message-stage-remove
+                   (chat-ui--stage-items) position))
+         (item (car removed)))
+    (chat-ui--set-stage (cdr removed))
+    (setq chat-ui--pending-content-parts
+          (append (chat-message-stage-item-content-parts item)
+                  chat-ui--pending-content-parts))
+    (chat-ui--set-input-text (chat-message-stage-item-text item))
+    (chat-ui--refresh-attachment-prompt)
+    (chat-ui--insert-system-message
+     (chat-i18n 'stage-recalled "Recalled staged item %d to the input."
+                position))))
+
+(defun chat-ui--stage-drop (request)
+  "Drop the staged position named by REQUEST, the last, or all."
+  (let ((items (chat-ui--stage-items))
+        (request (downcase (chat-command-fold-name request))))
+    (cond
+     ((null items)
+      (chat-ui--insert-system-message
+       (chat-i18n 'stage-empty
+                  "Nothing staged. /stage <draft> keeps input until explicit send.")))
+     ((member request '("all" "*"))
+      (chat-ui--set-stage nil)
+      (chat-ui--insert-system-message
+       (chat-i18n 'stage-dropped-all "Dropped all %d staged drafts."
+                  (length items))))
+     (t
+      (let* ((position (if (string-empty-p request)
+                           (length items)
+                         (chat-ui--stage-position request)))
+             (removed (chat-message-stage-remove items position)))
+        (chat-ui--set-stage (cdr removed))
+        (chat-ui--insert-system-message
+         (chat-i18n 'stage-dropped "Dropped: %s"
+                    (chat-message-stage-item-text (car removed)))))))))
+
+(defun chat-ui--command-stage (arg)
+  "Stage ARG, or edit, move, recall, or list staged items."
+  (let* ((note (string-trim (or arg "")))
+         (has-operation
+          (string-match
+           "\\`\\([^[:space:]]+\\)\\(?:[[:space:]]+\\(.*\\)\\)?\\'"
+           note))
+         (operation
+          (and has-operation
+               (downcase (chat-command-fold-name (match-string 1 note)))))
+         (operand (or (and has-operation (match-string 2 note)) "")))
+    (cond
+     ((string-empty-p note)
+      (chat-ui--report-stage))
+     ((and (string= operation "add") (not (string-empty-p operand)))
+      (chat-ui--stage-add operand chat-ui--send-content-parts))
+     ((and (string= operation "edit")
+           (string-match "\\`\\([0-9]+\\)[[:space:]]+\\(.+\\)\\'" operand))
+      (chat-ui--stage-edit
+       (chat-ui--stage-position (match-string 1 operand))
+       (match-string 2 operand)))
+     ((and (string= operation "move")
+           (string-match "\\`\\([0-9]+\\)[[:space:]]+\\([0-9]+\\)\\'" operand))
+      (chat-ui--stage-move
+       (chat-ui--stage-position (match-string 1 operand))
+       (chat-ui--stage-position (match-string 2 operand))))
+     ((and (string= operation "recall")
+           (string-match "\\`\\([0-9]+\\)\\'" operand))
+      (chat-ui--stage-recall
+       (chat-ui--stage-position (match-string 1 operand))))
+     ((and (string= operation "drop")
+           (or (string-empty-p operand)
+               (string-match-p "\\`[^[:space:]]+\\'" operand)))
+      (chat-ui--stage-drop operand))
+     ((and (string= operation "clear") (string-empty-p operand))
+      (chat-ui--stage-drop "all"))
+     ((member operation '("add" "edit" "move" "recall" "drop" "clear"))
+      (user-error
+       "Usage: /stage add TEXT | edit N TEXT | move N M | recall N | drop [N|all] | clear"))
+     (t
+      (chat-ui--stage-add note chat-ui--send-content-parts)))))
+
+(defun chat-ui--report-stage ()
+  "Say what is staged, and how to send or discard it."
+  (let ((items (chat-ui--stage-items)))
+    (chat-ui--insert-system-message
+     (if (null items)
+         (chat-i18n 'stage-empty
+                    "Nothing staged. /stage <draft> keeps input until explicit send.")
+       (concat (chat-i18n 'stage-heading "Staged (%d), /send to send:"
+                          (length items))
                "\n"
                (string-join
-                (seq-map-indexed (lambda (entry index)
-                                   (format "  %d. %s" (1+ index) entry))
-                                 entries)
+                (seq-map-indexed
+                 (lambda (item index)
+                   (let ((created (chat-message-stage-item-created-at item)))
+                     (format "  %d. [id %s, original %d%s] %s"
+                             (1+ index)
+                             (substring
+                              (chat-message-stage-item-id item)
+                              0 (min 18 (length
+                                         (chat-message-stage-item-id item))))
+                             (chat-message-stage-item-original-order item)
+                             (if (> created 0)
+                                 (format ", %s"
+                                         (format-time-string
+                                          "%H:%M:%S"
+                                          (seconds-to-time (/ created 1000.0))))
+                               "")
+                             (chat-message-stage-item-text item))))
+                 items)
                 "\n"))))))
 
-(defun chat-ui--command-flush (arg)
-  "Send the queue as one turn, with ARG appended when it is given."
+(defun chat-ui--send-stage (arg)
+  "Send the staged drafts as one turn, appending ARG when given."
   (let* ((extra (string-trim (or arg "")))
-         (entries (append (chat-ui--queue-entries)
-                          (and (not (string-empty-p extra)) (list extra)))))
-    (if (null entries)
-        (chat-ui--insert-system-message
-         (chat-i18n 'queue-empty
-                    "Nothing queued. /queue <note> collects notes to send together."))
-      ;; Cleared before sending: a failed request that left the notes
-      ;; queued would send them twice on the next flush.
-      (chat-ui--set-queue nil)
-      (chat-ui--send-user-message (chat-ui--queue-joined-text entries)))))
-
-(defun chat-ui--command-drop (arg)
-  "Drop the last queued note, or all of them when ARG says `all'."
-  (let ((entries (chat-ui--queue-entries))
-        (request (downcase (chat-command-fold-name arg))))
-    (cond
-     ((null entries)
-      (chat-ui--insert-system-message
-       (chat-i18n 'queue-empty
-                  "Nothing queued. /queue <note> collects notes to send together.")))
-     ((member request '("all" "*"))
-      (chat-ui--set-queue nil)
-      (chat-ui--insert-system-message
-       (chat-i18n 'queue-dropped-all "Dropped all %d queued notes."
-                  (length entries))))
-     (t
-      (chat-ui--set-queue (butlast entries))
-      (chat-ui--insert-system-message
-       (chat-i18n 'queue-dropped "Dropped: %s" (car (last entries))))))))
+         (items (append (chat-ui--stage-items)
+                        (and (not (string-empty-p extra))
+                             (list (chat-ui--stage-new-item
+                                    extra chat-ui--send-content-parts))))))
+    (if (null items)
+      (message "%s"
+               (chat-i18n 'send-usage
+                          "Usage: /send <message>, or /send alone to send staged drafts."))
+      ;; A staged batch is a new user turn.  If another run owns the
+      ;; executor, it waits in the runtime queue instead of being steered
+      ;; into that run or starting concurrently.
+      (chat-ui--send-in-mode
+       (chat-message-stage-joined-text items)
+       'queue
+       (chat-message-stage-content-parts items)
+       (chat-message-stage-batch-metadata items)))))
 
 (defun chat-ui--command-cancel (_arg)
   "Cancel the response that is in flight."
@@ -2826,7 +3011,7 @@ Only the first word, and only when it is exactly a mode name."
       (cons mode rest))))
 
 (defun chat-ui--command-send (arg)
-  "Send ARG to the model as a recorded turn, or flush the queue when empty.
+  "Send ARG to the model, including staged drafts when they exist.
 
 This is the name of what plain input has always done: recorded in the
 session, answered by a run that may reason and use tools over several
@@ -2839,15 +3024,18 @@ of one, which changes the mode for later ones."
   (let ((split (and (not chat-ui--input-was-typed)
                     (chat-ui--split-send-mode arg))))
     (cond
+     ;; Staging owns the entire next explicit send.  Its batch is a new
+     ;; turn and automatically waits behind an active run, so mode words
+     ;; here are ordinary closing text rather than a second control plane.
+     ((chat-ui--stage-items)
+      (chat-ui--send-stage arg))
      ((and split (string-empty-p (cdr split)))
       (chat-ui--set-send-mode (car split)))
      (split
       (chat-ui--send-in-mode (cdr split) (car split)))
      ((string-empty-p arg)
-      (if (chat-ui--queue-entries)
-          (chat-ui--command-flush "")
-        (message "%s" (chat-i18n 'send-usage
-                                 "Usage: /send <message>, or /send alone to send the queue."))))
+      (message "%s" (chat-i18n 'send-usage
+                               "Usage: /send <message>, or /send alone to send staged drafts.")))
      (t (chat-ui--send-in-mode arg (chat-ui-send-mode))))))
 
 (defun chat-ui--set-send-mode (mode)
@@ -2857,7 +3045,7 @@ of one, which changes the mode for later ones."
   (message (chat-i18n 'send-mode-set "Sending during a run now: %s")
            (chat-ui--send-mode-name mode)))
 
-(defun chat-ui--send-in-mode (content mode &optional content-parts)
+(defun chat-ui--send-in-mode (content mode &optional content-parts metadata)
   "Send CONTENT, handling a run already in progress according to MODE.
 
 With nothing running the three modes are the same thing, because there is
@@ -2865,29 +3053,31 @@ nothing to insert into, wait for, or interrupt."
   (let ((parts (or content-parts chat-ui--send-content-parts)))
     (cond
      ((not (chat-agent-active-p chat-ui--active-agent-run))
-      (if parts
-          (chat-ui--send-user-message content parts)
-        (chat-ui--send-user-message content)))
-     ((eq mode 'queue) (chat-ui--queue-send content parts))
+      (chat-ui--send-user-message content parts metadata))
+     ((eq mode 'queue) (chat-ui--queue-send content parts metadata))
      ((eq mode 'interrupt) (chat-ui--interrupt-with content parts))
      (parts (chat-ui--queue-send content parts))
      (t (chat-ui--steer-active-agent content)))))
 
-(defun chat-ui--draft (content parts)
-  "Return a queued draft for CONTENT and typed PARTS."
-  (if parts (list :text content :parts parts) content))
+(defun chat-ui--draft (content parts &optional metadata)
+  "Return a queued draft for CONTENT, typed PARTS and METADATA."
+  (list :text content :parts parts :metadata metadata))
 
 (defun chat-ui--draft-text (draft)
-  "Return DRAFT's compatibility text."
-  (if (stringp draft) draft (or (plist-get draft :text) "")))
+  "Return DRAFT text."
+  (or (plist-get draft :text) ""))
 
 (defun chat-ui--draft-parts (draft)
-  "Return DRAFT's typed parts, or nil for a legacy string draft."
-  (and (listp draft) (plist-get draft :parts)))
+  "Return DRAFT typed parts."
+  (plist-get draft :parts))
 
-(defun chat-ui--queue-send (content &optional content-parts)
-  "Hold CONTENT and CONTENT-PARTS until the current run finishes."
-  (let ((draft (chat-ui--draft content content-parts)))
+(defun chat-ui--draft-metadata (draft)
+  "Return DRAFT message metadata."
+  (plist-get draft :metadata))
+
+(defun chat-ui--queue-send (content &optional content-parts metadata)
+  "Hold CONTENT, CONTENT-PARTS and METADATA until the run finishes."
+  (let ((draft (chat-ui--draft content content-parts metadata)))
     (setq chat-ui--queued-sends (append chat-ui--queued-sends (list draft)))
     (setq chat-ui--send-content-parts-consumed (and content-parts t))
     (chat-event-publish
@@ -2916,11 +3106,10 @@ Swallowing the input would be worse than carrying a failure forward."
        (lambda ()
          (when (buffer-live-p buffer)
            (with-current-buffer buffer
-             (let ((text (chat-ui--draft-text next))
-                   (parts (chat-ui--draft-parts next)))
-               (if parts
-                   (chat-ui--send-user-message text parts)
-                 (chat-ui--send-user-message text))))))))))
+             (chat-ui--send-user-message
+              (chat-ui--draft-text next)
+              (chat-ui--draft-parts next)
+              (chat-ui--draft-metadata next)))))))))
 
 (defconst chat-ui--interrupted-marker "[interrupted after %s characters]"
   "How a reply cut short introduces itself to later turns.")

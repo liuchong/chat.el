@@ -1322,6 +1322,22 @@ starts at the input marker and has no second slash is a command; anything
 else is a path. Have both completion functions ask the same question so
 they cannot both claim the same token.
 
+### A Completion Hint Took Ownership Of RET
+
+**Problem**: a candidate list appeared while typing, and `RET` first accepted
+the highlighted candidate instead of sending the text. Even when completion
+was useful, the input acquired a modal state the user could not reliably see.
+
+**Cause**: the display was implemented by opening a selectable completion
+session. That session owned focus, navigation and confirmation keys, so the
+candidate list changed the input contract instead of merely describing it.
+
+**Solution**: render passive candidates with a zero-width overlay that has no
+keymap, focus, selection or mouse highlight. Keep `RET` bound to one dispatch.
+Implement `TAB` separately as direct unique or longest-common-prefix expansion
+without invoking a completion frontend. Compute filesystem candidates only on
+that explicit `TAB`, never during passive refresh.
+
 ### The Help Was Unreachable From The Place You Would Ask For It
 
 **Problem**: `/help` fell through to the model as ordinary text and came
