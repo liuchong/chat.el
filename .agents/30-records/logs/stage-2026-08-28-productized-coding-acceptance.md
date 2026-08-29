@@ -33,6 +33,8 @@
   warm query, context build, heap delta and cleanup
 - fixed large-repository live task with deterministic workspace materialization
   and measured indexed-file evidence
+- standalone Goal and Plan reliability measurement that emits the complete
+  final-aggregator metadata contract and rejects uncommitted evidence
 
 ## Performance Evidence
 
@@ -171,6 +173,30 @@ availability evidence, but it is neither a coding failure nor a passing smoke.
 No further final-campaign requests should be sent until the fixed provider and
 model are available again.
 
+## Runtime Reliability Evidence
+
+`tests/performance/run-runtime-reliability.el` closes the former gap between
+the typed `runtimeReliability` gates and their producer. It runs 17 gate-linked
+checks covering 15 unique Goal and Plan ERT scenarios in isolated state,
+including the 20-turn/two-compaction/reload/restart continuity case, then
+measures 20 growing prompt projections.
+Before writing JSON it feeds the values through
+`chat-coding-acceptance-reliability-gates`, so a producer/consumer contract
+drift fails the command rather than creating plausible-looking evidence.
+
+The development run passed every directed scenario and all nine acceptance
+gates. Rates were `1.0`, safety counts were `0`, and the Goal projection median
+was `0.0032043746239855107` of measured input tokens. This run deliberately
+records `implementationTreeClean: false` because the runner itself was not yet
+committed, so it is verification evidence only. A clean same-revision record
+must be generated after commit and supplied intact to final aggregation.
+
+Canonical command:
+
+```text
+CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json /Users/liu/projects/.agent-tools/capped.sh 2048 emacs -Q -batch -l tests/performance/run-runtime-reliability.el
+```
+
 ## Unblock Procedure
 
 1. Keep the completed M9 baseline and `aa4698a` current campaign immutable as
@@ -182,6 +208,7 @@ model are available again.
    never resume a campaign across an implementation or manifest revision.
 4. Establish trusted token coverage for at least 95 percent of both replacement
    comparison sets. The historical baseline cannot satisfy this gate.
-5. Save same-revision `runtimeReliability` measurements, including the Goal
-   projection median ratio, then run `chat-coding-acceptance-run-final`.
+5. From a clean frozen revision, run the standalone reliability command and
+   pass its complete JSON object to `chat-coding-acceptance-run-final`; do not
+   transcribe individual `runtimeReliability` values by hand.
 6. Mark M19 complete only if the immutable aggregate result is `passed`.

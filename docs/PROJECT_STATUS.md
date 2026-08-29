@@ -51,6 +51,14 @@ immutable; final acceptance still needs fresh same-manifest baseline/current
 campaigns with complete trusted token usage. The fixed corpus includes a
 measured 10,000-indexed-file large-repository task.
 
+Goal and Plan acceptance facts now have a standalone producer rather than a
+hand-authored metadata contract. The runner executes 17 gate-linked checks over
+15 unique directed scenarios, measures 20 Goal prompt projections, validates
+all nine facts through the final aggregator and refuses to certify a dirty worktree. A development run passed
+all gates with a `0.0032043746` Goal projection median; final evidence still
+requires rerunning it on the frozen clean revision used by the replacement
+campaign.
+
 An initial replacement current run exposed one more live reliability defect:
 multi-file TODO items could not be completed because evidence was double-encoded,
 successful tools did not return their event identity to the Agent, and tool-call
@@ -402,6 +410,8 @@ smoke and fresh final campaigns remain after provider availability returns.
   capability identity
 - record the immutable comparison, trusted usage sample and failure taxonomy;
   do not mark M19 complete before every strict acceptance gate passes
+- generate the complete runtime reliability JSON on the same clean frozen
+  revision and pass it intact to final aggregation
 - make true provider streaming and fallback behavior share one transport abstraction
 - extend the reading workflow from code mode into other surfaces only when the shared capture model stays intact
 - consider a current-file reading command after the new region, defun, and near-point captures settle

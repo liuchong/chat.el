@@ -983,6 +983,16 @@ revision 改变后禁止续跑；最终验收仍须创建新的 replacement camp
 `error`，不得当作任务失败或通过。canonical suite 1793/1793 通过。完整 live
 验收需等待同一 provider/model 恢复可用，不能改用不同身份的样本混入比较。
 
+Goal/Plan 可靠性现有独立、可复现的测量入口
+`tests/performance/run-runtime-reliability.el`。它在隔离状态目录中执行 17 次
+gate-linked 检查（15 个唯一 ERT 场景），测量 20 轮 Goal 投影占比，生成全部九个
+`runtimeReliability` 字段，并把
+结果重新送入最终聚合器验证每个 gate。默认只接受 clean worktree；开发中可以用
+`CHAT_RELIABILITY_ALLOW_DIRTY=1` 诊断，但此类输出会明确记录
+`implementationTreeClean: false`，不得进入最终验收。开发态实测九个 gate 全部
+通过，Goal projection median ratio 为 `0.0032043746`；提交后必须在冻结 revision
+上重新生成 clean record。
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。
@@ -998,6 +1008,19 @@ revision 改变后禁止续跑；最终验收仍须创建新的 replacement camp
 7. 对每个失败分类复核：模型能力、上下文遗漏、工具错误、验证错误、权限阻塞或基础设施错误。
 8. 运行全部 unit、integration、e2e、offline eval 和平台隔离测试。
 9. 生成不可变验收结果和与 M9 基线的比较报告。
+
+可靠性记录的标准命令：
+
+```sh
+CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json \
+  /Users/liu/projects/.agent-tools/capped.sh 2048 \
+  emacs -Q -batch -l tests/performance/run-runtime-reliability.el
+```
+
+命令必须在将要验收的 clean implementation revision 上运行。最终调用
+`chat-coding-acceptance-run-final` 时，读取该 JSON 并把完整顶层对象作为
+`metadata` 参数传入；只手工摘录数值或缺少 `acceptanceGates`、定向测试证据、
+revision、clean 标记的记录均不合格。
 
 #### 退出条件
 
@@ -1280,7 +1303,10 @@ Trace 至少新增：
 
 这些字段必须来自同一 implementation revision 上保存的定向测试或测量记录，不能由最终
 聚合器推测或用默认零补齐。最终不可变结果使用 `acceptance/m19` scenario，并把原始
-`runtimeReliability` 对象连同各 gate 一并保存。
+`runtimeReliability` 对象连同各 gate 一并保存。标准测量记录还必须包含与当前提交一致的
+`implementationRevision`、值为 true 的 `implementationTreeClean`、17 次 gate-linked
+检查结果（15 个唯一场景）和 20 个 Goal 投影样本；测量脚本必须在落盘前直接调用
+聚合器，确认九个 gate 全部通过。
 
 ## 15. 开工顺序
 

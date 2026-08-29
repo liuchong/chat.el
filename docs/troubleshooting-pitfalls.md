@@ -2663,4 +2663,25 @@ record is insufficient; the producer must expose its stable identity, the
 consumer must accept that identity without re-encoding, and the resolver must
 verify the same session and task scope.
 
+### A Passing Measurement From A Dirty Tree Is Not Revision Evidence
+
+**Problem**: a reliability command could pass while recording only `git HEAD`,
+even though the measured implementation also contained uncommitted changes.
+The resulting JSON looked versioned but could not be reproduced from that
+commit.
+
+**Cause**: implementation identity and measurement execution were recorded,
+but worktree state was omitted. The final consumer validated values and types,
+not whether those values actually belonged to the named revision.
+
+**Solution**: make the producer record `implementationTreeClean`, fail normal
+runs on a dirty tree, and allow dirty execution only through an explicit
+diagnostic override whose output remains visibly ineligible. Before saving,
+send the generated facts through the real final gates so schema or threshold
+drift fails at the producer boundary.
+
+**General rule**: evidence tied to a revision must prove both the revision and
+the absence of local implementation changes. Validate with the real consumer;
+do not duplicate its contract in a reporting script.
+
 Last updated: 2026-08-29
