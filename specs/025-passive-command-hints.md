@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Scope: reusable chat input hint engine and slash-command provider
-- Replaces: no existing command or message contract
+- Replaces: automatic completion-popup option and TAB-triggered selection sessions
 - Depends on: Decision 0012, the canonical slash command table and chat i18n
 
 ## Problem
@@ -69,6 +69,12 @@ deterministic prefix expansion:
 This contract applies equally when the active source is slash-command completion
 or path completion. Candidate display remains a convenience; prefix completion
 must work with the hint disabled.
+
+The former automatic path-completion option and post-insert popup path are removed,
+not retained as an opt-in. Path completion remains available through the same
+completion-at-point source, but filesystem candidates are computed only after an
+explicit `TAB`. A repeated `TAB` with no additional common prefix remains a no-op;
+it does not open a selectable list.
 
 ## Architecture
 
