@@ -242,7 +242,10 @@ Auto path completion is off. A completion UI that is open takes RET for
 itself, so the key that sends a message became the key that picks a
 candidate and the message needed a second RET, and the popup moved the
 buffer under someone still typing. TAB still completes, filling the common
-prefix on the first press and listing on the second, as a shell does.
+prefix without opening a selection session. Spec 025 adds passive slash-command
+hints: bounded overlay text with no focus, selected row or keymap, placed above
+or below according to available rows. It never changes `RET`; optional frequency
+ordering affects display only.
 
 Output format is now stated rather than assumed. Every model writes
 Markdown by habit and the renderer was built around that habit, so the
