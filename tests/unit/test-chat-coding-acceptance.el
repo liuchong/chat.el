@@ -182,6 +182,71 @@
             gates)))
       (evidence . ,evidence))))
 
+(defun chat-coding-acceptance-test--quality-record (&optional revision)
+  "Return one complete clean quality record for REVISION."
+  (let* ((semantic-corpus
+          (vconcat
+           (mapcar
+            (lambda (language)
+              `((language . ,language)
+                (definitionExpected . 1) (definitionHits . 1)
+                (referenceExpected . 1) (referenceReturned . 1)
+                (referenceTrue . 1)
+                (topFiveQueries . 1) (topFiveHits . 1)))
+            chat-coding-acceptance-quality-languages)))
+         (review-corpus
+          '((expectedCriticalHigh . ["c1" "h1" "h2" "c2" "h3" "h4" "c3"])
+            (reportedFormal . ["c1" "h1" "h2" "c2" "h3" "h4" "c3"
+                               "low-noise"])))
+         (prompt-samples
+          (vconcat
+           (cl-loop for turn from 1 to 20 collect
+                    `((turn . ,turn) (planTokens . 3)
+                      (workNoteTokens . 1) (inputTokens . 100)
+                      (ratio . 0.04)))))
+         (facts
+          `((semantic .
+                      ,(chat-coding-acceptance--semantic-summary
+                        semantic-corpus))
+            (review .
+                    ,(chat-coding-acceptance--review-summary review-corpus))
+            (planWorkNotePromptMedianRatio . 0.04)))
+         (evidence
+          `((semanticCorpus . ,semantic-corpus)
+            (reviewCorpus . ,review-corpus)
+            (planWorkNotePromptMedianRatio
+             . ((samples . ,prompt-samples)))))
+         (scenario-evidence
+          (mapcar
+           (lambda (group)
+             (cons
+              (car group)
+              (vconcat
+               (mapcar
+                (lambda (test)
+                  `((test . ,(symbol-name test)) (passed . t)))
+                (cddr group)))))
+           chat-coding-acceptance-quality-scenarios))
+         (metadata
+          `((qualityReliability . ,facts)
+            (evidence . ,(append evidence scenario-evidence))))
+         (gates (chat-coding-acceptance-quality-gates metadata)))
+    `((schemaVersion . 1)
+      (implementationRevision . ,(or revision "revision-current"))
+      (implementationTreeClean . t)
+      (measuredAt . "2026-08-29T12:00:00+0800")
+      (qualityReliability . ,facts)
+      (acceptanceGates
+       . ,(vconcat
+           (mapcar
+            (lambda (gate)
+              `((name . ,(chat-coding-acceptance-gate-name gate))
+                (status . "passed")
+                (expected . ,(chat-coding-acceptance-gate-expected gate))
+                (actual . ,(chat-coding-acceptance-gate-actual gate))))
+            gates)))
+      (evidence . ,(append evidence scenario-evidence)))))
+
 (ert-deftest chat-coding-acceptance-reliability-evidence-is-required ()
   "Missing Goal and Plan Mode measurements block every reliability gate."
   (let ((gates (chat-coding-acceptance-reliability-gates nil)))
@@ -256,14 +321,79 @@
           (chat-coding-acceptance-reliability-record-gate
            short "revision-current"))))))
 
-(ert-deftest chat-coding-acceptance-final-binds-reliability-to-current-campaign ()
-  "Final aggregation derives the reliability revision from current trials."
+(ert-deftest chat-coding-acceptance-quality-evidence-is-required ()
+  "Missing non-live quality evidence blocks every quality gate."
+  (let ((gates (chat-coding-acceptance-quality-gates nil)))
+    (should (> (length gates) 10))
+    (should (seq-every-p
+             (lambda (gate)
+               (eq 'blocked (chat-coding-acceptance-gate-status gate)))
+             gates))))
+
+(ert-deftest chat-coding-acceptance-quality-language-details-are-required ()
+  "Missing per-language metrics block rather than report a regression."
+  (let* ((record (chat-coding-acceptance-test--quality-record))
+         (facts (alist-get 'qualityReliability record))
+         (semantic (alist-get 'semantic facts)))
+    (setf (alist-get 'byLanguage semantic) nil)
+    (let ((gate
+           (seq-find
+            (lambda (candidate)
+              (equal "semantic-language-spread"
+                     (chat-coding-acceptance-gate-name candidate)))
+            (chat-coding-acceptance-quality-gates record))))
+      (should gate)
+      (should (eq 'blocked (chat-coding-acceptance-gate-status gate))))))
+
+(ert-deftest chat-coding-acceptance-quality-record-is-revision-bound ()
+  "Complete quality evidence passes only for its measured implementation."
+  (let ((record (chat-coding-acceptance-test--quality-record)))
+    (should
+     (eq 'passed
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-quality-record-gate
+           record "revision-current"))))
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-quality-record-gate
+           record "another-revision"))))))
+
+(ert-deftest chat-coding-acceptance-quality-record-rejects-rewritten-facts ()
+  "A hand-edited metric cannot disagree with its raw corpus evidence."
+  (let* ((record (chat-coding-acceptance-test--quality-record))
+         (facts (alist-get 'qualityReliability record))
+         (semantic (alist-get 'semantic facts))
+         (overall (alist-get 'overall semantic)))
+    (setf (alist-get 'definitionAccuracy overall) 0.99)
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-quality-record-gate
+           record "revision-current"))))))
+
+(ert-deftest chat-coding-acceptance-quality-record-requires-clean-full-evidence ()
+  "Dirty measurements and incomplete directed scenarios remain blocked."
+  (let ((dirty (chat-coding-acceptance-test--quality-record))
+        (short (chat-coding-acceptance-test--quality-record)))
+    (setf (alist-get 'implementationTreeClean dirty) :json-false)
+    (setf (alist-get 'editingSafety (alist-get 'evidence short)) [])
+    (dolist (record (list dirty short))
+      (should
+       (eq 'blocked
+           (chat-coding-acceptance-gate-status
+            (chat-coding-acceptance-quality-record-gate
+             record "revision-current")))))))
+
+(ert-deftest chat-coding-acceptance-final-binds-evidence-to-current-campaign ()
+  "Final aggregation binds both evidence records to current trials."
   (chat-test-with-temp-dir
    (let* ((baseline-directory (expand-file-name "baseline/" temp-dir))
           (current-directory (expand-file-name "current/" temp-dir))
           (baseline (chat-coding-acceptance-test--result 'passed nil))
           (current (chat-coding-acceptance-test--result 'passed nil))
-          (record (chat-coding-acceptance-test--reliability-record)))
+          (record (chat-coding-acceptance-test--reliability-record))
+          (quality-record (chat-coding-acceptance-test--quality-record)))
      (make-directory baseline-directory t)
      (make-directory current-directory t)
      (setf (alist-get 'implementationRevision
@@ -294,16 +424,27 @@
                 (lambda (gates &optional _) gates)))
        (let* ((gates
                (chat-coding-acceptance-run-final
-                baseline-directory current-directory record))
+                baseline-directory current-directory record quality-record))
               (provenance
                (seq-find
                 (lambda (gate)
                   (equal "runtime-reliability-record"
                          (chat-coding-acceptance-gate-name gate)))
+                gates))
+              (quality-provenance
+               (seq-find
+                (lambda (gate)
+                  (equal "quality-reliability-record"
+                         (chat-coding-acceptance-gate-name gate)))
                 gates)))
          (should provenance)
          (should (eq 'passed
-                     (chat-coding-acceptance-gate-status provenance))))))))
+                     (chat-coding-acceptance-gate-status provenance)))
+         (should quality-provenance)
+         (should
+          (eq 'passed
+              (chat-coding-acceptance-gate-status
+               quality-provenance))))))))
 
 (ert-deftest chat-coding-acceptance-record-is-immutable-and-strict ()
   "A blocked gate yields an immutable blocked Eval result."

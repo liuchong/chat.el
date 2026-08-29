@@ -67,6 +67,73 @@
   'chat-goal-projection-is-protected-bounded-and-state-aware
   "Directed scenario required beside the Goal projection samples.")
 
+(defconst chat-coding-acceptance-quality-languages
+  '("python" "typescript" "emacs-lisp" "go" "rust")
+  "Languages required in the deterministic semantic corpus.")
+
+(defconst chat-coding-acceptance-quality-scenarios
+  '((semanticCorpusCoverage "semantic-corpus-coverage"
+     chat-code-intelligence-index-fixture-meets-definition-and-reference-targets
+     chat-code-intelligence-five-language-adversarial-corpus-is-searchable
+     chat-repo-map-fixed-queries-exceed-top-five-hit-target)
+    (editingSafety "editing-safety"
+     chat-files-safe-path-rejects-symlink-escaping-allowed-root
+     chat-files-read-set-rejects-existing-write-without-read
+     chat-files-read-set-rejects-external-edit-after-read
+     chat-files-read-set-rejects-modified-visiting-buffer
+     chat-files-read-set-new-file-and-competing-creation
+     chat-files-read-set-keeps-multi-file-patch-atomic-on-drift
+     chat-files-read-set-revalidates-multi-file-patch-at-commit
+     chat-checkpoint-owned-rollback-preserves-preexisting-dirty-work
+     chat-checkpoint-external-drift-refuses-before-overwrite)
+    (verificationClosure "verification-closure"
+     chat-code-verify-detects-manifest-commands-deterministically
+     chat-code-verify-unrecognized-project-is-not-run
+     chat-code-verify-runtime-evidence-correlates-task-execution-and-wire
+     chat-code-verify-required-failures-never-pass
+     chat-code-verify-classifies-runtime-terminal-states
+     chat-code-verify-repair-passes-after-one-new-diff
+     chat-code-verify-repair-stops-on-identical-failure
+     chat-code-verify-repair-rejects-unrelated-files)
+    (isolationResource "isolation-and-cleanup"
+     chat-execution-isolation-inspect-blocks-outside-read-and-all-write
+     chat-execution-isolation-build-allows-project-write-and-blocks-escapes
+     chat-execution-isolation-filters-environment-and-denies-network
+     chat-execution-isolation-timeout-kills-the-whole-process-group
+     chat-execution-isolation-cancel-kills-the-whole-process-group
+     chat-execution-isolation-restricted-policy-never-falls-back-local
+     chat-execution-isolation-start-preparation-failure-cleans-temp-root)
+    (agentsScope "agents-scope"
+     chat-project-instruction-graph-keeps-directory-scopes
+     chat-project-instruction-graph-loads-explicit-dependencies
+     chat-project-instruction-dependency-inherits-declaring-scope
+     chat-project-instruction-graph-refuses-escape-and-diagnoses-cycle
+     chat-project-two-directories-do-not-share-an-answer
+     chat-work-context-scope-isolates-directory-and-session)
+    (contextContinuity "context-continuity"
+     chat-work-note-revision-conflict-preserves-durable-bytes
+     chat-work-note-fragments-never-gain-instruction-authority
+     chat-work-plan-persists-and-reloads-with-task-scope
+     chat-work-plan-restart-blocks-and-explicit-resume-recovers)
+    (planAdherence "plan-before-mutation"
+     chat-work-plan-gate-covers-mutations-and-consumes-skip-once
+     chat-agent-plan-gate-refuses-write-before-tool-execution)
+    (planEvidence "plan-evidence"
+     chat-work-plan-completion-requires-resolvable-evidence
+     chat-work-plan-rejects-evidence-from-another-session-or-task
+     chat-work-plan-resolves-tool-events-by-agent-task-scope)
+    (planUiStability "plan-ui-stability"
+     chat-work-plan-ui-thousand-updates-preserve-input-and-window)
+    (reviewReadOnly "review-read-only"
+     chat-code-review-profile-has-zero-write-effects)
+    (collaborationConflicts "collaboration-conflicts"
+     chat-code-collaboration-conflict-never-overwrites-parent
+     chat-code-collaboration-stale-base-is-conflicted
+     chat-code-collaboration-post-completion-drift-is-conflicted)
+    (postMergeVerification "post-merge-verification"
+     chat-code-collaboration-nonconflicting-children-merge-and-verify))
+  "Exact directed scenarios required by the non-live quality contract.")
+
 (cl-defstruct (chat-coding-acceptance-gate
                (:constructor chat-coding-acceptance-gate-create))
   name status expected actual evidence)
@@ -851,6 +918,430 @@ fail it."
      (unless valid
        "Load the complete clean reliability JSON for the current campaign revision."))))
 
+(defun chat-coding-acceptance--ratio (numerator denominator)
+  "Return NUMERATOR divided by DENOMINATOR, or nil for invalid counts."
+  (when (and (integerp numerator) (>= numerator 0)
+             (integerp denominator) (> denominator 0)
+             (<= numerator denominator))
+    (/ (float numerator) denominator)))
+
+(defun chat-coding-acceptance--semantic-row-summary (row)
+  "Return recomputed semantic metrics for one raw corpus ROW."
+  (let* ((definition-expected
+          (chat-coding-acceptance--field row 'definitionExpected))
+         (definition-hits
+          (chat-coding-acceptance--field row 'definitionHits))
+         (reference-expected
+          (chat-coding-acceptance--field row 'referenceExpected))
+         (reference-returned
+          (chat-coding-acceptance--field row 'referenceReturned))
+         (reference-true
+          (chat-coding-acceptance--field row 'referenceTrue))
+         (top-five-queries
+          (chat-coding-acceptance--field row 'topFiveQueries))
+         (top-five-hits
+          (chat-coding-acceptance--field row 'topFiveHits))
+         (definition
+          (chat-coding-acceptance--ratio definition-hits definition-expected))
+         (precision
+          (chat-coding-acceptance--ratio reference-true reference-returned))
+         (recall
+          (chat-coding-acceptance--ratio reference-true reference-expected))
+         (top-five
+          (chat-coding-acceptance--ratio top-five-hits top-five-queries)))
+    (when (and definition precision recall top-five)
+      `((definitionAccuracy . ,definition)
+        (referencePrecision . ,precision)
+        (referenceRecall . ,recall)
+        (topFiveHitRate . ,top-five)))))
+
+(defun chat-coding-acceptance--semantic-summary (corpus)
+  "Recompute overall and per-language semantic metrics from CORPUS."
+  (let ((rows (chat-coding-acceptance--sequence-list corpus)))
+    (when (and
+           (= (length rows) (length chat-coding-acceptance-quality-languages))
+           (equal
+            (mapcar (lambda (row)
+                      (chat-coding-acceptance--field row 'language))
+                    rows)
+            chat-coding-acceptance-quality-languages)
+           (cl-every #'chat-coding-acceptance--semantic-row-summary rows))
+      (let* ((sum
+              (lambda (field)
+                (apply #'+
+                       (mapcar
+                        (lambda (row)
+                          (chat-coding-acceptance--field row field))
+                        rows))))
+             (overall-row
+              `((definitionExpected . ,(funcall sum 'definitionExpected))
+                (definitionHits . ,(funcall sum 'definitionHits))
+                (referenceExpected . ,(funcall sum 'referenceExpected))
+                (referenceReturned . ,(funcall sum 'referenceReturned))
+                (referenceTrue . ,(funcall sum 'referenceTrue))
+                (topFiveQueries . ,(funcall sum 'topFiveQueries))
+                (topFiveHits . ,(funcall sum 'topFiveHits))))
+             (overall
+              (chat-coding-acceptance--semantic-row-summary overall-row))
+             (by-language
+              (mapcar
+               (lambda (row)
+                 (cons
+                  (cons 'language
+                        (chat-coding-acceptance--field row 'language))
+                  (chat-coding-acceptance--semantic-row-summary row)))
+               rows)))
+        `((overall . ,overall) (byLanguage . ,(vconcat by-language)))))))
+
+(defun chat-coding-acceptance--string-set (value)
+  "Return VALUE as a unique nonempty string list, or nil."
+  (let ((items (chat-coding-acceptance--sequence-list value)))
+    (when (and items
+               (cl-every (lambda (item)
+                           (and (stringp item) (not (string-empty-p item))))
+                         items)
+               (= (length items)
+                  (length (delete-dups (copy-sequence items)))))
+      items)))
+
+(defun chat-coding-acceptance--review-summary (corpus)
+  "Recompute Review precision and recall from raw CORPUS sets."
+  (let* ((expected
+          (chat-coding-acceptance--string-set
+           (chat-coding-acceptance--field corpus 'expectedCriticalHigh)))
+         (reported
+          (chat-coding-acceptance--string-set
+           (chat-coding-acceptance--field corpus 'reportedFormal)))
+         (confirmed (and expected reported
+                         (seq-intersection reported expected #'equal))))
+    (when (and expected reported)
+      `((recall . ,(/ (float (length confirmed)) (length expected)))
+        (precision . ,(/ (float (length confirmed)) (length reported)))
+        (expectedCount . ,(length expected))
+        (reportedCount . ,(length reported))
+        (confirmedCount . ,(length confirmed))))))
+
+(defun chat-coding-acceptance--plan-note-samples-median (samples)
+  "Validate SAMPLES and return their plan plus work-note token median."
+  (let ((items (chat-coding-acceptance--sequence-list samples)))
+    (when (and
+           (= (length items) 20)
+           (equal
+            (mapcar (lambda (sample)
+                      (chat-coding-acceptance--field sample 'turn))
+                    items)
+            (number-sequence 1 20))
+           (cl-every
+            (lambda (sample)
+              (let ((plan (chat-coding-acceptance--field sample 'planTokens))
+                    (note (chat-coding-acceptance--field
+                           sample 'workNoteTokens))
+                    (input (chat-coding-acceptance--field sample 'inputTokens))
+                    (ratio (chat-coding-acceptance--field sample 'ratio)))
+                (and (integerp plan) (> plan 0)
+                     (integerp note) (> note 0)
+                     (numberp input) (> input 0)
+                     (numberp ratio) (<= 0.0 ratio) (<= ratio 1.0)
+                     (<= (abs (- ratio (/ (float (+ plan note)) input)))
+                         1e-9))))
+            items))
+      (chat-coding-acceptance--median
+       (mapcar (lambda (sample)
+                 (chat-coding-acceptance--field sample 'ratio))
+               items)))))
+
+(defun chat-coding-acceptance--metric-valid-p (value)
+  "Return non-nil when VALUE is a normalized rate."
+  (and (numberp value) (<= 0.0 value) (<= value 1.0)))
+
+(defun chat-coding-acceptance--quality-test-records-shape-p
+    (records expected)
+  "Return non-nil when RECORDS exactly describe EXPECTED tests."
+  (let ((items (chat-coding-acceptance--sequence-list records)))
+    (and (= (length items) (length expected))
+         (cl-every
+          (lambda (pair)
+            (let ((record (car pair)) (test (cdr pair)))
+              (and
+               (equal (chat-coding-acceptance--field record 'test)
+                      (symbol-name test))
+               (assq 'passed record)
+               (memq (chat-coding-acceptance--field record 'passed)
+                     '(t :json-false)))))
+          (cl-mapcar #'cons items expected)))))
+
+(defun chat-coding-acceptance--quality-tests-passed-p (records)
+  "Return non-nil when every directed test in RECORDS passed."
+  (cl-every
+   (lambda (record)
+     (eq t (chat-coding-acceptance--field record 'passed)))
+   (chat-coding-acceptance--sequence-list records)))
+
+(defun chat-coding-acceptance--quality-language-metrics-valid-p (semantic)
+  "Return non-nil when SEMANTIC has every normalized language metric."
+  (let* ((overall (chat-coding-acceptance--field semantic 'overall))
+         (rows
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field semantic 'byLanguage)))
+         (metrics '(definitionAccuracy referencePrecision
+                    referenceRecall topFiveHitRate)))
+    (and
+     (= (length rows) (length chat-coding-acceptance-quality-languages))
+     (equal
+      (mapcar (lambda (row)
+                (chat-coding-acceptance--field row 'language))
+              rows)
+     chat-coding-acceptance-quality-languages)
+     (cl-every
+      (lambda (metric)
+        (let ((aggregate (chat-coding-acceptance--field overall metric)))
+          (and
+           (chat-coding-acceptance--metric-valid-p aggregate)
+           (cl-every
+            (lambda (row)
+              (let ((value (chat-coding-acceptance--field row metric)))
+                (chat-coding-acceptance--metric-valid-p value)))
+            rows))))
+      metrics))))
+
+(defun chat-coding-acceptance--quality-language-spread-p (semantic)
+  "Return non-nil when SEMANTIC language metrics stay within ten points."
+  (let* ((overall (chat-coding-acceptance--field semantic 'overall))
+         (rows
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field semantic 'byLanguage)))
+         (metrics '(definitionAccuracy referencePrecision
+                    referenceRecall topFiveHitRate)))
+    (and
+     (chat-coding-acceptance--quality-language-metrics-valid-p semantic)
+     (cl-every
+      (lambda (metric)
+        (let ((aggregate (chat-coding-acceptance--field overall metric)))
+          (cl-every
+           (lambda (row)
+             (>= (chat-coding-acceptance--field row metric)
+                 (- aggregate 0.10)))
+           rows)))
+      metrics))))
+
+(defun chat-coding-acceptance-quality-gates (metadata)
+  "Return non-live quality gates recomputed from bounded METADATA."
+  (let* ((facts (chat-coding-acceptance--field metadata 'qualityReliability))
+         (semantic (chat-coding-acceptance--field facts 'semantic))
+         (overall (chat-coding-acceptance--field semantic 'overall))
+         (review (chat-coding-acceptance--field facts 'review))
+         (prompt
+          (chat-coding-acceptance--field
+           facts 'planWorkNotePromptMedianRatio))
+         (evidence (chat-coding-acceptance--field metadata 'evidence))
+         (definition
+          (chat-coding-acceptance--field overall 'definitionAccuracy))
+         (precision
+          (chat-coding-acceptance--field overall 'referencePrecision))
+         (recall (chat-coding-acceptance--field overall 'referenceRecall))
+         (top-five (chat-coding-acceptance--field overall 'topFiveHitRate))
+         (review-recall (chat-coding-acceptance--field review 'recall))
+         (review-precision (chat-coding-acceptance--field review 'precision)))
+    (append
+     (list
+      (chat-coding-acceptance--reliability-gate
+       "semantic-definition-accuracy" ">=98%" definition
+       (chat-coding-acceptance--metric-valid-p definition)
+       (and (numberp definition) (>= definition 0.98)))
+      (chat-coding-acceptance--reliability-gate
+       "semantic-reference-precision" ">=95%" precision
+       (chat-coding-acceptance--metric-valid-p precision)
+       (and (numberp precision) (>= precision 0.95)))
+      (chat-coding-acceptance--reliability-gate
+       "semantic-reference-recall" ">=90%" recall
+       (chat-coding-acceptance--metric-valid-p recall)
+       (and (numberp recall) (>= recall 0.90)))
+      (chat-coding-acceptance--reliability-gate
+       "semantic-top-five-hit-rate" ">=90%" top-five
+       (chat-coding-acceptance--metric-valid-p top-five)
+       (and (numberp top-five) (>= top-five 0.90)))
+      (chat-coding-acceptance--reliability-gate
+       "semantic-language-spread" "all five languages within 10 points"
+       (chat-coding-acceptance--field semantic 'byLanguage)
+       (chat-coding-acceptance--quality-language-metrics-valid-p semantic)
+       (chat-coding-acceptance--quality-language-spread-p semantic)))
+     (mapcar
+      (lambda (group)
+        (let* ((records
+                (chat-coding-acceptance--field evidence (car group)))
+               (expected (cddr group))
+               (valid
+                (chat-coding-acceptance--quality-test-records-shape-p
+                 records expected))
+               (passed
+                (and valid
+                     (chat-coding-acceptance--quality-tests-passed-p records))))
+          (chat-coding-acceptance--reliability-gate
+           (cadr group) "all directed scenarios passed"
+           (and valid
+                (format "%d/%d"
+                        (seq-count
+                         (lambda (record)
+                           (eq t (chat-coding-acceptance--field
+                                  record 'passed)))
+                         (chat-coding-acceptance--sequence-list records))
+                        (length expected)))
+           valid passed
+           "Run the exact directed scenario group from a clean checkout.")))
+      chat-coding-acceptance-quality-scenarios)
+     (list
+      (chat-coding-acceptance--reliability-gate
+       "plan-work-note-token-budget" "median <=5%" prompt
+       (chat-coding-acceptance--metric-valid-p prompt)
+       (and (numberp prompt) (<= prompt 0.05)))
+      (chat-coding-acceptance--reliability-gate
+       "review-critical-high-recall" ">=85%" review-recall
+       (chat-coding-acceptance--metric-valid-p review-recall)
+       (and (numberp review-recall) (>= review-recall 0.85)))
+      (chat-coding-acceptance--reliability-gate
+       "review-formal-precision" ">=80%" review-precision
+       (chat-coding-acceptance--metric-valid-p review-precision)
+       (and (numberp review-precision) (>= review-precision 0.80)))))))
+
+(defun chat-coding-acceptance--metric-alist-equal-p (left right fields)
+  "Return non-nil when LEFT and RIGHT agree for numeric FIELDS."
+  (cl-every
+   (lambda (field)
+     (let ((lvalue (chat-coding-acceptance--field left field))
+           (rvalue (chat-coding-acceptance--field right field)))
+       (and (numberp lvalue) (numberp rvalue)
+            (<= (abs (- lvalue rvalue)) 1e-9))))
+   fields))
+
+(defun chat-coding-acceptance--semantic-facts-match-p (actual recomputed)
+  "Return non-nil when ACTUAL semantic facts equal RECOMPUTED facts."
+  (let* ((fields '(definitionAccuracy referencePrecision
+                   referenceRecall topFiveHitRate))
+         (actual-overall
+          (chat-coding-acceptance--field actual 'overall))
+         (expected-overall
+          (chat-coding-acceptance--field recomputed 'overall))
+         (actual-rows
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field actual 'byLanguage)))
+         (expected-rows
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field recomputed 'byLanguage))))
+    (and
+     (chat-coding-acceptance--metric-alist-equal-p
+      actual-overall expected-overall fields)
+     (= (length actual-rows) (length expected-rows))
+     (cl-every
+      (lambda (pair)
+        (and
+         (equal (chat-coding-acceptance--field (car pair) 'language)
+                (chat-coding-acceptance--field (cdr pair) 'language))
+         (chat-coding-acceptance--metric-alist-equal-p
+          (car pair) (cdr pair) fields)))
+      (cl-mapcar #'cons actual-rows expected-rows)))))
+
+(defun chat-coding-acceptance--quality-facts-valid-p (metadata)
+  "Return non-nil when quality facts in METADATA match raw evidence."
+  (let* ((facts (chat-coding-acceptance--field metadata 'qualityReliability))
+         (evidence (chat-coding-acceptance--field metadata 'evidence))
+         (semantic
+          (chat-coding-acceptance--semantic-summary
+           (chat-coding-acceptance--field evidence 'semanticCorpus)))
+         (review
+          (chat-coding-acceptance--review-summary
+           (chat-coding-acceptance--field evidence 'reviewCorpus)))
+         (samples
+          (chat-coding-acceptance--field
+           (chat-coding-acceptance--field
+            evidence 'planWorkNotePromptMedianRatio)
+           'samples))
+         (prompt
+          (chat-coding-acceptance--plan-note-samples-median samples))
+         (actual-prompt
+          (chat-coding-acceptance--field
+           facts 'planWorkNotePromptMedianRatio)))
+    (and
+     semantic review prompt
+     (chat-coding-acceptance--semantic-facts-match-p
+      (chat-coding-acceptance--field facts 'semantic) semantic)
+     (chat-coding-acceptance--metric-alist-equal-p
+      (chat-coding-acceptance--field facts 'review) review
+      '(recall precision expectedCount reportedCount confirmedCount))
+     (numberp actual-prompt)
+     (<= (abs (- actual-prompt prompt)) 1e-9))))
+
+(defun chat-coding-acceptance--quality-evidence-valid-p (metadata)
+  "Return non-nil when METADATA contains all exact quality evidence."
+  (let ((evidence (chat-coding-acceptance--field metadata 'evidence)))
+    (and
+     (chat-coding-acceptance--quality-facts-valid-p metadata)
+     (cl-every
+      (lambda (group)
+        (let ((records
+               (chat-coding-acceptance--field evidence (car group))))
+          (and
+           (chat-coding-acceptance--quality-test-records-shape-p
+            records (cddr group))
+           (chat-coding-acceptance--quality-tests-passed-p records))))
+      chat-coding-acceptance-quality-scenarios))))
+
+(defun chat-coding-acceptance--quality-gate-records-valid-p (metadata)
+  "Return non-nil when METADATA carries exact recomputed quality gates."
+  (let ((records
+         (chat-coding-acceptance--sequence-list
+          (chat-coding-acceptance--field metadata 'acceptanceGates)))
+        (gates (chat-coding-acceptance-quality-gates metadata)))
+    (and
+     (= (length records) (length gates))
+     (cl-every
+      (lambda (pair)
+        (let ((record (car pair)) (gate (cdr pair)))
+          (and
+           (equal (chat-coding-acceptance--field record 'name)
+                  (chat-coding-acceptance-gate-name gate))
+           (chat-coding-acceptance--passing-status-p
+            (chat-coding-acceptance--field record 'status))
+           (eq 'passed (chat-coding-acceptance-gate-status gate))
+           (equal (chat-coding-acceptance--field record 'expected)
+                  (chat-coding-acceptance-gate-expected gate))
+           (equal (chat-coding-acceptance--field record 'actual)
+                  (chat-coding-acceptance-gate-actual gate)))))
+      (cl-mapcar #'cons records gates)))))
+
+(defun chat-coding-acceptance-quality-record-gate
+    (metadata expected-revision)
+  "Validate complete quality METADATA for EXPECTED-REVISION."
+  (let* ((schema (chat-coding-acceptance--field metadata 'schemaVersion))
+         (revision
+          (chat-coding-acceptance--field metadata 'implementationRevision))
+         (tree-clean
+          (chat-coding-acceptance--field metadata 'implementationTreeClean))
+         (measured-at (chat-coding-acceptance--field metadata 'measuredAt))
+         (records
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field metadata 'acceptanceGates)))
+         (valid
+          (and (= (or schema 0) 1)
+               (stringp expected-revision)
+               (not (string-empty-p expected-revision))
+               (equal revision expected-revision)
+               (eq t tree-clean)
+               (stringp measured-at)
+               (not (string-empty-p measured-at))
+               (chat-coding-acceptance--quality-gate-records-valid-p metadata)
+               (chat-coding-acceptance--quality-evidence-valid-p metadata))))
+    (chat-coding-acceptance-gate-create
+     :name "quality-reliability-record"
+     :status (if valid 'passed 'blocked)
+     :expected "clean complete quality record for current implementation"
+     :actual `((implementationRevision . ,revision)
+               (expectedRevision . ,expected-revision)
+               (treeClean . ,tree-clean)
+               (gateCount . ,(length records)))
+     :evidence
+     (unless valid
+       "Load the complete clean quality JSON for the current campaign revision."))))
+
 (defun chat-coding-acceptance--single-implementation-revision (results)
   "Return the one nonempty implementation revision in RESULTS, or nil."
   (let ((revisions
@@ -1158,12 +1649,13 @@ is removed before the callback runs."
     result))
 
 (cl-defun chat-coding-acceptance-run-final
-    (&optional baseline-directory current-directory metadata)
+    (&optional baseline-directory current-directory metadata quality-metadata)
   "Run and record the strict final acceptance gate set.
 
 BASELINE-DIRECTORY and CURRENT-DIRECTORY contain immutable M9 and M19 live
 Eval results.  Missing directories remain explicit blocked gates.  METADATA
-adds bounded externally verified facts, including `runtimeReliability'."
+adds the measured runtime reliability record.  QUALITY-METADATA adds measured
+semantic, safety, isolation, context, and Review evidence."
   (interactive
    (list
     (let ((value
@@ -1196,7 +1688,11 @@ adds bounded externally verified facts, including `runtimeReliability'."
                   (list
                    (chat-coding-acceptance-reliability-record-gate
                     metadata current-revision))
-                  (chat-coding-acceptance-reliability-gates metadata)))
+                  (chat-coding-acceptance-reliability-gates metadata)
+                  (list
+                   (chat-coding-acceptance-quality-record-gate
+                    quality-metadata current-revision))
+                  (chat-coding-acceptance-quality-gates quality-metadata)))
          (result
           (chat-coding-acceptance-record
            gates
@@ -1216,7 +1712,8 @@ adds bounded externally verified facts, including `runtimeReliability'."
                                  ,(plist-get benchmark
                                              :context-build-p95-ms))
               (heapDeltaBytes .
-                              ,(plist-get benchmark :heap-delta-bytes)))
+                              ,(plist-get benchmark :heap-delta-bytes))
+              (qualityEvidence . ,quality-metadata))
             metadata))))
     (when (called-interactively-p 'interactive)
       (message "Final acceptance %s: %s"

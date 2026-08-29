@@ -55,8 +55,10 @@
 
 (defun chat-runtime-reliability--run-test (name)
   "Run ERT test NAME and return a bounded result alist."
-  (let* ((stats (ert-run-tests-batch name))
-         (passed (= (ert-stats-completed-expected stats) 1)))
+  (ert-run-tests-batch name)
+  (let* ((test (ert-get-test name))
+         (result (ert-test-most-recent-result test))
+         (passed (and result (ert-test-passed-p result))))
     `((test . ,(symbol-name name))
       (passed . ,(if passed t :json-false)))))
 
