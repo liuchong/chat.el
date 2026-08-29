@@ -29,9 +29,15 @@ immutable incident or comparison evidence and cannot be mixed into the final
 aggregate. A DeepSeek Flash campaign is an allowed replacement identity only if
 both roles use it from fresh campaign directories and readiness succeeds.
 
-Until live execution resumes, continue the next engineering item directly on
-`master`: make true provider streaming and fallback behavior share one tested
-transport abstraction. Do not create a development worktree.
+The transport audit found no remaining split to implement:
+`chat-model-request-events` already normalizes native streaming and the
+asynchronous fallback into one ordered model-event contract, and all major
+callers use that boundary.  Bounded current-file reading was also already
+present.  The next real gap, privacy-safe session export, is now implemented in
+`8c14cff` and specified in `7b187fc`.  The active chat command and session-tree
+`e` action export a deterministic public Markdown projection with an explicit
+field allowlist and atomic, overwrite-safe persistence.  Development remains
+directly on `master`; do not create a development worktree.
 
 There is one chat surface. Code capability is a property of a session,
 not a second display: `chat-code-mode` is gone, and a coding session is a
@@ -453,27 +459,17 @@ strictly task-relevant. Decision 0018 supersedes decision 0017's earlier
 non-retaliatory interaction stance while retaining the separate leading
 section and its customization boundary.
 
-Canonical suite: 1354 tests passing.
+Latest development verification: 1817/1817 canonical tests and 7/7 focused
+session-export tests pass.
 
 ## Next Stage
 
-Implement spec 005, then 006. Neither `lisp/core/chat-markdown.el` nor
-`lisp/core/chat-mdp.el` exists yet; 005 comes first because 006 depends on
-it for display and gets it for free.
-
-Auto's second sense: an agent running rounds until its goal is met rather
-than until it stops calling tools. The step budget already bounds the
-rounds and tells the model where it stands, and the transcript records
-each one. What is missing is the completion criterion — and a criterion
-that stops on "looks done" either quits early or never quits, so it needs
-designing rather than guessing.
-
-Then `/subagent` and `/send [agent-id]`, and whether external AI tools
-arrive as one `/call_ai <tool>` rather than a command per vendor.
-
-`/goal` was asked for alongside `/new` and `/save` and is not built: it
-has nothing underneath it, and a standing objective is not a command with
-a handler. It needs designing before it gets a name.
+Resume M19 final acceptance when one provider/model identity has enough live
+capacity for fresh baseline and current 30-by-5 campaigns.  Until then, the
+next bounded engineering candidates are honest per-provider context-window
+facts and session-tree filtering/open/inspect actions after real-use feedback.
+Do not widen the public session export into a diagnostic archive without a new
+versioned secrets and authorization contract.
 
 ## Not Doing Now
 
@@ -487,14 +483,9 @@ a handler. It needs designing before it gets a name.
 
 ## Immediate Next Step
 
-No deterministic implementation gap from the execution audit remains.
-Run credential-dependent provider or live-server checks only when their
-environments are intentionally available.
-
-Only `kimi-code` declares a `:context-window`; every other provider falls
-back to `chat-context-window-default` at 131072. That default is wrong in
-both directions — it over-promises for small models and wastes most of a
-1M window — and now that the allocation table derives every allowance
-from it, a wrong window silently mis-sizes the whole budget. Declaring
-the real window per provider is a small change with a large effect on how
-honest the panel is.
+No deterministic implementation gap from the execution audit remains.  Run
+credential-dependent provider or live-server checks only when their
+environments are intentionally available.  If offline development continues,
+audit model-specific context-window facts before changing the 131072 fallback;
+vendor catalogs are time-sensitive and every value needs current primary-source
+evidence plus boundary tests.

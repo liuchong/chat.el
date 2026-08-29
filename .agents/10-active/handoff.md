@@ -26,9 +26,15 @@
   identical concrete provider/model identity and the strict aggregate passes
 - DeepSeek Flash may be used, but it requires fresh campaign identities for
   both roles; never mix it with Kimi or historical campaign samples
-- While live work is deferred, implement the provider transport abstraction
-  listed in project status, directly on `master`, with focused tests and timely
-  Conventional Commit submissions
+- The provider transport boundary and bounded current-file reading were already
+  complete when audited; do not reimplement them
+- Privacy-safe Markdown session export is implemented in `8c14cff` and specified
+  in `7b187fc`; use `M-x chat-export-session` or session-tree `e`
+- Export is an allowlisted public projection, not a backup: never add prompts,
+  reasoning, tool traffic, raw transport data, paths or arbitrary metadata to
+  its default contract
+- Development verification passes 1817/1817 canonical tests, 7/7 focused
+  export tests and 4/4 documentation-contract tests
 
 ## Avoid
 
