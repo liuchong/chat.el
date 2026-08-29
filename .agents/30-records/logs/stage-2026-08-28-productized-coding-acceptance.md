@@ -197,6 +197,24 @@ Canonical command:
 CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json /Users/liu/projects/.agent-tools/capped.sh 2048 emacs -Q -batch -l tests/performance/run-runtime-reliability.el
 ```
 
+## Frozen Campaign Runner
+
+`tests/live/run-coding-campaign.el` is the committed entry point for both
+replacement roles. It requires explicit campaign, provider/model,
+implementation revision and harness revision identity; actual runs reject a
+dirty or mismatched checkout. `CHAT_CAMPAIGN_PREFLIGHT=1` validates the complete
+descriptor without network access or durable trial output. An actual run loads
+credentials only from an explicit trusted local setup file and proves the exact
+provider/model is ready with one bounded request before creating the campaign.
+
+The baseline may load the historical implementation from a separate checkout
+while overlaying the frozen current campaign contract, and should use an
+isolated runtime home. If a run reaches a provider availability failure such as
+transport exhaustion, rate limiting, quota exhaustion, service unavailability
+or capacity pressure, the failed attempt is archived, the run lock is released
+and the campaign pauses without consuming that repetition/task identity. Agent
+request retries remain narrower than this campaign-level stop boundary.
+
 ## Unblock Procedure
 
 1. Keep the completed M9 baseline and `aa4698a` current campaign immutable as
@@ -204,8 +222,9 @@ CHAT_RELIABILITY_OUTPUT=/absolute/path/runtime-reliability.json /Users/liu/proje
 2. Commit the Rust runtime, native plan/evidence schemas, scoped Evidence ID
    feedback and generated-output contract, then freeze the resulting
    implementation and manifest revisions.
-3. Run fresh 30-by-5 baseline and current campaigns against that exact manifest;
-   never resume a campaign across an implementation or manifest revision.
+3. Preflight the committed runner for both frozen checkouts, then run fresh
+   30-by-5 baseline and current campaigns against that exact manifest; never
+   resume a campaign across an implementation or manifest revision.
 4. Establish trusted token coverage for at least 95 percent of both replacement
    comparison sets. The historical baseline cannot satisfy this gate.
 5. From a clean frozen revision, run the standalone reliability command and

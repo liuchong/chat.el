@@ -73,6 +73,14 @@ The provider exhausted its seven-day allowance before the smoke could write or
 verify, so it was correctly recorded as infrastructure error. A passing focused
 smoke and fresh final campaigns remain after provider availability returns.
 
+Replacement campaigns now have a committed frozen batch runner with explicit
+implementation/harness revisions, clean-worktree checks, a no-network
+descriptor preflight and a bounded provider/model readiness gate before any
+campaign directory is created. Mid-run transport exhaustion, rate limiting,
+quota, service-unavailable and capacity failures archive the attempt and pause
+without consuming a trial identity, preventing one availability outage from
+filling the remaining matrix with infrastructure errors.
+
 ## Implemented Areas
 
 ### Chat Core

@@ -1563,13 +1563,29 @@ Return the unique repetition/scenario key."
                 (verificationRetryCount . 0))))))))
         (lambda () (chat-agent-cancel run))))))
 
+(defconst chat-coding-eval--campaign-pause-error-pattern
+  (concat
+   "\\(?:http error \\(?:429\\|50[234]\\)\\b"
+   "\\|rate limit\\|too many requests\\|usage limit\\|quota"
+   "\\|service unavailable\\|temporarily unavailable"
+   "\\|overloaded\\|capacity\\)")
+  "Provider availability failures that pause a live campaign.")
+
 (defun chat-coding-eval--transient-infrastructure-result-p (result)
-  "Return non-nil when RESULT is a retryable transport failure."
+  "Return non-nil when RESULT should pause without claiming its trial.
+
+Agent transport retries remain deliberately narrower.  A campaign also pauses
+for provider availability failures that cannot improve by scheduling another
+task immediately, including rate limits and exhausted usage quotas."
   (let* ((metadata (chat-eval-result-metadata result))
          (executor (and (listp metadata) (alist-get 'executor metadata)))
          (reason (and (listp executor) (alist-get 'failureReason executor))))
     (and (eq (chat-eval-result-status result) 'error)
-         (chat-agent--transient-model-error-p reason))))
+         (or (chat-agent--transient-model-error-p reason)
+             (and (stringp reason)
+                  (string-match-p
+                   chat-coding-eval--campaign-pause-error-pattern
+                   (downcase reason)))))))
 
 (defun chat-coding-eval--quarantine-result (result directory)
   "Move transient RESULT from DIRECTORY into its immutable attempts archive."
@@ -1608,7 +1624,7 @@ Return the unique repetition/scenario key."
                (progn
                  (chat-coding-eval--quarantine-result result directory)
                  (message
-                  "Coding eval paused after transient transport failure: %s repeat %d"
+                  "Coding eval paused after provider availability failure: %s repeat %d"
                   (chat-eval-result-scenario-id result) repetition)
                  (chat-coding-eval-cancel-suite state))
              (message "Coding eval %s repeat %d: %s"
@@ -1618,9 +1634,13 @@ Return the unique repetition/scenario key."
          (lambda (results state)
            (unwind-protect
                (if (chat-coding-eval-suite-state-cancelled-p state)
-                   (message
-                    "Coding evaluation paused with %d durable result(s) in %s"
-                    (length results) directory)
+                   (let ((durable
+                          (plist-get
+                           (chat-coding-eval--campaign-work campaign)
+                           :results)))
+                     (message
+                      "Coding evaluation paused with %d durable result(s) in %s"
+                      (length durable) directory))
                  (chat-coding-eval--complete-campaign campaign results)
                  (message "Coding evaluation completed: %d result(s) in %s"
                           (length results) directory))

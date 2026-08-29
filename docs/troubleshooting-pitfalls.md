@@ -2684,4 +2684,26 @@ drift fails at the producer boundary.
 the absence of local implementation changes. Validate with the real consumer;
 do not duplicate its contract in a reporting script.
 
+### Provider Retry And Campaign Pause Need Different Boundaries
+
+**Problem**: a provider that exhausted its weekly allowance could leave the
+live runner scheduling the rest of a 150-trial matrix, turning one availability
+incident into many durable infrastructure errors.
+
+**Cause**: the campaign reused the Agent's deliberately narrow immediate-retry
+predicate. A request retry answers whether the same turn should be attempted
+again now; a campaign pause answers whether any later task can produce valid
+evidence under the current provider state.
+
+**Solution**: keep immediate retries limited to bounded pre-payload transport
+failures. Give campaigns a broader availability boundary covering exhausted
+transport retries, rate limits, quota, service unavailability and capacity.
+Archive the failed attempt, reload the authoritative durable result count,
+release the lock and leave the repetition/task identity missing. Run one
+bounded provider/model readiness request before creating a new campaign.
+
+**General rule**: request retry, task retry and campaign pause have different
+costs and evidence boundaries. Model them separately instead of sharing one
+"transient" predicate.
+
 Last updated: 2026-08-29

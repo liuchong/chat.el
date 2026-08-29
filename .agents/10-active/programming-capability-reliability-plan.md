@@ -993,6 +993,16 @@ gate-linked 检查（15 个唯一 ERT 场景），测量 20 轮 Goal 投影占�
 通过，Goal projection median ratio 为 `0.0032043746`；提交后必须在冻结 revision
 上重新生成 clean record。
 
+最终 live 对比使用仓库内 `tests/live/run-coding-campaign.el`，不再依赖临时 runner。
+入口要求显式给出 campaign role、provider、具体 model、implementation checkout 与
+revision、当前 harness revision；真实运行同时拒绝任一 checkout 的未提交修改。
+`CHAT_CAMPAIGN_PREFLIGHT=1` 只做无网络 descriptor 预检，实际运行必须显式载入仓库外
+的 trusted setup file，并在创建 campaign 前完成一个有界、model-specific readiness
+请求。历史 baseline 使用隔离 runtime HOME，旧实现与当前 immutable campaign 合同
+分别加载。运行中遇到 DNS/TLS/连接/超时重试耗尽，或 429、502/503/504、quota、
+service unavailable、capacity 等 provider 可用性故障时，当前 attempt 进入审计目录，
+锁被释放，campaign 保留全部缺失 trial 后暂停；不得把后续矩阵批量记成模型失败。
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。

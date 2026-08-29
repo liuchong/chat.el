@@ -219,6 +219,28 @@ checkout 使用 `current`；两边必须使用同一 manifest、模型和 capabi
 后必须显式把 `chat-coding-eval-max-fixture-files` 设为 12,000，才能接受当前固定
 10,000-indexed-file task。只生成 `campaign.json` 是兼容性预检，不算 live trial。
 
+仓库提供可复现的 batch runner。先用无网络预检确认 campaign 身份、任务数、
+重复次数、manifest digest 和两个 checkout revision：
+
+```text
+CHAT_CAMPAIGN_PREFLIGHT=1 \
+CHAT_CAMPAIGN_ID=<unique-id> \
+CHAT_CAMPAIGN_ROLE=current \
+CHAT_CAMPAIGN_PROVIDER=<provider> \
+CHAT_CAMPAIGN_MODEL=<concrete-model> \
+CHAT_IMPLEMENTATION_ROOT=<clean-checkout> \
+CHAT_IMPLEMENTATION_REVISION=<implementation-head> \
+CHAT_HARNESS_REVISION=<current-harness-head> \
+  emacs -Q -batch -l tests/live/run-coding-campaign.el
+```
+
+真实运行移除 `CHAT_CAMPAIGN_PREFLIGHT`，并增加
+`CHAT_CAMPAIGN_SETUP_FILE=<trusted-local-file>`。该本地文件只负责载入凭据，不得
+提交。runner 会拒绝 revision 不匹配或不干净的 implementation/harness checkout，
+并在创建 campaign 目录前向指定 provider/model 发出一个 30 秒、64 token 的就绪
+请求。历史 baseline 应使用独立 `CHAT_CAMPAIGN_RUNTIME_HOME`，避免当前用户状态
+污染旧实现。
+
 每次运行只写入 `~/.chat/evaluations/coding-campaigns/<campaign-id>/`。目录中的
 `campaign.json` 在开始前固定模型及其 capability snapshot、profile、transport、
 approval mode、manifest digest、实现 revision、任务数和预期结果数；每条 trial
@@ -227,10 +249,12 @@ approval mode、manifest digest、实现 revision、任务数和预期结果数�
 `M-x chat-coding-eval-resume-live` 校验并只补齐缺失 trial。恢复不会接受不同
 manifest、revision、运行配置、重复身份或并发执行，也不能向已有
 `completion.json` 的 campaign 追加结果。模型请求在未收到任何 payload 的 DNS、TLS、
-连接和超时故障上使用可取消的有界退避。重试耗尽后，live campaign 会把该次结果
-移入 `attempts/` 审计目录、释放运行锁并暂停；它不会占用正式 repetition/task
-身份。网络恢复后对同一目录执行 `M-x chat-coding-eval-resume-live`，即可重试该
-缺失身份。分别得到 150 条 M9 与 150 条 M19 结果后运行
+连接和超时故障上使用可取消的有界退避。重试耗尽，或 provider 返回 429、
+502/503/504、用量上限、服务不可用或容量不足时，live campaign 会把该次结果移入
+`attempts/` 审计目录、释放运行锁并暂停；它不会占用正式 repetition/task 身份。
+这是 campaign 级可用性边界，不会扩大 Agent 对单次模型请求的重试范围。provider
+恢复后对同一目录执行 `M-x chat-coding-eval-resume-live`，即可重试该缺失身份。
+分别得到 150 条 M9 与 150 条 M19 结果后运行
 `M-x chat-coding-acceptance-run-final`。验收会拒绝混合 campaign、相同实现
 revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 token usage 或
 不真实的 large-repo 样本，结果不会被误判为通过。

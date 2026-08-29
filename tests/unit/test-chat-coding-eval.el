@@ -4,6 +4,15 @@
 (require 'test-helper)
 (require 'chat-coding-eval)
 
+(let ((previous (getenv "CHAT_CAMPAIGN_RUNNER_LIBRARY_ONLY")))
+  (unwind-protect
+      (progn
+        (setenv "CHAT_CAMPAIGN_RUNNER_LIBRARY_ONLY" "1")
+        (load (expand-file-name "tests/live/run-coding-campaign.el"
+                                chat-test-root-dir)
+              nil t))
+    (setenv "CHAT_CAMPAIGN_RUNNER_LIBRARY_ONLY" previous)))
+
 (defconst chat-coding-eval-test-manifest
   (expand-file-name "coding-eval/manifest.json" chat-test-fixtures-dir))
 
@@ -62,6 +71,59 @@
                (judges . [((type . "no-change")
                             (name . "unchanged"))]))])))))
     manifest))
+
+(ert-deftest chat-campaign-runner-rejects-ambiguous-integers ()
+  "Campaign numeric configuration accepts only canonical positive integers."
+  (let ((process-environment (copy-sequence process-environment)))
+    (setenv "CHAT_TEST_INTEGER" "5")
+    (should (= 5 (chat-campaign-runner--positive-integer
+                  "CHAT_TEST_INTEGER" 1)))
+    (dolist (value '("0" "-1" "5x" " 5" ""))
+      (setenv "CHAT_TEST_INTEGER" value)
+      (should-error
+       (chat-campaign-runner--positive-integer "CHAT_TEST_INTEGER" 1)))))
+
+(ert-deftest chat-campaign-runner-freezes-revision-and-worktree ()
+  "Only the expected clean checkout is eligible for an actual campaign."
+  (let (dirty)
+    (cl-letf (((symbol-function 'chat-campaign-runner--git-output)
+               (lambda (_root &rest arguments)
+                 (if (equal arguments '("rev-parse" "HEAD"))
+                     "revision-a"
+                   (if dirty " M changed.el" "")))))
+      (should
+       (chat-campaign-runner--validate-checkout
+        "/repo" "revision-a" "Implementation" nil))
+      (should-error
+       (chat-campaign-runner--validate-checkout
+        "/repo" "revision-b" "Implementation" nil))
+      (setq dirty t)
+      (should-error
+       (chat-campaign-runner--validate-checkout
+        "/repo" "revision-a" "Implementation" nil))
+      (should-not
+       (chat-campaign-runner--validate-checkout
+        "/repo" "revision-a" "Implementation" t)))))
+
+(ert-deftest chat-campaign-runner-readiness-is-bounded-and-model-specific ()
+  "Readiness sends one short request to the exact provider and model."
+  (let (observed)
+    (cl-letf (((symbol-function 'chat-llm-request)
+               (lambda (provider messages options)
+                 (setq observed (list provider messages options))
+                 "READY")))
+      (should (equal "READY"
+                     (chat-campaign-runner--provider-readiness
+                      'provider-a "model-a"))))
+    (should (eq 'provider-a (car observed)))
+    (should (= 1 (length (cadr observed))))
+    (should (equal "model-a" (plist-get (caddr observed) :model)))
+    (should (= 64 (plist-get (caddr observed) :max-tokens)))
+    (cl-letf (((symbol-function 'chat-llm-request)
+               (lambda (&rest _arguments) "")))
+      (should-error
+       (chat-campaign-runner--provider-readiness
+        'provider-a "model-a")))))
 
 (ert-deftest chat-coding-eval-suite-has-fixed-balanced-coverage ()
   "The baseline contains thirty tasks with balanced category coverage."
@@ -481,6 +543,65 @@
      (let ((work (chat-coding-eval--campaign-work campaign)))
        (should-not (plist-get work :results))
        (should (= 2 (length (plist-get work :pending))))))))
+
+(ert-deftest chat-coding-eval-usage-quota-pauses-without-claiming-trial ()
+  "An exhausted provider quota archives one attempt and preserves all work."
+  (chat-coding-eval-test-with-runtime
+   (let* ((chat-coding-eval-campaign-directory
+           (expand-file-name "campaigns/" temp-dir))
+          (manifest (chat-coding-eval-test--small-manifest temp-dir))
+          (campaign
+           (chat-coding-eval-prepare-campaign
+            "quota-001" 'provider-a "model-a" 1 manifest
+            :implementation-revision "quota-revision"))
+          (directory (plist-get campaign :directory))
+          messages)
+     (cl-letf (((symbol-function 'chat-llm-provider-configured-p)
+                (lambda (_provider) t))
+               ((symbol-function 'message)
+                (lambda (format-string &rest arguments)
+                  (push (apply #'format format-string arguments) messages)))
+               ((symbol-function 'chat-coding-eval-agent-executor)
+                (lambda (_provider _model)
+                  (lambda (_task _workspace done)
+                    (funcall
+                     done 'error ""
+                     '((failureReason .
+                                      "HTTP error 403: weekly usage limit; quota exhausted")))))))
+       (chat-coding-eval--start-campaign campaign 'provider-a "model-a")
+       (should
+        (chat-coding-eval-test--wait
+         (lambda ()
+           (not (file-exists-p
+                 (chat-coding-eval--campaign-lock-file directory)))))))
+     (should-not
+      (file-exists-p (expand-file-name "completion.json" directory)))
+     (should (= 1 (length (directory-files
+                           (expand-file-name "attempts/" directory)
+                           nil "\\`eval-.*\\.json\\'"))))
+     (should (seq-some
+              (lambda (text)
+                (string-match-p "paused with 0 durable result" text))
+              messages))
+     (let ((work (chat-coding-eval--campaign-work campaign)))
+       (should-not (plist-get work :results))
+       (should (= 2 (length (plist-get work :pending))))))))
+
+(ert-deftest chat-coding-eval-campaign-pause-errors-are-bounded ()
+  "Only transport and provider availability failures pause campaigns."
+  (dolist (reason '("HTTP error 429: too many requests"
+                    "HTTP error 503: service unavailable"
+                    "provider capacity is temporarily unavailable"))
+    (should
+     (chat-coding-eval--transient-infrastructure-result-p
+      (chat-eval-result-create-record
+       :status 'error
+       :metadata `((executor . ((failureReason . ,reason))))))))
+  (should-not
+   (chat-coding-eval--transient-infrastructure-result-p
+    (chat-eval-result-create-record
+     :status 'error
+     :metadata '((executor . ((failureReason . "HTTP error 403: forbidden"))))))))
 
 (ert-deftest chat-coding-eval-rejects-unsafe-allowed-and-judge-paths ()
   "Fixture policy rejects traversal before an executor can run."
