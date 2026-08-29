@@ -66,8 +66,15 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
 (defun chat-campaign-runner--install-runtime-home (runtime-home)
   "Install isolated RUNTIME-HOME without leaving a stale tilde directory."
   (when runtime-home
-    (let ((home (file-name-as-directory (expand-file-name runtime-home))))
+    (let* ((developer-home (getenv "HOME"))
+           (developer-rustup-home
+            (and developer-home
+                 (expand-file-name ".rustup" developer-home)))
+           (home (file-name-as-directory (expand-file-name runtime-home))))
       (make-directory home t)
+      (when (and (not (getenv "RUSTUP_HOME"))
+                 (file-directory-p (or developer-rustup-home "")))
+        (setenv "RUSTUP_HOME" (file-truename developer-rustup-home)))
       (setenv "HOME" home)
       ;; `default-directory' may have been recorded as ~/... before HOME was
       ;; replaced.  A subprocess expands it after the replacement and then
