@@ -54,31 +54,31 @@
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "resolve_account_status"}, {"type": "no-change", "name": "read-only"}]
     },
     {
-      "id": "python-single-fix", "revision": 1, "category": "single-file-fix", "language": "python",
+      "id": "python-single-fix", "revision": 2, "category": "single-file-fix", "language": "python",
       "description": "Correct division behavior.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Fix divide so it preserves fractional results and raises ValueError when the divisor is zero.",
-      "allowedPaths": ["sample.py"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "divide-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_divide"], "expectedExit": 0}]
     },
     {
-      "id": "python-multi-file", "revision": 1, "category": "multi-file-change", "language": "python",
+      "id": "python-multi-file", "revision": 2, "category": "multi-file-change", "language": "python",
       "description": "Change a label contract and its documentation.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.py", "README.md"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py", "README.md"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "label-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
-      "id": "python-refactor", "revision": 1, "category": "refactor", "language": "python",
+      "id": "python-refactor", "revision": 2, "category": "refactor", "language": "python",
       "description": "Extract normalization detail.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Refactor normalize_name by extracting whitespace cleanup into a private helper named _clean_name. Preserve behavior.",
-      "allowedPaths": ["sample.py"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.py", "regexp": "_clean_name"}]
     },
     {
-      "id": "python-failing-test", "revision": 1, "category": "failing-test-fix", "language": "python",
+      "id": "python-failing-test", "revision": 2, "category": "failing-test-fix", "language": "python",
       "description": "Repair an activity-state regression.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "The test_active test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.py"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "active-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_active"], "expectedExit": 0}]
     },
     {
@@ -140,31 +140,31 @@
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "FindUser"}, {"type": "no-change", "name": "read-only"}]
     },
     {
-      "id": "go-single-fix", "revision": 1, "category": "single-file-fix", "language": "go",
+      "id": "go-single-fix", "revision": 2, "category": "single-file-fix", "language": "go",
       "description": "Correct integer division behavior.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Fix Divide for positive integers so non-exact results round up. Preserve the existing zero-divisor failure behavior.",
-      "allowedPaths": ["sample.go"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "divide-tests", "command": ["go", "test", "-run", "^TestDivide$", "./..."], "expectedExit": 0}]
     },
     {
-      "id": "go-multi-file", "revision": 1, "category": "multi-file-change", "language": "go",
+      "id": "go-multi-file", "revision": 2, "category": "multi-file-change", "language": "go",
       "description": "Change a label contract and its documentation.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.go", "README.md"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go", "README.md"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "label-tests", "command": ["go", "test", "-run", "^TestLabel$", "./..."], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
-      "id": "go-refactor", "revision": 1, "category": "refactor", "language": "go",
+      "id": "go-refactor", "revision": 2, "category": "refactor", "language": "go",
       "description": "Extract normalization detail.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Refactor NormalizeName by extracting whitespace cleanup into an unexported helper named cleanName. Preserve behavior.",
-      "allowedPaths": ["sample.go"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["go", "test", "-run", "^TestNormalize$", "./..."], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.go", "regexp": "cleanName"}]
     },
     {
-      "id": "go-failing-test", "revision": 1, "category": "failing-test-fix", "language": "go",
+      "id": "go-failing-test", "revision": 2, "category": "failing-test-fix", "language": "go",
       "description": "Repair an activity-state regression.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "TestActive fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.go"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
       "judges": [{"type": "command", "name": "active-tests", "command": ["go", "test", "-run", "^TestActive$", "./..."], "expectedExit": 0}]
     },
     {

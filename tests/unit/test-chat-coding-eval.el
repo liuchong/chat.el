@@ -211,6 +211,26 @@
         (should (= 64 (length left)))
         (should (equal left right))))))
 
+(ert-deftest chat-coding-eval-suite-declares-language-build-artifacts ()
+  "Executable fixtures separate generated caches from writable source scope."
+  (let ((tasks (chat-coding-eval-load-suite
+                chat-coding-eval-test-manifest)))
+    (dolist (task tasks)
+      (let ((category (chat-coding-eval-task-category task))
+            (language (chat-coding-eval-task-language task))
+            (generated (chat-coding-eval-task-generated-paths task)))
+        (when (member category '("single-file-fix" "multi-file-change"
+                                 "refactor" "failing-test-fix"))
+          (pcase language
+            ("python"
+             (should (equal '("__pycache__" ".pytest_cache") generated))
+             (should-not (member "__pycache__"
+                                 (chat-coding-eval-task-allowed-paths task))))
+            ("go"
+             (should (equal '(".gocache" ".gotmp") generated))
+             (should-not (member ".gocache"
+                                 (chat-coding-eval-task-allowed-paths task))))))))))
+
 (ert-deftest chat-coding-eval-generator-materializes-bounded-source-files ()
   "A generator creates deterministic files and records their measured count."
   (chat-coding-eval-test-with-runtime
