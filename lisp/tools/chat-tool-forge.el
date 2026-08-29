@@ -206,7 +206,9 @@
    (when-let ((items (plist-get param :items)))
      `((items . ,items)))
    (when-let ((min-items (plist-get param :min-items)))
-     `((minItems . ,min-items)))))
+     `((minItems . ,min-items)))
+   (when-let ((accepted-types (plist-get param :accepted-types)))
+     `((acceptedTypes . ,(vconcat accepted-types))))))
 
 (defun chat-tool-forge--parameters-to-json (parameters)
   "Convert PARAMETERS to a JSON array for persistence."
@@ -228,7 +230,9 @@
         (items (or (cdr (assoc "items" param))
                    (cdr (assoc 'items param))))
         (min-items (or (cdr (assoc "minItems" param))
-                       (cdr (assoc 'minItems param)))))
+                       (cdr (assoc 'minItems param))))
+        (accepted-types (or (cdr (assoc "acceptedTypes" param))
+                            (cdr (assoc 'acceptedTypes param)))))
     (append
      (list :name name :type type)
      (when (and description (not (string-empty-p description)))
@@ -239,6 +243,11 @@
        (list :items items))
      (when min-items
        (list :min-items min-items))
+     (when accepted-types
+       (list :accepted-types
+             (if (vectorp accepted-types)
+                 (append accepted-types nil)
+               accepted-types)))
      (list :required (and required (not (eq required :json-false)))))))
 
 (defun chat-tool-forge--parameters-from-json (parameters)

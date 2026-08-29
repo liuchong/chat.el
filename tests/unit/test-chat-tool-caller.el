@@ -128,6 +128,28 @@ turn one repeated call into two executions."
           :arguments (("count" . 1) ("extra" . t))))))
      (should (= executions 0)))))
 
+(ert-deftest chat-tool-caller-accepts-declared-legacy-argument-types ()
+  "Provider schemas stay strict while a declared old wire shape still runs."
+  (let* ((tool
+          (make-chat-forged-tool
+           :id 'compatible-tool :name "Compatible" :language 'elisp
+           :parameters
+           '((:name "evidence" :type "array" :required nil
+              :items ((type . "string")) :accepted-types ("string")))
+           :compiled-function #'identity :is-active t))
+         (schema (chat-tool-caller--json-schema tool))
+         (property (cdr (assoc "evidence"
+                               (cdr (assoc 'properties schema))))))
+    (should (equal (cdr (assoc 'type property)) "array"))
+    (should-not (assoc 'acceptedTypes property))
+    (should (equal
+             (chat-tool-caller--arguments-to-argv
+              tool '(("evidence" . "[\"event-one\"]")))
+             '("[\"event-one\"]")))
+    (should-error
+     (chat-tool-caller--validate-arguments
+      tool '(("evidence" . 42))))))
+
 (ert-deftest chat-tool-caller-accepts-required-json-false ()
   "Test required booleans distinguish false from a missing argument."
   (chat-test-with-temp-dir
@@ -806,7 +828,8 @@ being a thing the reader could do when the two surfaces merged."
        :language 'elisp
        :source-code "(lambda (input) input)"
        :parameters '((:name "input" :type "string"
-                      :enum ("one" "two") :required t))
+                      :enum ("one" "two") :accepted-types ("integer")
+                      :required t))
        :owner 'persisted-owner
        :sensitivity 'personal
        :effects '(read outbound)
@@ -818,7 +841,8 @@ being a thing the reader could do when the two surfaces merged."
        (should
         (equal (chat-forged-tool-parameters tool)
                '((:name "input" :type "string"
-                  :enum ("one" "two") :required t))))
+                  :enum ("one" "two") :accepted-types ("integer")
+                  :required t))))
        (should (eq (chat-forged-tool-owner tool) 'persisted-owner))
        (should (eq (chat-forged-tool-sensitivity tool) 'personal))
        (should (equal (chat-forged-tool-effects tool)

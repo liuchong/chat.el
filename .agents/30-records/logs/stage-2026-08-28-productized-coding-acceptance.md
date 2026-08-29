@@ -154,6 +154,23 @@ The incomplete campaign remains immutable incident evidence and must never be
 resumed after this implementation change. A focused live multi-file smoke must
 pass before another 150-trial current campaign is started.
 
+Focused campaign `m19-smoke-go-multi-file-20260829T083500` ran one committed
+`go-multi-file` trial. Its wire trace confirms that post-tool events now carry
+the owning `agent_task_id`, and the Agent successfully created and advanced its
+durable plan with a native evidence array. One earlier transition used the old
+JSON-string shape and was rejected before reaching the compatibility parser.
+Tool parameters now keep the provider-visible array schema while accepting an
+explicitly declared legacy string type at runtime; this metadata survives tool
+persistence. The canonical suite passes 1793/1793.
+
+The smoke could not reach a functional verdict because the provider exhausted
+its seven-day usage allowance during the trial. Both write approvals received
+the same 403 from the guard model and failed closed; Eval recorded the terminal
+trial as infrastructure `error` with no workspace leak. This result is useful
+availability evidence, but it is neither a coding failure nor a passing smoke.
+No further final-campaign requests should be sent until the fixed provider and
+model are available again.
+
 ## Unblock Procedure
 
 1. Keep the completed M9 baseline and `aa4698a` current campaign immutable as

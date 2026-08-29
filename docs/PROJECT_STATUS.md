@@ -58,7 +58,12 @@ scope was mistaken for Agent-task scope. Progress tools now accept native
 Evidence ID arrays, successful tracked tools return exact IDs, and post-tool
 events carry a separately resolved `agent_task_id`. The incomplete 10-result
 campaign is retained only as incident evidence. The canonical suite passes
-1792/1792; a focused live multi-file smoke and fresh final campaigns remain.
+1793/1793. A focused multi-file trace confirms scoped post-tool identities and
+native plan transitions; runtime now also accepts the explicitly declared
+legacy JSON-string evidence shape without weakening the provider array schema.
+The provider exhausted its seven-day allowance before the smoke could write or
+verify, so it was correctly recorded as infrastructure error. A passing focused
+smoke and fresh final campaigns remain after provider availability returns.
 
 ## Implemented Areas
 

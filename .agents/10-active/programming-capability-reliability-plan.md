@@ -974,6 +974,15 @@ Evidence ID；post-tool event 同时保留 tool-call identity 与 `agent_task_id
 canonical suite 1792/1792 通过。该中断 campaign 仅作事故证据，implementation
 revision 改变后禁止续跑；最终验收仍须创建新的 replacement campaign。
 
+提交后针对 `go-multi-file` 的单任务 live smoke 证实新 post-tool event 已携带
+正确 `agent_task_id`，且原生 evidence 数组可以成功推进 plan item。模型第一次仍
+按旧调用习惯发送 JSON 字符串，本地 validator 在兼容解析器之前拒绝；现由参数
+合同只向 provider 宣告原生 array，同时对明确声明的旧 string wire shape 做运行时
+兼容并持久化该兼容元数据。smoke 随后因 provider 七天用量达到上限而终止：guard
+请求收到同一 403 后按 fail-closed 拒绝两次写入，Eval 正确记录为 infrastructure
+`error`，不得当作任务失败或通过。canonical suite 1793/1793 通过。完整 live
+验收需等待同一 provider/model 恢复可用，不能改用不同身份的样本混入比较。
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。

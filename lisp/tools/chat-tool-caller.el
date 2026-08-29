@@ -688,6 +688,14 @@ merely mentions JSON in prose has not."
                        (cl-every #'consp value))))
     (_ t)))
 
+(defun chat-tool-caller--parameter-type-valid-p (value param)
+  "Return non-nil when VALUE has PARAM's primary or accepted legacy type."
+  (let ((types (cons (or (plist-get param :type) "string")
+                     (plist-get param :accepted-types))))
+    (seq-some (lambda (type)
+                (chat-tool-caller--argument-type-valid-p value type))
+              types)))
+
 (defun chat-tool-caller--schema-get (schema key)
   "Return KEY from JSON SCHEMA with symbol or string keys."
   (or (cdr (assoc key schema))
@@ -793,14 +801,15 @@ enumerated values."
              (items (plist-get param :items))
              (min-items (plist-get param :min-items)))
         (unless (eq value chat-tool-caller--missing-argument)
-          (unless (chat-tool-caller--argument-type-valid-p value type)
+          (unless (chat-tool-caller--parameter-type-valid-p value param)
             (error "Argument '%s' must be %s" name type))
           (when (and enum (not (member value enum)))
             (error "Argument '%s' must be one of: %s"
                    name
                    (mapconcat (lambda (item) (format "%s" item))
                               enum ", "))))
-          (when (or items min-items)
+          (when (and (chat-tool-caller--argument-type-valid-p value type)
+                     (or items min-items))
             (chat-tool-caller--validate-schema-value
              value
              (append `((type . ,type))

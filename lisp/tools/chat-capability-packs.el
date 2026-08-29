@@ -1135,7 +1135,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "criterion_id" :type "string" :required nil)
      (:name "evidence" :type "array" :required nil
       :description "Exact Evidence IDs returned by successful tools."
-      :items ((type . "string")))
+      :items ((type . "string")) :accepted-types ("string"))
      (:name "plan_id" :type "string" :required nil)
      (:name "task_id" :type "string" :required nil))
    #'chat-capability-programming-goal-progress 'project '(state))
@@ -1204,7 +1204,7 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
       :enum ("in-progress" "completed" "blocked" "skipped"))
      (:name "evidence" :type "array" :required nil
       :description "Exact Evidence IDs returned by successful tools. Required when completing an item."
-      :items ((type . "string")))
+      :items ((type . "string")) :accepted-types ("string"))
      (:name "blocker_reason" :type "string" :required nil))
    #'chat-capability-programming-plan-transition 'project '(state))
   (chat-capability--register-tool

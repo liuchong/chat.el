@@ -338,6 +338,8 @@
                                  params)))
         (should evidence)
         (should (equal "array" (plist-get evidence :type)))
+        (should (equal '("string")
+                       (plist-get evidence :accepted-types)))
         (should (equal "string"
                        (cdr (assoc 'type (plist-get evidence :items)))))
         (should-not (seq-find

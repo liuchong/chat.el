@@ -2654,6 +2654,9 @@ with every successful tracked tool result, and persist a separate
 `agent_task_id` for scope resolution. Keep the tool-call identity for tracing.
 Never return a usable Evidence ID for a failed tool. Test provider schema,
 model-visible feedback, persisted scope and resolver behavior as one contract.
+When an established wire shape must remain readable, declare it as a runtime
+accepted type while keeping the provider schema on the new canonical type; make
+that compatibility metadata survive tool persistence.
 
 **General rule**: durable evidence needs an end-to-end citation path. Creating a
 record is insufficient; the producer must expose its stable identity, the
