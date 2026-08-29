@@ -1,6 +1,6 @@
 # Spec 026: Input Work Shelf
 
-- Status: accepted, implementation pending
+- Status: implemented
 - Scope: chat input-adjacent runtime projections
 - Depends on: typed work plans, Goal, Plan Mode, runtime-owned change evidence
 - Replaces: separate always-visible Goal, Plan Mode and TODO projections above input
@@ -118,4 +118,3 @@ Tests must prove:
 - zero available sections renders no region, while the prompt control remains;
 - provider rendering is bounded and performs no synchronous filesystem/Git scan;
 - the former separate projections are removed, and the full canonical suite passes.
-

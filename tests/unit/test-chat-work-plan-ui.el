@@ -1,4 +1,4 @@
-;;; test-chat-work-plan-ui.el --- Native work-plan UI tests -*- lexical-binding: t -*-
+;;; test-chat-work-plan-ui.el --- Input work-shelf UI tests -*- lexical-binding: t -*-
 
 (require 'ert)
 (require 'cl-lib)
@@ -7,6 +7,7 @@
 (require 'chat-work-plan)
 (require 'chat-goal)
 (require 'chat-plan-mode)
+(require 'chat-changed-files)
 
 (defun chat-work-plan-ui-test--session ()
   "Return one code-capable UI test session."
@@ -15,11 +16,16 @@
     session))
 
 (defun chat-work-plan-ui-test--region ()
-  "Return the visible native plan region."
-  (buffer-substring-no-properties chat-ui--plan-start chat-ui--plan-end))
+  "Return the visible input work-shelf region."
+  (buffer-substring-no-properties
+   chat-ui--work-shelf-start chat-ui--work-shelf-end))
 
-(ert-deftest chat-work-plan-ui-renders-collapsed-and-expanded-cjk-items ()
-  "The native plan view is compact by default and expands in place."
+(defun chat-work-plan-ui-test--prompt-start ()
+  "Return the first position in the visible input prompt."
+  (car (chat-ui--input-prompt-bounds)))
+
+(ert-deftest chat-work-shelf-defaults-closed-and-expands-without-key-focus ()
+  "The two-level shelf is closed by default and owns no keyboard keys."
   (chat-test-with-temp-dir
    (let ((session (chat-work-plan-ui-test--session)))
      (chat-work-plan-create
@@ -30,57 +36,141 @@
      (with-temp-buffer
        (setq-local chat--current-session session)
        (chat-ui-setup-buffer session)
-       (should (equal "Plan 1/2 · 分析现状\n"
+       (should (string-empty-p (chat-work-plan-ui-test--region)))
+       (let* ((prompt-start (chat-work-plan-ui-test--prompt-start))
+              (map (get-text-property prompt-start 'keymap)))
+         (should (equal "▸" (buffer-substring-no-properties
+                             prompt-start (1+ prompt-start))))
+         (should (eq (lookup-key map [mouse-1])
+                     'chat-ui-toggle-work-shelf))
+         (should-not (lookup-key map (kbd "TAB")))
+         (should-not (lookup-key map (kbd "RET")))
+         (should-not (lookup-key map (kbd "<left>")))
+         (should-not (lookup-key map "x")))
+       (goto-char (point-max))
+       (insert "draft 输入")
+       (let ((input-offset (- (point)
+                              (marker-position chat-ui--input-overlay))))
+         (chat-ui-toggle-work-shelf)
+         (should (= input-offset
+                    (- (point)
+                       (marker-position chat-ui--input-overlay)))))
+       (should (equal "▸ TODO 0/2 · 分析现状\n"
                       (chat-work-plan-ui-test--region)))
-       (goto-char chat-ui--plan-start)
-       (should (keymapp (get-text-property (point) 'keymap)))
-       (chat-ui-toggle-work-plan)
+       (goto-char chat-ui--work-shelf-start)
+       (let ((map (get-text-property (point) 'keymap)))
+         (should (eq 'todo (get-text-property
+                            (point) 'chat-work-shelf-section)))
+         (should (eq (lookup-key map [mouse-1])
+                     'chat-ui-toggle-work-shelf-section))
+         (should-not (lookup-key map (kbd "TAB")))
+         (should-not (lookup-key map (kbd "RET")))
+         (should-not (lookup-key map (kbd "<down>")))
+         (should-not (lookup-key map "x")))
+       (goto-char (point-max))
+       (let ((input-offset (- (point)
+                              (marker-position chat-ui--input-overlay))))
+         (chat-ui-toggle-work-shelf-section nil 'todo)
+         (should (= input-offset
+                    (- (point)
+                       (marker-position chat-ui--input-overlay)))))
        (let ((visible (chat-work-plan-ui-test--region)))
-         (should (string-match-p "\\[ \\] 分析现状" visible))
-         (should (string-match-p "\\[ \\] 实现功能" visible)))))))
+         (should (string-match-p "▾ TODO 0/2" visible))
+         (should (string-match-p (regexp-quote "[ ] 分析现状") visible))
+         (should (string-match-p (regexp-quote "[ ] 实现功能") visible)))
+       (chat-ui-toggle-work-shelf)
+       (should (string-empty-p (chat-work-plan-ui-test--region)))
+       (chat-ui-toggle-work-shelf)
+       (should (string-match-p "▾ TODO 0/2"
+                               (chat-work-plan-ui-test--region)))
+       (chat-ui-setup-buffer session)
+       (should-not chat-ui--work-shelf-open)
+       (should (string-empty-p (chat-work-plan-ui-test--region)))))))
 
-(ert-deftest chat-work-plan-ui-event-adds-plan-without-transcript-redraw ()
-  "A plan event refreshes only the plan region of its bound session."
+(ert-deftest chat-work-shelf-event-adds-section-without-transcript-redraw ()
+  "A provider event refreshes only the open shelf of its bound session."
   (chat-test-with-temp-dir
    (let ((session (chat-work-plan-ui-test--session)))
      (with-temp-buffer
        (setq-local chat--current-session session)
        (chat-ui-setup-buffer session)
+       (chat-ui-toggle-work-shelf)
        (should (string-empty-p (chat-work-plan-ui-test--region)))
        (let ((conversation-start (marker-position chat-ui--conversation-start))
              (messages-end (marker-position chat-ui--messages-end)))
          (chat-work-plan-create
           session "Event"
           '(((id . "event") (title . "Event item"))))
-         (should (equal "Plan 1/1 · Event item\n"
+         (should (equal "▸ TODO 0/1 · Event item\n"
                         (chat-work-plan-ui-test--region)))
          (should (= conversation-start
                     (marker-position chat-ui--conversation-start)))
          (should (= messages-end (marker-position chat-ui--messages-end))))))))
 
-(ert-deftest chat-goal-ui-renders-collapsed-and-expanded-contract ()
-  "The Goal summary and contract share the stable native work region."
+(ert-deftest chat-work-shelf-event-refreshes-only-affected-provider ()
+  "A Goal event does not redraw sibling shelf sections."
   (chat-test-with-temp-dir
    (let ((session (chat-work-plan-ui-test--session)))
+     (chat-work-plan-create
+      session "Work" '(((id . "work") (title . "Do work"))))
+     (chat-goal-create
+      session "Goal" '(((id . "goal") (title . "Goal evidence")))
+      "Goal evidence is known")
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (chat-ui-toggle-work-shelf)
+       (let ((inserted nil)
+             (original (symbol-function 'chat-ui--insert-work-shelf-section)))
+         (cl-letf (((symbol-function 'chat-ui--insert-work-shelf-section)
+                    (lambda (section)
+                      (push (chat-work-shelf-section-id section) inserted)
+                      (funcall original section))))
+           (chat-event-emit
+            'goal-progressed :session-id (chat-session-id session)
+            :source 'test :payload nil))
+         (should (equal '(goal) inserted)))))))
+
+(ert-deftest chat-work-shelf-provider-order-and-independent-details ()
+  "TODO, files, Goal and Plan appear in canonical independent sections."
+  (chat-test-with-temp-dir
+   (let ((session (chat-work-plan-ui-test--session)))
+     (chat-work-plan-create
+      session "Work" '(((id . "work") (title . "Do work"))))
+     (chat-changed-files-record-success
+      session "evidence-1"
+      (list (list :path "lisp/work.el"
+                  :canonical-path
+                  (expand-file-name "lisp/work.el" default-directory)
+                  :operation 'added :turn-id "turn-1"))
+      '("lisp/work.el"))
      (chat-goal-create
       session "完成跨轮目标"
       '(((id . "state") (title . "状态可恢复"))
         ((id . "tests") (title . "测试全部通过")))
       "全部必要条件都有可解析证据")
+     (chat-plan-mode-enter session)
      (with-temp-buffer
        (setq-local chat--current-session session)
        (chat-ui-setup-buffer session)
-       (should (equal "Goal [active] 0/2 · 完成跨轮目标\n"
-                      (chat-work-plan-ui-test--region)))
-       (goto-char chat-ui--plan-start)
-       (should (eq (lookup-key (get-text-property (point) 'keymap)
-                               (kbd "TAB"))
-                   'chat-ui-toggle-goal))
-       (chat-ui-toggle-goal)
+       (chat-ui-toggle-work-shelf)
+       (let* ((visible (chat-work-plan-ui-test--region))
+              (todo (string-match "TODO" visible))
+              (files (string-match "Changed files" visible))
+              (goal (string-match "Goal" visible))
+              (plan (string-match (regexp-quote "Plan [researching]")
+                                  visible)))
+         (should (< todo files))
+         (should (< files goal))
+         (should (< goal plan)))
+       (chat-ui-toggle-work-shelf-section nil 'changed-files)
+       (chat-ui-toggle-work-shelf-section nil 'goal)
        (let ((visible (chat-work-plan-ui-test--region)))
-         (should (string-match-p "Stop: 全部必要条件都有可解析证据" visible))
-         (should (string-match-p "\\[ \\] 状态可恢复" visible))
-         (should (string-match-p "\\[ \\] 测试全部通过" visible)))))))
+         (should (string-match-p (regexp-quote "[+] lisp/work.el") visible))
+         (should (string-match-p
+                  "Stop: 全部必要条件都有可解析证据" visible))
+         (should (string-match-p (regexp-quote "[ ] 状态可恢复")
+                                 visible)))))))
 
 (ert-deftest chat-goal-slash-command-creates-and-controls-user-lifecycle ()
   "Slash controls own pause, resume and clear without exposing Agent tools."
@@ -107,7 +197,9 @@
        (setq-local chat--current-session session)
        (chat-ui-setup-buffer session)
        (chat-ui--command-plan "on")
-       (should (string-match-p "Plan Mode \\[researching\\] · read-only"
+       (chat-ui-toggle-work-shelf)
+       (should (string-match-p (regexp-quote
+                                "Plan [researching] · revision 1")
                                (chat-work-plan-ui-test--region)))
        (let ((plan
               (chat-work-plan-create
@@ -115,11 +207,11 @@
                '(((id . "step") (title . "Step")
                   (acceptance . "Evidence is recorded"))))))
          (chat-plan-mode-submit session (chat-work-plan-id plan) 1))
-       (should (string-match-p "Plan Mode \\[ready\\] · read-only"
+       (should (string-match-p (regexp-quote "Plan [ready]")
                                (chat-work-plan-ui-test--region)))
        (chat-ui--command-plan "approve")
        (should-not (chat-plan-mode-active-p session))
-       (should-not (string-match-p "Plan Mode \\[[^]]+\\] · read-only"
+       (should-not (string-match-p "Plan \\[[^]]+\\]"
                                    (chat-work-plan-ui-test--region)))))))
 
 (ert-deftest chat-goal-automatic-continuation-is-bounded-and-auditable ()
@@ -144,11 +236,11 @@
                 (chat-context-fragment-payload
                  (chat-goal-context-fragment session))))))))
 
-(ert-deftest chat-work-plan-ui-thousand-updates-preserve-input-and-window ()
-  "Frequent plan refreshes leave input point and scroll anchors stable."
+(ert-deftest chat-work-shelf-thousand-updates-preserve-input-and-window ()
+  "Frequent shelf refreshes leave input, point and scroll anchors stable."
   (chat-test-with-temp-dir
    (let ((session (chat-work-plan-ui-test--session))
-         (buffer (generate-new-buffer " *plan-ui-stability*")))
+         (buffer (generate-new-buffer " *work-shelf-stability*")))
      (unwind-protect
          (save-window-excursion
            (switch-to-buffer buffer)
@@ -169,6 +261,8 @@
             '(((id . "stable") (title . "Stable item"))))
            (chat-plan-mode-enter session)
            (chat-ui-setup-buffer session)
+           (chat-ui-toggle-work-shelf)
+           (chat-ui-toggle-work-shelf-section nil 'todo)
            (goto-char (point-max))
            (insert "draft 输入")
            (let* ((input-offset (- (point)
@@ -181,9 +275,9 @@
              (set-window-start window anchor t)
              (cl-letf (((symbol-function 'run-at-time)
                         (lambda (&rest _)
-                          (ert-fail "plan rendering scheduled a timer"))))
+                          (ert-fail "shelf rendering scheduled a timer"))))
                (dotimes (_ 1000)
-                 (chat-ui--render-work-plan)))
+                 (chat-ui--render-work-shelf)))
              (should (= input-offset
                         (- (point)
                            (marker-position chat-ui--input-overlay))))
@@ -191,7 +285,9 @@
                             (buffer-substring-no-properties
                              chat-ui--input-overlay (point-max))))
              (should (= (marker-position anchor) (window-start window)))
-             (should-not (overlays-in chat-ui--plan-start chat-ui--plan-end))
+             (should-not
+              (overlays-in chat-ui--work-shelf-start
+                           chat-ui--work-shelf-end))
              (set-marker anchor nil)))
        (when (buffer-live-p buffer)
          (kill-buffer buffer))))))

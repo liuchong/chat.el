@@ -874,6 +874,25 @@ Use `/stage add <text>` when the literal item itself begins with `edit`,
 `move`, `recall`, `drop` or `clear` and could otherwise be read as a staging
 operation.
 
+## Input Work Shelf
+
+Every input prompt begins with `▸`, a stable mouse-only disclosure control for
+conversation work state. Clicking it changes the glyph to `▴` and opens a
+bounded shelf immediately above the prompt. New buffers start closed, including
+when the conversation already has active work.
+
+The shelf shows only non-empty sections, in this order: TODO, changed files,
+Goal and Plan. Each section starts collapsed and has its own `▸`/`▾` mouse
+control. Closing and reopening the outer shelf preserves section expansion in
+that buffer. The controls never own `RET`, `TAB`, arrows or typing, and redraws
+preserve the draft, input position and manual transcript scroll.
+
+Changed files are attributed from successful current-conversation checkpointed
+writes. They are not derived from `git status`: unrelated dirty files, viewed
+paths, failed writes and rolled-back effects do not enter the list. Repeated
+writes collapse to one entry, while add, modify, delete and rename remain
+distinguishable.
+
 ## Auto: The Default Command
 
 Plain input runs through one command, and by default that command is
@@ -894,7 +913,7 @@ that had run one shell command stayed a shell, and a question got an
 answer without getting you out.
 
 It is a mode, so it is visible in two places. The status line reads
-`auto: /cmd`, and the input prompt itself becomes `❯ cmd>` -- the status
+`auto: /cmd`, and the input prompt itself becomes `▸ ❯ cmd>` -- the status
 line is at the top of a buffer that scrolls, and the cursor is at the
 bottom. An explicit `/command` always means itself, and while a response
 is running plain input steers that run rather than the default command.
@@ -903,17 +922,17 @@ The prompt says what RET will do, so an unclaimed line names the provider
 and the model it will reach instead:
 
 ```text
-K moonshot-v1-8k>   ; the baseline: this line goes to Kimi
-✳ claude-sonnet-4-5>
-❯ cmd>              ; a shell line, which no model sees
-≡ queue>
+▸ K moonshot-v1-8k>   ; the baseline: this line goes to Kimi
+▸ ✳ claude-sonnet-4-5>
+▸ ❯ cmd>              ; a shell line, which no model sees
+▸ ≡ queue>
 ```
 
 The mark is the provider's own where a character resembles it, and the
 initial of its name otherwise; `✦` stands in when there is no provider
 configuration to read. A glyph the frame cannot draw is dropped rather
-than shown as a hollow box, so the prompt degrades to `cmd>` and
-`moonshot-v1-8k>` on a terminal without them. `chat-ui-prompt-model-width`
+than shown as a hollow box, so the prompt degrades to `▸ cmd>` and
+`▸ moonshot-v1-8k>` on a terminal without them. `chat-ui-prompt-model-width`
 truncates a long model name, and hovering shows it in full.
 
 On a graphical frame an initial is drawn as a rounded badge in the

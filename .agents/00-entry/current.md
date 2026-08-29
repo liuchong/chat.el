@@ -51,6 +51,12 @@ revisions. The fixed 30-task corpus includes one versioned `large-repo` task wit
 10,000 indexed source files. No capability becomes a default until the fixed task
 set shows that it does not reduce success, safety or responsiveness.
 
+The input work shelf is complete under Spec 026. One stable prompt disclosure
+opens bounded TODO, changed-files, Goal and Plan sections; each section is
+independently collapsed and refreshed from its own typed event source. The
+changed-file provider is derived only from successful session checkpoint facts
+and rollback, so it never mistakes unrelated worktree dirt for Agent work.
+
 M0 through M8 of the Agent Runtime roadmap are complete (2026-08-28). Decision
 0019 fixes the foundational contracts and Spec 014 orders their delivery through
 M8 so later features depend on runtime boundaries rather than provider, UI or

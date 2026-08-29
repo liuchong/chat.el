@@ -58,6 +58,13 @@ immutable; final acceptance still needs fresh same-manifest baseline/current
 campaigns with complete trusted token usage. The fixed corpus includes a
 measured 10,000-indexed-file large-repository task.
 
+The input prompt now owns one default-closed two-level work shelf. Its bounded
+TODO, changed-files, Goal and Plan providers replace the former separate
+always-visible projections. Provider events refresh only their section, while
+all disclosure controls remain mouse-only and preserve draft position and
+manual scroll. Changed-file state comes from successful session checkpoint
+evidence and rollback, never from a repository-wide dirty-file scan.
+
 A later immutable diagnostic current campaign at revision `26e7738` completed
 150/150 results with 143 passed, 7 cancelled and trusted token usage for every
 sample. The 95.33 percent result is useful diagnosis, not final acceptance:
@@ -523,6 +530,8 @@ are still required at the next frozen revision.
 | `lisp/core/chat-session-export.el` | privacy-safe public transcript export |
 | `lisp/core/chat-goal.el` | durable Goal contracts and lifecycle |
 | `lisp/core/chat-plan-mode.el` | read-only planning permission state |
+| `lisp/core/chat-changed-files.el` | session-attributed successful file effects |
+| `lisp/ui/chat-work-shelf.el` | bounded TODO, changed-files, Goal and Plan providers |
 | `lisp/llm/chat-llm.el` | provider abstraction |
 | `lisp/core/chat-stream.el` | stream parsing |
 | `lisp/tools/chat-tool-caller.el` | tool protocol |

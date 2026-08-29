@@ -38,6 +38,7 @@
 (require 'chat-work-plan)
 (require 'chat-goal)
 (require 'chat-plan-mode)
+(require 'chat-work-shelf)
 (require 'chat-transcript)
 (require 'chat-markdown)
 (require 'chat-llm)
@@ -106,17 +107,20 @@ indistinguishable from a hung one."
 (defvar-local chat-ui--messages-end nil
   "Marker for end of messages area.")
 
-(defvar-local chat-ui--plan-start nil
-  "Marker before the native work-plan projection.")
+(defvar-local chat-ui--work-shelf-start nil
+  "Marker before the input-adjacent work shelf.")
 
-(defvar-local chat-ui--plan-end nil
-  "Marker after the native work-plan projection.")
+(defvar-local chat-ui--work-shelf-end nil
+  "Marker after the input-adjacent work shelf.")
 
-(defvar-local chat-ui--plan-expanded nil
-  "Non-nil when the native work-plan projection shows every item.")
+(defvar-local chat-ui--work-shelf-open nil
+  "Non-nil when the outer input work shelf is open.")
 
-(defvar-local chat-ui--goal-expanded nil
-  "Non-nil when the native Goal projection shows its contract details.")
+(defvar-local chat-ui--work-shelf-expanded-sections nil
+  "Hash table of expanded section IDs in the input work shelf.")
+
+(defvar-local chat-ui--work-shelf-section-ids nil
+  "Provider IDs currently rendered in the input work shelf.")
 
 (defvar-local chat-ui--active-request-handle nil
   "Currently active non streaming request handle.")
@@ -1133,10 +1137,11 @@ doubles as the answer to why a reply mentioned a file nobody named."
   (setq chat-ui--live-trailers nil)
   (setq chat-ui--last-render nil)
   (setq chat-ui--opened-fold-groups nil)
-  (setq chat-ui--plan-start nil)
-  (setq chat-ui--plan-end nil)
-  (setq chat-ui--plan-expanded nil)
-  (setq chat-ui--goal-expanded nil)
+  (setq chat-ui--work-shelf-start nil)
+  (setq chat-ui--work-shelf-end nil)
+  (setq chat-ui--work-shelf-open nil)
+  (setq chat-ui--work-shelf-expanded-sections (make-hash-table :test 'eq))
+  (setq chat-ui--work-shelf-section-ids nil)
   (chat-request-panel-close (current-buffer))
   (let ((inhibit-read-only t))
     (erase-buffer)
@@ -1653,6 +1658,18 @@ Carries the mouse binding only.  Everything else falls through to the
 buffer, because point can be moved onto the prompt and a keymap there
 that swallowed ordinary keys would be a trap.")
 
+(defvar chat-ui-work-shelf-prompt-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'chat-ui-toggle-work-shelf)
+    map)
+  "Mouse-only keymap on the input work-shelf disclosure glyph.")
+
+(defvar chat-ui-work-shelf-section-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'chat-ui-toggle-work-shelf-section)
+    map)
+  "Mouse-only keymap on an input work-shelf section glyph.")
+
 (defun chat-ui--prompt-segment (text &rest properties)
   "Return TEXT as a prompt segment carrying PROPERTIES.
 
@@ -1735,6 +1752,20 @@ Clickable only when there is more than one provider to choose from.  A
               (list 'keymap chat-ui-prompt-model-map
                     'mouse-face 'highlight))))))
 
+(defun chat-ui--work-shelf-prompt-segment ()
+  "Return the stable outer disclosure control for the input work shelf."
+  (concat
+   (chat-ui--prompt-segment
+    (if chat-ui--work-shelf-open "▴" "▸")
+    'face 'shadow
+    'keymap chat-ui-work-shelf-prompt-map
+    'mouse-face 'highlight
+    'help-echo (if chat-ui--work-shelf-open
+                   "mouse-1 to close the work shelf"
+                 "mouse-1 to open the work shelf")
+    'rear-nonsticky '(keymap mouse-face help-echo))
+   (chat-ui--prompt-segment " ")))
+
 (defun chat-ui--input-prompt ()
   "Return the text that opens the input area.
 
@@ -1750,6 +1781,7 @@ model is not what a shell line is about, and the baseline command has
 never been announced by name."
   (let ((claimed (chat-ui-default-command-claimed-p)))
     (concat
+     (chat-ui--work-shelf-prompt-segment)
      (chat-ui--pending-attachments-prompt)
      (if (not claimed)
          (concat (chat-ui--prompt-model-segment)
@@ -1878,237 +1910,169 @@ long transcript never scans the whole conversation."
 (defun chat-ui--setup-input-area ()
   "Setup the input area at bottom of buffer."
   (goto-char (point-max))
-  (setq chat-ui--plan-start (copy-marker (point) nil))
-  (setq chat-ui--plan-end (copy-marker (point) t))
-  (chat-ui--render-work-plan)
-  (set-marker-insertion-type chat-ui--plan-end nil)
+  (setq chat-ui--work-shelf-start (copy-marker (point) nil))
+  (setq chat-ui--work-shelf-end (copy-marker (point) t))
+  (chat-ui--render-work-shelf)
+  (set-marker-insertion-type chat-ui--work-shelf-end nil)
   (insert (propertize "───\n" 'face 'shadow))
   (insert (chat-ui--input-prompt))
   (setq chat-ui--input-overlay (point-marker)))
 
-(defvar chat-ui-work-plan-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB") #'chat-ui-toggle-work-plan)
-    (define-key map (kbd "RET") #'chat-ui-toggle-work-plan)
-    (define-key map [mouse-1] #'chat-ui-toggle-work-plan)
-    map)
-  "Keymap attached to the native work-plan projection.")
+(defun chat-ui--work-shelf-section-expanded-p (section-id)
+  "Return non-nil when SECTION-ID is expanded in this buffer."
+  (and (hash-table-p chat-ui--work-shelf-expanded-sections)
+       (gethash section-id chat-ui--work-shelf-expanded-sections)))
 
-(defvar chat-ui-goal-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB") #'chat-ui-toggle-goal)
-    (define-key map (kbd "RET") #'chat-ui-toggle-goal)
-    (define-key map [mouse-1] #'chat-ui-toggle-goal)
-    map)
-  "Keymap attached to the native Goal projection.")
-
-(defconst chat-ui--goal-event-types
-  '(goal-created goal-selected goal-progressed goal-paused goal-resumed
-    goal-blocked goal-unblocked goal-completed goal-cancelled goal-cleared
-    goal-conflicted goal-completion-refused
-    goal-continuation-budget-exhausted)
-  "Events that can change the visible Goal projection.")
-
-(defconst chat-ui--plan-mode-event-types
-  '(plan-mode-entered plan-mode-submitted plan-mode-approved
-    plan-mode-rejected plan-mode-exited plan-mode-refused
-    plan-mode-conflicted)
-  "Events that can change the visible Plan Mode projection.")
-
-(defconst chat-ui--work-plan-event-types
-  '(plan-created plan-updated plan-skipped plan-item-started
-    plan-item-completed plan-item-blocked plan-item-skipped plan-resumed
-    plan-cancelled plan-completed plan-skip-consumed)
-  "Events that can change the visible work-plan projection.")
-
-(defun chat-ui--work-plan-status-label (status)
-  "Return a fixed-width native label for item STATUS."
-  (pcase status
-    ('completed "[x]")
-    ('in-progress "[>]")
-    ('blocked "[!]")
-    ('skipped "[-]")
-    (_ "[ ]")))
-
-(defun chat-ui--work-plan-status-face (status)
-  "Return a face for item STATUS."
-  (pcase status
-    ('completed 'success)
-    ('in-progress 'font-lock-keyword-face)
-    ('blocked 'warning)
-    ((or 'skipped 'pending) 'shadow)
-    (_ 'default)))
-
-(defun chat-ui--insert-work-plan-projection (projection)
-  "Insert native text for work-plan PROJECTION at point."
-  (let* ((status (plist-get projection :status))
-         (current (plist-get projection :current-item))
-         (current-index (or (plist-get projection :current-index) 0))
-         (total (plist-get projection :total))
-         (summary
-          (concat
-           (format "Plan %d/%d" current-index total)
-           (when current
-             (format " · %s" (chat-work-plan-item-title current)))
-           (when (eq status 'blocked) " · blocked")
-           "\n"))
-         (start (point)))
-    (insert (propertize summary 'face 'font-lock-keyword-face))
-    (when chat-ui--plan-expanded
-      (dolist (item (plist-get projection :items))
-        (let ((item-status (chat-work-plan-item-status item)))
-          (insert "  "
-                  (propertize (chat-ui--work-plan-status-label item-status)
-                              'face (chat-ui--work-plan-status-face item-status))
-                  " "
-                  (propertize (chat-work-plan-item-title item)
-                              'face (chat-ui--work-plan-status-face item-status)))
-          (when (and (eq item-status 'blocked)
-                     (chat-work-plan-item-blocker-reason item))
-            (insert (propertize
-                     (format " · %s"
-                             (chat-work-plan-item-blocker-reason item))
-                     'face 'warning)))
-          (insert "\n"))))
+(defun chat-ui--insert-work-shelf-section (section)
+  "Insert one work-shelf SECTION at point."
+  (let* ((section-id (chat-work-shelf-section-id section))
+         (expanded (chat-ui--work-shelf-section-expanded-p section-id))
+         (section-start (point))
+         (glyph-start section-start))
+    (insert (if expanded "▾" "▸"))
     (add-text-properties
-     start (point)
-     `(keymap ,chat-ui-work-plan-map
+     glyph-start (point)
+     `(face shadow
+       keymap ,chat-ui-work-shelf-section-map
        mouse-face highlight
-       help-echo "TAB or click to expand or collapse the work plan"
-       rear-nonsticky (keymap mouse-face help-echo)))))
-
-(defun chat-ui--insert-goal-projection (projection)
-  "Insert native text for Goal PROJECTION at point."
-  (let* ((status (plist-get projection :status))
-         (summary
-          (format "Goal [%s] %d/%d · %s%s\n"
-                  status (plist-get projection :satisfied)
-                  (plist-get projection :total)
-                  (plist-get projection :objective)
-                  (if (plist-get projection :needs-attention)
-                      " · needs attention" "")))
-         (start (point)))
-    (insert (propertize summary
-                        'face (pcase status
-                                ('completed 'success)
-                                ('blocked 'warning)
-                                ('paused 'shadow)
-                                (_ 'font-lock-keyword-face))))
-    (when chat-ui--goal-expanded
-      (when-let ((stopping (plist-get projection :stopping-condition)))
-        (insert "  " (propertize "Stop: " 'face 'shadow) stopping "\n"))
-      (when-let ((checkpoint (plist-get projection :checkpoint)))
-        (insert "  " (propertize "Now: " 'face 'shadow) checkpoint "\n"))
-      (when-let ((attention (plist-get projection :needs-attention)))
-        (insert "  " (propertize "[!] " 'face 'warning) attention "\n"))
-      (when-let ((remaining (plist-get projection :remaining)))
-        (dolist (criterion remaining)
-          (insert "  " (propertize "[ ] " 'face 'shadow) criterion "\n")))
-      (when-let ((reason (plist-get projection :blocker-reason)))
-        (insert "  " (propertize "[!] " 'face 'warning) reason "\n")
-        (when-let ((condition (plist-get projection :unblock-condition)))
-          (insert "      " (propertize "Resume when: " 'face 'shadow)
-                  condition "\n"))))
+       help-echo ,(if expanded
+                      "mouse-1 to collapse this section"
+                    "mouse-1 to expand this section")
+       chat-work-shelf-section ,section-id
+       rear-nonsticky
+       (keymap mouse-face help-echo chat-work-shelf-section)))
+    (insert " " (chat-work-shelf-section-summary section) "\n")
+    (when expanded
+      (dolist (line (chat-work-shelf-section-detail-lines section))
+        (insert "  " line "\n")))
     (add-text-properties
-     start (point)
-     `(keymap ,chat-ui-goal-map mouse-face highlight
-       help-echo "TAB or click to expand or collapse the Goal"
-       rear-nonsticky (keymap mouse-face help-echo)))))
+     section-start (point)
+     `(chat-work-shelf-section-owner ,section-id))
+    (add-text-properties
+     (1- (point)) (point)
+     '(rear-nonsticky (chat-work-shelf-section-owner)))))
 
-(defun chat-ui--insert-plan-mode-projection (projection)
-  "Insert native text for active Plan Mode PROJECTION."
-  (when (plist-get projection :enabled)
-    (insert
-     (propertize
-      (format "Plan Mode [%s] · read-only%s\n"
-              (plist-get projection :status)
-              (if (plist-get projection :plan-id)
-                  (format " · %s" (plist-get projection :plan-id)) ""))
-      'face (if (eq (plist-get projection :status) 'ready)
-                'warning 'font-lock-keyword-face)))))
+(defun chat-ui--work-shelf-section-region (section-id)
+  "Return the rendered region owned by SECTION-ID, or nil."
+  (let ((start
+         (text-property-any
+          chat-ui--work-shelf-start chat-ui--work-shelf-end
+          'chat-work-shelf-section-owner section-id)))
+    (when start
+      (cons start
+            (or (next-single-property-change
+                 start 'chat-work-shelf-section-owner nil
+                 chat-ui--work-shelf-end)
+                chat-ui--work-shelf-end)))))
 
-(defun chat-ui--render-work-plan ()
-  "Render only the native work-plan region without moving UI anchors."
-  (when (and (markerp chat-ui--plan-start)
-             (markerp chat-ui--plan-end)
-             (marker-position chat-ui--plan-start)
-             (marker-position chat-ui--plan-end))
-    (let* ((point-anchor (copy-marker (point) t))
-           (window-anchors
-            (mapcar (lambda (window)
-                      (cons window
-                            (copy-marker (window-start window) nil)))
-                    (get-buffer-window-list (current-buffer) nil t)))
-           (plan-mode-projection
-            (and chat--current-session
-                 (chat-plan-mode-ui-projection chat--current-session)))
-           (goal-projection (and chat--current-session
-                                 (chat-goal-ui-projection
-                                  chat--current-session)))
-           (projection (and chat--current-session
-                            (chat-work-plan-ui-projection
-                             chat--current-session))))
-      (unwind-protect
-          (let ((inhibit-read-only t)
-                (inhibit-modification-hooks t))
-            (goto-char chat-ui--plan-start)
-            (delete-region chat-ui--plan-start chat-ui--plan-end)
-            (when plan-mode-projection
-              (chat-ui--insert-plan-mode-projection plan-mode-projection))
-            (when goal-projection
-              (chat-ui--insert-goal-projection goal-projection))
-            (when (and projection
-                       (memq (plist-get projection :status)
-                             '(active blocked)))
-              (chat-ui--insert-work-plan-projection projection))
-            (set-marker chat-ui--plan-end (point)))
-        (when (marker-position point-anchor)
-          (goto-char point-anchor))
-        (set-marker point-anchor nil)
-        (dolist (entry window-anchors)
-          (when (and (window-live-p (car entry))
-                     (marker-position (cdr entry)))
-            (set-window-start (car entry) (cdr entry) t))
-          (set-marker (cdr entry) nil))))))
+(defun chat-ui--call-preserving-work-shelf-anchors (function)
+  "Call FUNCTION while preserving point and visible window starts."
+  (let ((point-anchor (copy-marker (point) t))
+        (window-anchors
+         (mapcar (lambda (window)
+                   (cons window (copy-marker (window-start window) nil)))
+                 (get-buffer-window-list (current-buffer) nil t))))
+    (unwind-protect
+        (funcall function)
+      (when (marker-position point-anchor)
+        (goto-char point-anchor))
+      (set-marker point-anchor nil)
+      (dolist (entry window-anchors)
+        (when (and (window-live-p (car entry))
+                   (marker-position (cdr entry)))
+          (set-window-start (car entry) (cdr entry) t))
+        (set-marker (cdr entry) nil)))))
 
-(defun chat-ui-toggle-work-plan (&optional event)
-  "Expand or collapse the native work-plan view at EVENT."
+(defun chat-ui--render-work-shelf ()
+  "Render the bounded work shelf without moving point or visible windows."
+  (when (and (markerp chat-ui--work-shelf-start)
+             (markerp chat-ui--work-shelf-end)
+             (marker-position chat-ui--work-shelf-start)
+             (marker-position chat-ui--work-shelf-end))
+    (let* ((sections
+            (and chat-ui--work-shelf-open
+                 chat--current-session
+                 (chat-work-shelf-project chat--current-session))))
+      (chat-ui--call-preserving-work-shelf-anchors
+       (lambda ()
+         (let ((inhibit-read-only t)
+               (inhibit-modification-hooks t))
+           (goto-char chat-ui--work-shelf-start)
+           (delete-region chat-ui--work-shelf-start chat-ui--work-shelf-end)
+           (dolist (section sections)
+             (chat-ui--insert-work-shelf-section section))
+           (set-marker chat-ui--work-shelf-end (point))
+           (setq chat-ui--work-shelf-section-ids
+                 (mapcar #'chat-work-shelf-section-id sections))))))))
+
+(defun chat-ui--refresh-work-shelf-sections (event)
+  "Incrementally refresh only work-shelf sections invalidated by EVENT."
+  (when (and chat-ui--work-shelf-open chat--current-session)
+    (let* ((sections (chat-work-shelf-project chat--current-session))
+           (section-ids (mapcar #'chat-work-shelf-section-id sections))
+           (affected (chat-work-shelf-provider-ids-for-event event)))
+      (if (not (equal section-ids chat-ui--work-shelf-section-ids))
+          (chat-ui--render-work-shelf)
+        (chat-ui--call-preserving-work-shelf-anchors
+         (lambda ()
+           (let ((inhibit-read-only t)
+                 (inhibit-modification-hooks t)
+                 (shelf-end (copy-marker chat-ui--work-shelf-end t)))
+             (unwind-protect
+                 (dolist (section sections)
+                   (when (memq (chat-work-shelf-section-id section) affected)
+                     (when-let ((region
+                                 (chat-ui--work-shelf-section-region
+                                  (chat-work-shelf-section-id section))))
+                       (goto-char (car region))
+                       (delete-region (car region) (cdr region))
+                       (chat-ui--insert-work-shelf-section section))))
+               (set-marker chat-ui--work-shelf-end shelf-end)
+               (set-marker shelf-end nil)))))))))
+
+(defun chat-ui-toggle-work-shelf (&optional _event)
+  "Open or close the input work shelf without moving the input point."
   (interactive (list last-nonmenu-event))
-  (when (and event (mouse-event-p event))
-    (mouse-set-point event))
-  (setq chat-ui--plan-expanded (not chat-ui--plan-expanded))
-  (chat-ui--render-work-plan))
+  (setq chat-ui--work-shelf-open (not chat-ui--work-shelf-open))
+  (chat-ui--render-work-shelf)
+  (chat-ui--render-input-prompt))
 
-(defun chat-ui-toggle-goal (&optional event)
-  "Expand or collapse the native Goal view at EVENT."
-  (interactive (list last-nonmenu-event))
+(defun chat-ui--work-shelf-section-at-event (event)
+  "Return the work-shelf section ID under mouse EVENT, if any."
   (when (and event (mouse-event-p event))
-    (mouse-set-point event))
-  (setq chat-ui--goal-expanded (not chat-ui--goal-expanded))
-  (chat-ui--render-work-plan))
+    (let ((position (posn-point (event-start event))))
+      (when (integer-or-marker-p position)
+        (get-text-property position 'chat-work-shelf-section)))))
 
-(defun chat-ui--observe-work-plan-event (event)
-  "Refresh chat buffers whose session is affected by work-plan EVENT."
-  (when (memq (chat-event-type event)
-              (append chat-ui--work-plan-event-types
-                      chat-ui--goal-event-types
-                      chat-ui--plan-mode-event-types))
+(defun chat-ui-toggle-work-shelf-section (&optional event section-id)
+  "Toggle SECTION-ID, or the section under mouse EVENT, without moving point."
+  (interactive (list last-nonmenu-event nil))
+  (let ((id (or section-id (chat-ui--work-shelf-section-at-event event))))
+    (when id
+      (unless (hash-table-p chat-ui--work-shelf-expanded-sections)
+        (setq chat-ui--work-shelf-expanded-sections
+              (make-hash-table :test 'eq)))
+      (puthash id
+               (not (gethash id chat-ui--work-shelf-expanded-sections))
+               chat-ui--work-shelf-expanded-sections)
+      (chat-ui--render-work-shelf))))
+
+(defun chat-ui--observe-work-shelf-event (event)
+  "Refresh work shelves whose session is affected by EVENT."
+  (when (chat-work-shelf-event-relevant-p event)
     (dolist (buffer (buffer-list))
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
           (when (and chat--current-session
-                     (markerp chat-ui--plan-start)
+                     (markerp chat-ui--work-shelf-start)
                      (equal (chat-session-id chat--current-session)
                             (chat-event-session-id event)))
-            (chat-ui--render-work-plan)))))))
+            (chat-ui--refresh-work-shelf-sections event)))))))
 
 (defun chat-ui--observe-runtime-event (event)
   "Project lifecycle EVENT into chat buffers for the same session."
   (let ((phase
-         (unless (memq (chat-event-type event)
-                       (append chat-ui--work-plan-event-types
-                               chat-ui--goal-event-types
-                               chat-ui--plan-mode-event-types))
+         (unless (chat-work-shelf-event-relevant-p event)
            (chat-runtime-status-phase-for-event
             (chat-event-type event) (chat-event-payload event)))))
     (when phase
@@ -5083,7 +5047,7 @@ This is an ephemeral query - the result is displayed but not persisted."
    (t
     (message "No response is currently running"))))
 
-(chat-event-add-observer #'chat-ui--observe-work-plan-event)
+(chat-event-add-observer #'chat-ui--observe-work-shelf-event)
 (chat-event-add-observer #'chat-ui--observe-runtime-event)
 
 (provide 'chat-ui)

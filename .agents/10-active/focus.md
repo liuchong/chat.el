@@ -108,12 +108,13 @@ directions. The one-way version passed while four live commands were
 undocumented; both directions failed on their first run, the second
 catching `/help` being dropped from the help while it was restructured.
 
-The structured input-staging and passive-hint stage is complete. Spec 026 is
-accepted and pending implementation next. It replaces separate input-adjacent work projections with
-a default-closed two-level work shelf: one stable prompt disclosure controls the
-whole region, while non-empty TODO, changed-files, Goal and Plan sections remain
-independently collapsed. Changed files must come from current-session successful
-runtime write evidence, never a repository-wide dirty-file scan.
+The structured input-staging, passive-hint and Spec 026 input-work-shelf stages
+are complete. Separate input-adjacent projections have been replaced by one
+default-closed two-level shelf: a stable prompt disclosure controls the whole
+region, while non-empty TODO, changed-files, Goal and Plan sections remain
+independently collapsed. Provider events redraw only their section. Changed
+files come from successful current-session checkpoint evidence and rollback,
+never a repository-wide dirty-file scan.
 
 Spec 027 records the deferred application-wide session collaboration design. Its
 admission layer captures every new requirement and preempts current work only for

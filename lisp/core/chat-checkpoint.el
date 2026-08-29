@@ -17,6 +17,7 @@
 (require 'subr-x)
 (require 'chat-event)
 (require 'chat-files)
+(require 'chat-changed-files)
 (require 'chat-session)
 
 (declare-function chat-code-session-project-root "chat-code" (session))
@@ -558,15 +559,116 @@
          (format "%s may modify paths outside direct file ownership" tool-id))))
       checkpoint)))
 
+(defun chat-checkpoint--patch-rename-pairs (checkpoint tool-id arguments)
+  "Return collapsed relative rename pairs for TOOL-ID and ARGUMENTS.
+Each result is (ORIGINAL . FINAL) inside CHECKPOINT's workspace."
+  (when (eq tool-id 'apply_patch)
+    (when-let ((patch-text (cdr (assoc "patch" arguments))))
+      (let ((origins (make-hash-table :test 'equal)))
+        (dolist (operation (chat-files--parse-apply-patch patch-text))
+          (when-let* ((source (plist-get operation :path))
+                      (target (plist-get operation :move-to)))
+            (let* ((source-relative
+                    (chat-checkpoint--relative-path
+                     checkpoint
+                     (expand-file-name
+                      source (chat-checkpoint-workspace-root checkpoint))))
+                   (target-relative
+                    (chat-checkpoint--relative-path
+                     checkpoint
+                     (expand-file-name
+                      target (chat-checkpoint-workspace-root checkpoint))))
+                   (origin (or (gethash source-relative origins)
+                               source-relative)))
+              (remhash source-relative origins)
+              (puthash target-relative origin origins))))
+        (let (pairs)
+          (maphash (lambda (target origin)
+                     (push (cons origin target) pairs))
+                   origins)
+          (sort pairs (lambda (left right) (string< (cdr left) (cdr right)))))))))
+
+(defun chat-checkpoint--changed-operation (entry)
+  "Return the net changed-file operation for checkpoint file ENTRY."
+  (let ((original-kind (chat-checkpoint-file-original-kind entry))
+        (post-kind (chat-checkpoint-file-post-kind entry)))
+    (cond
+     ((and (eq original-kind post-kind)
+           (equal (chat-checkpoint-file-original-digest entry)
+                  (chat-checkpoint-file-post-digest entry)))
+      nil)
+     ((and (eq original-kind 'absent) (not (eq post-kind 'absent))) 'added)
+     ((and (not (eq original-kind 'absent)) (eq post-kind 'absent)) 'deleted)
+     (t 'modified))))
+
+(defun chat-checkpoint--changed-file-fact
+    (checkpoint entry operation &optional rename-from)
+  "Return one changed-file fact for CHECKPOINT ENTRY and OPERATION."
+  (let ((relative (chat-checkpoint-file-path entry)))
+    (list :path relative
+          :canonical-path
+          (expand-file-name relative (chat-checkpoint-workspace-root checkpoint))
+          :operation operation
+          :turn-id (chat-checkpoint-turn-id checkpoint)
+          :updated-at (or (chat-checkpoint-file-updated-at entry)
+                          (chat-checkpoint--timestamp-ms))
+          :rename-from rename-from)))
+
+(defun chat-checkpoint--successful-change-facts
+    (checkpoint paths rename-pairs)
+  "Return successful changed-file facts for CHECKPOINT PATHS and RENAME-PAIRS."
+  (let ((relative-paths
+         (mapcar (lambda (path)
+                   (chat-checkpoint--relative-path checkpoint path))
+                 paths))
+        rename-targets
+        rename-sources
+        facts)
+    (dolist (pair rename-pairs)
+      (let* ((source (car pair))
+             (target (cdr pair))
+             (source-entry (chat-checkpoint--find-file checkpoint source))
+             (target-entry (chat-checkpoint--find-file checkpoint target)))
+        (when (and source-entry target-entry
+                   (not (eq (chat-checkpoint-file-original-kind source-entry)
+                            'absent))
+                   (not (eq (chat-checkpoint-file-post-kind target-entry)
+                            'absent)))
+          (push target rename-targets)
+          (when (eq (chat-checkpoint-file-post-kind source-entry) 'absent)
+            (push source rename-sources))
+          (push (chat-checkpoint--changed-file-fact
+                 checkpoint target-entry 'renamed source)
+                facts))))
+    (dolist (relative relative-paths)
+      (unless (or (member relative rename-targets)
+                  (member relative rename-sources))
+        (when-let* ((entry (chat-checkpoint--find-file checkpoint relative))
+                    (operation (chat-checkpoint--changed-operation entry)))
+          (push (chat-checkpoint--changed-file-fact
+                 checkpoint entry operation)
+                facts))))
+    (nreverse facts)))
+
 (defun chat-checkpoint-complete-tool (session turn-id call)
   "Mark successfully written CALL targets as owned in SESSION TURN-ID."
   (when-let* ((checkpoint (chat-checkpoint-for-turn session turn-id)))
-    (let ((tool-id (chat-checkpoint--call-tool-id call)))
+    (let* ((tool-id (chat-checkpoint--call-tool-id call))
+           (arguments (chat-checkpoint--call-arguments call)))
       (when (chat-checkpoint--write-tool-p tool-id)
-        (chat-checkpoint-complete-paths
-         checkpoint
-         (chat-files--tool-target-paths
-          tool-id (chat-checkpoint--call-arguments call))))
+        (let* ((paths (chat-files--tool-target-paths tool-id arguments))
+               (rename-pairs
+                (chat-checkpoint--patch-rename-pairs
+                 checkpoint tool-id arguments)))
+          (chat-checkpoint-complete-paths checkpoint paths)
+          (chat-changed-files-record-success
+           session
+           (chat-checkpoint-id checkpoint)
+           (chat-checkpoint--successful-change-facts
+            checkpoint paths rename-pairs)
+           (mapcar (lambda (path)
+                     (chat-checkpoint--relative-path checkpoint path))
+                   paths))))
       checkpoint)))
 
 (defun chat-checkpoint-complete-paths (checkpoint paths)
@@ -727,6 +829,13 @@
      checkpoint 'code 'completed
      `((restoredFiles . ,(length owned))
        (forced . ,(and force t))))
+    (let ((session (chat-session-get (chat-checkpoint-session-id checkpoint))))
+      (unless session
+        (signal 'chat-checkpoint-invalid
+                (list "checkpoint session is unavailable"
+                      (chat-checkpoint-session-id checkpoint))))
+      (chat-changed-files-rollback-evidence
+       session (chat-checkpoint-id checkpoint)))
     (list :checkpoint-id (chat-checkpoint-id checkpoint)
           :scope 'code
           :restored-files (length owned)

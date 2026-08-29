@@ -1489,6 +1489,10 @@ same thing any unrecognized slash does."
      (line-beginning-position)
      (marker-position chat-ui--input-overlay))))
 
+(defun chat-ui-auto-test--prompt-action-segment (&optional prompt)
+  "Return PROMPT after its stable work-shelf disclosure segment."
+  (substring (or prompt (chat-ui--input-prompt)) 2))
+
 (ert-deftest chat-ui-the-prompt-says-which-command-holds-the-line ()
   "The status line is at the top; the cursor is at the bottom."
   (chat-ui-auto-test--with-session
@@ -1513,13 +1517,14 @@ same thing any unrecognized slash does."
 The name shown has to be the one the request carries, not the provider
 symbol and not its display name."
   (chat-ui-auto-test--with-session
-    (let ((model (plist-get (chat-llm-get-provider-config 'kimi) :model)))
+    (let ((model (plist-get (chat-llm-get-provider-config 'kimi) :model))
+          (prompt (chat-ui-auto-test--prompt-action-segment)))
       (should model)
-      (should (string-match-p (regexp-quote model) (chat-ui--input-prompt)))
+      (should (string-match-p (regexp-quote model) prompt))
       ;; The provider's mark stands where a generic star would, and the
       ;; baseline command is still not announced by name.
-      (should (string-prefix-p "K " (chat-ui--input-prompt)))
-      (should-not (string-match-p "send" (chat-ui--input-prompt))))))
+      (should (string-prefix-p "K " prompt))
+      (should-not (string-match-p "send" prompt)))))
 
 (ert-deftest chat-ui-the-prompt-draws-the-vendor-not-the-protocol-alias ()
   "Two transports for one vendor must select the same packaged logo."
@@ -1545,7 +1550,7 @@ symbol and not its display name."
   "RET there does not reach one, and naming it would train the eye to skip."
   (chat-ui-auto-test--with-session
     (chat-ui--dispatch-command (chat-command-parse "!ls"))
-    (let ((prompt (chat-ui--input-prompt)))
+    (let ((prompt (chat-ui-auto-test--prompt-action-segment)))
       (should (string-prefix-p "\u276F " prompt))
       (should (string-suffix-p "cmd> " prompt))
       (should-not (string-match-p
@@ -1590,20 +1595,20 @@ written to hand it to them."
   "An unmarked command is a supported state, not an error."
   (chat-ui-auto-test--with-session
     (chat-ui--set-default-command "stage")
-    (should (equal "stage> " (chat-ui--input-prompt)))))
+    (should (equal "stage> " (chat-ui-auto-test--prompt-action-segment)))))
 
 (ert-deftest chat-ui-an-undisplayable-mark-leaves-a-usable-prompt ()
   "On a frame that cannot draw the glyph, the prompt is the old one."
   (chat-ui-auto-test--with-session
     (cl-letf (((symbol-function 'char-displayable-p) (lambda (_c) nil)))
       (chat-ui--dispatch-command (chat-command-parse "!ls"))
-      (should (equal "cmd> " (chat-ui--input-prompt)))
+      (should (equal "cmd> " (chat-ui-auto-test--prompt-action-segment)))
       (chat-ui--set-default-command nil)
       ;; The provider mark goes too, and the model name is still there.
       (should (equal (concat (plist-get (chat-llm-get-provider-config 'kimi)
                                         :model)
                              "> ")
-                     (chat-ui--input-prompt))))))
+                     (chat-ui-auto-test--prompt-action-segment))))))
 
 (ert-deftest chat-ui-a-long-model-name-is-truncated-by-columns ()
   "Counted in columns, or a CJK name is measured at half its width."
@@ -1611,7 +1616,7 @@ written to hand it to them."
     (cl-letf (((symbol-function 'chat-llm-get-provider-config)
                (lambda (_provider) (list :name "Wide" :model "模型名字很长的那个"))))
       (let* ((chat-ui-prompt-model-width 8)
-             (prompt (chat-ui--input-prompt))
+             (prompt (chat-ui-auto-test--prompt-action-segment))
              (shown (string-remove-suffix "> " (substring prompt 2))))
         (should (<= (string-width shown) 8))
         ;; And what was cut is still readable on hover.
@@ -1660,16 +1665,16 @@ someone sees when they go to switch."
   "A `mouse-face' over a menu of one promises a choice that does not exist."
   (chat-ui-auto-test--with-session
     (chat-ui-auto-test--with-providers '(kimi deepseek)
-      (let ((prompt (chat-ui--input-prompt)))
+      (let ((prompt (chat-ui-auto-test--prompt-action-segment)))
         (should (get-text-property 2 'keymap prompt))
         (should (get-text-property 2 'mouse-face prompt))))
     (chat-ui-auto-test--with-providers '(kimi)
-      (let ((prompt (chat-ui--input-prompt)))
+      (let ((prompt (chat-ui-auto-test--prompt-action-segment)))
         (should-not (get-text-property 2 'keymap prompt))
         (should-not (get-text-property 2 'mouse-face prompt))))
     ;; Nothing configured at all is also not a choice.
     (chat-ui-auto-test--with-providers nil
-      (let ((prompt (chat-ui--input-prompt)))
+      (let ((prompt (chat-ui-auto-test--prompt-action-segment)))
         (should-not (get-text-property 2 'keymap prompt))))))
 
 (ert-deftest chat-ui-the-input-does-not-inherit-the-mouse-binding ()
@@ -1684,13 +1689,16 @@ someone sees when they go to switch."
   "The mark is part of the prompt, not decoration sitting beside it."
   (chat-ui-auto-test--with-session
     (chat-ui--dispatch-command (chat-command-parse "!ls"))
-    (let ((start (car (chat-ui--input-prompt-bounds))))
-      (should (get-text-property start 'chat-ui-prompt))
-      (should (get-text-property start 'read-only))
-      ;; And the bounds cover the mark, so recovery redraws all of it.
-      (should (string-prefix-p
-               "\u276F " (buffer-substring-no-properties
-                          start (marker-position chat-ui--input-overlay)))))))
+    (let* ((start (car (chat-ui--input-prompt-bounds)))
+           (drawn (buffer-substring-no-properties
+                   start (marker-position chat-ui--input-overlay)))
+           (mark-offset (string-search "\u276F " drawn))
+           (mark-start (+ start mark-offset)))
+      (should (string-prefix-p "▸ " drawn))
+      (should (get-text-property mark-start 'chat-ui-prompt))
+      (should (get-text-property mark-start 'read-only))
+      ;; The bounds cover both controls, so recovery redraws all of them.
+      (should mark-offset))))
 
 (ert-deftest chat-ui-switching-provider-goes-through-the-command-that-checks ()
   "Not by setting the session field, which would skip its refusals."
