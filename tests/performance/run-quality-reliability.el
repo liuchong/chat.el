@@ -6,9 +6,10 @@
 ;; Run from the repository root:
 ;;   emacs -Q -batch -l tests/performance/run-quality-reliability.el
 ;;
-;; Set CHAT_QUALITY_OUTPUT to persist the JSON record.  The runner measures the
-;; semantic corpus, Review corpus, prompt share, and every directed safety
-;; scenario before deriving the final quality gates.
+;; Set CHAT_QUALITY_RELIABILITY_OUTPUT to persist the JSON record.  The legacy
+;; CHAT_QUALITY_OUTPUT name remains accepted.  The runner measures the semantic
+;; corpus, Review corpus, prompt share, and every directed safety scenario
+;; before deriving the final quality gates.
 
 ;;; Code:
 
@@ -285,7 +286,9 @@
                 (evidence . ,evidence)))
              (json-encoding-pretty-print t)
              (encoded (json-encode record))
-             (output (getenv "CHAT_QUALITY_OUTPUT")))
+             (output
+              (or (getenv "CHAT_QUALITY_RELIABILITY_OUTPUT")
+                  (getenv "CHAT_QUALITY_OUTPUT"))))
         (unless (and gates-pass (or tree-clean allow-dirty))
           (setq all-passed nil))
         (when output

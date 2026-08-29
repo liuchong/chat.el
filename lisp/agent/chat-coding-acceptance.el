@@ -23,6 +23,12 @@
   "Final coding capability acceptance."
   :group 'chat)
 
+(defconst chat-coding-acceptance--repository-root
+  (file-name-as-directory
+   (file-truename
+    (expand-file-name "../.." (file-name-directory load-file-name))))
+  "Repository root captured when the acceptance library is loaded.")
+
 (defcustom chat-coding-acceptance-query-repetitions 30
   "Warm query and context-build repetitions in the performance benchmark."
   :type 'integer :group 'chat-coding-acceptance)
@@ -1342,6 +1348,87 @@ fail it."
      (unless valid
        "Load the complete clean quality JSON for the current campaign revision."))))
 
+(defun chat-coding-acceptance--canonical-test-names ()
+  "Return exact canonical ERT names declared by the repository test files."
+  (when-let* ((directory
+               (expand-file-name
+                "tests/unit" chat-coding-acceptance--repository-root))
+              ((file-directory-p directory)))
+    (let (names)
+      (dolist (file (directory-files directory t "\\`test-.*\\.el\\'"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (condition-case nil
+              (while t
+                (let ((form (read (current-buffer))))
+                  (when (and (consp form)
+                             (eq (car form) 'ert-deftest)
+                             (symbolp (cadr form)))
+                    (push (symbol-name (cadr form)) names))))
+            (end-of-file nil))))
+      (sort (delete-dups names) #'string<))))
+
+(defun chat-coding-acceptance-canonical-record-gate
+    (metadata expected-revision)
+  "Validate canonical-suite METADATA for EXPECTED-REVISION."
+  (let* ((schema (chat-coding-acceptance--field metadata 'schemaVersion))
+         (revision
+          (chat-coding-acceptance--field metadata 'implementationRevision))
+         (tree-clean
+          (chat-coding-acceptance--field metadata 'implementationTreeClean))
+         (measured-at (chat-coding-acceptance--field metadata 'measuredAt))
+         (summary (chat-coding-acceptance--field metadata 'summary))
+         (records
+          (chat-coding-acceptance--sequence-list
+           (chat-coding-acceptance--field metadata 'tests)))
+         (expected-names (chat-coding-acceptance--canonical-test-names))
+         (recorded-names
+          (mapcar
+           (lambda (record)
+             (chat-coding-acceptance--field record 'test))
+           records))
+         (total (chat-coding-acceptance--field summary 'total))
+         (passed (chat-coding-acceptance--field summary 'passed))
+         (failed (chat-coding-acceptance--field summary 'failed))
+         (skipped (chat-coding-acceptance--field summary 'skipped))
+         (unexpected (chat-coding-acceptance--field summary 'unexpected))
+         (valid
+          (and (equal schema 1)
+               (stringp expected-revision)
+               (not (string-empty-p expected-revision))
+               (equal revision expected-revision)
+               (eq t tree-clean)
+               (stringp measured-at)
+               (not (string-empty-p measured-at))
+               expected-names
+               (equal recorded-names expected-names)
+               (seq-every-p
+                (lambda (record)
+                  (eq t (chat-coding-acceptance--field record 'passed)))
+                records)
+               (integerp total) (= total (length expected-names))
+               (integerp passed) (= passed total)
+               (equal failed 0)
+               (equal skipped 0)
+               (equal unexpected 0))))
+    (chat-coding-acceptance-gate-create
+     :name "canonical-suite-record"
+     :status (if valid 'passed 'blocked)
+     :expected "all exact canonical ERT tests passed on the clean current revision"
+     :actual `((implementationRevision . ,revision)
+               (expectedRevision . ,expected-revision)
+               (treeClean . ,tree-clean)
+               (expectedTests . ,(length expected-names))
+               (recordedTests . ,(length records))
+               (passed . ,passed)
+               (failed . ,failed)
+               (skipped . ,skipped)
+               (unexpected . ,unexpected))
+     :evidence
+     (unless valid
+       "Run tests/run-tests.el with CHAT_CANONICAL_OUTPUT on the clean current revision."))))
+
 (defun chat-coding-acceptance--single-implementation-revision (results)
   "Return the one nonempty implementation revision in RESULTS, or nil."
   (let ((revisions
@@ -1649,13 +1736,15 @@ is removed before the callback runs."
     result))
 
 (cl-defun chat-coding-acceptance-run-final
-    (&optional baseline-directory current-directory metadata quality-metadata)
+    (&optional baseline-directory current-directory metadata quality-metadata
+               canonical-metadata)
   "Run and record the strict final acceptance gate set.
 
 BASELINE-DIRECTORY and CURRENT-DIRECTORY contain immutable M9 and M19 live
 Eval results.  Missing directories remain explicit blocked gates.  METADATA
 adds the measured runtime reliability record.  QUALITY-METADATA adds measured
-semantic, safety, isolation, context, and Review evidence."
+semantic, safety, isolation, context, and Review evidence.  CANONICAL-METADATA
+adds the complete canonical ERT result record."
   (interactive
    (list
     (let ((value
@@ -1692,7 +1781,10 @@ semantic, safety, isolation, context, and Review evidence."
                   (list
                    (chat-coding-acceptance-quality-record-gate
                     quality-metadata current-revision))
-                  (chat-coding-acceptance-quality-gates quality-metadata)))
+                  (chat-coding-acceptance-quality-gates quality-metadata)
+                  (list
+                   (chat-coding-acceptance-canonical-record-gate
+                    canonical-metadata current-revision))))
          (result
           (chat-coding-acceptance-record
            gates
@@ -1713,7 +1805,8 @@ semantic, safety, isolation, context, and Review evidence."
                                              :context-build-p95-ms))
               (heapDeltaBytes .
                               ,(plist-get benchmark :heap-delta-bytes))
-              (qualityEvidence . ,quality-metadata))
+              (qualityEvidence . ,quality-metadata)
+              (canonicalEvidence . ,canonical-metadata))
             metadata))))
     (when (called-interactively-p 'interactive)
       (message "Final acceptance %s: %s"

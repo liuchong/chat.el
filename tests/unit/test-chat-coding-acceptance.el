@@ -247,6 +247,21 @@
             gates)))
       (evidence . ,(append evidence scenario-evidence)))))
 
+(defun chat-coding-acceptance-test--canonical-record (&optional revision)
+  "Return one complete clean canonical record for REVISION."
+  (let ((names (chat-coding-acceptance--canonical-test-names)))
+    (copy-tree
+     `((schemaVersion . 1)
+       (implementationRevision . ,(or revision "revision-current"))
+       (implementationTreeClean . t)
+       (measuredAt . "2026-08-29T12:30:00+0800")
+       (summary . ((total . ,(length names)) (passed . ,(length names))
+                   (failed . 0) (skipped . 0) (unexpected . 0)))
+       (tests . ,(vconcat
+                  (mapcar (lambda (name)
+                            (list (cons 'test name) (cons 'passed t)))
+                          names)))))))
+
 (ert-deftest chat-coding-acceptance-reliability-evidence-is-required ()
   "Missing Goal and Plan Mode measurements block every reliability gate."
   (let ((gates (chat-coding-acceptance-reliability-gates nil)))
@@ -385,15 +400,56 @@
             (chat-coding-acceptance-quality-record-gate
              record "revision-current")))))))
 
+(ert-deftest chat-coding-acceptance-canonical-record-is-required-and-bound ()
+  "Canonical evidence must be complete, clean, and revision-bound."
+  (let ((record (chat-coding-acceptance-test--canonical-record)))
+    (should
+     (eq 'passed
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-canonical-record-gate
+           record "revision-current"))))
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-canonical-record-gate
+           record "another-revision"))))
+    (setf (alist-get 'implementationTreeClean record) :json-false)
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-canonical-record-gate
+           record "revision-current"))))))
+
+(ert-deftest chat-coding-acceptance-canonical-record-rejects-partial-summary ()
+  "A passing total cannot hide a missing or failed canonical test."
+  (let* ((record (chat-coding-acceptance-test--canonical-record))
+         (tests (append (alist-get 'tests record) nil)))
+    (setf (alist-get 'tests record) (vconcat (cdr tests)))
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-canonical-record-gate
+           record "revision-current"))))
+    (setq record (chat-coding-acceptance-test--canonical-record))
+    (setf (alist-get 'passed (car (append (alist-get 'tests record) nil)))
+          :json-false)
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-canonical-record-gate
+           record "revision-current"))))))
+
 (ert-deftest chat-coding-acceptance-final-binds-evidence-to-current-campaign ()
-  "Final aggregation binds both evidence records to current trials."
+  "Final aggregation binds every evidence record to current trials."
   (chat-test-with-temp-dir
    (let* ((baseline-directory (expand-file-name "baseline/" temp-dir))
           (current-directory (expand-file-name "current/" temp-dir))
           (baseline (chat-coding-acceptance-test--result 'passed nil))
           (current (chat-coding-acceptance-test--result 'passed nil))
           (record (chat-coding-acceptance-test--reliability-record))
-          (quality-record (chat-coding-acceptance-test--quality-record)))
+          (quality-record (chat-coding-acceptance-test--quality-record))
+          (canonical-record
+           (chat-coding-acceptance-test--canonical-record)))
      (make-directory baseline-directory t)
      (make-directory current-directory t)
      (setf (alist-get 'implementationRevision
@@ -424,7 +480,8 @@
                 (lambda (gates &optional _) gates)))
        (let* ((gates
                (chat-coding-acceptance-run-final
-                baseline-directory current-directory record quality-record))
+                baseline-directory current-directory record quality-record
+                canonical-record))
               (provenance
                (seq-find
                 (lambda (gate)
@@ -436,6 +493,12 @@
                 (lambda (gate)
                   (equal "quality-reliability-record"
                          (chat-coding-acceptance-gate-name gate)))
+                gates))
+              (canonical-provenance
+               (seq-find
+                (lambda (gate)
+                  (equal "canonical-suite-record"
+                         (chat-coding-acceptance-gate-name gate)))
                 gates)))
          (should provenance)
          (should (eq 'passed
@@ -444,7 +507,12 @@
          (should
           (eq 'passed
               (chat-coding-acceptance-gate-status
-               quality-provenance))))))))
+               quality-provenance)))
+         (should canonical-provenance)
+         (should
+          (eq 'passed
+              (chat-coding-acceptance-gate-status
+               canonical-provenance))))))))
 
 (ert-deftest chat-coding-acceptance-record-is-immutable-and-strict ()
   "A blocked gate yields an immutable blocked Eval result."
