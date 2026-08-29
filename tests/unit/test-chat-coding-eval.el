@@ -111,16 +111,18 @@
     (cl-letf (((symbol-function 'chat-llm-request)
                (lambda (provider messages options)
                  (setq observed (list provider messages options))
-                 "READY")))
+                 '(:content "READY"
+                   :reasoning "Checked the requested response."
+                   :usage (:total-tokens 12)))))
       (should (equal "READY"
                      (chat-campaign-runner--provider-readiness
                       'provider-a "model-a"))))
     (should (eq 'provider-a (car observed)))
     (should (= 1 (length (cadr observed))))
     (should (equal "model-a" (plist-get (caddr observed) :model)))
-    (should (= 64 (plist-get (caddr observed) :max-tokens)))
+    (should (= 512 (plist-get (caddr observed) :max-tokens)))
     (cl-letf (((symbol-function 'chat-llm-request)
-               (lambda (&rest _arguments) "")))
+               (lambda (&rest _arguments) '(:content "  \n"))))
       (should-error
        (chat-campaign-runner--provider-readiness
         'provider-a "model-a")))))

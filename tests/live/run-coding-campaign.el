@@ -81,10 +81,11 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
           (make-chat-message :role :user :content "Reply exactly READY."))
          (response
           (chat-llm-request provider (list message)
-                            (list :model model :max-tokens 64 :timeout 30))))
-    (unless (and (stringp response) (not (string-empty-p response)))
+                            (list :model model :max-tokens 512 :timeout 30)))
+         (content (plist-get response :content)))
+    (unless (and (stringp content) (not (string-blank-p content)))
       (error "Provider readiness response is empty"))
-    response))
+    content))
 
 (defun chat-campaign-runner--descriptor-summary (descriptor)
   "Return bounded JSON summary for campaign DESCRIPTOR."
