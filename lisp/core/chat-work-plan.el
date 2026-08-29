@@ -515,12 +515,14 @@
       (and (fboundp 'chat-session-wire-read-all)
            (seq-some
             (lambda (record)
-              (and (equal id (or (chat-work-plan--get record 'event_id)
-                                 (chat-work-plan--get record 'id)))
-                   (or (null task-id)
-                       (null (chat-work-plan--get record 'task_id))
-                       (equal task-id
-                              (chat-work-plan--get record 'task_id)))))
+              (let ((record-task-id
+                     (or (chat-work-plan--get record 'agent_task_id)
+                         (chat-work-plan--get record 'task_id))))
+                (and (equal id (or (chat-work-plan--get record 'event_id)
+                                   (chat-work-plan--get record 'id)))
+                     (or (null task-id)
+                         (null record-task-id)
+                         (equal task-id record-task-id)))))
             (ignore-errors
               (chat-session-wire-read-all (chat-session-id session)))))))
 

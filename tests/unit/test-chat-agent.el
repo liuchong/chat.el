@@ -311,8 +311,48 @@ car collects the messages of every request."
      (should (chat-agent-run-state-done run))
      (should (eq (chat-agent-run-state-status run) 'cancelled))
      (should (eq (chat-task-status
-                  (chat-task-get (chat-agent-run-state-task-id run)))
+                 (chat-task-get (chat-agent-run-state-task-id run)))
                  'canceled)))))
+
+(ert-deftest chat-agent-successful-tool-result-exposes-scoped-evidence-id ()
+  "A tracked Agent can cite a real post-tool event in its work plan."
+  (chat-test-with-temp-dir
+   (let* ((chat-task-directory temp-dir)
+          (chat-task--registry (make-hash-table :test 'equal))
+          (chat-task--loaded-p nil)
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (exec-counter (list 0))
+          (calls (list nil))
+          (session (make-chat-session :id "evidence-session"
+                                      :name "Evidence run"
+                                      :model-id 'kimi))
+          run)
+     (chat-agent-test--register-demo-tool exec-counter)
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport
+                 (list (list :content chat-agent-test--tool-call-json)
+                       '(:content "done"))
+                 calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi
+                    :messages (list (chat-agent-test--user-message))
+                    :session session
+                    :track-task t))))
+     (let ((result (car (chat-agent-run-state-tool-results run))))
+       (should (string-match
+                "\\`Evidence ID: \\([^[:space:]]+\\)\necho:hi\\'"
+                result))
+       (let ((evidence-id (match-string 1 result))
+             (task-id (chat-agent-run-state-task-id run)))
+         (should
+          (chat-work-plan-evidence-known-p session task-id evidence-id))
+         (let ((record
+                (seq-find
+                 (lambda (item)
+                   (equal evidence-id (alist-get 'event_id item)))
+                 (chat-session-wire-read-all (chat-session-id session)))))
+           (should (equal task-id (alist-get 'agent_task_id record)))))))))
 
 (ert-deftest chat-agent-executes-tool-and-feeds-result-back ()
   "Test a tool call is executed and its result drives a follow-up turn."

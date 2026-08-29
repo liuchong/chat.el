@@ -51,6 +51,15 @@ immutable; final acceptance still needs fresh same-manifest baseline/current
 campaigns with complete trusted token usage. The fixed corpus includes a
 measured 10,000-indexed-file large-repository task.
 
+An initial replacement current run exposed one more live reliability defect:
+multi-file TODO items could not be completed because evidence was double-encoded,
+successful tools did not return their event identity to the Agent, and tool-call
+scope was mistaken for Agent-task scope. Progress tools now accept native
+Evidence ID arrays, successful tracked tools return exact IDs, and post-tool
+events carry a separately resolved `agent_task_id`. The incomplete 10-result
+campaign is retained only as incident evidence. The canonical suite passes
+1792/1792; a focused live multi-file smoke and fresh final campaigns remain.
+
 ## Implemented Areas
 
 ### Chat Core

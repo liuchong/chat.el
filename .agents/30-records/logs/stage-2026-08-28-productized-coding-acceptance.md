@@ -133,12 +133,34 @@ Rust build outputs were audited separately and the out-of-scope list was empty.
 The canonical suite passed 1789/1789. This evidence validates the remediation,
 but it is one smoke task rather than the required 30-by-5 comparison.
 
+A first replacement current campaign, `m19-current-20260829T075539`, was
+intentionally stopped after 10 of 150 trials when both completed multi-file
+tasks cancelled. Eight trials passed. The `go-multi-file` trace showed that the
+Agent created a durable plan and began its first item, then could neither encode
+nor resolve completion evidence. The provider contract exposed evidence as an
+encoded JSON string; successful tool results did not reveal their post-tool
+event IDs; and wire events scoped `task_id` to the tool call rather than the
+owning Agent task. This was a runtime contract defect, not a transport failure.
+
+Goal and plan progress tools now expose a native string-array `evidence`
+parameter. Every successful tracked tool result returns its exact Evidence ID,
+while failed tools remain ineligible as completion evidence. Post-tool wire
+events preserve the tool-call identity and add `agent_task_id`; the resolver
+uses the Agent task scope first and retains the old field only as a compatibility
+fallback. Provider schema, Agent feedback, durable resolver and transcript
+projection are covered together. The canonical suite passes 1792/1792.
+
+The incomplete campaign remains immutable incident evidence and must never be
+resumed after this implementation change. A focused live multi-file smoke must
+pass before another 150-trial current campaign is started.
+
 ## Unblock Procedure
 
 1. Keep the completed M9 baseline and `aa4698a` current campaign immutable as
    historical evidence; do not append or rewrite either campaign.
-2. Commit the Rust runtime, plan schema and generated-output contract together,
-   then freeze the resulting implementation and manifest revisions.
+2. Commit the Rust runtime, native plan/evidence schemas, scoped Evidence ID
+   feedback and generated-output contract, then freeze the resulting
+   implementation and manifest revisions.
 3. Run fresh 30-by-5 baseline and current campaigns against that exact manifest;
    never resume a campaign across an implementation or manifest revision.
 4. Establish trusted token coverage for at least 95 percent of both replacement

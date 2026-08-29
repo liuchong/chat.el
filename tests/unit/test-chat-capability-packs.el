@@ -326,6 +326,33 @@
                        (equal (plist-get param :name) "items_json"))
                      params))))))
 
+(ert-deftest chat-capability-progress-tools-advertise-native-evidence-schema ()
+  "Plan and Goal progress accept Evidence IDs without encoded JSON."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (dolist (id '(programming_plan_transition programming_goal_progress))
+      (let* ((tool (chat-tool-forge-get id))
+             (params (chat-forged-tool-parameters tool))
+             (evidence (seq-find (lambda (param)
+                                   (equal (plist-get param :name) "evidence"))
+                                 params)))
+        (should evidence)
+        (should (equal "array" (plist-get evidence :type)))
+        (should (equal "string"
+                       (cdr (assoc 'type (plist-get evidence :items)))))
+        (should-not (seq-find
+                     (lambda (param)
+                       (equal (plist-get param :name) "evidence_json"))
+                     params))))
+    (should (equal '("event-one" "verification-two")
+                   (chat-capability--string-list
+                    ["event-one" "verification-two"] "evidence")))
+    (should (equal '("legacy-event")
+                   (chat-capability--string-list
+                    "[\"legacy-event\"]" "evidence")))
+    (should-error
+     (chat-capability--string-list '((id . "not-a-string")) "evidence"))))
+
 (ert-deftest chat-capability-registers-bounded-goal-tool-surface ()
   "The Agent can advance Goals but cannot pause, resume or clear them."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))

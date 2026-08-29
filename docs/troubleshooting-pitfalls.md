@@ -2637,4 +2637,27 @@ to source changes and continue to fail closed for every undeclared path.
 **General rule**: generated output is evidence, not permission. Keep it visible
 and bounded, but never let it widen the source edit contract.
 
+### Evidence Is Not Actionable Until The Agent Can Cite It
+
+**Problem**: a multi-file coding task created and advanced its durable TODO
+plan, but repeatedly failed when completing the first item and eventually
+exhausted its step budget.
+
+**Cause**: three individually plausible contracts did not compose. The provider
+schema represented evidence as an encoded JSON string, successful tool results
+hid the post-tool event ID from the model, and the persisted event used the tool
+call ID where the plan resolver expected the owning Agent task ID. Evidence
+existed in storage but was neither constructible nor discoverable by its caller.
+
+**Solution**: expose evidence as a native string array, return the exact event ID
+with every successful tracked tool result, and persist a separate
+`agent_task_id` for scope resolution. Keep the tool-call identity for tracing.
+Never return a usable Evidence ID for a failed tool. Test provider schema,
+model-visible feedback, persisted scope and resolver behavior as one contract.
+
+**General rule**: durable evidence needs an end-to-end citation path. Creating a
+record is insufficient; the producer must expose its stable identity, the
+consumer must accept that identity without re-encoding, and the resolver must
+verify the same session and task scope.
+
 Last updated: 2026-08-29

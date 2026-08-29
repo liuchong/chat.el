@@ -233,8 +233,17 @@ on screen, where the marker would be noise.  It belongs on the wire only."
           :source 'tool
           :payload (chat-agent--tool-event-payload call result)
           :subject call
-          :context (list (cons 'step (chat-agent-run-state-step run))))))
+          :context
+          (delq nil
+                (list
+                 (cons 'step (chat-agent-run-state-step run))
+                 (when-let* ((task-id (chat-agent-run-state-task-id run)))
+                   (cons 'agent_task_id task-id)))))))
     (cons event (chat-event-publish event))))
+
+(defun chat-agent--result-with-evidence-id (result evidence-id)
+  "Prefix successful tool RESULT with its scoped EVIDENCE-ID."
+  (format "Evidence ID: %s\n%s" evidence-id (or result "")))
 
 (defun chat-agent--prepare-next-turn (run processed)
   "Let RUN append messages before a continued turn after PROCESSED."
@@ -760,7 +769,16 @@ need approval carry exclusive accesses and therefore remain serialized."
                         (chat-code-session-project-root
                          (chat-agent-run-state-session run))))
              (chat-repo-map-update-tool-call root call)))
-         (chat-agent--publish-tool-event run 'post-tool call result)
+         (let* ((lifecycle
+                 (chat-agent--publish-tool-event run 'post-tool call result))
+                (evidence-id
+                 (and (not failed)
+                      (chat-agent-run-state-session run)
+                      (chat-agent-run-state-task-id run)
+                      (chat-event-id (car lifecycle)))))
+           (when evidence-id
+             (aset results index
+                   (chat-agent--result-with-evidence-id result evidence-id))))
          (chat-agent--hook-all
           'chat-plugin-after-tool-call-functions run call result))
        (cond

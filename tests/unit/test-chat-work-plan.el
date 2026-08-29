@@ -141,8 +141,25 @@
               :status 'completed)))
        (puthash "execution:local" local-record chat-execution--records)
        (should
+       (chat-work-plan-evidence-known-p
+        session "task-1" "execution:local"))))))
+
+(ert-deftest chat-work-plan-resolves-tool-events-by-agent-task-scope ()
+  "A post-tool event is evidence only for its owning Agent task."
+  (chat-test-with-temp-dir
+   (let ((session (chat-work-plan-test--session)))
+     (cl-letf (((symbol-function 'chat-session-wire-read-all)
+                (lambda (session-id)
+                  (should (equal session-id (chat-session-id session)))
+                  '(((event_id . "event-tool-result")
+                     (task_id . "tool-call-id")
+                     (agent_task_id . "task-1"))))))
+       (should
         (chat-work-plan-evidence-known-p
-         session "task-1" "execution:local"))))))
+         session "task-1" "event-tool-result"))
+       (should-not
+        (chat-work-plan-evidence-known-p
+         session "task-2" "event-tool-result"))))))
 
 (ert-deftest chat-work-plan-stale-write-does-not-change-session-metadata ()
   "A stale writer fails before touching the persisted projection."

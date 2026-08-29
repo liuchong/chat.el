@@ -247,8 +247,12 @@ Without it the answer's header reads as one more detail line."
   "Consecutive detail is not broken up by blank lines."
   (chat-ui-transcript-test--with-run ()
     (chat-ui-toggle-all-folds)
-    (should (string-match-p "Tool call:[^\n]*\n  Tool result:"
-                            (chat-ui-transcript-test--visible)))))
+    (should
+     (string-match-p
+      (concat "Tool call:[^\n]*\n  Tool result\n"
+              "    Evidence ID: [^\n]+\n"
+              "    echo:hi")
+      (chat-ui-transcript-test--visible)))))
 
 (ert-deftest chat-ui-transcript-the-answer-is-ordinary-text ()
   "The answer carries no detail face of its own."

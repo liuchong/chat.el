@@ -268,6 +268,21 @@
         (error "%s must be a JSON string array" label))
       items)))
 
+(defun chat-capability--string-list (value label)
+  "Normalize native or legacy JSON string-list VALUE named LABEL."
+  (let ((items
+         (cond
+          ((null value) nil)
+          ((and (stringp value) (string-empty-p value)) nil)
+          ((stringp value)
+           (json-parse-string value :array-type 'list))
+          ((vectorp value) (append value nil))
+          ((proper-list-p value) value)
+          (t (error "%s must be an array of strings" label)))))
+    (unless (cl-every #'stringp items)
+      (error "%s must be an array of strings" label))
+    items))
+
 (defun chat-capability--work-plan-items (value label)
   "Normalize native or legacy JSON work-plan item VALUE named LABEL."
   (let ((items
@@ -496,13 +511,10 @@
            (chat-goal-list (chat-capability--work-plan-session)))))
 
 (defun chat-capability-programming-goal-progress
-    (goal-id revision &optional checkpoint message criterion-id evidence-json
+    (goal-id revision &optional checkpoint message criterion-id evidence
              plan-id task-id)
   "Record Goal progress using an observed REVISION."
-  (let ((evidence (and evidence-json
-                       (not (string-empty-p evidence-json))
-                       (chat-capability--json-string-list
-                        evidence-json "evidence_json"))))
+  (let ((evidence (chat-capability--string-list evidence "evidence")))
     (chat-goal-to-alist
      (chat-goal-progress
       (chat-capability--work-plan-session) goal-id revision
@@ -566,12 +578,9 @@
    (chat-plan-mode-enter (chat-capability--work-plan-session))))
 
 (defun chat-capability-programming-plan-transition
-    (plan-id revision item-id status &optional evidence-json blocker-reason)
-  "Transition one plan item with optional EVIDENCE-JSON."
-  (let ((evidence (and evidence-json
-                       (not (string-empty-p evidence-json))
-                       (chat-capability--json-string-list
-                        evidence-json "evidence_json"))))
+    (plan-id revision item-id status &optional evidence blocker-reason)
+  "Transition one plan item with optional EVIDENCE ids."
+  (let ((evidence (chat-capability--string-list evidence "evidence")))
     (chat-work-plan-to-alist
      (chat-work-plan-transition-item
       (chat-capability--work-plan-session) plan-id revision item-id
@@ -1124,7 +1133,9 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "checkpoint" :type "string" :required nil)
      (:name "message" :type "string" :required nil)
      (:name "criterion_id" :type "string" :required nil)
-     (:name "evidence_json" :type "string" :required nil)
+     (:name "evidence" :type "array" :required nil
+      :description "Exact Evidence IDs returned by successful tools."
+      :items ((type . "string")))
      (:name "plan_id" :type "string" :required nil)
      (:name "task_id" :type "string" :required nil))
    #'chat-capability-programming-goal-progress 'project '(state))
@@ -1191,7 +1202,9 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
      (:name "item_id" :type "string" :required t)
      (:name "status" :type "string" :required t
       :enum ("in-progress" "completed" "blocked" "skipped"))
-     (:name "evidence_json" :type "string" :required nil)
+     (:name "evidence" :type "array" :required nil
+      :description "Exact Evidence IDs returned by successful tools. Required when completing an item."
+      :items ((type . "string")))
      (:name "blocker_reason" :type "string" :required nil))
    #'chat-capability-programming-plan-transition 'project '(state))
   (chat-capability--register-tool

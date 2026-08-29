@@ -963,6 +963,17 @@ JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Pl
 历史 baseline 缺少足够 token usage，且 manifest 合同已升级，不得复用旧比较
 冒充最终通过。
 
+同日第一次 replacement current campaign 在 10/150 时主动中止：8 个任务通过，
+`elisp-multi-file` 与 `go-multi-file` 取消。复核证明多文件任务已经成功创建并推进
+TODO，但 provider schema 要求模型把 evidence 二次编码成 JSON 字符串，同时成功
+工具结果没有把 post-tool event ID 返回给模型，wire record 又只用 tool-call ID 填充
+`task_id`。因此模型既无法可靠构造参数，也无法引用通过 scope 校验的真实 evidence。
+现已把 Goal/plan evidence 参数改为原生字符串数组；每个成功工具结果返回精确
+Evidence ID；post-tool event 同时保留 tool-call identity 与 `agent_task_id`，resolver
+优先按后者校验 session/task scope。失败工具不产生可完成计划项的 evidence。
+canonical suite 1792/1792 通过。该中断 campaign 仅作事故证据，implementation
+revision 改变后禁止续跑；最终验收仍须创建新的 replacement campaign。
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。
