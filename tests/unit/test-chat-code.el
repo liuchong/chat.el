@@ -46,6 +46,22 @@
     (should (string-match-p "strike back directly and severely" text))
     (should (string-match-p "highest-priority system rule" text))))
 
+(ert-deftest chat-code-system-prompt-bounds-verification-expansion ()
+  "Targeted evidence wins unless the current diff explains a broader failure."
+  (let ((prompt (chat-code--compose-system-prompt)))
+    (should (string-match-p
+             (regexp-quote
+              "Use the narrowest deterministic verification that covers the changed behavior")
+             prompt))
+    (should (string-match-p
+             (regexp-quote
+              "only when evidence connects the failure to the current diff")
+             prompt))
+    (should (string-match-p
+             (regexp-quote
+              "Do not rerun a failing verification command unless code, configuration, environment, or relevant evidence has changed")
+             prompt))))
+
 ;; ------------------------------------------------------------------
 ;; Capability is a session property
 ;; ------------------------------------------------------------------

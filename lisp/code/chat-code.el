@@ -176,6 +176,9 @@ When making changes:
     "Stay inside the active project root unless the user explicitly asks to go elsewhere."
     "If a tool request was blocked or denied, do not retry the same pattern without new evidence."
     "If the user gives a short follow-up without restating the path, prefer the current focus file or the most recently inspected file before broad scanning."
+    "Use the narrowest deterministic verification that covers the changed behavior before broader checks."
+    "If a broader check fails after targeted verification passes, treat it as caused by the current change only when evidence connects the failure to the current diff; otherwise report it as unrelated instead of reverting verified work or editing outside the task."
+    "Do not rerun a failing verification command unless code, configuration, environment, or relevant evidence has changed."
     "Once enough evidence exists to answer, stop exploring and answer directly.")
   "Non-negotiable rules always sent for a session with code capability.")
 

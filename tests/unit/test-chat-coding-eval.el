@@ -346,6 +346,13 @@
        (should (string-match-p
                 (regexp-quote
                  "emacs -Q --eval \\(ert-run-tests-batch-and-exit\\ \\'sample-test\\)")
+                prompt))
+       (should (string-match-p
+                (regexp-quote
+                 "These commands are the complete task verification contract.")
+                prompt))
+       (should (string-match-p
+                (regexp-quote "do not run a broader test suite")
                 prompt))))))
 
 (ert-deftest chat-coding-eval-agent-omits-guidance-without-command-judge ()

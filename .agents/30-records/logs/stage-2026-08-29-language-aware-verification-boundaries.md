@@ -103,6 +103,37 @@ or removal call appeared, and all six plan transitions completed serially.
   reproducible evidence decides whether it becomes a hard check, a soft prompt
   rule or a project-scoped instruction.
 
+## Focused Live Feedback: 2026-08-30
+
+Current campaign `m19-current-deepseek-v4-flash-8881b62` ran committed revision
+`8881b62`. A code-18 truncated stream was archived as an infrastructure attempt;
+the same campaign then resumed the missing trial and passed it without replacing
+or duplicating an existing durable result.
+
+The first complete repetition produced 29/30 passes. The only cancellation was
+`go-refactor`. Its required targeted command, `go test -run ^TestNormalize$ ./...`,
+passed after the intended edit. The Agent then ran `go test ./...`, encountered
+the fixture's unrelated pre-existing `TestDivide` failure, reverted and reapplied
+the verified edit, and exhausted the 120-second trial budget after 19 steps,
+22 tool calls, three tool errors and 18 approval events. No out-of-scope file was
+changed and workspace cleanup passed.
+
+This is direct evidence for a bounded verification rule rather than a
+language-specific exception:
+
+- start with the narrowest deterministic check that covers the changed behavior;
+- a broader failure blocks completion only when evidence connects it to the
+  current diff;
+- do not rerun an unchanged failing command or undo verified work merely to
+  diagnose an unrelated failure;
+- live Eval command judges are the complete targeted verification contract, so
+  once those commands pass the Agent inspects the diff and finishes instead of
+  adding a broader suite.
+
+The old campaign was stopped after two additional passing trials in repetition
+two. Because the prompt implementation changed, its 32 durable results remain
+diagnostic evidence and the campaign must not be resumed for final acceptance.
+
 ## Follow-Up
 
 The focused boundary regression is complete. Continue with the remaining goal

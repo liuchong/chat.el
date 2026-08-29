@@ -1475,7 +1475,11 @@ Return the unique repetition/scenario key."
     (if commands
         (concat
          "\n\nVerification commands (run these exact targeted checks):\n"
-         (mapconcat (lambda (command) (concat "- " command)) commands "\n"))
+         (mapconcat (lambda (command) (concat "- " command)) commands "\n")
+         "\nThese commands are the complete task verification contract. "
+         "Run each exact command. Once they pass, inspect the changed files "
+         "and finish; do not run a broader test suite. File-local format "
+         "checks are allowed.")
       "")))
 
 (defun chat-coding-eval-agent-executor (provider &optional model-name)

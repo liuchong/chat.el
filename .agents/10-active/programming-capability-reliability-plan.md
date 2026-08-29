@@ -1179,6 +1179,22 @@ replace fresh same-manifest 30-by-5 baseline/current campaigns. The incomplete
 124-result campaign is immutable incident evidence and must not be resumed
 after the implementation revision changed.
 
+2026-08-30 current campaign `m19-current-deepseek-v4-flash-8881b62` at revision
+`8881b62` completed one full repetition at 29/30 passed, then recorded two more
+passes before an intentional stop. A prior code-18 truncated stream was archived
+as an infrastructure attempt and the missing trial resumed successfully. The
+single cancellation, `go-refactor`, first passed its exact targeted test, then
+ran a broader suite whose unrelated fixture failure triggered repeated diagnosis,
+revert/reapply work and the 120-second budget. The trace recorded 19 steps,
+22 tool calls, three tool errors and 18 approval events, with no out-of-scope
+change. Product rules now prioritize the narrowest sufficient deterministic
+verification, require evidence connecting broader failures to the current diff,
+and forbid unchanged verification reruns. Eval guidance treats exact command
+judges as the complete task contract and stops broader-suite expansion after
+they pass. This implementation change invalidates the incomplete campaign for
+final comparison; a new committed revision and fresh replacement campaign are
+required.
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。
