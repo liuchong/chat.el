@@ -79,7 +79,14 @@ original targeted Go test using the real private temporary boundary; the former
 cache migration and cleanup loop did not occur. The trace also showed two plan
 errors caused by batching revision-dependent transitions, so plan tool guidance
 now requires serial transitions using each returned revision. That adjustment
-passes the canonical batch at 1825/1825; a Python multi-file smoke remains.
+passes the canonical batch at 1825/1825.
+The follow-up Python multi-file smoke at revision `919bc87` passed in 51.641
+seconds with 19 tool calls, zero tool errors, zero verification retries, only
+the two requested changes and no generated or out-of-scope files. The Guard
+allowed the original unittest command, no cache/virtual-environment cleanup
+loop occurred, and every plan transition completed serially. This focused
+boundary regression is complete; no more provider samples are needed for it
+unless the affected contracts change again.
 
 Goal and Plan acceptance facts now have a standalone producer rather than a
 hand-authored metadata contract. The runner executes 17 gate-linked checks over

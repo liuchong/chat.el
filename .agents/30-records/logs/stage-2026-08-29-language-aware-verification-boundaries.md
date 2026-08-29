@@ -79,6 +79,14 @@ plan transitions are serial, only one item may be active, and each next call
 must use the revision returned by the previous result. This is a soft guidance
 change supported by an exact trace rather than a new hard-coded exception.
 
+Committed revision `919bc87` then passed campaign
+`m19-smoke-python-boundary-20260829T203700` for `python-multi-file` in 51.641
+seconds. It made 19 tool calls with zero tool errors and zero verification
+retries. Only `sample.py` and `README.md` changed; generated and out-of-scope
+files were empty and workspace cleanup passed. The Guard directly allowed the
+original `python3 -m unittest` command. No cache, virtual-environment, cleanup
+or removal call appeared, and all six plan transitions completed serially.
+
 ## Lessons
 
 - Guard decisions must use measured execution facts. A static allowlist is a
@@ -97,7 +105,7 @@ change supported by an exact trace rather than a new hard-coded exception.
 
 ## Follow-Up
 
-Commit the serial plan guidance, then run one Python multi-file live smoke on
-that candidate. Inspect tool count, approvals, Guard rationale, cache paths and
-task duration, not only pass/fail. If the loop remains gone, continue with the
-remaining goal work before freezing the final M19 campaign revision.
+The focused boundary regression is complete. Continue with the remaining goal
+work before freezing the final M19 campaign revision; do not spend additional
+provider calls on this already-confirmed path unless a later code change touches
+Guard payloads, plan guidance or build execution.
