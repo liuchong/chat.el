@@ -237,7 +237,7 @@ CHAT_HARNESS_REVISION=<current-harness-head> \
 真实运行移除 `CHAT_CAMPAIGN_PREFLIGHT`，并增加
 `CHAT_CAMPAIGN_SETUP_FILE=<trusted-local-file>`。该本地文件只负责载入凭据，不得
 提交。runner 会拒绝 revision 不匹配或不干净的 implementation/harness checkout，
-并在创建 campaign 目录前向指定 provider/model 发出一个 30 秒、64 token 的就绪
+并在创建 campaign 目录前向指定 provider/model 发出一个 30 秒、512 token 的就绪
 请求。历史 baseline 应使用独立 `CHAT_CAMPAIGN_RUNTIME_HOME`，避免当前用户状态
 污染旧实现。
 
