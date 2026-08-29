@@ -92,7 +92,8 @@
 12. Goal 作为跨轮持久目标状态机，支持暂停、恢复、阻塞、完成和清除；完成必须满足停止条件并绑定已知证据，压缩和重启后仍可续接。
 13. Goal、work plan/TODO、工作笔记和 runtime task 分层联动；一项 Goal 可更换多版 Plan，Plan 和 task 不得静默改写 Goal。
 14. Plan Mode 使用独立权限门只允许研究、提问、工作笔记和计划产物，用户批准后才转换到执行模式。
-15. 最终能力由固定任务集重复测量，并满足第 13 节全部验收门槛。
+15. 最终能力由固定任务集重复测量，并满足第 13 节全部验收门槛；后续语言扩展按
+    `specs/028-programming-evaluation-corpus.md` 的独立资格矩阵推进，不能只增加文件扩展名。
 
 ## 4. 非目标
 
@@ -1195,6 +1196,14 @@ they pass. This implementation change invalidates the incomplete campaign for
 final comparison; a new committed revision and fresh replacement campaign are
 required.
 
+Revision `3139395` then passed a fresh, single-task DeepSeek v4 Flash smoke for
+`go-refactor` in 25.783 seconds. The trace contained ten tool calls with ten
+results, zero tool errors and four approval events. It changed only `sample.go`,
+passed `go test -run ^TestNormalize$ ./...`, did not run the unrelated broad
+suite, and left no generated or out-of-scope files. This confirms the bounded
+verification fix on the exact failure path; it does not replace the final
+30-by-5 campaign.
+
 #### 目标
 
 把前述能力接入默认编码工作流，完成迁移、文档、性能和最终基准。
@@ -1238,6 +1247,41 @@ CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json \
 
 满足第 13 节全部项目级验收标准。
 
+### M20：扩展语言资格矩阵
+
+M20 在 M19 核心比较完成后实施，不打断当前固定 revision 的最终验收。完整设计见
+`specs/028-programming-evaluation-corpus.md`。
+
+#### 目标
+
+在既有 Emacs Lisp、Python、JavaScript、Go 和 Rust 核心矩阵之外，增加 Zig、
+Clojure、Java、TypeScript、C、C++ 和 SQL 七种语言。每种语言都覆盖六类真实任务，
+并同时接入文件识别、语言画像、验证 adapter、语义质量记录和资源清理合同。
+
+#### 实施步骤
+
+1. 新建独立版本化 extended manifest；核心 30-task manifest 不改身份。
+2. 为七种语言建立无网络、小型、可复制 fixture 和 42 个确定性任务。
+3. 增加工具链 preflight；缺失运行时、依赖缓存或版本能力时在 provider 请求前 blocked。
+4. 扩展语言检测、目标语言画像、组合式验证和按语言报告，禁止主循环按语言分叉。
+5. 所有编译、测试和数据库输出声明为 `generatedPaths`；每 trial 立即清理，campaign
+   结束再扫描 owned process、workspace、worktree 和构建目录。
+6. 集成测试连续重复 setup、judge、cancel、timeout 和 cleanup，确认仓库磁盘占用不增长。
+7. 每种新增语言先运行一个 mutation smoke；失败先分类和修复，不机械跑完整矩阵。
+8. 使用同一 provider/model/capability snapshot 对 extended manifest 分别建立 baseline
+   和 current，开发各 task 三次，最终各 task 五次。
+9. 只有重复证据支持的经验才进入硬规则或语言提示包，并记录前后指标和反例。
+
+#### 退出条件
+
+- extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
+- fixture 离线 setup、judge 和清理 100% 通过；残留编译产物、进程和 worktree 为 0。
+- 最终 baseline/current 各有 210 个唯一有效 trial，任何语言不得被总平均掩盖。
+- current 总成功率达到 90% 或相对 baseline 提高至少 15 个百分点；每种语言至少 80%
+  且不低于自身 baseline。
+- 越界写入、未验证却完成、生成物漏报和清理失败均为 0。
+- 重要样例、验收话术、标准、性能指标和诊断结论按 spec 的保留规则进入仓库。
+
 ## 8. 测试矩阵
 
 | 层级 | 内容 | 是否进入 canonical suite |
@@ -1246,7 +1290,7 @@ CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json \
 | Integration | Agent loop + Goal + scoped context + Plan Mode + plan gate + file gate + checkpoint + execution + verifier | 是，外部依赖缺失时只允许明确 skip |
 | E2E | 临时 Git fixture 中跨轮推进 Goal、审批计划、编辑、压缩恢复、验证、review | 是，必须确定性 |
 | Offline Eval | 五个现有合同及新增非模型 coding contracts | 是 |
-| Live Eval | 固定模型执行 30 个真实任务 | 否，单独命令 |
+| Live Eval | 固定模型执行核心 30-task 比较或扩展 42-task 语言资格矩阵 | 否，单独命令 |
 | Spike | 平台隔离、外部服务和语言服务器可行性 | 否，正式实现前运行 |
 | Performance | 10,000 文件索引与上下文基准 | 单独命令，最终验收必跑 |
 
@@ -1557,9 +1601,11 @@ M9 baseline
   -> M17 durable Goal mode
   -> M18 read-only Plan Mode and approval
   -> M19 rollout and acceptance
+  -> M20 extended language qualification
 ```
 
 M10 可以在 M9 基线建立后与 M11 的后端合同设计并行调查，但共享的 Agent loop、
 tool caller 和 context 文件不得并行修改。M12 依赖 M10 和 M11；M14 依赖 M13；
 M16 依赖 M12、M14 和 M15；M17 依赖 M13、M14 和 M16；M18 依赖 M14 和 M17；
-M19 依赖前述全部阶段。最终默认开启任何能力前，必须先在 live Eval 中证明不降低成功率。
+M19 依赖前述全部阶段；M20 依赖 M19 的稳定 runner、验收聚合和资源清理合同。
+最终默认开启任何能力前，必须先在对应 manifest 的 live Eval 中证明不降低成功率。

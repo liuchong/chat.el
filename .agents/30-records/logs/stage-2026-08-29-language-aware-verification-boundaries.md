@@ -134,6 +134,19 @@ The old campaign was stopped after two additional passing trials in repetition
 two. Because the prompt implementation changed, its 32 durable results remain
 diagnostic evidence and the campaign must not be resumed for final acceptance.
 
+## Focused Fix Verification: 2026-08-30
+
+Revision `3139395` ran a fresh one-task DeepSeek v4 Flash campaign for
+`go-refactor`. It passed in 25.783 seconds with ten tool calls, ten tool results,
+zero tool errors and four approval events. The Agent changed only `sample.go`,
+ran the required `go test -run ^TestNormalize$ ./...` command, inspected the
+result and completed. It did not expand to `go test ./...`.
+
+The fixture workspace was cleaned, with no generated or out-of-scope files.
+This focused result verifies that the implementation changed the observed
+failure behavior. It is supporting evidence only and does not replace a fresh
+30-by-5 final campaign.
+
 ## Follow-Up
 
 The focused boundary regression is complete. Continue with the remaining goal

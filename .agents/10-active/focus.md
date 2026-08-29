@@ -15,12 +15,12 @@ notes, evidence, restart/compaction recovery, verification, isolation, Review
 and collaboration contracts are implemented on the shared session/event/UI
 infrastructure.
 
-Implementation revision `875433c` has three clean, revision-bound evidence
-records: runtime passes all nine gates, quality passes all 20 gates, and the
-canonical suite passes 1810/1810 with zero failed, skipped or unexpected
-results. The strict final aggregator independently validates all three records.
-Current and historical-baseline descriptors also pass the clean 30-by-5
-no-network preflight with the same 30-task manifest.
+Implementation revision `3139395` bounds verification to the narrowest
+sufficient deterministic evidence. A fresh DeepSeek v4 Flash `go-refactor`
+smoke passed in 25.783 seconds, ran only the required targeted command, changed
+one allowed source file and left no generated residue. Earlier runtime, quality
+and canonical records remain stage evidence but must be regenerated on the
+final clean implementation revision before aggregation.
 
 M19 final acceptance remains blocked only on fresh live evidence. Baseline and
 current must each run 30 tasks five times with one identical concrete
@@ -28,6 +28,11 @@ provider/model/capability identity and trusted usage. Historical campaigns stay
 immutable incident or comparison evidence and cannot be mixed into the final
 aggregate. A DeepSeek Flash campaign is an allowed replacement identity only if
 both roles use it from fresh campaign directories and readiness succeeds.
+
+The next recorded expansion is M20, after the fixed M19 comparison: Zig,
+Clojure, Java, TypeScript, C, C++ and SQL each receive the same six task
+categories. The 42-task extended manifest stays separate from the immutable
+30-task core comparison and follows `specs/028-programming-evaluation-corpus.md`.
 
 The transport audit found no remaining split to implement:
 `chat-model-request-events` already normalizes native streaming and the
