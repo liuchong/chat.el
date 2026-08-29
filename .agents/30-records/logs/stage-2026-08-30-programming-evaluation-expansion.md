@@ -58,3 +58,34 @@ binary, cache or database output across campaigns.
 5. Pass offline repeated cleanup before the first provider call.
 6. Run one focused mutation smoke per language, then baseline/current repeated
    campaigns without mixing results with the core manifest.
+
+## Core Campaign Evidence
+
+The clean `54db3f1` DeepSeek v4 Flash current campaign completed all 150 core
+trials. Each of the five languages passed 30/30 and each of the six categories
+passed 25/25. No task changed an out-of-scope path. Twenty standard generated
+outputs were declared, audited and removed. The matching deterministic records
+passed all 9 runtime gates, all 20 quality gates and 1859/1859 canonical tests.
+
+The paired frozen M9 campaign produced two complete repetitions at 2/30 and
+1/30 before the third repetition exposed an inadmissible infrastructure result.
+Its dominant valid failure was the old approval path refusing source mutation;
+read-only failures were separate answer-quality failures. The campaign stopped
+at 64 durable records and is incident evidence only.
+
+## Harness Independence Lesson
+
+A campaign shared across historical implementations cannot unconditionally
+call a helper introduced after the baseline revision. The code 18 incident did
+not reach the campaign's independent curl-status table because the preceding
+Agent transient classifier was undefined in M9. Campaign-level availability
+classification now checks whether that optional helper exists, while its own
+bounded transport and provider rules remain complete. Regression coverage runs
+the code 16 and code 18 cases with the Agent helper absent.
+
+This is an acceptance-integrity rule: infrastructure failures are quarantined
+before they claim a repetition/task identity. A campaign containing such a
+formal result is invalid even when the remaining samples are useful diagnostics.
+After a harness revision changes, both comparison roles receive fresh campaign
+identities; partial directories are never rewritten or mixed into the final
+aggregate.

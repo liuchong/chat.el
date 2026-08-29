@@ -1587,7 +1587,8 @@ task immediately, including rate limits and exhausted usage quotas."
          (executor (and (listp metadata) (alist-get 'executor metadata)))
          (reason (and (listp executor) (alist-get 'failureReason executor))))
     (and (eq (chat-eval-result-status result) 'error)
-         (or (chat-agent--transient-model-error-p reason)
+         (or (and (fboundp 'chat-agent--transient-model-error-p)
+                  (chat-agent--transient-model-error-p reason))
              (and (stringp reason)
                   (string-match-p
                    chat-coding-eval--campaign-pause-error-pattern

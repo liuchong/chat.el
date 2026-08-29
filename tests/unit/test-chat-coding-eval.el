@@ -674,10 +674,10 @@
        (should (= 2 (length (plist-get work :pending))))))))
 
 (ert-deftest chat-coding-eval-campaign-pause-errors-are-bounded ()
-  "Only transport and provider availability failures pause campaigns."
-  (cl-letf (((symbol-function 'chat-agent--transient-model-error-p)
-             (lambda (_reason) nil)))
+  "Campaign classification works without a historical Agent classifier."
+  (cl-letf (((symbol-function 'chat-agent--transient-model-error-p) nil))
     (dolist (reason '("exited abnormally with code 16"
+                      "exited abnormally with code 18"
                       "HTTP error 429: too many requests"
                       "HTTP error 503: service unavailable"
                       "provider capacity is temporarily unavailable"))

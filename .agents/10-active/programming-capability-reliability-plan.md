@@ -1081,6 +1081,17 @@ JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Pl
 `generatedPaths` 并提升 task revision，源码 allowlist 不变。manifest digest 改变后，
 `16bbffd` campaign 只能作为诊断证据；重新提交并验证后建立新的两侧 campaign。
 
+Revision `54db3f1` 的 replacement current campaign 完成 150/150，通过五种语言
+各 30/30、六类任务各 25/25；越界写入为 0，20 次声明的生成物全部完成审计和清理。
+同 revision 的 runtime、quality、canonical 记录分别通过 9/9、20/20、1859/1859。
+历史 baseline 的前两轮仅通过 2/30 与 1/30，主要失败链是旧审批策略拒绝源码修改；
+但第三轮出现的 curl code 18 被错误保留为正式 error。原因是 current campaign
+harness 先调用冻结 M9 中不存在的 Agent transient classifier，抛出
+`void-function` 后没有执行自己的 curl 状态表。该 baseline 在 64 个 durable result
+处停止且不得进入最终聚合。harness 的 Agent classifier 现在是可选增强；独立规则在
+该函数不存在时仍识别 code 16 和 18。实现 revision 改变后，两侧都建立 fresh
+campaign，不能续跑旧目录。
+
 同日第一次 replacement current campaign 在 10/150 时主动中止：8 个任务通过，
 `elisp-multi-file` 与 `go-multi-file` 取消。复核证明多文件任务已经成功创建并推进
 TODO，但 provider schema 要求模型把 evidence 二次编码成 JSON 字符串，同时成功
