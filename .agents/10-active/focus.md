@@ -97,9 +97,11 @@ that was reported, a session staying a shell after one `!ls` with no
 question able to get it out. The holder shows in the input prompt as
 `cmd> `, not only in a status line at the top of a scrolling buffer.
 
-`/new`, `/list`, `/save` and `/clear` are implemented. `/queue`, `/flush`
-and `/drop` collect notes and send them as one numbered message, on the
-session so they survive a reopen.
+`/new`, `/list`, `/save` and `/clear` are implemented. Structured `/stage`
+items remain inert, editable and durable across reopen until `/send` creates
+one canonical user turn. The stage is distinct from `/send queue`: the latter
+is already-triggered executable work and automatically starts after the active
+run ends. The active plan section 6.11 is the formal replacement contract.
 
 Slash commands have the consistency guarantee the keymap got, now in both
 directions. The one-way version passed while four live commands were

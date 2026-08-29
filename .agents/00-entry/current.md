@@ -170,8 +170,13 @@ either way of asking and a name that must be memorized to be told apart
 from its neighbour earns nothing. Auto returns to `/send` rather than to a cleared variable:
 commands declare `:default sticky` or `reset`, anything that asks the
 model releases the claim, and the holder shows in the input prompt as
-`cmd> `. `/queue`, `/flush` and `/drop` collect notes and send them as one
-numbered message. Decision 0013 records it.
+`cmd> `. Structured `/stage` items remain inert, editable and durable until
+`/send` turns the current ordered batch into one canonical user turn. This is
+separate from `/send queue`, which is already-triggered executable work waiting
+for the active run and starts automatically when the executor becomes free.
+Section 6.11 of the active reliability plan is the current contract; it replaces
+the former top-level queue/flush/drop staging design. Decision 0013 continues to
+govern baseline command ownership and sticky/reset behavior.
 
 Language covers the surface rather than only the help. Command names have
 aliases, so `/auto` and `/自动` resolve to one entry and any language's

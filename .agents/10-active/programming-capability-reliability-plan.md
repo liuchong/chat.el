@@ -434,6 +434,44 @@ ecosystem，不能按第一个 manifest 短路；生成代码、vendor、fixture
 所有已检测 ecosystem 均有稳定且唯一的验证 step identity，任何提示包关闭后通用能力仍
 完整可用。
 
+### 6.11 结构化消息暂存与运行时发送队列
+
+聊天输入具有两个生命周期不同的容器，必须使用不同的数据合同、事件和 UI 名称：
+
+- **消息暂存区（stage）** 保存尚未成为用户 turn 的惰性草稿。暂存、编辑、排序、召回、
+  删除和重启恢复都不得请求模型，也不得在执行器空闲时自动发送；
+- **运行时发送队列（runtime send queue）** 保存已经被用户明确触发、但因当前 run 占用
+  执行器而等待的 canonical user turn。当前 run 到达任一终态后，它按到达顺序逐条自动
+  启动，每条保持独立 turn，不合并为一条。
+
+暂存项使用唯一当前 schema，至少包含 `schema-version`、稳定 `id`、不可复用的
+`original-order`、`created-at`、`updated-at`、`text`、typed `content-parts` 和 `source`。
+当前展示顺序由容器位置表达，移动不得改写稳定身份、原始加入顺序或创建时间；编辑只
+更新正文和更新时间。未知 schema 和非结构化记录必须明确拒绝，不推测、不迁移、不双读。
+
+当前交互合同只有两个顶层命令：
+
+- `/stage <draft>` 追加惰性草稿；`/stage` 查看；`/stage edit N <draft>` 编辑；
+  `/stage move N M` 排序；`/stage recall N` 从暂存区移回输入框并恢复 typed attachments；
+  `/stage drop [N|all]` 或 `/stage clear` 删除；
+- `/send` 是暂存批次的唯一触发入口；`/send <closing text>` 在已有暂存项时把末条文本加入
+  同一批次后触发。批次只有一项时直接使用原文，多项时按当前展示顺序组成有序列表，形成
+  一个 user turn。批次存在时，`insert`、`queue`、`interrupt` 等词都是普通末条文本，
+  不能绕过暂存状态机。
+
+触发不等于确认。只有 canonical user message 通过 checkpoint、写入 session 且保留
+暂存项 ID、原始顺序、创建时间和 schema provenance 后，暂存区才可原子清空。checkpoint、
+policy 或记录失败时原批次保持可恢复。若触发时已有活动 run，合成后的完整 turn 连同 typed
+attachments 和 provenance 进入运行时发送队列；暂存区在该 turn 实际记录成功前仍不清空。
+
+本设计正式替换把顶层 `/queue`、`/flush`、`/drop` 用作草稿收集与触发的旧交互；这些旧
+命令、别名、存储形态、测试和文档不保留。它不修改 `/send insert|queue|interrupt` 的运行时
+并发语义，也不修改正式 transcript、Guard、Goal、Plan Mode 或 Markdown 渲染合同。
+
+验收必须覆盖：零模型调用的暂存、稳定身份与排序、typed attachment 往返、重启恢复、单项
+与多项合成、末条文本、忙时进入运行时队列、按序自动发送、checkpoint 失败保留、成功记录
+后清空、provenance 可审计、未知 schema 拒绝，以及命令表、帮助、本地化和 README 一致。
+
 ## 7. 施工阶段
 
 阶段编号延续已完成的 M0-M8。每个阶段必须遵循：先测试合同，再实现；阶段测试和规范测试全部通过后立即提交；未满足退出条件不得开始依赖它的下一阶段。

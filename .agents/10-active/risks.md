@@ -25,6 +25,7 @@
 - Compiler shims can hide filesystem and environment requirements from argv inspection.
 - A durable Goal can loop indefinitely, leak across project scope or be marked complete from model prose.
 - Plan Mode can become prompt-only ceremony if a tool bypasses its execution-boundary effect gate.
+- Inert staged drafts can be conflated with the executable runtime send queue, causing premature sends or lost input.
 
 ## Mitigations
 
@@ -45,6 +46,7 @@
 - Resolve measured tool shims to real binaries and derive SDK paths without widening write roots.
 - Bound Goal continuation, preserve scope on every projection/mutation and require known scoped evidence for deterministic completion.
 - Gate every tool call while Plan Mode is active, fail closed on unknown effects and bind approval to the exact submitted plan revision.
+- Give stage items stable structured identity, require explicit `/send`, and clear only after the canonical turn is checkpointed and recorded.
 
 ## Governing Plan
 
