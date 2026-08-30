@@ -79,6 +79,25 @@
                   (plist-get (chat-session-tool-config execution)
                              :advertised-tools)))))
 
+(ert-deftest chat-capability-exploration-is-explicitly-staged ()
+  "Editor-semantic and web tools stay available without taxing turn one."
+  (let* ((execution (make-chat-session :id "exploration-execution"))
+         (chat-tool-caller-current-session execution))
+    (chat-session-set-tool-config
+     execution
+     (list :enabled-tools chat-capability-programming-tools
+           :advertised-tools chat-capability-programming-base-tools))
+    (dolist (tool chat-capability-programming-exploration-tools)
+      (should (memq tool chat-capability-programming-tools))
+      (should-not (memq tool
+                        (plist-get (chat-session-tool-config execution)
+                                   :advertised-tools))))
+    (chat-capability-programming-capability-activate "exploration")
+    (dolist (tool chat-capability-programming-exploration-tools)
+      (should (memq tool
+                    (plist-get (chat-session-tool-config execution)
+                               :advertised-tools))))))
+
 (ert-deftest chat-capability-active-plan-is-advertised-on-the-next-run ()
   "A durable plan restores its lifecycle tools without another activation call."
   (chat-test-with-temp-dir

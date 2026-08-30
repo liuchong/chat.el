@@ -35,14 +35,17 @@
 (defconst chat-capability-programming-base-tools
   '(programming_capability_activate
     programming_git_status
-    programming_flymake_diagnostics
     programming_compile_task
+    files_read files_read_lines files_list files_grep open_file
+    files_write files_replace apply_patch)
+  "Small tool menu advertised at the start of a programming run.")
+
+(defconst chat-capability-programming-exploration-tools
+  '(programming_flymake_diagnostics
     programming_completion_at_point
     web_eww_read
-    files_read files_read_lines files_list files_grep open_file
-    files_write files_replace apply_patch
     emacs_buffers emacs_read_buffer emacs_imenu emacs_xref emacs_project)
-  "Small tool menu advertised at the start of a programming run.")
+  "Editor-semantic and external lookup tools activated when needed.")
 
 (defconst chat-capability-programming-verification-tools
   '(programming_verification_plan programming_verification_run
@@ -76,7 +79,8 @@
   "Programming tools advertised for TODO plans and Plan Mode.")
 
 (defconst chat-capability-programming-tool-groups
-  `((plan . ,chat-capability-programming-plan-tools)
+  `((exploration . ,chat-capability-programming-exploration-tools)
+    (plan . ,chat-capability-programming-plan-tools)
     (goal . ,chat-capability-programming-goal-tools)
     (notes . ,chat-capability-programming-work-note-tools)
     (verification . ,chat-capability-programming-verification-tools)
@@ -1086,10 +1090,12 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
   (chat-capability--register-tool
    'programming_capability_activate "Programming Capability Activate"
    (concat "Expose a stage tool group for this run. Use plan before substantial "
-           "work, goal only when explicitly requested, and batch-edit only for "
-           "structured multi-replacement; apply_patch is already available.")
+           "work, exploration for editor semantics or web lookup, goal only when "
+           "explicitly requested, and batch-edit only for structured "
+           "multi-replacement; apply_patch is already available.")
    '((:name "capability" :type "string" :required t
-      :enum ("plan" "goal" "notes" "verification" "context" "batch-edit")))
+      :enum ("exploration" "plan" "goal" "notes" "verification"
+             "context" "batch-edit")))
    #'chat-capability-programming-capability-activate 'project '(state))
   (chat-capability--register-tool
    'programming_git_status "Programming Git Status"
