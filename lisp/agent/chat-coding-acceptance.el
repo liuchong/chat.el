@@ -29,6 +29,12 @@
     (expand-file-name "../.." (file-name-directory load-file-name))))
   "Repository root captured when the acceptance library is loaded.")
 
+(defconst chat-coding-acceptance--request-footprint-baseline-path
+  (expand-file-name
+   "tests/fixtures/coding-eval/request-footprint-baseline.json"
+   chat-coding-acceptance--repository-root)
+  "Committed first-request baseline used to validate measured records.")
+
 (defcustom chat-coding-acceptance-query-repetitions 30
   "Warm query and context-build repetitions in the performance benchmark."
   :type 'integer :group 'chat-coding-acceptance)
@@ -500,13 +506,18 @@ with otherwise identical capabilities remain comparable."
             (chat-eval-result-checks result)))))
    results))
 
-(defun chat-coding-acceptance--input-tokens (result)
-  "Return trusted input token count from RESULT, or nil."
+(defun chat-coding-acceptance--usage-input-tokens (result field)
+  "Return trusted input tokens from usage FIELD in RESULT, or nil."
   (let* ((executor (chat-coding-acceptance--metadata result))
-         (usage (chat-coding-acceptance--field executor 'tokenUsage)))
+         (usage (chat-coding-acceptance--field executor field)))
     (or (chat-coding-acceptance--field usage 'input_tokens)
         (chat-coding-acceptance--field usage 'input-tokens)
         (chat-coding-acceptance--field usage 'prompt_tokens))))
+
+(defun chat-coding-acceptance--first-request-input-tokens (result)
+  "Return trusted first-request input tokens from RESULT, or nil."
+  (chat-coding-acceptance--usage-input-tokens
+   result 'firstRequestTokenUsage))
 
 (defun chat-coding-acceptance--task-tags (result)
   "Return normalized task tags from RESULT."
@@ -527,22 +538,20 @@ with otherwise identical capabilities remain comparable."
   (let* ((baseline-large
           (seq-filter
            (lambda (result)
-             (and (eq (chat-eval-result-status result) 'passed)
-                  (member "large-repo"
-                          (chat-coding-acceptance--task-tags result))))
-           baseline))
+             (member "large-repo"
+                     (chat-coding-acceptance--task-tags result)))
+           (chat-coding-acceptance--valid-results baseline)))
          (current-large
           (seq-filter
            (lambda (result)
-             (and (eq (chat-eval-result-status result) 'passed)
-                  (member "large-repo"
-                          (chat-coding-acceptance--task-tags result))))
-           current))
+             (member "large-repo"
+                     (chat-coding-acceptance--task-tags result)))
+           (chat-coding-acceptance--valid-results current)))
          (baseline-usage
-          (delq nil (mapcar #'chat-coding-acceptance--input-tokens
+          (delq nil (mapcar #'chat-coding-acceptance--first-request-input-tokens
                             baseline-large)))
          (current-usage
-          (delq nil (mapcar #'chat-coding-acceptance--input-tokens
+          (delq nil (mapcar #'chat-coding-acceptance--first-request-input-tokens
                             current-large)))
          (invalid-fixtures
           (seq-remove
@@ -572,7 +581,7 @@ with otherwise identical capabilities remain comparable."
       ((not complete) 'blocked)
       ((<= current-median (* 0.85 baseline-median)) 'passed)
       (t 'failed))
-     :expected "large-repo median input tokens reduced >=15%"
+     :expected "large-repo median first-request input tokens reduced >=15%"
      :actual
      (cond
       (invalid-fixtures
@@ -617,11 +626,14 @@ with otherwise identical capabilities remain comparable."
             (chat-coding-acceptance--success-rate baseline-valid))
            (current-rate
             (chat-coding-acceptance--success-rate current-valid))
-           (usage (delq nil (mapcar #'chat-coding-acceptance--input-tokens
-                                    current-valid)))
+           (usage
+            (delq nil
+                  (mapcar #'chat-coding-acceptance--first-request-input-tokens
+                          current-valid)))
            (baseline-usage
-            (delq nil (mapcar #'chat-coding-acceptance--input-tokens
-                              baseline-valid)))
+            (delq nil
+                  (mapcar #'chat-coding-acceptance--first-request-input-tokens
+                          baseline-valid)))
            (missing-usage
             (if current-valid
                 (- 1.0 (/ (float (length usage)) (length current-valid)))
@@ -677,7 +689,7 @@ with otherwise identical capabilities remain comparable."
                     'passed 'failed)
         :expected 0 :actual (chat-coding-acceptance--unverified-pass-count current))
        (chat-coding-acceptance-gate-create
-        :name "live-eval-token-coverage"
+        :name "live-eval-first-request-token-coverage"
         :status (if (and (<= baseline-missing-usage 0.05)
                          (<= missing-usage 0.05))
                     'passed 'blocked)
@@ -685,7 +697,7 @@ with otherwise identical capabilities remain comparable."
         :actual `((baseline . ,baseline-missing-usage)
                   (current . ,missing-usage)))
        (chat-coding-acceptance-gate-create
-        :name "live-eval-input-token-budget"
+        :name "live-eval-first-request-input-token-budget"
         :status
         (if (and baseline-usage usage
                  (<= baseline-missing-usage 0.05)
@@ -694,8 +706,10 @@ with otherwise identical capabilities remain comparable."
                     (* 1.10 (chat-coding-acceptance--median baseline-usage)))
                 'passed 'failed)
           'blocked)
-        :expected "current median <=110% of baseline"
-        :actual (chat-coding-acceptance--median usage))
+        :expected "current first-request median <=110% of baseline"
+        :actual
+        `((baseline . ,(chat-coding-acceptance--median baseline-usage))
+          (current . ,(chat-coding-acceptance--median usage))))
        (chat-coding-acceptance--large-repo-token-gate baseline current)))))
 
 (defun chat-coding-acceptance--reliability-gate
@@ -1429,6 +1443,72 @@ fail it."
      (unless valid
        "Run tests/run-tests.el with CHAT_CANONICAL_OUTPUT on the clean current revision."))))
 
+(defun chat-coding-acceptance-request-footprint-record-gate
+    (record current-revision)
+  "Validate request-footprint RECORD against CURRENT-REVISION and baseline."
+  (let* ((baseline
+          (chat-coding-acceptance--read-json-file
+           chat-coding-acceptance--request-footprint-baseline-path))
+         (baseline-revision (alist-get 'baselineRevision baseline))
+         (baseline-bytes (alist-get 'combinedBytes baseline))
+         (limit (alist-get 'maxCombinedRatio baseline))
+         (record-revision
+          (chat-coding-acceptance--field record 'implementationRevision))
+         (record-baseline-revision
+          (chat-coding-acceptance--field record 'baselineRevision))
+         (record-baseline-bytes
+          (chat-coding-acceptance--field record 'baselineCombinedBytes))
+         (record-limit
+          (chat-coding-acceptance--field record 'maxCombinedRatio))
+         (current-bytes
+          (chat-coding-acceptance--field record 'currentCombinedBytes))
+         (record-ratio
+          (chat-coding-acceptance--field record 'currentRatio))
+         (reported-passed
+          (chat-coding-acceptance--field record 'passed))
+         (computed-ratio
+          (and (numberp current-bytes) (numberp baseline-bytes)
+               (> baseline-bytes 0)
+               (/ (float current-bytes) baseline-bytes)))
+         (within-limit
+          (and (numberp computed-ratio) (numberp limit)
+               (<= computed-ratio limit)))
+         (valid
+          (and record baseline current-revision
+               (= (or (chat-coding-acceptance--field record 'schemaVersion) 0)
+                  1)
+               (equal record-revision current-revision)
+               (eq t (chat-coding-acceptance--field
+                      record 'implementationTreeClean))
+               (equal record-baseline-revision baseline-revision)
+               (equal record-baseline-bytes baseline-bytes)
+               (equal record-limit limit)
+               (numberp record-ratio)
+               (numberp computed-ratio)
+               (<= (abs (- record-ratio computed-ratio)) 1e-9)
+               (assq 'passed record)
+               (memq reported-passed '(t :json-false))
+               (eq (eq t reported-passed) (and within-limit t)))))
+    (chat-coding-acceptance-gate-create
+     :name "first-request-footprint-record"
+     :status (cond
+              ((not valid) 'blocked)
+              (within-limit 'passed)
+              (t 'failed))
+     :expected "clean revision-bound request footprint <=110% of frozen M9"
+     :actual
+     `((implementationRevision . ,record-revision)
+       (baselineBytes . ,record-baseline-bytes)
+       (currentBytes . ,current-bytes)
+       (ratio . ,record-ratio)
+       (limit . ,record-limit))
+     :evidence
+     (cond
+      ((not valid)
+       "Run tests/performance/run-request-footprint.el on the exact clean current revision.")
+      ((not within-limit)
+       "The measured first request exceeds the committed regression ceiling.")))))
+
 (defun chat-coding-acceptance--single-implementation-revision (results)
   "Return the one nonempty implementation revision in RESULTS, or nil."
   (let ((revisions
@@ -1737,14 +1817,15 @@ is removed before the callback runs."
 
 (cl-defun chat-coding-acceptance-run-final
     (&optional baseline-directory current-directory metadata quality-metadata
-               canonical-metadata)
+               canonical-metadata request-footprint-metadata)
   "Run and record the strict final acceptance gate set.
 
 BASELINE-DIRECTORY and CURRENT-DIRECTORY contain immutable M9 and M19 live
 Eval results.  Missing directories remain explicit blocked gates.  METADATA
 adds the measured runtime reliability record.  QUALITY-METADATA adds measured
 semantic, safety, isolation, context, and Review evidence.  CANONICAL-METADATA
-adds the complete canonical ERT result record."
+adds the complete canonical ERT result record.  REQUEST-FOOTPRINT-METADATA adds
+the no-network first-request measurement for the same clean revision."
   (interactive
    (list
     (let ((value
@@ -1784,7 +1865,9 @@ adds the complete canonical ERT result record."
                   (chat-coding-acceptance-quality-gates quality-metadata)
                   (list
                    (chat-coding-acceptance-canonical-record-gate
-                    canonical-metadata current-revision))))
+                    canonical-metadata current-revision)
+                   (chat-coding-acceptance-request-footprint-record-gate
+                    request-footprint-metadata current-revision))))
          (result
           (chat-coding-acceptance-record
            gates
@@ -1806,7 +1889,8 @@ adds the complete canonical ERT result record."
               (heapDeltaBytes .
                               ,(plist-get benchmark :heap-delta-bytes))
               (qualityEvidence . ,quality-metadata)
-              (canonicalEvidence . ,canonical-metadata))
+              (canonicalEvidence . ,canonical-metadata)
+              (requestFootprintEvidence . ,request-footprint-metadata))
             metadata))))
     (when (called-interactively-p 'interactive)
       (message "Final acceptance %s: %s"

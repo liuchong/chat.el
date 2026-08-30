@@ -26,6 +26,14 @@
    "tests/fixtures/coding-eval/request-footprint-baseline.json"
    chat-request-footprint--project-root))
 
+(defun chat-request-footprint--git-output (&rest args)
+  "Return trimmed Git output for ARGS in the implementation checkout."
+  (let ((default-directory chat-request-footprint--project-root))
+    (with-temp-buffer
+      (unless (zerop (apply #'process-file "git" nil t nil args))
+        (error "Git command failed: %s" (string-join args " ")))
+      (string-trim (buffer-string)))))
+
 (defun chat-request-footprint--read-json (path)
   "Read one JSON object from PATH."
   (with-temp-buffer
@@ -144,6 +152,15 @@
          (passed (<= ratio limit))
          (record
           `((schemaVersion . 1)
+            (implementationRevision .
+                                    ,(chat-request-footprint--git-output
+                                      "rev-parse" "HEAD"))
+            (implementationTreeClean .
+                                     ,(if (string-empty-p
+                                           (chat-request-footprint--git-output
+                                            "status" "--porcelain"))
+                                          t :json-false))
+            (measuredAt . ,(format-time-string "%FT%T%z"))
             (metric . ,(alist-get 'metric baseline))
             (baselineRevision . ,(alist-get 'baselineRevision baseline))
             (baselineCombinedBytes . ,baseline-bytes)

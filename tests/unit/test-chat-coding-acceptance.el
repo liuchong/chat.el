@@ -75,14 +75,15 @@
     (should (= 2 (length (chat-coding-acceptance--valid-results
                           (list errored cancelled)))))))
 
-(ert-deftest chat-coding-acceptance-reads-json-round-tripped-token-plists ()
-  "Token usage remains measurable after a plist is serialized as a JSON array."
+(ert-deftest chat-coding-acceptance-reads-json-round-tripped-first-request-usage ()
+  "First-request usage remains measurable after JSON round trip."
   (let ((result
          (chat-coding-acceptance-test--result
           'passed (list (chat-eval-check "judge" t t t))
-          '((tokenUsage . [":input-tokens" 4321
-                           ":output-tokens" 123])))))
-    (should (= 4321 (chat-coding-acceptance--input-tokens result)))))
+          '((firstRequestTokenUsage . [":input-tokens" 4321
+                                       ":output-tokens" 123])))))
+    (should (= 4321
+               (chat-coding-acceptance--first-request-input-tokens result)))))
 
 (ert-deftest chat-coding-acceptance-normalizes-redundant-snapshot-model ()
   "Adding the outer model to a capability snapshot does not break identity."
@@ -273,6 +274,50 @@
                             (list (cons 'test name) (cons 'passed t)))
                           names)))))))
 
+(defun chat-coding-acceptance-test--request-footprint-record (&optional revision)
+  "Return one complete clean footprint record for REVISION."
+  (copy-tree
+   `((schemaVersion . 1)
+     (implementationRevision . ,(or revision "revision-current"))
+     (implementationTreeClean . t)
+     (measuredAt . "2026-08-30T11:00:00+0800")
+     (metric . "message-content-plus-provider-tools-json-bytes")
+     (baselineRevision . "e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3")
+     (baselineCombinedBytes . 6324)
+     (maxCombinedRatio . 1.1)
+     (currentCombinedBytes . 6605)
+     (currentRatio . 1.0444339025932954)
+     (passed . t))))
+
+(ert-deftest chat-coding-acceptance-footprint-record-is-required-and-bound ()
+  "Footprint evidence must be clean, internally consistent and revision-bound."
+  (let ((record (chat-coding-acceptance-test--request-footprint-record)))
+    (should
+     (eq 'passed
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-request-footprint-record-gate
+           record "revision-current"))))
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-request-footprint-record-gate
+           record "another-revision"))))
+    (setf (alist-get 'currentRatio record) 0.5)
+    (should
+     (eq 'blocked
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-request-footprint-record-gate
+           record "revision-current"))))
+    (setq record (chat-coding-acceptance-test--request-footprint-record))
+    (setf (alist-get 'currentCombinedBytes record) 7000
+          (alist-get 'currentRatio record) (/ 7000.0 6324)
+          (alist-get 'passed record) :json-false)
+    (should
+     (eq 'failed
+         (chat-coding-acceptance-gate-status
+          (chat-coding-acceptance-request-footprint-record-gate
+           record "revision-current"))))))
+
 (ert-deftest chat-coding-acceptance-reliability-evidence-is-required ()
   "Missing Goal and Plan Mode measurements block every reliability gate."
   (let ((gates (chat-coding-acceptance-reliability-gates nil)))
@@ -460,7 +505,9 @@
           (record (chat-coding-acceptance-test--reliability-record))
           (quality-record (chat-coding-acceptance-test--quality-record))
           (canonical-record
-           (chat-coding-acceptance-test--canonical-record)))
+           (chat-coding-acceptance-test--canonical-record))
+          (footprint-record
+           (chat-coding-acceptance-test--request-footprint-record)))
      (make-directory baseline-directory t)
      (make-directory current-directory t)
      (setf (alist-get 'implementationRevision
@@ -492,7 +539,7 @@
        (let* ((gates
                (chat-coding-acceptance-run-final
                 baseline-directory current-directory record quality-record
-                canonical-record))
+                canonical-record footprint-record))
               (provenance
                (seq-find
                 (lambda (gate)
@@ -510,6 +557,12 @@
                 (lambda (gate)
                   (equal "canonical-suite-record"
                          (chat-coding-acceptance-gate-name gate)))
+                gates))
+              (footprint-provenance
+               (seq-find
+                (lambda (gate)
+                  (equal "first-request-footprint-record"
+                         (chat-coding-acceptance-gate-name gate)))
                 gates)))
          (should provenance)
          (should (eq 'passed
@@ -523,7 +576,12 @@
          (should
           (eq 'passed
               (chat-coding-acceptance-gate-status
-               canonical-provenance))))))))
+               canonical-provenance)))
+         (should footprint-provenance)
+         (should
+          (eq 'passed
+              (chat-coding-acceptance-gate-status
+               footprint-provenance))))))))
 
 (ert-deftest chat-coding-acceptance-record-is-immutable-and-strict ()
   "A blocked gate yields an immutable blocked Eval result."
@@ -549,11 +607,30 @@
          (baseline
           (chat-coding-acceptance-test--result
            'passed (list check)
-           '((tokenUsage . ((input_tokens . 1000)))) '("large-repo")))
+           '((firstRequestTokenUsage . ((input_tokens . 1000))))
+           '("large-repo")))
          (current
           (chat-coding-acceptance-test--result
            'passed (list check)
-           '((tokenUsage . ((input_tokens . 800)))) '("large-repo")))
+           '((firstRequestTokenUsage . ((input_tokens . 800))))
+           '("large-repo")))
+         (gate
+          (chat-coding-acceptance--large-repo-token-gate
+           (list baseline) (list current))))
+    (should (eq 'passed (chat-coding-acceptance-gate-status gate)))))
+
+(ert-deftest chat-coding-acceptance-large-repo-uses-valid-failed-baseline ()
+  "Correctness failure does not erase a trustworthy performance sample."
+  (let* ((baseline
+          (chat-coding-acceptance-test--result
+           'failed (list (chat-eval-check "judge" nil t nil))
+           '((firstRequestTokenUsage . ((input_tokens . 1000))))
+           '("large-repo")))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list (chat-eval-check "judge" t t t))
+           '((firstRequestTokenUsage . ((input_tokens . 800))))
+           '("large-repo")))
          (gate
           (chat-coding-acceptance--large-repo-token-gate
            (list baseline) (list current))))
@@ -565,11 +642,13 @@
          (baseline
           (chat-coding-acceptance-test--result
            'passed (list check)
-           '((tokenUsage . ((input_tokens . 1000)))) '("large-repo")))
+           '((firstRequestTokenUsage . ((input_tokens . 1000))))
+           '("large-repo")))
          (current
           (chat-coding-acceptance-test--result
            'passed (list check)
-           '((tokenUsage . ((input_tokens . 800)))) '("large-repo"))))
+           '((firstRequestTokenUsage . ((input_tokens . 800))))
+           '("large-repo"))))
     (setf (alist-get 'fixtureIndexedFileCount
                      (chat-eval-result-metadata current))
           9999)
@@ -726,7 +805,8 @@
         (let* ((task-id (format "task-%02d" task))
                (judge (chat-eval-check "judge" t t t))
                (executor '((model . fixed)
-                           (tokenUsage . ((input_tokens . 100)))))
+                           (firstRequestTokenUsage .
+                                                   ((input_tokens . 100)))))
                (invalid (and (= task 0) (= repeat 0))))
           (push (chat-coding-acceptance-test--result
                  'passed (list judge) executor nil task-id)
@@ -750,7 +830,7 @@
       (should (equal "raw=150/150 valid=150/149"
                      (chat-coding-acceptance-gate-actual sample))))))
 
-(ert-deftest chat-coding-acceptance-token-coverage-includes-the-baseline ()
+(ert-deftest chat-coding-acceptance-first-request-coverage-includes-baseline ()
   "Sparse baseline usage blocks token comparison even when current is complete."
   (let* ((judge (chat-eval-check "judge" t t t))
          (baseline
@@ -759,11 +839,12 @@
          (current
           (chat-coding-acceptance-test--result
            'passed (list judge)
-           '((model . fixed) (tokenUsage . ((input_tokens . 100))))))
+           '((model . fixed)
+             (firstRequestTokenUsage . ((input_tokens . 100))))))
          (coverage
           (seq-find
            (lambda (gate)
-             (equal "live-eval-token-coverage"
+             (equal "live-eval-first-request-token-coverage"
                     (chat-coding-acceptance-gate-name gate)))
            (chat-coding-acceptance-live-gates
             (list baseline) (list current)))))
@@ -771,6 +852,30 @@
                 (chat-coding-acceptance-gate-status coverage)))
     (should (equal '((baseline . 1.0) (current . 0.0))
                    (chat-coding-acceptance-gate-actual coverage)))))
+
+(ert-deftest chat-coding-acceptance-token-budget-measures-first-request-only ()
+  "Later agent turns cannot redefine the fixed request-overhead gate."
+  (let* ((judge (chat-eval-check "judge" t t t))
+         (baseline
+          (chat-coding-acceptance-test--result
+           'passed (list judge)
+           '((firstRequestTokenUsage . ((input_tokens . 100)))
+             (finalRequestTokenUsage . ((input_tokens . 100))))))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list judge)
+           '((firstRequestTokenUsage . ((input_tokens . 105)))
+             (finalRequestTokenUsage . ((input_tokens . 1000))))))
+         (gate
+          (seq-find
+           (lambda (candidate)
+             (equal "live-eval-first-request-input-token-budget"
+                    (chat-coding-acceptance-gate-name candidate)))
+           (chat-coding-acceptance-live-gates
+            (list baseline) (list current)))))
+    (should (eq 'passed (chat-coding-acceptance-gate-status gate)))
+    (should (equal '((baseline . 100) (current . 105))
+                   (chat-coding-acceptance-gate-actual gate)))))
 
 (ert-deftest chat-coding-acceptance-cancel-discards-fixture-and-timer ()
   "Cancelling an owned benchmark removes its timer, map, and fixture."

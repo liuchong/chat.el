@@ -1101,6 +1101,14 @@ Goal 会在下一轮自动恢复相应生命周期工具。空参数说明不再
 agent-profile、tool-caller 和 capability tests 为 92/92。该结果只关闭固定请求体积缺陷，
 尚不替代新 revision 的 30-by-5 paired live campaign，也不改变 large-repo 指标语义。
 
+同日已把含义模糊的单个 `tokenUsage` 改为 `firstRequestTokenUsage`、
+`finalRequestTokenUsage`、`totalTokenUsage`、`requestCount` 和
+`usageSampleCount`；请求数由 `turn-start` 统计，usage 缺失不会被当作零补入累计值。110% 固定开销门与
+large-repo 15% 降幅门只读取 valid trials 的首轮 provider usage；任务正确性失败仍由
+成功率门严格计算，但不再删除可信性能样本，基础设施无效 attempt 仍全部排除。无网络
+footprint record 同时绑定 implementation revision、clean-tree 和冻结 baseline，并作为
+`chat-coding-acceptance-run-final` 的强制来源门；缺失或手改 ratio 均为 blocked。
+
 Revision `54db3f1` 的 replacement current campaign 完成 150/150，通过五种语言
 各 30/30、六类任务各 25/25；越界写入为 0，20 次声明的生成物全部完成审计和清理。
 同 revision 的 runtime、quality、canonical 记录分别通过 9/9、20/20、1859/1859。
@@ -1290,7 +1298,8 @@ CHAT_REQUEST_FOOTPRINT_OUTPUT=/absolute/path/request-footprint.json \
 命令必须在将要验收的 clean implementation revision 上运行。最终调用
 `chat-coding-acceptance-run-final` 时，读取三份 JSON，把完整 runtime 顶层对象作为
 第三个参数 `metadata`、完整 quality 顶层对象作为第四个参数 `quality-metadata`
-、完整 canonical 顶层对象作为第五个参数 `canonical-metadata` 传入；只手工摘录数值
+、完整 canonical 顶层对象作为第五个参数 `canonical-metadata`、完整 request-footprint
+顶层对象作为第六个参数 `request-footprint-metadata` 传入；只手工摘录数值
 或缺少 `acceptanceGates`、原始样本、精确测试清单、定向测试证据、revision、clean
 标记的记录均不合格。
 
@@ -1501,7 +1510,7 @@ Trace 至少新增：
 - Top-5 命中率 = 预期必要文件至少一个出现在前五个非重复候选中的查询数 / 全部相关性查询数。
 - Review precision = 被 fixture 或独立确定性证据确认的 finding 数 / 全部正式 findings；Review recall = 被找到的预埋 critical/high 缺陷数 / 预埋 critical/high 缺陷总数。
 - 延迟 p95 使用全部有效样本按毫秒升序排列，取 `ceil(0.95 * N)` 的第 N 项；样本数少于 20 时不得报告 p95 为验收证据。
-- token 指标只比较 provider 返回了可信 usage 的 valid trials；缺少 usage 的比例必须单独报告，超过 5% 时 token 门槛状态为 blocked。
+- token 指标分别保存 first request、final request、total task 和 request count；固定开销与 large-repo 门只比较 provider 返回可信 first-request usage 的 valid trials。缺少 usage 的比例必须单独报告，超过 5% 时 token 门槛状态为 blocked。有效 trial 的正确性失败不删除性能样本，基础设施无效 attempt 不得进入样本。
 - first-request footprint 使用真实 request builder 在 transport 前生成的 message content 与 provider tools JSON 字节和；必须相对仓库内冻结 M9 基线 <= 110%，且运行过程不得联网。该门槛约束固定请求开销，不替代 provider usage 的 live token 指标。
 - 性能测试必须记录机器、操作系统、Emacs 版本、冷/热缓存、fixture digest 和重复次数。最终值取至少 30 次 warm query；环境变化后不得与旧绝对值混用。
 - 最终比较前必须验证两组 task ID、task revision、fixture digest、provider/model、capability snapshot、profile 和运行参数完全一致；不一致时结果为 blocked，不得计算“提升”。
@@ -1541,7 +1550,7 @@ Trace 至少新增：
 - 隔离测试中的项目外读写、symlink escape、默认网络和环境泄漏全部被阻止。
 - timeout/cancel/crash 后没有本轮创建的孤儿进程、监听端口或 worktree。
 - 10,000 文件 fixture 的主循环单切片 <= 50ms，warm semantic query p95 <= 200ms。
-- 最终成功任务的中位输入 token 不高于 M9 同任务基线的 110%；large-repo tasks 的中位输入 token 必须至少降低 15%。
+- valid trials 的 first-request 中位输入 token 不高于 M9 同任务基线的 110%；large-repo tasks 的 first-request 中位输入 token 必须至少降低 15%。正确性由独立成功率门判定，不与性能样本资格混合。
 
 ### 13.6 上下文连续性与计划
 

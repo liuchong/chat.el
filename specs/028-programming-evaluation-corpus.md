@@ -211,11 +211,22 @@ Every significant campaign record includes:
 - manifest path, manifest digest, task revisions and expected sample count;
 - valid, passed, failed, cancelled, timed-out, errored and quarantined counts;
 - per-language and per-category rates, safety violations and cleanup residue;
-- latency and token metrics when the provider exposes trusted usage;
+- latency plus first-request, final-request and total-task token metrics when
+  the provider exposes trusted usage, including request count and coverage;
 - exact failed task identities, root-cause class and whether a code, prompt,
   fixture or infrastructure change followed;
 - a final `PASS`, `FAIL`, `BLOCKED` or `INVALID` verdict using the repository
-  vocabulary in the fixture README.
+vocabulary in the fixture README.
+
+Token boundaries are explicit. `firstRequestTokenUsage` measures fixed prompt,
+context-selection and provider-schema cost; `finalRequestTokenUsage` describes
+the last model turn; `totalTokenUsage` is the sum across `requestCount` model
+requests; `usageSampleCount` exposes provider coverage independently. The 110
+percent fixed-overhead gate and the large-repository reduction
+gate use first-request input tokens from all valid trials, regardless of task
+correctness. Correctness failures remain failures in the success-rate gates but
+do not erase an otherwise trustworthy performance sample. Infrastructure-
+invalid attempts remain excluded from both correctness and token comparison.
 
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive

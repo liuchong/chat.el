@@ -256,9 +256,11 @@ manifest、revision、运行配置、重复身份或并发执行，也不能向�
 恢复后对同一目录执行 `M-x chat-coding-eval-resume-live`，即可重试该缺失身份。
 分别得到 150 条 M9 与 150 条 M19 结果后运行
 `M-x chat-coding-acceptance-run-final`。验收会拒绝混合 campaign、相同实现
-revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 token usage 或
-不真实的 large-repo 样本，结果不会被误判为通过。最终验收还必须读取同一 clean
-implementation revision 上生成的完整 runtime、quality 与 canonical JSON 记录。聚合器会复算
+revision、不同 manifest、非 30-by-5 唯一 trial 矩阵、缺失可信 first-request token
+usage 或不真实的 large-repo 样本，结果不会被误判为通过。每条 trial 分别记录首轮、
+末轮、累计 token 和模型请求数；固定开销与 large-repo 门只比较有效 trial 的首轮 usage，
+不会把任务正确性失败误当成缺失性能样本。最终验收还必须读取同一 clean implementation
+revision 上生成的完整 runtime、quality、canonical 与 request-footprint JSON 记录。聚合器会复算
 runtime 的九个 gate，检查 17 次 Goal/Plan 定向检查和 20 个 Goal 投影样本；同时从
 quality 原始语义查询、48 个固定场景、20 个 plan/work-note prompt 样本和 Review
 finding sets 重算 20 个质量 gate。手工填写汇总字段、遗漏语言或把 skip 当 pass 都会

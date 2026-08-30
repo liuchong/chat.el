@@ -126,7 +126,7 @@ Examples:
 
 ```text
 PASS: core-current-r1 contains 150/150 unique valid trials at abc1234; all correctness, scope, cleanup and declared performance gates passed.
-FAIL: core-current-r1 is complete but failed live-eval-input-token-budget; 150 valid trials are affected. See the M19 stage record.
+FAIL: core-current-r1 is complete but failed live-eval-first-request-input-token-budget; 150 valid trials are affected. See the M19 stage record.
 BLOCKED: extended-smoke-r1 produced no admissible conclusion because the TypeScript compiler failed preflight; attempts were quarantined and trial identities remain pending.
 INVALID: core-current-r1 cannot be compared because its manifest digest differs from the frozen baseline campaign.
 ```
@@ -148,7 +148,8 @@ Retain these facts:
 - expected, valid, passed, failed, cancelled, timed-out, errored and quarantined counts;
 - per-language and per-category rates;
 - scope, false-completion and cleanup counts;
-- latency and trusted token statistics with sample coverage;
+- latency, request count, first/final/total trusted token statistics and sample
+  coverage;
 - deterministic suite counts and performance measurements;
 - failed task IDs, root-cause class, action taken and remaining work;
 - final standard verdict.

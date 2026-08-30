@@ -46,16 +46,22 @@ cleanup residue explicitly, including zero.
 
 | Metric | Value | Coverage | Gate |
 |---|---:|---:|---|
-| Input tokens | | | |
-| Output tokens | | | |
+| First-request input tokens | | | |
+| Final-request input tokens | | | |
+| Total-task input tokens | | | |
+| Total-task output tokens | | | |
+| Model request count | | | |
+| Usage sample count | | | |
 | Latency median | | | |
 | Latency p95 | | | |
 | Main-loop max slice | | | |
 | Warm query p95 | | | |
 | Incremental update | | | |
 
-Do not synthesize missing usage as zero. Name the exact request boundary used by
-each token metric and keep baseline/current definitions identical.
+Do not synthesize missing usage as zero. Keep first-request, final-request and
+total-task usage separate, report coverage, and keep baseline/current
+definitions identical. A valid failed correctness trial may retain trustworthy
+performance evidence; an infrastructure-invalid attempt may not.
 
 ## Deterministic Evidence
 

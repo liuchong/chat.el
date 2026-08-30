@@ -979,6 +979,20 @@ ON-COMPLETE receives results in execution order and the suite state."
       (plist-get (chat-llm-get-provider-config provider) :model)
       (user-error "Provider %s has no configured model" provider)))
 
+(defconst chat-coding-eval--token-usage-keys
+  '(:input-tokens :output-tokens :total-tokens
+    :cache-read-tokens :cache-write-tokens)
+  "Normalized usage counters retained for each live request.")
+
+(defun chat-coding-eval--sum-token-usage (samples)
+  "Return token counters summed independently across usage SAMPLES."
+  (let (total)
+    (dolist (key chat-coding-eval--token-usage-keys total)
+      (let ((values
+             (mapcar (lambda (sample) (plist-get sample key)) samples)))
+        (when (and values (seq-every-p #'numberp values))
+          (setq total (plist-put total key (apply #'+ values))))))))
+
 (defun chat-coding-eval--campaign-id ()
   "Return a filesystem-safe live campaign identifier."
   (format "coding-%s-%06x"
@@ -1500,7 +1514,10 @@ Return the unique repetition/scenario key."
              (chat-coding-eval--verification-guidance task)))
            (capabilities
             (chat-coding-eval--capability-snapshot provider resolved-model))
-           usage
+           first-usage
+           final-usage
+           usage-samples
+           (request-count 0)
            (tool-errors 0)
            (approvals 0)
            (stale-writes 0)
@@ -1526,8 +1543,14 @@ Return the unique repetition/scenario key."
          :transport 'stream
          :on-event
          (lambda (event)
+           (when (eq (plist-get event :type) 'turn-start)
+             (cl-incf request-count))
            (when (plist-member event :usage)
-             (setq usage (plist-get event :usage)))
+             (let ((usage (copy-tree (plist-get event :usage))))
+               (unless first-usage
+                 (setq first-usage usage))
+               (setq final-usage usage)
+               (push usage usage-samples)))
            (let ((type (plist-get event :type))
                  (tool-type (and (eq (plist-get event :type) 'tool-event)
                                  (plist-get (plist-get event :event) :type))))
@@ -1550,7 +1573,13 @@ Return the unique repetition/scenario key."
                 (transport . "stream")
                 (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
                 (failureReason . ,(plist-get event :reason))
-                (tokenUsage . ,usage)
+                (firstRequestTokenUsage . ,first-usage)
+                (finalRequestTokenUsage . ,final-usage)
+                (totalTokenUsage .
+                                 ,(chat-coding-eval--sum-token-usage
+                                   usage-samples))
+                (requestCount . ,request-count)
+                (usageSampleCount . ,(length usage-samples))
                 (sessionId . ,(chat-session-id session))
                 (runtimeTaskId . ,(and run
                                         (chat-agent-run-state-task-id run)))

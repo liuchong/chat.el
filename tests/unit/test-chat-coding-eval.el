@@ -395,16 +395,36 @@
                 '(:type tool-event :event (:type approval)))
        (funcall on-event
                 '(:type tool-event :event (:type tool-error)))
+       (funcall on-event '(:type turn-start))
        (funcall on-event
                 '(:type model-usage
                   :usage (:input-tokens 11 :output-tokens 4 :total-tokens 15)))
+       (funcall on-event '(:type turn-start))
+       (funcall on-event
+                '(:type model-usage
+                  :usage (:input-tokens 21 :output-tokens 8 :total-tokens 29)))
        (funcall on-event
                 '(:type agent-end :status completed :content "done"
                   :steps 1 :tool-calls nil :tool-results nil)))
      (should (= 1 (alist-get 'toolErrorCount metadata)))
      (should (= 2 (alist-get 'approvalCount metadata)))
-     (should (= 15 (plist-get (alist-get 'tokenUsage metadata)
-                              :total-tokens))))))
+     (should (= 11 (plist-get (alist-get 'firstRequestTokenUsage metadata)
+                              :input-tokens)))
+     (should (= 29 (plist-get (alist-get 'finalRequestTokenUsage metadata)
+                              :total-tokens)))
+     (should (= 44 (plist-get (alist-get 'totalTokenUsage metadata)
+                              :total-tokens)))
+     (should (= 2 (alist-get 'requestCount metadata)))
+     (should (= 2 (alist-get 'usageSampleCount metadata))))))
+
+(ert-deftest chat-coding-eval-total-usage-never-fills-a-missing-counter ()
+  "A partial provider usage field is omitted instead of counted as zero."
+  (let ((total
+         (chat-coding-eval--sum-token-usage
+          '((:input-tokens 10 :output-tokens 3)
+            (:input-tokens 20)))))
+    (should (= 30 (plist-get total :input-tokens)))
+    (should-not (plist-member total :output-tokens))))
 
 (ert-deftest chat-coding-eval-agent-projects-exact-command-judges ()
   "The live agent sees the same targeted argv that judges its result."
