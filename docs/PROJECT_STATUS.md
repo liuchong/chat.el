@@ -47,15 +47,15 @@ are implemented. Live coding Eval now writes each run to a fresh versioned
 campaign with immutable configuration and completion records. Interrupted
 campaigns can resume only validated missing repetition/task identities; stale
 locks recover, concurrent runs and configuration drift fail closed, and terminal
-evidence requires the exact unique result matrix. The immutable M9 baseline is
-complete with 150/150 results. The latest valid historical M19 current campaign
-also completed 150/150 with 112 passed, 37 cancelled and one failed, but its
-74.67 percent success rate misses the 80 percent floor. Post-run diagnosis fixed
-rustup access in the Darwin sandbox, native work-plan item schemas and explicit
-build-output accounting. A live Rust smoke now passes all five checks with one
-scoped source change and no scope leak. The historical campaigns remain
-immutable; final acceptance still needs fresh same-manifest baseline/current
-campaigns with complete trusted token usage. The fixed corpus includes a
+evidence requires the exact unique result matrix. The fresh DeepSeek paired
+campaign at revision `f0b0701` is complete: frozen M9 passed 17/150 and current
+passed 150/150, with every current language at 30/30, every category at 25/25,
+zero scope leaks and zero cleanup failures. Runtime, quality and canonical
+records passed 9/9, 20/20 and 1859/1859. Strict final acceptance nevertheless
+failed its token budget: current final-request input median was 12,242 versus
+baseline 9,223, and the large-repository comparison was blocked because the
+baseline task passed 0/5. M19 remains open for resident prompt and tool-schema
+cost reduction followed by fresh paired campaigns. The fixed corpus includes a
 measured 10,000-indexed-file large-repository task.
 
 The input prompt now owns one default-closed two-level work shelf. Its bounded

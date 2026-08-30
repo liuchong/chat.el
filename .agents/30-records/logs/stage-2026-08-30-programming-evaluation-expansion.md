@@ -89,3 +89,49 @@ formal result is invalid even when the remaining samples are useful diagnostics.
 After a harness revision changes, both comparison roles receive fresh campaign
 identities; partial directories are never rewritten or mixed into the final
 aggregate.
+
+## Final Core Acceptance Record
+
+The strict paired aggregate at harness revision
+`f0b0701416aaccc54edbac1642886b51f1548d91` used DeepSeek
+`deepseek-v4-flash`, manifest digest
+`0164487205a6fab51be67eebdfb9d7dad48ec7c68ccadb20b513c2da5e344dcc`
+and these immutable campaigns:
+
+| Role | Campaign | Implementation | Passed |
+|---|---|---|---:|
+| baseline | `m9-baseline-deepseek-v4-flash-e4e6cbc-f0b0701` | `e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3` | 17/150 |
+| current | `m19-current-deepseek-v4-flash-f0b0701` | `f0b0701416aaccc54edbac1642886b51f1548d91` | 150/150 |
+
+Current language results were 30/30 for Emacs Lisp, Go, JavaScript, Python and
+Rust. Current category results were 25/25 for locate/explain, single-file fix,
+multi-file change, refactor, failing-test fix and read-only review. The baseline
+language pass counts were 0, 3, 8, 2 and 4 respectively; its category pass
+counts were 10 locate/explain, 7 read-only review and zero for every mutation
+category. Current out-of-scope writes and cleanup failures were both zero.
+
+Three current curl code 18 attempts were quarantined and later resumed. They did
+not claim formal trial identities. The baseline produced no infrastructure
+attempt. Raw campaign storage remains outside Git; both bounded result
+directories were under 1 MiB after completion.
+
+Deterministic evidence for the clean current revision passed 9/9 runtime gates,
+20/20 quality gates and 1859/1859 canonical tests. Semantic definition,
+reference precision/recall and top-five rates were all 1.0. Review recall was
+1.0 and precision 0.875. The 10,000-file benchmark measured a 29.388 ms maximum
+main-loop slice, 122.949 ms warm-query p95 and 1 ms incremental update.
+
+The final result `eval-20260830T024330654360000-2acb4f` is **failed**, not
+accepted. Final-request input-token median was 9,223 for baseline and 12,242 for
+current, exceeding the current <= baseline * 1.10 gate. The large-repository
+token gate was blocked because all five baseline `python-locate` trials failed,
+while the gate currently admits only passed trials. A separate wire-log audit
+found first-request medians of 1,921.5 and 5,413.5 tokens. This rules out the
+explanation that only longer successful tool loops caused the regression; fixed
+resident prompt and tool-schema cost is the next optimization target.
+
+Standard verdict:
+
+```text
+FAIL: the paired f0b0701 campaign is complete and current correctness is 150/150, but live-eval-input-token-budget failed and live-eval-large-repo-token-budget is blocked; reduce fixed context cost and rerun both immutable roles.
+```

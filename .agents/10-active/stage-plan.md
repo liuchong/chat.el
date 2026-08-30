@@ -38,19 +38,16 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-Produce the missing comparable M19 live evidence: use the provider/model and
-fixed manifest identity frozen by the completed M9 baseline, create one fresh
-immutable `current` campaign, run M19 over all 30 tasks five times, then record
-the strict immutable paired aggregate. The current campaign must have one clean
-implementation revision, one manifest digest, 150 results and a terminal
-completion record. If its process is interrupted, resume that exact campaign
-with `chat-coding-eval-resume-live`; never mix the earlier 30/150 attempt bound
-to revision `8c45301`, or the 150/150 attempt with 133 infrastructure failures
-bound to `8ca4ae8`, into the new result set. Exhausted transient transport
-failures must pause with an archived attempt and be resumed after connectivity
-recovers. The corpus includes a versioned task with 10,000 measured indexed
-files. Do not mark M19 complete while the current campaign or its trusted token
-sample is absent.
+Reduce the fixed resident prompt and tool-schema cost exposed by the completed
+`f0b0701` paired campaign. Preserve the current 150/150 correctness result while
+bringing median trusted input tokens to at most 110 percent of the frozen M9
+baseline. Measure first-request and final-request usage separately so startup
+context cost cannot be confused with longer successful tool loops. Define a
+valid large-repository comparison when the historical task has trusted usage
+but does not pass; do not weaken the 15 percent reduction target or rewrite the
+immutable campaign. After implementation, commit a clean revision, rebuild the
+runtime/quality/canonical records and run fresh baseline/current 30-by-5
+campaigns. Do not mark M19 complete until both token gates pass.
 
 ## Stage Gate
 

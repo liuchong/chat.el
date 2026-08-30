@@ -24,21 +24,22 @@ declared generated-output occurrences were audited and cleaned. Runtime,
 quality and canonical records for the same clean revision passed 9/9, 20/20
 and 1859/1859 respectively.
 
-The paired historical baseline was stopped after 64 durable results. Its first
-two complete repetitions passed 2/30 and 1/30, mainly because the old guarded
-approval path rejected source edits. A later curl code 18 result exposed a
-campaign-harness defect: the shared classifier called an Agent helper that did
-not exist at the frozen M9 revision before reaching its independent transport
-table. That infrastructure result is inadmissible. The campaign classifier now
-treats the Agent helper as optional and tests code 16 and 18 with the helper
-absent. Both roles require fresh campaign identities after this fix.
+Fresh campaigns at harness revision `f0b0701` are complete. The frozen M9
+baseline passed 17/150 while the current implementation passed 150/150. Current
+results are 30/30 for every language and 25/25 for every category, with zero
+out-of-scope writes and zero cleanup failures. Three current code 18 attempts
+were quarantined and resumed without consuming trial identities; the baseline
+had no infrastructure attempts.
 
-M19 final acceptance remains blocked only on fresh paired live evidence.
-Baseline and current must each run 30 tasks five times with one identical concrete
-provider/model/capability identity and trusted usage. Historical campaigns stay
-immutable incident or comparison evidence and cannot be mixed into the final
-aggregate. A DeepSeek Flash campaign is an allowed replacement identity only if
-both roles use it from fresh campaign directories and readiness succeeds.
+M19 final acceptance is now failed on measured token efficiency, not missing
+live evidence. The current final-request input-token median is 12,242 versus
+9,223 for the baseline, above the 110 percent ceiling. The large-repository
+gate is blocked because the baseline `python-locate` task failed all five
+trials, leaving no passed baseline sample under the current gate definition.
+A first-request diagnostic also measures 5,413.5 current tokens versus 1,921.5
+baseline tokens, locating the main cost in resident prompt and tool contracts
+rather than only in longer successful tool loops. Keep the 150/150 capability
+result; next reduce fixed context/schema cost and rerun both immutable roles.
 
 The next recorded expansion is M20, after the fixed M19 comparison: Zig,
 Clojure, Java, TypeScript, C, C++ and SQL each receive the same six task

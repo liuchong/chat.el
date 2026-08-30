@@ -1081,6 +1081,17 @@ JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Pl
 `generatedPaths` 并提升 task revision，源码 allowlist 不变。manifest digest 改变后，
 `16bbffd` campaign 只能作为诊断证据；重新提交并验证后建立新的两侧 campaign。
 
+Revision `f0b0701` 的 fresh paired campaign 已完成。M9 baseline 为 17/150，current
+为 150/150；current 五种语言均为 30/30，六类任务均为 25/25，越界写入和 workspace
+清理失败均为 0。current 的三次 curl code 18 attempt 被隔离后按原 identity 恢复，
+没有污染 150 个正式结果。strict final aggregate 的 correctness、identity、scope、
+runtime、quality、canonical 与性能门均通过，但总状态为 failed：final-request input
+token 中位数 baseline 9,223、current 12,242，超过 110% 上限；large-repo gate 因
+baseline `python-locate` 5/5 未通过而没有 passed baseline usage，状态为 blocked。
+额外从 session wire 复算 first-request 中位数为 baseline 1,921.5、current 5,413.5，
+证明主要差距是常驻 prompt/tool schema 固定开销。下一轮先优化该开销并区分首次请求与
+末次请求指标，再在新 revision 上重跑 paired campaign；不得降低阈值或改写本次记录。
+
 Revision `54db3f1` 的 replacement current campaign 完成 150/150，通过五种语言
 各 30/30、六类任务各 25/25；越界写入为 0，20 次声明的生成物全部完成审计和清理。
 同 revision 的 runtime、quality、canonical 记录分别通过 9/9、20/20、1859/1859。
