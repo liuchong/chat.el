@@ -1092,6 +1092,15 @@ baseline `python-locate` 5/5 未通过而没有 passed baseline usage，状态�
 证明主要差距是常驻 prompt/tool schema 固定开销。下一轮先优化该开销并区分首次请求与
 末次请求指标，再在新 revision 上重跑 paired campaign；不得降低阈值或改写本次记录。
 
+2026-08-30 已建立无网络 first-request footprint gate。旧 current 首请求包含 47 个
+provider tools，message 与 tool JSON 合计 20,898 bytes；冻结 M9 基线为 19 个 tools、
+6,324 bytes。编程 profile 现保留 48 个完整授权工具，但首轮只公布 19 个基础工具，
+Plan、Goal、工作笔记、验证、上下文和批量编辑能力按阶段激活，已存在的 active Plan 或
+Goal 会在下一轮自动恢复相应生命周期工具。空参数说明不再序列化，非空说明保持不变。
+真实 transport 边界复测为 6,605 bytes，即基线的 1.0444 倍，通过 1.10 门槛；相关
+agent-profile、tool-caller 和 capability tests 为 92/92。该结果只关闭固定请求体积缺陷，
+尚不替代新 revision 的 30-by-5 paired live campaign，也不改变 large-repo 指标语义。
+
 Revision `54db3f1` 的 replacement current campaign 完成 150/150，通过五种语言
 各 30/30、六类任务各 25/25；越界写入为 0，20 次声明的生成物全部完成审计和清理。
 同 revision 的 runtime、quality、canonical 记录分别通过 9/9、20/20、1859/1859。
@@ -1271,6 +1280,11 @@ CHAT_QUALITY_RELIABILITY_OUTPUT=/absolute/path/quality-reliability.json \
 CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json \
   /Users/liu/projects/.agent-tools/capped.sh 4096 \
   emacs -Q -batch -l tests/run-tests.el
+
+CHAT_REQUEST_FOOTPRINT_OUTPUT=/absolute/path/request-footprint.json \
+  /Users/liu/projects/.agent-tools/capped.sh 1600 \
+  emacs -Q --batch -l tests/test-paths.el \
+  -l tests/performance/run-request-footprint.el
 ```
 
 命令必须在将要验收的 clean implementation revision 上运行。最终调用
@@ -1488,6 +1502,7 @@ Trace 至少新增：
 - Review precision = 被 fixture 或独立确定性证据确认的 finding 数 / 全部正式 findings；Review recall = 被找到的预埋 critical/high 缺陷数 / 预埋 critical/high 缺陷总数。
 - 延迟 p95 使用全部有效样本按毫秒升序排列，取 `ceil(0.95 * N)` 的第 N 项；样本数少于 20 时不得报告 p95 为验收证据。
 - token 指标只比较 provider 返回了可信 usage 的 valid trials；缺少 usage 的比例必须单独报告，超过 5% 时 token 门槛状态为 blocked。
+- first-request footprint 使用真实 request builder 在 transport 前生成的 message content 与 provider tools JSON 字节和；必须相对仓库内冻结 M9 基线 <= 110%，且运行过程不得联网。该门槛约束固定请求开销，不替代 provider usage 的 live token 指标。
 - 性能测试必须记录机器、操作系统、Emacs 版本、冷/热缓存、fixture digest 和重复次数。最终值取至少 30 次 warm query；环境变化后不得与旧绝对值混用。
 - 最终比较前必须验证两组 task ID、task revision、fixture digest、provider/model、capability snapshot、profile 和运行参数完全一致；不一致时结果为 blocked，不得计算“提升”。
 - 两组结果必须分别来自唯一且角色正确的 campaign；manifest digest 必须相同，campaign/configuration digest 和 implementation revision 必须不同。`campaign.json` 与 `completion.json` 必须匹配且分别确认 30 tasks、5 repetitions、150 个唯一 repetition/task 结果和 complete。缺字段、重复结果、混合身份、复用同一 revision 或尚未补齐的中断 campaign 均不得通过。

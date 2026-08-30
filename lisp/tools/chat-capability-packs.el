@@ -32,44 +32,65 @@
 (defvar chat-capability-mail-drafts nil
   "Local mail draft records.  Sending is intentionally not implemented.")
 
-(defconst chat-capability-programming-tools
-  '(programming_git_status
+(defconst chat-capability-programming-base-tools
+  '(programming_capability_activate
+    programming_git_status
     programming_flymake_diagnostics
     programming_compile_task
-    programming_task_output
     programming_completion_at_point
-    programming_verification_plan
-    programming_verification_run
-    programming_verification_read_result
-    programming_work_note_upsert
-    programming_work_note_query
-    programming_work_note_resolve
-    programming_work_note_supersede
-    programming_work_note_archive
-    programming_work_note_delete
-    programming_context_inspect
-    programming_goal_create
-    programming_goal_read
-    programming_goal_list
-    programming_goal_progress
-    programming_goal_block
-    programming_goal_complete
-    programming_plan_mode_enter
-    programming_plan_create
-    programming_plan_read
-    programming_plan_list
-    programming_plan_update
-    programming_plan_submit
-    programming_plan_transition
-    programming_plan_resume
-    programming_plan_cancel
-    programming_plan_skip
-    programming_plan_mode
     web_eww_read
     files_read files_read_lines files_list files_grep open_file
-    files_write files_replace files_patch apply_patch
+    files_write files_replace apply_patch
     emacs_buffers emacs_read_buffer emacs_imenu emacs_xref emacs_project)
-  "Tools exposed by the programming profile.")
+  "Small tool menu advertised at the start of a programming run.")
+
+(defconst chat-capability-programming-verification-tools
+  '(programming_verification_plan programming_verification_run
+    programming_verification_read_result programming_task_output)
+  "Programming tools advertised for verification work.")
+
+(defconst chat-capability-programming-work-note-tools
+  '(programming_work_note_upsert programming_work_note_query
+    programming_work_note_resolve programming_work_note_supersede
+    programming_work_note_archive programming_work_note_delete)
+  "Programming tools advertised for structured working notes.")
+
+(defconst chat-capability-programming-context-tools
+  '(programming_context_inspect)
+  "Programming tools advertised for scoped context inspection.")
+
+(defconst chat-capability-programming-batch-edit-tools
+  '(files_patch)
+  "Programming tools advertised for structured multi-replacement edits.")
+
+(defconst chat-capability-programming-goal-tools
+  '(programming_goal_create programming_goal_read programming_goal_list
+    programming_goal_progress programming_goal_block programming_goal_complete)
+  "Programming tools advertised for durable Goal work.")
+
+(defconst chat-capability-programming-plan-tools
+  '(programming_plan_mode_enter programming_plan_create programming_plan_read
+    programming_plan_list programming_plan_update programming_plan_submit
+    programming_plan_transition programming_plan_resume programming_plan_cancel
+    programming_plan_skip programming_plan_mode)
+  "Programming tools advertised for TODO plans and Plan Mode.")
+
+(defconst chat-capability-programming-tool-groups
+  `((plan . ,chat-capability-programming-plan-tools)
+    (goal . ,chat-capability-programming-goal-tools)
+    (notes . ,chat-capability-programming-work-note-tools)
+    (verification . ,chat-capability-programming-verification-tools)
+    (context . ,chat-capability-programming-context-tools)
+    (batch-edit . ,chat-capability-programming-batch-edit-tools))
+  "On-demand programming tool groups keyed by activation name.")
+
+(defconst chat-capability-programming-tools
+  (delete-dups
+   (apply #'append
+          (copy-sequence chat-capability-programming-base-tools)
+          (mapcar (lambda (entry) (copy-sequence (cdr entry)))
+                  chat-capability-programming-tool-groups)))
+  "Complete programming authority; only a stage-relevant subset is advertised.")
 
 (defconst chat-capability--work-plan-item-schema
   '((type . "object")
@@ -154,6 +175,36 @@
     ('all nil)
     (_ (error "Unknown capability profile: %s" profile))))
 
+(defun chat-capability--ordered-tool-union (&rest groups)
+  "Return GROUPS as one stable duplicate-free tool list."
+  (let (result)
+    (dolist (group groups result)
+      (dolist (tool group)
+        (unless (memq tool result)
+          (setq result (append result (list tool))))))))
+
+(defun chat-capability-programming-tool-advertisement
+    (session profile authorized-tools)
+  "Select the stage-relevant programming tools for SESSION and PROFILE."
+  (when (eq (chat-agent-profile-id profile) 'code)
+    (let ((advertised (copy-sequence chat-capability-programming-base-tools)))
+      (when (and session
+                 (or (ignore-errors (chat-work-plan-current session))
+                     (ignore-errors (chat-plan-mode-active-p session))))
+        (setq advertised
+              (chat-capability--ordered-tool-union
+               advertised chat-capability-programming-plan-tools)))
+      (when (and session (ignore-errors (chat-goal-current session)))
+        (setq advertised
+              (chat-capability--ordered-tool-union
+               advertised chat-capability-programming-goal-tools)))
+      (list :advertised-tools
+            (seq-filter (lambda (tool) (memq tool authorized-tools))
+                        advertised)))))
+
+(add-hook 'chat-agent-profile-tool-advertisement-functions
+          #'chat-capability-programming-tool-advertisement)
+
 (defun chat-capability-apply-profile (session profile)
   "Apply capability PROFILE to SESSION using session tool overlays."
   (let ((tools (chat-capability-profile-tools profile)))
@@ -174,6 +225,42 @@
            chat-tool-caller-current-session)
       (and (boundp 'chat--current-session) chat--current-session)
       (error "No current chat session")))
+
+(defun chat-capability--execution-session ()
+  "Return the ephemeral execution session used for provider tool menus."
+  (or (and (boundp 'chat-tool-caller-current-session)
+           chat-tool-caller-current-session)
+      (and (boundp 'chat--current-session) chat--current-session)))
+
+(defun chat-capability--advertise-tools (tools)
+  "Advertise authorized TOOLS for the remainder of the current agent run."
+  (when-let ((session (chat-capability--execution-session)))
+    (let* ((config (copy-tree (chat-session-tool-config session)))
+           (enabled (plist-get config :enabled-tools))
+           (disabled (plist-get config :disabled-tools))
+           (current (if (plist-member config :advertised-tools)
+                        (plist-get config :advertised-tools)
+                      enabled))
+           (allowed (seq-filter
+                     (lambda (tool)
+                       (and (or (not (plist-member config :enabled-tools))
+                                (memq tool enabled))
+                            (not (memq tool disabled))))
+                     tools))
+           (advertised (chat-capability--ordered-tool-union current allowed)))
+      (setf (chat-session-tool-config session)
+            (plist-put config :advertised-tools advertised))
+      allowed)))
+
+(defun chat-capability-programming-capability-activate (capability)
+  "Advertise the programming tool group named CAPABILITY for this run."
+  (let* ((name (intern capability))
+         (tools (alist-get name chat-capability-programming-tool-groups)))
+    (unless tools
+      (error "Unknown programming capability: %s" capability))
+    (let ((advertised (chat-capability--advertise-tools tools)))
+      `((capability . ,capability)
+        (tools . ,(vconcat advertised))))))
 
 (defun chat-capability--project-directory (&optional directory)
   "Return explicit DIRECTORY or the current session's project directory."
@@ -252,8 +339,10 @@
 
 (defun chat-capability-programming-compile-task (command &optional directory)
   "Start compile/test COMMAND as a background task."
-  (chat-work-task-start command
-                        (chat-capability--project-directory directory)))
+  (let ((task (chat-work-task-start
+               command (chat-capability--project-directory directory))))
+    (chat-capability--advertise-tools '(programming_task_output))
+    task))
 
 (defun chat-capability-programming-task-output (id &optional max-chars)
   "Read bounded output for compile/test task ID in the current session."
@@ -994,6 +1083,14 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
 
 (defun chat-capability-register-tools ()
   "Register programming, office, and daily capability tools."
+  (chat-capability--register-tool
+   'programming_capability_activate "Programming Capability Activate"
+   (concat "Expose a stage tool group for this run. Use plan before substantial "
+           "work, goal only when explicitly requested, and batch-edit only for "
+           "structured multi-replacement; apply_patch is already available.")
+   '((:name "capability" :type "string" :required t
+      :enum ("plan" "goal" "notes" "verification" "context" "batch-edit")))
+   #'chat-capability-programming-capability-activate 'project '(state))
   (chat-capability--register-tool
    'programming_git_status "Programming Git Status"
    "Return read-only git status for a directory."

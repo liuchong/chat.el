@@ -34,6 +34,8 @@ The repository keeps all reusable inputs and selected conclusions:
 | Machine-readable language inventory | `tests/fixtures/coding-eval/language-registry.json` | Versioned; distinguishes executable and planned cohorts |
 | Fixture source and tests | `tests/fixtures/coding-eval/` | Small, deterministic and dependency bounded |
 | Acceptance playbook and examples | `tests/fixtures/coding-eval/ACCEPTANCE.md` | Stable run sequence, wording and cleanup checklist |
+| First-request footprint baseline | `tests/fixtures/coding-eval/request-footprint-baseline.json` | Frozen historical measurement and explicit regression ceiling |
+| First-request footprint runner | `tests/performance/run-request-footprint.el` | No-network capture at the real transport boundary |
 | Runner and judges | `lisp/agent/chat-coding-eval.el` | Product code with unit and integration tests |
 | Acceptance thresholds | This spec and the active reliability plan | Stable until an explicit design revision |
 | User operation guide | `docs/code-mode-usage.md` | Updated with public commands and recovery steps |
@@ -54,6 +56,22 @@ accepted language IDs and separates `executable` from `planned`; a planned
 language is not a skip, pass or tested capability. Registry unit tests keep the
 core cohort identical to the languages actually present in `manifest.json` and
 keep every cohort bound to the same six accepted categories.
+
+### 2.1 First-Request Footprint Contract
+
+Provider tool schemas are request content and therefore part of the coding
+Agent's performance surface. The offline gate measures the first request after
+the actual profile, context and provider schema builders have run. Its metric is
+the sum of UTF-8 message-content bytes and serialized provider-tool JSON bytes.
+It deliberately excludes HTTP framing and credentials so the result is stable,
+reviewable and runnable without network access.
+
+The M9 baseline is frozen in `request-footprint-baseline.json`. Current code may
+retain broader authority while advertising only the stage-relevant tool menu;
+advertisement must never grant authority or bypass a disabled tool. The current
+footprint must remain at or below 110 percent of the frozen baseline before a
+live comparison revision is accepted. A threshold change is a design change
+that requires an updated spec and stage analysis, not a campaign workaround.
 
 ## 3. Task Matrix
 

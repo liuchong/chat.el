@@ -99,6 +99,14 @@
 (defvar chat-agent-profile--discovered-p nil
   "Whether profile candidates have been indexed at least once.")
 
+(defvar chat-agent-profile-tool-advertisement-functions nil
+  "Functions that may narrow the tools advertised for one agent run.
+
+Each function receives SESSION, the resolved PROFILE, and the authorized tool
+list.  The first non-nil return value must be a plist containing
+`:advertised-tools'.  Advertisement may only narrow authority; it never grants
+a tool that the resolved profile or session disabled.")
+
 (defun chat-agent-profile--validate (profile)
   "Validate and return declared PROFILE."
   (unless (chat-agent-profile-p profile)
@@ -610,6 +618,21 @@ When ALLOW-NIL is non-nil, nil is accepted."
     (if disabled
         (setq config (plist-put config :disabled-tools disabled))
       (setq config (plist-put config :disabled-tools nil)))
+    (when-let ((selection
+                (run-hook-with-args-until-success
+                 'chat-agent-profile-tool-advertisement-functions
+                 session profile enabled)))
+      (let ((advertised (plist-get selection :advertised-tools)))
+        (unless (and (plist-member selection :advertised-tools)
+                     (seq-every-p
+                      (lambda (tool)
+                        (and (memq tool enabled)
+                             (not (memq tool disabled))))
+                      advertised))
+          (signal 'chat-agent-profile-authority-expansion
+                  (list (chat-agent-profile-id profile)
+                        'advertised-tools advertised)))
+        (setq config (plist-put config :advertised-tools advertised))))
     config))
 
 (defun chat-agent-profile--tool-authorized-p (tool config)

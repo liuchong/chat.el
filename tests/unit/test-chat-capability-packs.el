@@ -22,6 +22,76 @@
                               :enabled-tools))
     (should (chat-session-tool-enabled-p session 'any-tool))))
 
+(ert-deftest chat-capability-code-profile-stages-its-provider-tool-menu ()
+  "The code profile keeps full authority while advertising a small base menu."
+  (let* ((profile (chat-agent-profile-resolve 'code))
+         (session (make-chat-session :id "staged-code"))
+         (config (chat-agent-profile--effective-tool-config session profile)))
+    (should (equal chat-capability-programming-tools
+                   (plist-get config :enabled-tools)))
+    (should (equal chat-capability-programming-base-tools
+                   (plist-get config :advertised-tools)))
+    (should-not (memq 'programming_plan_create
+                      (plist-get config :advertised-tools)))))
+
+(ert-deftest chat-capability-activation-expands-only-the-execution-menu ()
+  "Activating a group preserves authority and the durable state session."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (execution (make-chat-session :id "activation-execution"))
+         (state (make-chat-session :id "activation-state"))
+         (chat-tool-caller-current-session execution)
+         (chat-tool-caller-current-state-session state))
+    (chat-capability-register-tools)
+    (chat-session-set-tool-config
+     execution
+     (list :enabled-tools chat-capability-programming-tools
+           :advertised-tools chat-capability-programming-base-tools))
+    (should-not
+     (member "programming_plan_create"
+             (mapcar (lambda (definition)
+                       (alist-get 'name (alist-get 'function definition)))
+                     (append (chat-tool-caller-provider-tools) nil))))
+    (chat-capability-programming-capability-activate "plan")
+    (should (memq 'programming_plan_create
+                  (plist-get (chat-session-tool-config execution)
+                             :advertised-tools)))
+    (should
+     (member "programming_plan_create"
+             (mapcar (lambda (definition)
+                       (alist-get 'name (alist-get 'function definition)))
+                     (append (chat-tool-caller-provider-tools) nil))))
+    (should-not (chat-session-tool-config state))))
+
+(ert-deftest chat-capability-batch-edit-is-explicitly-staged ()
+  "Structured batch editing is authorized but absent until requested."
+  (let* ((execution (make-chat-session :id "batch-edit-execution"))
+         (chat-tool-caller-current-session execution))
+    (chat-session-set-tool-config
+     execution
+     (list :enabled-tools chat-capability-programming-tools
+           :advertised-tools chat-capability-programming-base-tools))
+    (should (memq 'files_patch chat-capability-programming-tools))
+    (should-not (memq 'files_patch
+                      (plist-get (chat-session-tool-config execution)
+                                 :advertised-tools)))
+    (chat-capability-programming-capability-activate "batch-edit")
+    (should (memq 'files_patch
+                  (plist-get (chat-session-tool-config execution)
+                             :advertised-tools)))))
+
+(ert-deftest chat-capability-active-plan-is-advertised-on-the-next-run ()
+  "A durable plan restores its lifecycle tools without another activation call."
+  (chat-test-with-temp-dir
+   (let* ((session (make-chat-session :id "active-plan-menu"))
+          (profile (chat-agent-profile-resolve 'code)))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-work-plan-create
+      session "Plan"
+      '(((id . "step") (title . "Implement") (acceptance . "Tests pass"))))
+     (let ((config (chat-agent-profile--effective-tool-config session profile)))
+       (should (memq 'programming_plan_transition
+                     (plist-get config :advertised-tools)))))))
+
 (ert-deftest chat-capability-office-tools-read_and_mutate_allowed_roots ()
   "Test office tools read Org headings and mutate allowed directories."
   (chat-test-with-temp-dir
@@ -420,7 +490,8 @@
   "Plan and note bookkeeping is session state, not an external write."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
     (chat-capability-register-tools)
-    (dolist (id '(programming_work_note_upsert
+    (dolist (id '(programming_capability_activate
+                  programming_work_note_upsert
                   programming_work_note_resolve
                   programming_work_note_supersede
                   programming_work_note_archive

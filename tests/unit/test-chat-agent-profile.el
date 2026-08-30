@@ -28,6 +28,27 @@
    (apply #'chat-agent-profile-create
           :id id :revision "1" :source 'test fields)))
 
+(ert-deftest chat-agent-profile-advertisement-narrows-without-changing-authority ()
+  "A runtime tool menu can narrow, but cannot widen, profile authority."
+  (chat-agent-profile-test--isolated
+   (let* ((profile (chat-agent-profile-create
+                    :id 'code :revision "1" :source 'test
+                    :tools '(read write) :tools-specified-p t))
+          (chat-agent-profile-tool-advertisement-functions
+           (list (lambda (_session _profile _authorized)
+                   '(:advertised-tools (read)))))
+          (config (chat-agent-profile--effective-tool-config nil profile)))
+     (should (equal '(read write) (plist-get config :enabled-tools)))
+     (should (equal '(read) (plist-get config :advertised-tools))))
+   (let* ((profile (chat-agent-profile-create
+                    :id 'code :revision "1" :source 'test
+                    :tools '(read) :tools-specified-p t))
+          (chat-agent-profile-tool-advertisement-functions
+           (list (lambda (_session _profile _authorized)
+                   '(:advertised-tools (write))))))
+     (should-error (chat-agent-profile--effective-tool-config nil profile)
+                   :type 'chat-agent-profile-authority-expansion))))
+
 (ert-deftest chat-agent-profile-inheritance-only-tightens-tool-authority ()
   "Inherited tool lists intersect and budgets choose the lower ceiling."
   (chat-agent-profile-test--isolated

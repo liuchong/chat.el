@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "metric": "message-content-plus-provider-tools-json-bytes",
+  "taskId": "elisp-single-fix",
+  "baselineRevision": "e4e6cbcec89a8a0d5f67d15a861ace9d9b4965d3",
+  "messageBytes": 238,
+  "toolCount": 19,
+  "toolBytes": 6086,
+  "combinedBytes": 6324,
+  "maxCombinedRatio": 1.1
+}

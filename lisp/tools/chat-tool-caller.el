@@ -75,15 +75,28 @@ model knows content is missing."
                 (- (length text) limit))
       text)))
 
-(defun chat-tool-caller--tool-available-p (tool)
-  "Return non-nil when TOOL should be exposed to the model."
+(defun chat-tool-caller--tool-advertised-p (session tool-id)
+  "Return non-nil when SESSION advertises TOOL-ID to the model."
+  (let* ((config (and session (chat-session-tool-config session)))
+         (advertised (plist-get config :advertised-tools)))
+    (or (not (plist-member config :advertised-tools))
+        (memq tool-id advertised))))
+
+(defun chat-tool-caller--tool-available-in-session-p (tool session)
+  "Return non-nil when TOOL is both authorized and advertised in SESSION."
   (let ((tool-id (chat-forged-tool-id tool)))
-    (and (chat-session-tool-enabled-p chat-tool-caller-current-session tool-id)
+    (and (chat-session-tool-enabled-p session tool-id)
+         (chat-tool-caller--tool-advertised-p session tool-id)
          (cond
           ((eq tool-id 'shell_execute)
            (bound-and-true-p chat-tool-shell-enabled))
           (t
            (chat-forged-tool-is-active tool))))))
+
+(defun chat-tool-caller--tool-available-p (tool)
+  "Return non-nil when TOOL should be exposed to the model."
+  (chat-tool-caller--tool-available-in-session-p
+   tool chat-tool-caller-current-session))
 
 (defun chat-tool-caller--available-tools ()
   "Return tools that can currently be called."
@@ -135,12 +148,15 @@ model knows content is missing."
       (dolist (param params)
         (let ((name (plist-get param :name))
               (type (or (plist-get param :type) "string"))
-              (desc (or (plist-get param :description) ""))
+              (desc (plist-get param :description))
               (enum (plist-get param :enum))
               (items (plist-get param :items))
               (min-items (plist-get param :min-items)))
           (push (cons name
-                      (append `((type . ,type) (description . ,desc))
+                      (append `((type . ,type))
+                              (when (and (stringp desc)
+                                         (not (string-empty-p desc)))
+                                `((description . ,desc)))
                               (when enum
                                 `((enum . ,(vconcat enum))))
                               (when items
@@ -1109,6 +1125,14 @@ loop."
                observer
                (list :type 'tool-error :tool name :result-summary text))
               (funcall success text)))
+           ((not (chat-tool-caller--tool-available-in-session-p
+                  tool actual-session))
+            (let ((text (format "Error: Tool '%s' is unavailable for this turn"
+                                name)))
+              (chat-tool-caller--notify
+               observer
+               (list :type 'tool-error :tool name :result-summary text))
+              (funcall success text)))
            (t
             (chat-approval-authorize-async
              tool call actual-session observer
@@ -1228,7 +1252,18 @@ a silent downgrade of the mode."
            ((null tool)
             (format "Error: Tool '%s' not found" name))
            ((not (chat-session-tool-enabled-p actual-session tool-id))
-            (let ((result (format "Error: Tool '%s' is disabled for this session" name)))
+            (let ((result
+                   (format "Error: Tool '%s' is disabled for this session"
+                           name)))
+              (chat-tool-caller--notify
+               observer
+               (list :type 'tool-error
+                     :tool name
+                     :result-summary result))
+              result))
+           ((not (chat-tool-caller--tool-available-in-session-p
+                  tool actual-session))
+            (let ((result (format "Error: Tool '%s' is unavailable for this turn" name)))
               (chat-tool-caller--notify
                observer
                (list :type 'tool-error

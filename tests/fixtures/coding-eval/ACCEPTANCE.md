@@ -71,6 +71,34 @@ The public batch commands and Emacs entry points are documented in
 evaluation storage. It must not be copied into Git merely to make a result look
 durable.
 
+## Offline First-Request Footprint Gate
+
+Run this no-network gate before freezing a live comparison revision. It loads
+the real `elisp-single-fix` task, builds the actual code-profile request, captures
+it immediately before transport, and compares message-content bytes plus the
+provider-tool JSON bytes with `request-footprint-baseline.json`.
+
+```sh
+state=$(mktemp -d /tmp/chat-request-footprint-XXXXXX)
+trap 'find "$state" -depth -delete' EXIT
+HOME="$state/home" CHAT_REQUEST_FOOTPRINT_OUTPUT="$state/result.json" \
+  /Users/liu/projects/.agent-tools/capped.sh 1600 \
+  emacs -Q --batch -l tests/test-paths.el \
+  -l tests/performance/run-request-footprint.el
+```
+
+The process exits 0 only when `passed` is true and `currentRatio` is at most the
+committed `maxCombinedRatio`. The baseline is an immutable historical fact; a
+larger intentional request contract requires a reviewed design revision and a
+new comparison baseline, never an edit made only to turn a failure green.
+
+Use one of these bounded statements in a stage record:
+
+```text
+PASS: first-request footprint is <current> bytes versus <baseline> bytes (<ratio>x), within the <limit>x gate; <tool-count> tools were advertised.
+FAIL: first-request footprint is <current> bytes versus <baseline> bytes (<ratio>x), above the <limit>x gate; the live campaign revision is not frozen.
+```
+
 ## Trial Standard
 
 A trial is valid only when its frozen identity is unique and the provider

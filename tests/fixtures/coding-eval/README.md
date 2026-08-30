@@ -10,6 +10,8 @@ Stable entry points:
 - `language-registry.json` lists all 12 accepted languages, cohort, state,
   extensions and required toolchains in a machine-readable form;
 - `manifest.json` defines the executable 30-task core corpus;
+- `request-footprint-baseline.json` freezes the M9 first-request byte baseline
+  and its 110 percent regression ceiling;
 - `ACCEPTANCE.md` contains the repeatable run sequence, representative smoke
   cases, project fragments, cleanup checklist and standard verdict wording.
 
@@ -111,6 +113,8 @@ Commit small reusable assets and curated conclusions:
 
 - manifests, generators, fixture sources, tests and bounded wrappers;
 - schema tests, acceptance thresholds and public run instructions;
+- first-request baselines and offline measurement runners that execute the real
+  request builder immediately before transport;
 - significant stage records with campaign identity, revision, configuration
   digest, sample counts, per-language/category metrics and failure analysis;
 - accepted prompt, rule or implementation adjustments with before/after task IDs.

@@ -99,6 +99,48 @@ turn one repeated call into two executions."
                       :arguments (("command" . "pwd"))))))
        (should (string= result "ran:pwd"))))))
 
+(ert-deftest chat-tool-caller-advertises-and-executes-only-the-current-menu ()
+  "Authorized tools outside the current advertisement menu stay unavailable."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (session (make-chat-session :id "tool-menu"))
+         (chat-tool-caller-current-session session)
+         (hidden-runs 0))
+    (dolist (spec `((visible . ,#'identity)
+                    (hidden . ,(lambda () (cl-incf hidden-runs) "hidden"))))
+      (chat-tool-forge-register
+       (make-chat-forged-tool
+        :id (car spec) :name (symbol-name (car spec)) :language 'elisp
+        :compiled-function (cdr spec) :is-active t :usage-count 0)))
+    (chat-session-set-tool-config
+     session '(:enabled-tools (visible hidden) :advertised-tools (visible)))
+    (should (equal '("visible")
+                   (mapcar (lambda (definition)
+                             (alist-get 'name (alist-get 'function definition)))
+                           (append (chat-tool-caller-provider-tools) nil))))
+    (should (string-match-p
+             "unavailable for this turn"
+             (chat-tool-caller-execute
+              '(:name "hidden" :arguments nil) session)))
+    (should (= hidden-runs 0))))
+
+(ert-deftest chat-tool-caller-omits-only-empty-schema-descriptions ()
+  "Compact schemas retain useful descriptions and omit empty placeholders."
+  (let* ((tool
+          (make-chat-forged-tool
+           :id 'compact-schema :name "Compact Schema" :language 'elisp
+           :parameters
+           '((:name "plain" :type "string")
+             (:name "explained" :type "integer"
+              :description "A useful explanation"))
+           :compiled-function #'ignore :is-active t))
+         (properties (alist-get 'properties
+                                (chat-tool-caller--json-schema tool)))
+         (plain (alist-get "plain" properties nil nil #'string=))
+         (explained (alist-get "explained" properties nil nil #'string=)))
+    (should-not (assq 'description plain))
+    (should (equal "A useful explanation"
+                   (alist-get 'description explained)))))
+
 (ert-deftest chat-tool-caller-rejects-mistyped-and-unknown-arguments ()
   "Test runtime validation rejects schema violations before execution."
   (chat-test-with-temp-dir
