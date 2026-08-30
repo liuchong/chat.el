@@ -1264,15 +1264,16 @@ verification fix on the exact failure path; it does not replace the final
 
 #### 实施步骤
 
-1. 清理被新 facade 和 verifier 替代的实验调用路径，保留必要兼容 wrapper 并标记删除条件。
+1. 清理被新 facade 和 verifier 替代的实验调用路径；按照 Decision 0033 同步删除旧内部合同、wrapper、测试和文档，不保留试验期兼容层。
 2. 在统一 chat surface 中展示当前阶段：planning、understanding、editing、verifying、repairing、reviewing。
 3. 为 stale write、semantic backend、verification 和 sandbox 增加可操作错误说明。
 4. 更新用户文档、配置示例、帮助命令和故障排查。
 5. 对 10,000 文件 fixture 做索引、增量更新、查询、上下文构建和内存测试。
 6. 对 30 个 live coding tasks 各执行 5 次最终基准；M9 与 M19 分别使用 fresh `baseline` / `current` campaign。中断后可以恢复原 campaign 的缺项，但不得把其他运行目录或配置当作续跑来源。
-7. 对每个失败分类复核：模型能力、上下文遗漏、工具错误、验证错误、权限阻塞或基础设施错误。
-8. 运行全部 unit、integration、e2e、offline eval 和平台隔离测试。
-9. 生成不可变验收结果和与 M9 基线的比较报告。
+7. 使用与 core 中 `python-locate` 完全相同的 focused manifest，在两侧 revision 各运行 1-task x 5；全部 usage 齐全后才计算 15% 大仓库 token 降幅，且不得计入成功率。
+8. 对每个失败分类复核：模型能力、上下文遗漏、工具错误、验证错误、权限阻塞或基础设施错误。
+9. 运行全部 unit、integration、e2e、offline eval 和平台隔离测试。
+10. 生成不可变验收结果和与 M9 基线的比较报告。
 
 可靠性记录的标准命令：
 
@@ -1296,10 +1297,11 @@ CHAT_REQUEST_FOOTPRINT_OUTPUT=/absolute/path/request-footprint.json \
 ```
 
 命令必须在将要验收的 clean implementation revision 上运行。最终调用
-`chat-coding-acceptance-run-final` 时，读取三份 JSON，把完整 runtime 顶层对象作为
-第三个参数 `metadata`、完整 quality 顶层对象作为第四个参数 `quality-metadata`
-、完整 canonical 顶层对象作为第五个参数 `canonical-metadata`、完整 request-footprint
-顶层对象作为第六个参数 `request-footprint-metadata` 传入；只手工摘录数值
+`chat-coding-acceptance-run-final` 时，前四个参数依次传入 core baseline/current 与
+focused large-repo baseline/current 目录，再把完整 runtime 顶层对象作为第五个参数
+`metadata`、完整 quality 顶层对象作为第六个参数 `quality-metadata`、完整 canonical
+顶层对象作为第七个参数 `canonical-metadata`、完整 request-footprint 顶层对象作为
+第八个参数 `request-footprint-metadata` 传入；只手工摘录数值
 或缺少 `acceptanceGates`、原始样本、精确测试清单、定向测试证据、revision、clean
 标记的记录均不合格。
 
@@ -1343,6 +1345,37 @@ Clojure、Java、TypeScript、C、C++ 和 SQL 七种语言。每种语言都覆�
   且不低于自身 baseline。
 - 越界写入、未验证却完成、生成物漏报和清理失败均为 0。
 - 重要样例、验收话术、标准、性能指标和诊断结论按 spec 的保留规则进入仓库。
+
+### M21：跨厂商模型自适应可靠性
+
+M21 在 M19 核心门禁关闭后启动，可以与 M20 的 focused smoke 交错，但不能用一个
+provider/model 的结果替代另一个。完整合同见
+`specs/029-model-adaptive-reliability.md`。
+
+#### 目标
+
+在统一、不可降低的正确性与安全层之上，建立可测量、可回滚的模型定向策略层；用
+DeepSeek `deepseek-v4-flash` 与 Kimi Code `k3-256k` 验证不同厂商和协议的可移植性，
+明确禁止在该矩阵中使用 `k3` 或模型别名。
+
+#### 实施步骤
+
+1. 建立 provider/model/protocol/capability/language/task-category 的精确策略键和版本化记录。
+2. 把 provider 可用性、模型质量、工具合同、验证和权限失败分开统计，禁止混合归因。
+3. 先运行无策略 common path，固定两家 provider 的 readiness、manifest 和 capability 身份。
+4. 对重复失败提出 candidate policy；只允许调整提示、工具公布、上下文分配、验证顺序和预算。
+5. 以同模型、同 manifest、同次数做 A/B；记录样本数、语言/类别结果、token、延迟和反例。
+6. 只有显著改善且无安全回归的候选进入 active；版本或 capability 变化后自动失配并重验。
+7. 将通用缺陷修在 common layer，禁止复制两个 Agent loop 或把一次随机失败硬编码成模型分支。
+8. 所有 accepted/rejected/retired 策略记录 promotion、review date、removal condition 和回滚目标。
+
+#### 退出条件
+
+- 两个精确模型均完成独立、不可变、可审计的 bounded core campaign。
+- provider attempt 与 admissible model trial 分类准确率 100%，两家结果不合并平均。
+- 无策略 common path 保持完整；未知、过期或 capability 不匹配策略的行为增量为 0。
+- 任一策略无法扩大 authority、改变 judge 或降低第 13 节门槛。
+- 至少一个重复问题完成 control/candidate 对照，或有证据表明无需模型定向策略并记录结论。
 
 ## 8. 测试矩阵
 
@@ -1510,7 +1543,7 @@ Trace 至少新增：
 - Top-5 命中率 = 预期必要文件至少一个出现在前五个非重复候选中的查询数 / 全部相关性查询数。
 - Review precision = 被 fixture 或独立确定性证据确认的 finding 数 / 全部正式 findings；Review recall = 被找到的预埋 critical/high 缺陷数 / 预埋 critical/high 缺陷总数。
 - 延迟 p95 使用全部有效样本按毫秒升序排列，取 `ceil(0.95 * N)` 的第 N 项；样本数少于 20 时不得报告 p95 为验收证据。
-- token 指标分别保存 first request、final request、total task 和 request count；固定开销与 large-repo 门只比较 provider 返回可信 first-request usage 的 valid trials。缺少 usage 的比例必须单独报告，超过 5% 时 token 门槛状态为 blocked。有效 trial 的正确性失败不删除性能样本，基础设施无效 attempt 不得进入样本。
+- token 指标分别保存 first request、final request、total task 和 request count；固定开销比较 core valid trials，large-repo 门比较与 core 任务结构完全相同、分别绑定两侧 implementation revision 的 1-task x 5 focused campaigns。focused 十个 trial 必须全部有 provider 返回的可信 first-request usage；core 缺少 usage 的比例必须单独报告，超过 5% 时固定开销门状态为 blocked。有效 trial 的正确性失败不删除性能样本，基础设施无效 attempt 不得进入样本。
 - first-request footprint 使用真实 request builder 在 transport 前生成的 message content 与 provider tools JSON 字节和；必须相对仓库内冻结 M9 基线 <= 110%，且运行过程不得联网。该门槛约束固定请求开销，不替代 provider usage 的 live token 指标。
 - 性能测试必须记录机器、操作系统、Emacs 版本、冷/热缓存、fixture digest 和重复次数。最终值取至少 30 次 warm query；环境变化后不得与旧绝对值混用。
 - 最终比较前必须验证两组 task ID、task revision、fixture digest、provider/model、capability snapshot、profile 和运行参数完全一致；不一致时结果为 blocked，不得计算“提升”。
@@ -1665,10 +1698,12 @@ M9 baseline
   -> M18 read-only Plan Mode and approval
   -> M19 rollout and acceptance
   -> M20 extended language qualification
+  -> M21 cross-provider model adaptation
 ```
 
 M10 可以在 M9 基线建立后与 M11 的后端合同设计并行调查，但共享的 Agent loop、
 tool caller 和 context 文件不得并行修改。M12 依赖 M10 和 M11；M14 依赖 M13；
 M16 依赖 M12、M14 和 M15；M17 依赖 M13、M14 和 M16；M18 依赖 M14 和 M17；
-M19 依赖前述全部阶段；M20 依赖 M19 的稳定 runner、验收聚合和资源清理合同。
+M19 依赖前述全部阶段；M20 依赖 M19 的稳定 runner、验收聚合和资源清理合同；
+M21 依赖 M19 的固定身份、失败分类和不可变 campaign，并以 M20 的语言证据逐步扩展适用范围。
 最终默认开启任何能力前，必须先在对应 manifest 的 live Eval 中证明不降低成功率。

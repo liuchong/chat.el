@@ -1,0 +1,172 @@
+# Model-Adaptive Reliability
+
+- Status: accepted design
+- Scope: model runtime, coding Agent, evaluation
+- Owners: model runtime, Agent policy, coding Eval
+
+## 1. Purpose
+
+Model behavior varies across providers, concrete model revisions, languages and
+task shapes. The product must absorb that variation without weakening task
+correctness, hiding failures or turning the Agent loop into model-name branches.
+
+Reliability therefore has two ordered layers:
+
+1. a provider-neutral reliability layer that every model must satisfy;
+2. an evidence-backed adaptation layer that may tune how one concrete model is
+   prompted, equipped and verified.
+
+The adaptation layer improves the route to the same acceptance result. It never
+changes the meaning of success, grants additional authority or suppresses a
+failed gate.
+
+## 2. Identity And Evidence
+
+An adaptation key is the tuple:
+
+```text
+provider + concrete model + protocol + capability snapshot + language set + task category
+```
+
+Aliases are not accepted as concrete model identity. Every measurement records
+the resolved model returned by the provider when available. Provider
+availability attempts are classified separately from admissible model trials;
+DNS, TLS, connection, rate-limit, quota, capacity and service failures do not
+become evidence that a model cannot program.
+
+Evidence is eligible to change policy only when it is:
+
+- produced by a committed, versioned fixture and deterministic judge;
+- bound to a clean implementation revision and immutable campaign identity;
+- repeated enough to distinguish a pattern from one stochastic result;
+- reported by language and task category, not only as an overall average;
+- accompanied by counterexamples, token and latency cost, and a removal rule.
+
+One transcript may open an investigation. It cannot create a permanent model
+rule.
+
+## 3. Provider-Neutral Layer
+
+The common layer owns all non-negotiable behavior:
+
+- scoped authority, approval, path boundaries and checkpoint semantics;
+- structured context, Goal, plan, TODO and work-note continuity;
+- typed tool contracts and explicit tool errors;
+- stale-write detection, deterministic verification and cleanup;
+- bounded step, request, time, retry and repair budgets;
+- honest completion: blocked permissions and failed writes are surfaced directly;
+- infrastructure quarantine before an admissible trial exists;
+- immutable evidence, exact identities and strict acceptance thresholds.
+
+Retries in this layer are bounded and classified. A model-quality retry must
+change at least one relevant condition, such as supplying missing evidence,
+selecting a more precise tool, narrowing verification or correcting a malformed
+contract. Repeating the same request shape after a semantic failure is not a
+strategy. Transport retries may repeat the same payload only for the explicitly
+classified transient conditions covered by the transport policy.
+
+## 4. Adaptation Layer
+
+Adaptation is declarative data resolved after the common layer. An adaptation
+record may adjust only these levers:
+
+- bounded prompt guidance and examples;
+- initial and stage-activated tool advertisement;
+- context allocation within the common budget;
+- verification ordering and intensity;
+- malformed-call repair hints and retry eligibility;
+- per-stage step or request budgets within global ceilings.
+
+It may not change authority, allowed paths, approval requirements, judges,
+success thresholds, cleanup rules or evidence requirements. The generic path
+must remain complete when no adaptation matches.
+
+Records are versioned and contain:
+
+```text
+id, state, provider, model, protocol, capability digest,
+language/task applicability, evidence campaign IDs, sample count,
+confidence and observed effect, added token/latency cost,
+policy payload, created revision, review date, removal condition
+```
+
+`state` is one of `candidate`, `active`, `retired` or `rejected`. Unknown,
+expired or capability-mismatched records are ignored, not guessed. Active rules
+must be removable without changing persisted session semantics.
+
+## 5. Language Signals
+
+Language adaptation uses four distinct signals:
+
+- repository languages discovered from committed files and project metadata;
+- current-file language;
+- requested output language inferred from the task and target paths;
+- planned project language stated in accepted project context.
+
+Each signal carries provenance and confidence. Filename-only detection cannot
+activate a destructive hard rule. Conflicts remain explicit in structured
+context and can request clarification when they affect the result.
+
+Deterministic language facts belong in code: syntax checks, generated paths,
+toolchain discovery, targeted test commands and cleanup. Repeated strategy
+guidance belongs in a small prompt pack. Project conventions remain scoped
+project instructions. The main Agent loop does not fork by programming
+language.
+
+## 6. Qualification Matrix
+
+The initial cross-provider qualification matrix is:
+
+| Provider | Concrete model | Purpose |
+|---|---|---|
+| DeepSeek | `deepseek-v4-flash` | primary core comparison and transport behavior |
+| Kimi Code | `k3-256k` | independent provider/protocol behavior and adaptation comparison |
+
+`k3` is explicitly excluded from this matrix. A campaign request for Kimi must
+record the exact model `k3-256k`; an alias or resolved model mismatch makes the
+campaign invalid.
+
+For each provider/model pair, run the same immutable core manifest and report:
+
+- passed, failed, cancelled and timed-out admissible trials;
+- quarantined provider attempts separately;
+- results per language and task category;
+- first-request, final-request and total usage with coverage;
+- request count, latency distribution, scope and cleanup violations;
+- malformed tool calls, repair attempts and unchanged retries;
+- which common or candidate adaptation policy was active.
+
+Cross-provider results diagnose portability. They are not pooled to hide one
+provider/model failure, and one provider's baseline cannot serve as another's.
+
+## 7. Promotion And Rollback
+
+1. Reproduce the symptom with a fixed task and classify infrastructure, model,
+   prompt, tool, verifier, permission or fixture cause.
+2. Prefer a common-layer correction when the contract is wrong for every model.
+3. Create a candidate adaptation only when the behavior is specific and
+   repeated.
+4. Run an A/B campaign with the same provider/model snapshot, manifest and
+   repetition count.
+5. Promote only when correctness or reliability improves without a safety
+   regression and the measured token/latency cost is accepted.
+6. Retire the rule when the concrete model or capability snapshot changes,
+   evidence ages out, or a new campaign shows no benefit.
+
+Rollback selects the previous declarative policy set. It does not require a
+session migration or a second Agent implementation.
+
+## 8. Acceptance
+
+- The common path passes all deterministic safety and correctness gates with no
+  adaptation loaded.
+- An unmatched or stale adaptation has no behavioral effect.
+- Exact provider/model/capability identity is persisted and visible in records.
+- Infrastructure attempts never alter model success rates.
+- A candidate and control campaign can be compared without changing fixtures or
+  acceptance thresholds.
+- No adaptation can expand authority or convert a failed judge into success.
+- Language and task-category regressions remain visible independently.
+- DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` both pass readiness and a
+  bounded core campaign before the first cross-provider policy is promoted.
+
