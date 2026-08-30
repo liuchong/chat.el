@@ -454,6 +454,23 @@
       (should (string-match-p "Transitions are serial" description))
       (should (string-match-p "returned revision" description)))))
 
+(ert-deftest chat-capability-plan-tools-front-load-minimal-planning ()
+  "Initial and staged contracts avoid a rejected probe and narrative TODOs."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (let ((activation
+           (chat-forged-tool-description
+            (chat-tool-forge-get 'programming_capability_activate)))
+          (creation
+           (chat-forged-tool-description
+            (chat-tool-forge-get 'programming_plan_create))))
+      (should (string-match-p "Before the first multi-file write" activation))
+      (should (string-match-p "do not probe the gated action first" activation))
+      (should (string-match-p "fewest control points" activation))
+      (should (string-match-p "start its first dependency-ready item" creation))
+      (should (string-match-p "control points, not a transcript" creation))
+      (should (string-match-p "Combine related edits" creation)))))
+
 (ert-deftest chat-capability-registers-bounded-goal-tool-surface ()
   "The Agent can advance Goals but cannot pause, resume or clear them."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))

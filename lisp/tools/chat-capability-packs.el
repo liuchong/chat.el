@@ -1089,8 +1089,13 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
   "Register programming, office, and daily capability tools."
   (chat-capability--register-tool
    'programming_capability_activate "Programming Capability Activate"
-   (concat "Expose a stage tool group for this run. Use plan before substantial "
-           "work, exploration for editor semantics or web lookup, goal only when "
+   (concat "Expose a stage tool group for this run. Before the first multi-file "
+           "write, project-wide compile or verification, or substantial repair, "
+           "activate plan, create its durable TODO plan, and start the first item; "
+           "do not probe the gated action first. Keep that plan to the fewest "
+           "control points that preserve real dependencies: combine related edits "
+           "and their verification when one observable result closes both. Use "
+           "exploration for editor semantics or web lookup, goal only when "
            "explicitly requested, and batch-edit only for structured "
            "multi-replacement; apply_patch is already available.")
    '((:name "capability" :type "string" :required t
@@ -1269,7 +1274,13 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    nil #'chat-capability-programming-plan-mode-enter 'project '(state))
   (chat-capability--register-tool
    'programming_plan_create "Programming Plan Create"
-   "Create the durable TODO plan for substantial coding. This does not enter read-only Plan Mode. Each item needs a concrete title and observable acceptance evidence."
+   (concat "Create the durable TODO plan for substantial coding, then start its "
+           "first dependency-ready item before a gated action. This does not enter "
+           "read-only Plan Mode. TODO items are control points, not a transcript: "
+           "use the fewest items that preserve real dependencies, approvals, and "
+           "distinct acceptance outcomes. Combine related edits and their "
+           "verification when one observable result closes both. Each item needs "
+           "a concrete title and observable acceptance evidence.")
    `((:name "objective" :type "string" :required t
       :description "The bounded outcome this work plan must achieve.")
      (:name "items" :type "array" :required t :min-items 1
