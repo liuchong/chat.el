@@ -16,6 +16,84 @@
 (defconst chat-coding-eval-test-manifest
   (expand-file-name "coding-eval/manifest.json" chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-language-registry
+  (expand-file-name "coding-eval/language-registry.json"
+                    chat-test-fixtures-dir))
+
+(defun chat-coding-eval-test--read-json (path)
+  "Read PATH as an alist with lists for JSON arrays."
+  (with-temp-buffer
+    (insert-file-contents path)
+    (let ((json-object-type 'alist)
+          (json-array-type 'list)
+          (json-key-type 'symbol))
+      (json-read))))
+
+(ert-deftest chat-coding-eval-language-registry-matches-core-manifest ()
+  "The reusable language inventory stays balanced and matches core tasks."
+  (let* ((registry
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-language-registry))
+         (manifest
+          (chat-coding-eval-test--read-json chat-coding-eval-test-manifest))
+         (categories (alist-get 'categories registry))
+         (cohorts (alist-get 'cohorts registry))
+         (languages (alist-get 'languages registry))
+         (core-languages
+          (seq-filter
+           (lambda (language)
+             (equal "core" (alist-get 'cohort language)))
+           languages))
+         (extended-languages
+          (seq-filter
+           (lambda (language)
+             (equal "extended" (alist-get 'cohort language)))
+           languages))
+         (manifest-languages
+          (delete-dups
+           (mapcar (lambda (task) (alist-get 'language task))
+                   (alist-get 'tasks manifest))))
+         (manifest-categories
+          (delete-dups
+           (mapcar (lambda (task) (alist-get 'category task))
+                   (alist-get 'tasks manifest))))
+         (language-ids (mapcar (lambda (language)
+                                 (alist-get 'id language))
+                               languages)))
+    (should (= 1 (alist-get 'schemaVersion registry)))
+    (should (= 6 (length categories)))
+    (should (= 12 (length languages)))
+    (should (= (length language-ids)
+               (length (delete-dups (copy-sequence language-ids)))))
+    (should (= 5 (length core-languages)))
+    (should (= 7 (length extended-languages)))
+    (should (equal (sort (copy-sequence categories) #'string<)
+                   (sort manifest-categories #'string<)))
+    (should
+     (equal
+      (sort (mapcar (lambda (language) (alist-get 'id language))
+                    core-languages)
+            #'string<)
+      (sort manifest-languages #'string<)))
+    (should
+     (seq-every-p (lambda (language)
+                    (equal "executable" (alist-get 'state language)))
+                  core-languages))
+    (should
+     (seq-every-p (lambda (language)
+                    (equal "planned" (alist-get 'state language)))
+                  extended-languages))
+    (dolist (cohort cohorts)
+      (let* ((id (alist-get 'id cohort))
+             (members
+              (seq-filter (lambda (language)
+                            (equal id (alist-get 'cohort language)))
+                          languages)))
+        (should (= (alist-get 'expectedLanguages cohort)
+                   (length members)))
+        (should (= (alist-get 'expectedTasks cohort)
+                   (* (length members) (length categories))))))))
+
 (defmacro chat-coding-eval-test-with-runtime (&rest body)
   "Run BODY with isolated evaluation records and workspaces."
   `(chat-test-with-temp-dir

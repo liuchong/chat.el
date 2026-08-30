@@ -1,5 +1,11 @@
 # Stage - Programming Evaluation Expansion (2026-08-30)
 
+- Type: logs
+- Attention: records
+- Status: active
+- Scope: programming-evaluation
+- Tags: evaluation, languages, acceptance, performance
+
 ## Scope
 
 This stage records the accepted expansion of the reusable programming Eval
@@ -17,6 +23,19 @@ The repository now records the durable asset contract in
 `specs/028-programming-evaluation-corpus.md`: fixture shape, task wording,
 deterministic judges, path boundaries, cleanup, repeated live qualification,
 result retention and promotion of language-specific rules.
+
+The reusable operator layer is now committed beside the fixtures:
+
+- `language-registry.json` is the machine-readable 12-language inventory and
+  distinguishes the executable core from the planned extension;
+- `ACCEPTANCE.md` keeps the smoke cases, representative project fragments,
+  execution sequence, cleanup checklist and standard verdict wording;
+- `.agents/templates/programming-evaluation-record-template.md` keeps future
+  campaign identity, language/category results, performance and failure
+  analysis comparable.
+
+An ERT contract checks unique language IDs, 5+7 cohort balance, six categories,
+30+42 expected tasks, state boundaries and exact core-manifest language parity.
 
 ## Local Toolchain Survey
 

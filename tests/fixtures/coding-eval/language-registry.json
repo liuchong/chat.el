@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "categories": [
+    "locate-explain",
+    "single-file-fix",
+    "multi-file-change",
+    "refactor",
+    "failing-test-fix",
+    "read-only-review"
+  ],
+  "cohorts": [
+    {
+      "id": "core",
+      "state": "executable",
+      "manifest": "manifest.json",
+      "expectedLanguages": 5,
+      "expectedTasks": 30
+    },
+    {
+      "id": "extended",
+      "state": "planned",
+      "manifest": "manifest-extended.json",
+      "expectedLanguages": 7,
+      "expectedTasks": 42
+    }
+  ],
+  "languages": [
+    {
+      "id": "elisp",
+      "displayName": "Emacs Lisp",
+      "cohort": "core",
+      "state": "executable",
+      "fixture": "elisp",
+      "sourceExtensions": [".el"],
+      "toolchains": ["emacs"]
+    },
+    {
+      "id": "python",
+      "displayName": "Python",
+      "cohort": "core",
+      "state": "executable",
+      "fixture": "python",
+      "sourceExtensions": [".py"],
+      "toolchains": ["python3"]
+    },
+    {
+      "id": "javascript",
+      "displayName": "JavaScript",
+      "cohort": "core",
+      "state": "executable",
+      "fixture": "javascript",
+      "sourceExtensions": [".js", ".mjs", ".cjs"],
+      "toolchains": ["node"]
+    },
+    {
+      "id": "go",
+      "displayName": "Go",
+      "cohort": "core",
+      "state": "executable",
+      "fixture": "go",
+      "sourceExtensions": [".go"],
+      "toolchains": ["go"]
+    },
+    {
+      "id": "rust",
+      "displayName": "Rust",
+      "cohort": "core",
+      "state": "executable",
+      "fixture": "rust",
+      "sourceExtensions": [".rs"],
+      "toolchains": ["cargo", "rustc"]
+    },
+    {
+      "id": "zig",
+      "displayName": "Zig",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "zig",
+      "sourceExtensions": [".zig"],
+      "toolchains": ["zig"]
+    },
+    {
+      "id": "clojure",
+      "displayName": "Clojure",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "clojure",
+      "sourceExtensions": [".clj", ".cljc", ".cljs"],
+      "toolchains": ["lein"]
+    },
+    {
+      "id": "java",
+      "displayName": "Java",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "java",
+      "sourceExtensions": [".java"],
+      "toolchains": ["java", "javac"]
+    },
+    {
+      "id": "typescript",
+      "displayName": "TypeScript",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "typescript",
+      "sourceExtensions": [".ts", ".tsx", ".mts", ".cts"],
+      "toolchains": ["node", "tsc"]
+    },
+    {
+      "id": "c",
+      "displayName": "C",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "c",
+      "sourceExtensions": [".c", ".h"],
+      "toolchains": ["clang"]
+    },
+    {
+      "id": "cpp",
+      "displayName": "C++",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "cpp",
+      "sourceExtensions": [".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"],
+      "toolchains": ["clang++"]
+    },
+    {
+      "id": "sql",
+      "displayName": "SQL",
+      "cohort": "extended",
+      "state": "planned",
+      "fixture": "sql",
+      "sourceExtensions": [".sql"],
+      "toolchains": ["sqlite3"]
+    }
+  ]
+}

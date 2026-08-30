@@ -5,6 +5,14 @@ evaluation inputs. A task is eligible for a live campaign only when its prompt,
 project fixture, deterministic judges, mutation boundary and cleanup contract
 are all committed here.
 
+Stable entry points:
+
+- `language-registry.json` lists all 12 accepted languages, cohort, state,
+  extensions and required toolchains in a machine-readable form;
+- `manifest.json` defines the executable 30-task core corpus;
+- `ACCEPTANCE.md` contains the repeatable run sequence, representative smoke
+  cases, project fragments, cleanup checklist and standard verdict wording.
+
 ## Corpus Registry
 
 | Manifest | Languages | Categories per language | Tasks | State |
@@ -16,6 +24,11 @@ The six categories are `locate-explain`, `single-file-fix`,
 `multi-file-change`, `refactor`, `failing-test-fix` and `read-only-review`.
 The two manifests keep independent digests so the 30-task historical comparison
 cannot silently change when the extended corpus lands.
+
+The sidecar language registry may describe a `planned` cohort whose manifest is
+not present yet. Only an `executable` cohort is eligible for preflight or live
+campaign accounting. Changing a language ID, cohort or task category is a
+versioned corpus-design change and requires registry tests plus a stage record.
 
 ## Reusable Task Shape
 

@@ -31,7 +31,9 @@ The repository keeps all reusable inputs and selected conclusions:
 | Asset | Canonical location | Retention rule |
 |---|---|---|
 | Manifest and task wording | `tests/fixtures/coding-eval/` | Versioned; task identity changes when behavior changes |
+| Machine-readable language inventory | `tests/fixtures/coding-eval/language-registry.json` | Versioned; distinguishes executable and planned cohorts |
 | Fixture source and tests | `tests/fixtures/coding-eval/` | Small, deterministic and dependency bounded |
+| Acceptance playbook and examples | `tests/fixtures/coding-eval/ACCEPTANCE.md` | Stable run sequence, wording and cleanup checklist |
 | Runner and judges | `lisp/agent/chat-coding-eval.el` | Product code with unit and integration tests |
 | Acceptance thresholds | This spec and the active reliability plan | Stable until an explicit design revision |
 | User operation guide | `docs/code-mode-usage.md` | Updated with public commands and recovery steps |
@@ -46,6 +48,12 @@ task IDs so a later developer can reproduce the conclusion.
 the language registry, reusable task wording patterns, verdict vocabulary and
 retention boundary next to the executable corpus. A manifest cannot refer to a
 sample that exists only in a local evaluation directory or an old transcript.
+
+The JSON registry is the authoritative language inventory. It records all 12
+accepted language IDs and separates `executable` from `planned`; a planned
+language is not a skip, pass or tested capability. Registry unit tests keep the
+core cohort identical to the languages actually present in `manifest.json` and
+keep every cohort bound to the same six accepted categories.
 
 ## 3. Task Matrix
 
@@ -194,6 +202,11 @@ Every significant campaign record includes:
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive
 provider traffic.
+
+New records start from
+`.agents/templates/programming-evaluation-record-template.md`. This keeps the
+identity, per-language results, token boundary, performance metrics, cleanup
+evidence and standard verdict comparable across stages.
 
 ## 7. Language-Specific Optimization
 
