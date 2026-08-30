@@ -217,7 +217,7 @@ checkout 使用 `current`；两边必须使用同一 manifest、模型和 capabi
 运行前 tracked worktree 必须干净，避免无法复现的本地修改冒充固定 revision。
 历史 M9 checkout 会保留当时的 2,000 文件 Eval 上限；加载当前 campaign harness
 后必须显式把 `chat-coding-eval-max-fixture-files` 设为 12,000，才能接受当前固定
-10,000-indexed-file task。只生成 `campaign.json` 是兼容性预检，不算 live trial。
+10,000-indexed-file task。只生成 `campaign.json` 是身份与合同预检，不算 live trial。
 
 仓库提供可复现的 batch runner。先用无网络预检确认 campaign 身份、任务数、
 重复次数、manifest digest 和两个 checkout revision：
@@ -268,6 +268,13 @@ finding sets 重算 20 个质量 gate。手工填写汇总字段、遗漏语言�
 同一次全量运行的结果；缺项、改名、expected failure、skip、abort、dirty 或 revision
 不符同样会得到 blocked。
 
+大仓库 token 门使用独立的固定子集
+`tests/fixtures/coding-eval/manifest-large-repo.json`。它必须在 M9 和 M19 两个精确
+implementation revision 上各执行五次，形成两个完整 1-by-5 campaign。聚合器会核对
+该任务与 core `python-locate` 的 revision、fixture、provider/model/capability 和实现
+revision；十个 trusted usage 缺一不可。该子集只提供性能证据，不参与成功率，也不能
+替代 core 30-by-5 的任何结果。
+
 标准生产命令为：
 
 ```sh
@@ -282,11 +289,18 @@ CHAT_QUALITY_RELIABILITY_OUTPUT=/absolute/path/quality-reliability.json \
 CHAT_CANONICAL_OUTPUT=/absolute/path/canonical.json \
   /Users/liu/projects/.agent-tools/capped.sh 4096 \
   emacs -Q -batch -l tests/run-tests.el
+
+CHAT_REQUEST_FOOTPRINT_OUTPUT=/absolute/path/request-footprint.json \
+  /Users/liu/projects/.agent-tools/capped.sh 1600 \
+  emacs -Q --batch -l tests/test-paths.el \
+  -l tests/performance/run-request-footprint.el
 ```
 
 调用 `chat-coding-acceptance-run-final` 时，runtime 完整顶层对象作为第三个
-`metadata` 参数，quality 完整顶层对象作为第四个 `quality-metadata` 参数，canonical
-完整顶层对象作为第五个 `canonical-metadata` 参数传入。
+参数位置已经由两份 focused campaign 目录占用：第三、第四个参数依次是 M9 与 M19
+large-repo 目录；runtime 完整顶层对象作为第五个 `metadata` 参数，quality 作为第六个
+`quality-metadata`，canonical 作为第七个 `canonical-metadata`，request-footprint
+作为第八个 `request-footprint-metadata` 参数传入。
 
 固定 manifest 保持 30 个任务的语言和类别平衡，其中 `python-locate` 是
 `large-repo` task。版本化生成描述符在隔离 workspace 内物化 10,000 个可索引

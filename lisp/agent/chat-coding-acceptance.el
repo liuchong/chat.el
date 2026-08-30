@@ -276,8 +276,12 @@ with otherwise identical capabilities remain comparable."
          (= (length (delete-dups (mapcar #'car keys))) task-count))))
 
 (defun chat-coding-acceptance--campaign-directory-gate
-    (directory results expected-role)
-  "Validate campaign DIRECTORY and RESULTS for EXPECTED-ROLE."
+    (directory results expected-role &optional expected-tasks
+               expected-repetitions gate-label)
+  "Validate campaign DIRECTORY and RESULTS for EXPECTED-ROLE.
+
+EXPECTED-TASKS and EXPECTED-REPETITIONS default to the core 30-by-5 matrix.
+GATE-LABEL distinguishes an independently measured campaign in the result."
   (let* ((descriptor
           (and directory
                (chat-coding-acceptance--read-json-file
@@ -294,6 +298,9 @@ with otherwise identical capabilities remain comparable."
          (expected (alist-get 'expectedResultCount descriptor))
          (task-count (alist-get 'taskCount descriptor))
          (repetitions (alist-get 'repetitions descriptor))
+         (required-tasks (or expected-tasks 30))
+         (required-repetitions (or expected-repetitions 5))
+         (required-results (* required-tasks required-repetitions))
          (complete-trial-matrix
           (and (integerp task-count) (integerp repetitions)
                (chat-coding-acceptance--complete-trial-matrix-p
@@ -328,22 +335,27 @@ with otherwise identical capabilities remain comparable."
                (equal campaign-id (alist-get 'campaignId completion))
                (equal configuration-digest
                       (alist-get 'configurationDigest completion))
-               (= (or (alist-get 'taskCount descriptor) 0) 30)
-               (= (or (alist-get 'repetitions descriptor) 0) 5)
-               (= (or expected 0) 150)
-               (= (or (alist-get 'expectedResultCount completion) 0) 150)
-               (= (or (alist-get 'resultCount completion) 0) 150)
-               (= (length results) 150)
+               (= (or (alist-get 'taskCount descriptor) 0) required-tasks)
+               (= (or (alist-get 'repetitions descriptor) 0)
+                  required-repetitions)
+               (= (or expected 0) required-results)
+               (= (or (alist-get 'expectedResultCount completion) 0)
+                  required-results)
+               (= (or (alist-get 'resultCount completion) 0)
+                  required-results)
+               (= (length results) required-results)
                complete-trial-matrix
                results-match
                (eq t (alist-get 'complete completion)))))
     (chat-coding-acceptance-gate-create
-     :name (format "live-eval-%s-campaign-record" expected-role)
+     :name (format "live-eval-%s-campaign-record"
+                   (or gate-label expected-role))
      :status (cond
               ((null directory) 'blocked)
               (passed 'passed)
               (t 'failed))
-     :expected "immutable 30-task x 5 campaign and complete terminal record"
+     :expected (format "immutable %d-task x %d campaign and complete terminal record"
+                       required-tasks required-repetitions)
      :actual
      `((campaignId . ,campaign-id)
        (expectedResults . ,expected)
@@ -600,6 +612,89 @@ with otherwise identical capabilities remain comparable."
       ((not complete)
        "Add fixed large-repo tagged trials with trusted usage for both configurations.")))))
 
+(defun chat-coding-acceptance--large-repo-results (results)
+  "Return valid large-repository RESULTS."
+  (seq-filter
+   (lambda (result)
+     (member "large-repo" (chat-coding-acceptance--task-tags result)))
+   (chat-coding-acceptance--valid-results results)))
+
+(defun chat-coding-acceptance--single-campaign-revision (results)
+  "Return the one implementation revision in RESULTS, or nil."
+  (let ((revisions
+         (delete-dups
+          (mapcar
+           (lambda (result)
+             (chat-coding-acceptance--field
+              (chat-eval-result-metadata result) 'implementationRevision))
+           results))))
+    (and (= (length revisions) 1)
+         (stringp (car revisions))
+         (not (string-empty-p (car revisions)))
+         (car revisions))))
+
+(defun chat-coding-acceptance--large-repo-evidence-gate
+    (baseline current performance-baseline performance-current)
+  "Validate dedicated large-repository evidence against the core campaigns."
+  (let* ((core-baseline (chat-coding-acceptance--large-repo-results baseline))
+         (core-current (chat-coding-acceptance--large-repo-results current))
+         (measured-baseline
+          (chat-coding-acceptance--large-repo-results performance-baseline))
+         (measured-current
+          (chat-coding-acceptance--large-repo-results performance-current))
+         (core-baseline-revision
+          (chat-coding-acceptance--single-campaign-revision baseline))
+         (core-current-revision
+          (chat-coding-acceptance--single-campaign-revision current))
+         (measured-baseline-revision
+          (chat-coding-acceptance--single-campaign-revision
+           performance-baseline))
+         (measured-current-revision
+          (chat-coding-acceptance--single-campaign-revision
+           performance-current))
+         (passed
+          (and (= (length measured-baseline) 5)
+               (= (length measured-current) 5)
+               (= (hash-table-count
+                   (chat-coding-acceptance--group-by-task measured-baseline))
+                  1)
+               (= (hash-table-count
+                   (chat-coding-acceptance--group-by-task measured-current))
+                  1)
+               (chat-coding-acceptance--compatible-identities-p
+                measured-baseline measured-current)
+               (chat-coding-acceptance--compatible-identities-p
+                core-baseline measured-baseline)
+               (chat-coding-acceptance--compatible-identities-p
+                core-current measured-current)
+               core-baseline-revision core-current-revision
+               measured-baseline-revision measured-current-revision
+               (equal core-baseline-revision measured-baseline-revision)
+               (equal core-current-revision measured-current-revision)
+               (eq 'passed
+                   (chat-coding-acceptance-gate-status
+                    (chat-coding-acceptance--campaign-gate
+                     performance-baseline performance-current))))))
+    (chat-coding-acceptance-gate-create
+     :name "live-eval-large-repo-evidence"
+     :status (cond
+              ((or (null performance-baseline) (null performance-current))
+               'blocked)
+              (passed 'passed)
+              (t 'failed))
+     :expected
+     "dedicated 1-task x 5 pair matching core task, model, capability, and revisions"
+     :actual
+     `((baselineSamples . ,(length measured-baseline))
+       (currentSamples . ,(length measured-current))
+       (baselineRevision .
+                         ,measured-baseline-revision)
+       (currentRevision .
+                        ,measured-current-revision))
+     :evidence
+     (unless passed
+       "Run the fixed large-repo manifest five times for both exact implementations."))))
+
 (defun chat-coding-acceptance--median (values)
   "Return median of numeric VALUES."
   (when values
@@ -610,8 +705,9 @@ with otherwise identical capabilities remain comparable."
           (nth middle ordered)
         (/ (+ (nth (1- middle) ordered) (nth middle ordered)) 2.0)))))
 
-(defun chat-coding-acceptance-live-gates (baseline current)
-  "Return final live-Eval gates comparing BASELINE with CURRENT."
+(defun chat-coding-acceptance-live-gates
+    (baseline current performance-baseline performance-current)
+  "Return final live-Eval gates for core and dedicated performance campaigns."
   (if (or (null baseline) (null current))
       (list
        (chat-coding-acceptance-gate-create
@@ -619,7 +715,10 @@ with otherwise identical capabilities remain comparable."
         :expected "M9 and M19 result sets"
         :actual "missing"
         :evidence "Run 30 tasks five times for both comparable configurations.")
-       (chat-coding-acceptance--large-repo-token-gate baseline current))
+       (chat-coding-acceptance--large-repo-evidence-gate
+        baseline current performance-baseline performance-current)
+       (chat-coding-acceptance--large-repo-token-gate
+        performance-baseline performance-current))
     (let* ((baseline-valid (chat-coding-acceptance--valid-results baseline))
            (current-valid (chat-coding-acceptance--valid-results current))
            (baseline-rate
@@ -710,7 +809,10 @@ with otherwise identical capabilities remain comparable."
         :actual
         `((baseline . ,(chat-coding-acceptance--median baseline-usage))
           (current . ,(chat-coding-acceptance--median usage))))
-       (chat-coding-acceptance--large-repo-token-gate baseline current)))))
+       (chat-coding-acceptance--large-repo-evidence-gate
+        baseline current performance-baseline performance-current)
+       (chat-coding-acceptance--large-repo-token-gate
+        performance-baseline performance-current)))))
 
 (defun chat-coding-acceptance--reliability-gate
     (name expected actual valid-p passed-p &optional evidence)
@@ -1760,15 +1862,25 @@ is removed before the callback runs."
       :expected 1 :actual (plist-get incremental :changed)))))
 
 (defun chat-coding-acceptance-compare-live
-    (baseline-directory current-directory)
-  "Record a strict comparison of live results in two directories."
+    (baseline-directory current-directory
+                        large-repo-baseline-directory
+                        large-repo-current-directory)
+  "Record a strict core and large-repository live comparison."
   (interactive
    (list (read-directory-name "M9 baseline results: ")
-         (read-directory-name "M19 current results: ")))
+         (read-directory-name "M19 current results: ")
+         (read-directory-name "M9 large-repo results: ")
+         (read-directory-name "M19 large-repo results: ")))
   (let* ((baseline
           (chat-coding-acceptance-load-result-directory baseline-directory))
          (current
           (chat-coding-acceptance-load-result-directory current-directory))
+         (large-repo-baseline
+          (chat-coding-acceptance-load-result-directory
+           large-repo-baseline-directory))
+         (large-repo-current
+          (chat-coding-acceptance-load-result-directory
+           large-repo-current-directory))
          (result
           (chat-coding-acceptance-record
            (append
@@ -1776,10 +1888,19 @@ is removed before the callback runs."
              (chat-coding-acceptance--campaign-directory-gate
               baseline-directory baseline "baseline")
              (chat-coding-acceptance--campaign-directory-gate
-              current-directory current "current"))
-            (chat-coding-acceptance-live-gates baseline current))
+              current-directory current "current")
+             (chat-coding-acceptance--campaign-directory-gate
+              large-repo-baseline-directory large-repo-baseline
+              "baseline" 1 5 "large-repo-baseline")
+             (chat-coding-acceptance--campaign-directory-gate
+              large-repo-current-directory large-repo-current
+              "current" 1 5 "large-repo-current"))
+            (chat-coding-acceptance-live-gates
+             baseline current large-repo-baseline large-repo-current))
            `((baselineTrials . ,(length baseline))
              (currentTrials . ,(length current))
+             (largeRepoBaselineTrials . ,(length large-repo-baseline))
+             (largeRepoCurrentTrials . ,(length large-repo-current))
              (failureSummary .
                              ,(chat-coding-acceptance-failure-summary
                                current))))))
@@ -1816,13 +1937,17 @@ is removed before the callback runs."
     result))
 
 (cl-defun chat-coding-acceptance-run-final
-    (&optional baseline-directory current-directory metadata quality-metadata
-               canonical-metadata request-footprint-metadata)
+    (&optional baseline-directory current-directory
+               large-repo-baseline-directory large-repo-current-directory
+               metadata quality-metadata canonical-metadata
+               request-footprint-metadata)
   "Run and record the strict final acceptance gate set.
 
 BASELINE-DIRECTORY and CURRENT-DIRECTORY contain immutable M9 and M19 live
-Eval results.  Missing directories remain explicit blocked gates.  METADATA
-adds the measured runtime reliability record.  QUALITY-METADATA adds measured
+Eval results.  LARGE-REPO-BASELINE-DIRECTORY and
+LARGE-REPO-CURRENT-DIRECTORY contain the independently repeated one-task token
+comparison.  Missing directories remain explicit blocked gates.  METADATA adds
+the measured runtime reliability record.  QUALITY-METADATA adds measured
 semantic, safety, isolation, context, and Review evidence.  CANONICAL-METADATA
 adds the complete canonical ERT result record.  REQUEST-FOOTPRINT-METADATA adds
 the no-network first-request measurement for the same clean revision."
@@ -1833,6 +1958,12 @@ the no-network first-request measurement for the same clean revision."
       (unless (string-empty-p value) value))
     (let ((value
            (read-string "M19 current results directory (blank if missing): ")))
+      (unless (string-empty-p value) value))
+    (let ((value
+           (read-string "M9 large-repo results directory (blank if missing): ")))
+      (unless (string-empty-p value) value))
+    (let ((value
+           (read-string "M19 large-repo results directory (blank if missing): ")))
       (unless (string-empty-p value) value))))
   (let* ((benchmark (chat-coding-acceptance-benchmark-sync))
          (baseline
@@ -1845,6 +1976,16 @@ the no-network first-request measurement for the same clean revision."
                (file-directory-p current-directory)
                (chat-coding-acceptance-load-result-directory
                 current-directory)))
+         (large-repo-baseline
+          (and large-repo-baseline-directory
+               (file-directory-p large-repo-baseline-directory)
+               (chat-coding-acceptance-load-result-directory
+                large-repo-baseline-directory)))
+         (large-repo-current
+          (and large-repo-current-directory
+               (file-directory-p large-repo-current-directory)
+               (chat-coding-acceptance-load-result-directory
+                large-repo-current-directory)))
          (current-revision
           (chat-coding-acceptance--single-implementation-revision current))
          (gates
@@ -1854,7 +1995,15 @@ the no-network first-request measurement for the same clean revision."
                     baseline-directory baseline "baseline")
                    (chat-coding-acceptance--campaign-directory-gate
                     current-directory current "current"))
-                  (chat-coding-acceptance-live-gates baseline current)
+                  (list
+                   (chat-coding-acceptance--campaign-directory-gate
+                    large-repo-baseline-directory large-repo-baseline
+                    "baseline" 1 5 "large-repo-baseline")
+                   (chat-coding-acceptance--campaign-directory-gate
+                    large-repo-current-directory large-repo-current
+                    "current" 1 5 "large-repo-current"))
+                  (chat-coding-acceptance-live-gates
+                   baseline current large-repo-baseline large-repo-current)
                   (list
                    (chat-coding-acceptance-reliability-record-gate
                     metadata current-revision))
@@ -1875,6 +2024,8 @@ the no-network first-request measurement for the same clean revision."
             `((kind . "final")
               (baselineTrials . ,(length baseline))
               (currentTrials . ,(length current))
+              (largeRepoBaselineTrials . ,(length large-repo-baseline))
+              (largeRepoCurrentTrials . ,(length large-repo-current))
               (failureSummary .
                               ,(chat-coding-acceptance-failure-summary current))
               (environment . ,(plist-get benchmark :environment))

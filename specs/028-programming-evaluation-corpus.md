@@ -18,6 +18,14 @@ The corpus has two independently versioned manifests:
 - the **extended language manifest** adds Zig, Clojure, Java, TypeScript, C,
   C++ and SQL, with the same six categories per language.
 
+`manifest-large-repo.json` is a measured subset, not a third behavioral corpus.
+It contains the exact `python-locate` task from the core manifest and runs it
+five times for each implementation. A unit gate requires byte-for-structure
+task equality with the core entry, while final acceptance binds both focused
+campaigns back to the core task identity, implementation revisions, provider,
+model and capability snapshot. This keeps performance sampling complete without
+rerunning 145 unrelated tasks when provider usage is missing.
+
 The combined qualification suite therefore contains 12 languages and 72 tasks.
 Keeping two manifests protects measurement identity: a result from the original
 30-task baseline remains directly comparable, while the 42-task extension can
@@ -202,6 +210,13 @@ separate immutable campaigns. A combined report may summarize 360 trials, but
 must not average away a failing language or substitute one manifest for the
 other.
 
+The large-repository token gate additionally requires two completed focused
+campaigns using `manifest-large-repo.json`: baseline 1-by-5 and current 1-by-5.
+All ten trials must contain trusted first-request usage and at least 10,000
+indexed fixture files. Their median comparison still requires at least a 15
+percent reduction. The focused campaign cannot contribute to the behavioral
+success rate or replace any core trial.
+
 ### 6.1 Acceptance Record
 
 Every significant campaign record includes:
@@ -253,6 +268,17 @@ An observed language issue is promoted only after repeated evidence:
 Each promotion records affected task IDs, before/after results, counterexamples,
 token cost and a removal condition. This prevents a larger corpus from turning
 into a larger collection of unmeasured prompt folklore.
+
+Language-specific guidance is one input to the model-adaptation policy defined
+by `specs/029-model-adaptive-reliability.md`. Corpus tasks provide evidence; they
+do not embed provider or model branches. The initial portability check runs the
+same core manifest independently with DeepSeek `deepseek-v4-flash` and Kimi Code
+`k3-256k`. Results retain separate campaign identities and are never pooled.
+
+The Kimi matrix accepts only the concrete `k3-256k` identity. `k3`, model aliases
+and a provider response resolving to a different model are invalid for this
+qualification. This cost and identity constraint is part of preflight, before
+any repeated live task is dispatched.
 
 ## 8. Completion Checklist
 

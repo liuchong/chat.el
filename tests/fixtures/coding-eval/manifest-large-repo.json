@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "id": "python-locate",
+      "revision": 2,
+      "category": "locate-explain",
+      "language": "python",
+      "description": "Locate an account-status lookup in a large source tree.",
+      "fixtureId": "python-large-v1",
+      "fixture": "python-large",
+      "fixtureGenerator": "generators/python-large.json",
+      "tags": ["large-repo"],
+      "prompt": "Find the function that resolves an account status by identifier and explain its missing-account result. Do not edit files.",
+      "allowedPaths": ["src/account_status.py"],
+      "timeoutSeconds": 120,
+      "judges": [
+        {
+          "type": "answer-regexp",
+          "name": "located-symbol",
+          "regexp": "resolve_account_status"
+        },
+        {
+          "type": "no-change",
+          "name": "read-only"
+        }
+      ]
+    }
+  ]
+}

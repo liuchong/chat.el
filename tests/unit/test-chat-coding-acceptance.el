@@ -103,8 +103,8 @@
 
 (ert-deftest chat-coding-acceptance-never-passes-a-missing-live-comparison ()
   "Absent M9 or M19 trials produce a blocked gate, never an invented score."
-  (let ((gates (chat-coding-acceptance-live-gates nil nil)))
-    (should (= 2 (length gates)))
+  (let ((gates (chat-coding-acceptance-live-gates nil nil nil nil)))
+    (should (= 3 (length gates)))
     (should (seq-every-p
              (lambda (gate)
                (eq 'blocked (chat-coding-acceptance-gate-status gate)))
@@ -538,8 +538,8 @@
                 (lambda (gates &optional _) gates)))
        (let* ((gates
                (chat-coding-acceptance-run-final
-                baseline-directory current-directory record quality-record
-                canonical-record footprint-record))
+                baseline-directory current-directory nil nil
+                record quality-record canonical-record footprint-record))
               (provenance
                (seq-find
                 (lambda (gate)
@@ -656,6 +656,62 @@
            (chat-coding-acceptance--large-repo-token-gate
             (list baseline) (list current))))
       (should (eq 'failed (chat-coding-acceptance-gate-status gate))))))
+
+(ert-deftest chat-coding-acceptance-large-repo-evidence-matches-core-revisions ()
+  "Dedicated token trials must preserve core task and implementation identity."
+  (let* ((judge (chat-eval-check "judge" t t t))
+         (executor '((provider . fixed-provider) (model . fixed-model)
+                     (profile . code) (transport . openai)
+                     (approvalMode . guarded)))
+         (core-baseline
+          (chat-coding-acceptance-test--result
+           'passed (list judge) executor '("large-repo") "python-locate"))
+         (core-current
+          (chat-coding-acceptance-test--result
+           'passed (list judge) executor '("large-repo") "python-locate"))
+         performance-baseline performance-current)
+    (setf (alist-get 'implementationRevision
+                     (chat-eval-result-metadata core-baseline))
+          "old-revision"
+          (alist-get 'implementationRevision
+                     (chat-eval-result-metadata core-current))
+          "new-revision")
+    (dotimes (_ 5)
+      (let ((baseline
+             (chat-coding-acceptance-test--result
+              'passed (list judge) executor '("large-repo") "python-locate"))
+            (current
+             (chat-coding-acceptance-test--result
+              'passed (list judge) executor '("large-repo") "python-locate")))
+        (dolist (entry `((,baseline "large-baseline" "baseline"
+                                   "baseline-config" "old-revision")
+                         (,current "large-current" "current"
+                                   "current-config" "new-revision")))
+          (setf (chat-eval-result-metadata (car entry))
+                (append
+                 `((campaignId . ,(nth 1 entry))
+                   (campaignRole . ,(nth 2 entry))
+                   (campaignConfigurationDigest . ,(nth 3 entry))
+                   (campaignManifestDigest . "large-manifest")
+                   (implementationRevision . ,(nth 4 entry)))
+                 (chat-eval-result-metadata (car entry)))))
+        (push baseline performance-baseline)
+        (push current performance-current)))
+    (let ((gate
+           (chat-coding-acceptance--large-repo-evidence-gate
+            (list core-baseline) (list core-current)
+            performance-baseline performance-current)))
+      (should (eq 'passed (chat-coding-acceptance-gate-status gate)))
+      (setf (alist-get 'implementationRevision
+                       (chat-eval-result-metadata
+                        (car performance-current)))
+            "wrong-revision")
+      (should
+       (eq 'failed
+           (chat-coding-acceptance-gate-status
+            (chat-coding-acceptance--large-repo-evidence-gate
+             (list core-baseline) (list core-current)
+             performance-baseline performance-current)))))))
 
 (ert-deftest chat-coding-acceptance-rejects-mixed-trial-identities ()
   "Every repeat in a task group must share one comparison identity."
@@ -819,7 +875,8 @@
                    (list judge))
                  executor nil task-id)
                 current))))
-    (let* ((gates (chat-coding-acceptance-live-gates baseline current))
+    (let* ((gates (chat-coding-acceptance-live-gates
+                   baseline current nil nil))
            (sample
             (seq-find
              (lambda (gate)
@@ -847,7 +904,7 @@
              (equal "live-eval-first-request-token-coverage"
                     (chat-coding-acceptance-gate-name gate)))
            (chat-coding-acceptance-live-gates
-            (list baseline) (list current)))))
+            (list baseline) (list current) nil nil))))
     (should (eq 'blocked
                 (chat-coding-acceptance-gate-status coverage)))
     (should (equal '((baseline . 1.0) (current . 0.0))
@@ -872,7 +929,7 @@
              (equal "live-eval-first-request-input-token-budget"
                     (chat-coding-acceptance-gate-name candidate)))
            (chat-coding-acceptance-live-gates
-            (list baseline) (list current)))))
+            (list baseline) (list current) nil nil))))
     (should (eq 'passed (chat-coding-acceptance-gate-status gate)))
     (should (equal '((baseline . 100) (current . 105))
                    (chat-coding-acceptance-gate-actual gate)))))

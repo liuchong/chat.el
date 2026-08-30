@@ -14,6 +14,8 @@ Before any provider request, freeze and record:
 - provider, concrete model and capability snapshot;
 - manifest path, digest and task revisions;
 - language registry path and digest;
+- behavioral manifest and, when measuring repository scale, the exact focused
+  large-repository manifest digest;
 - repetition count, timeout and campaign role;
 - executable paths and toolchain versions.
 
@@ -60,10 +62,12 @@ judges, path boundaries and cleanup declarations.
    starting a repeated matrix.
 5. Run immutable baseline and current campaigns with identical manifest,
    provider, model, capabilities and repetition count.
-6. Run deterministic runtime, quality, canonical and performance evidence on
+6. Run the exact one-task large-repository manifest five times for both frozen
+   implementations; do not use it as behavioral success evidence.
+7. Run deterministic runtime, quality, canonical and performance evidence on
    the exact clean current revision.
-7. Build the strict aggregate from raw machine-readable evidence.
-8. Scan for copied workspaces, compiler output, owned processes and temporary
+8. Build the strict aggregate from raw machine-readable evidence.
+9. Scan for copied workspaces, compiler output, owned processes and temporary
    worktrees; any residue is an acceptance failure.
 
 The public batch commands and Emacs entry points are documented in
@@ -110,6 +114,12 @@ Infrastructure attempts that fail before admissible model work are quarantined.
 They do not consume a repetition/task identity and do not become model failures.
 Missing tools or dependencies block the relevant campaign before the first
 provider request.
+
+`manifest-large-repo.json` must remain an exact structural copy of the core
+`python-locate` task. Its baseline and current campaigns each contain exactly
+five unique repetitions. Final acceptance verifies that both focused campaigns
+match their corresponding core implementation revision and that the pair uses
+the same provider, concrete model, capability snapshot and focused manifest.
 
 ## Standard Verdict Wording
 

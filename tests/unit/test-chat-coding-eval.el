@@ -16,6 +16,10 @@
 (defconst chat-coding-eval-test-manifest
   (expand-file-name "coding-eval/manifest.json" chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-large-repo-manifest
+  (expand-file-name "coding-eval/manifest-large-repo.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-language-registry
   (expand-file-name "coding-eval/language-registry.json"
                     chat-test-fixtures-dir))
@@ -93,6 +97,22 @@
                    (length members)))
         (should (= (alist-get 'expectedTasks cohort)
                    (* (length members) (length categories))))))))
+
+(ert-deftest chat-coding-eval-large-repo-manifest-is-an-exact-core-subset ()
+  "The focused performance campaign cannot drift from its core task."
+  (let* ((core (chat-coding-eval-test--read-json
+                chat-coding-eval-test-manifest))
+         (focused (chat-coding-eval-test--read-json
+                   chat-coding-eval-test-large-repo-manifest))
+         (tasks (alist-get 'tasks focused))
+         (core-task
+          (seq-find (lambda (task)
+                      (equal "python-locate" (alist-get 'id task)))
+                    (alist-get 'tasks core))))
+    (should (= 1 (alist-get 'schemaVersion focused)))
+    (should (= 1 (length tasks)))
+    (should (equal core-task (car tasks)))
+    (should (member "large-repo" (alist-get 'tags (car tasks))))))
 
 (defmacro chat-coding-eval-test-with-runtime (&rest body)
   "Run BODY with isolated evaluation records and workspaces."
