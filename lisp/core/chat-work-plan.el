@@ -621,6 +621,29 @@
       (chat-work-plan--notify-goal session plan status)
       plan)))
 
+(defun chat-work-plan-start-first-ready
+    (session plan-id expected-revision)
+  "Start the earliest dependency-ready pending item in PLAN-ID.
+
+EXPECTED-REVISION keeps this compound convenience operation under the same
+optimistic concurrency contract as every explicit item transition."
+  (let ((plan (or (chat-work-plan-find session plan-id)
+                  (signal 'chat-work-plan-invalid '("unknown plan")))))
+    (chat-work-plan--check-revision plan expected-revision)
+    (when (chat-work-plan--in-progress-item plan)
+      (signal 'chat-work-plan-invalid '("plan already has an active item")))
+    (let ((item
+           (seq-find
+            (lambda (candidate)
+              (and (eq (chat-work-plan-item-status candidate) 'pending)
+                   (chat-work-plan--dependencies-ready-p plan candidate)))
+            (chat-work-plan-items plan))))
+      (unless item
+        (signal 'chat-work-plan-invalid '("no dependency-ready item")))
+      (chat-work-plan-transition-item
+       session plan-id expected-revision (chat-work-plan-item-id item)
+       'in-progress))))
+
 (defun chat-work-plan-resume (session plan-id expected-revision)
   "Resume blocked PLAN-ID at EXPECTED-REVISION."
   (let* ((original (or (chat-work-plan-find session plan-id)

@@ -222,10 +222,10 @@ The vector is empty when tool calling is disabled."
     (mapconcat
      #'identity
      '("Programming plan boundaries:"
-       "- Use `programming_plan_create` as the durable TODO list for substantial coding. Start its first dependency-ready item before the first gated action; do not probe a write or project verification first."
+       "- Before the first gated action, call the directly available `programming_plan_create`; ordinary coding creates the durable TODO list and starts its first dependency-ready item atomically."
        "- TODO items are control points, not narration. Use the fewest items that preserve real dependencies, approvals, and distinct acceptance outcomes; combine related edits and their verification when one observable result closes both."
        "- Successful tools return an exact Evidence ID. Pass that ID in `evidence` when completing a plan item or recording Goal evidence; never invent one."
-       "- Plan transitions are revisioned and only one item may be active. Never batch dependent transitions; wait for each result and use its returned revision for the next transition."
+       "- The first item is already active after ordinary creation. Complete only the active item; then start the next pending item. Never batch dependent transitions: use each returned revision."
        "- Do not enter Plan Mode merely to create or use that TODO list."
        "- Call `programming_plan_mode_enter` only when the user explicitly asks for read-only planning before implementation.")
      "\n")))

@@ -31,7 +31,9 @@
                    (plist-get config :enabled-tools)))
     (should (equal chat-capability-programming-base-tools
                    (plist-get config :advertised-tools)))
-    (should-not (memq 'programming_plan_create
+    (should (memq 'programming_plan_create
+                  (plist-get config :advertised-tools)))
+    (should-not (memq 'programming_plan_transition
                       (plist-get config :advertised-tools)))))
 
 (ert-deftest chat-capability-activation-expands-only-the-execution-menu ()
@@ -46,11 +48,12 @@
      execution
      (list :enabled-tools chat-capability-programming-tools
            :advertised-tools chat-capability-programming-base-tools))
-    (should-not
-     (member "programming_plan_create"
-             (mapcar (lambda (definition)
-                       (alist-get 'name (alist-get 'function definition)))
-                     (append (chat-tool-caller-provider-tools) nil))))
+    (let ((names
+           (mapcar (lambda (definition)
+                     (alist-get 'name (alist-get 'function definition)))
+                   (append (chat-tool-caller-provider-tools) nil))))
+      (should (member "programming_plan_create" names))
+      (should-not (member "programming_plan_transition" names)))
     (chat-capability-programming-capability-activate "plan")
     (should (memq 'programming_plan_create
                   (plist-get (chat-session-tool-config execution)
@@ -376,8 +379,28 @@
        '(((id . "step")
           (title . "Run in execution session")
           (acceptance . "Execution session contains the plan.")))))
-    (should (chat-work-plan-current execution))
+    (let ((plan (chat-work-plan-current execution)))
+      (should (= 2 (chat-work-plan-revision plan)))
+      (should (eq 'in-progress
+                  (chat-work-plan-item-status
+                   (car (chat-work-plan-items plan))))))
     (should-not (chat-work-plan-current ambient))))
+
+(ert-deftest chat-capability-plan-mode-create-keeps-items-pending ()
+  "Read-only Plan Mode never turns proposal creation into execution."
+  (let* ((session (make-chat-session :id "planning-only"))
+         (chat-tool-caller-current-session session)
+         (chat-tool-caller-current-state-session session))
+    (chat-plan-mode-enter session)
+    (chat-capability-programming-plan-create
+     "Proposal"
+     '(((id . "step") (title . "Propose")
+        (acceptance . "The user can review it."))))
+    (let ((plan (chat-work-plan-current session)))
+      (should (= 1 (chat-work-plan-revision plan)))
+      (should (eq 'pending
+                  (chat-work-plan-item-status
+                   (car (chat-work-plan-items plan))))))))
 
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."
@@ -464,10 +487,11 @@
           (creation
            (chat-forged-tool-description
             (chat-tool-forge-get 'programming_plan_create))))
-      (should (string-match-p "Before the first multi-file write" activation))
-      (should (string-match-p "do not probe the gated action first" activation))
-      (should (string-match-p "fewest control points" activation))
-      (should (string-match-p "start its first dependency-ready item" creation))
+      (should (string-match-p "programming_plan_create is already visible"
+                              activation))
+      (should (string-match-p "starts the first item" activation))
+      (should (string-match-p "starts atomically" creation))
+      (should (string-match-p "remain pending for user approval" creation))
       (should (string-match-p "control points, not a transcript" creation))
       (should (string-match-p "Combine related edits" creation)))))
 

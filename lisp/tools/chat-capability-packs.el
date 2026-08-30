@@ -34,6 +34,7 @@
 
 (defconst chat-capability-programming-base-tools
   '(programming_capability_activate
+    programming_plan_create
     programming_git_status
     programming_compile_task
     files_read files_read_lines files_list files_grep open_file
@@ -628,12 +629,18 @@
     (chat-capability--work-plan-session) goal-id revision)))
 
 (defun chat-capability-programming-plan-create (objective items &optional mode)
-  "Create a durable work plan from structured ITEMS."
-  (let ((items (chat-capability--work-plan-items items "items")))
-    (chat-work-plan-to-alist
-     (chat-work-plan-create
-      (chat-capability--work-plan-session) objective items
-      :mode (and mode (not (string-empty-p mode)) (intern mode))))))
+  "Create a durable plan and, outside Plan Mode, start its first item."
+  (let* ((items (chat-capability--work-plan-items items "items"))
+         (session (chat-capability--work-plan-session))
+         (plan
+          (chat-work-plan-create
+           session objective items
+           :mode (and mode (not (string-empty-p mode)) (intern mode)))))
+    (unless (chat-plan-mode-active-p session)
+      (setq plan
+            (chat-work-plan-start-first-ready
+             session (chat-work-plan-id plan) (chat-work-plan-revision plan))))
+    (chat-work-plan-to-alist plan)))
 
 (defun chat-capability-programming-plan-read (&optional plan-id)
   "Read PLAN-ID or the selected work plan."
@@ -1089,13 +1096,11 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
   "Register programming, office, and daily capability tools."
   (chat-capability--register-tool
    'programming_capability_activate "Programming Capability Activate"
-   (concat "Expose a stage tool group for this run. Before the first multi-file "
-           "write, project-wide compile or verification, or substantial repair, "
-           "activate plan, create its durable TODO plan, and start the first item; "
-           "do not probe the gated action first. Keep that plan to the fewest "
-           "control points that preserve real dependencies: combine related edits "
-           "and their verification when one observable result closes both. Use "
-           "exploration for editor semantics or web lookup, goal only when "
+   (concat "Expose a stage tool group for this run. programming_plan_create is "
+           "already visible and starts the first item for ordinary coding; "
+           "activate plan only for read-only Plan Mode or lifecycle operations "
+           "before a plan exists. Use exploration for editor semantics or web "
+           "lookup, goal only when "
            "explicitly requested, and batch-edit only for structured "
            "multi-replacement; apply_patch is already available.")
    '((:name "capability" :type "string" :required t
@@ -1274,9 +1279,10 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    nil #'chat-capability-programming-plan-mode-enter 'project '(state))
   (chat-capability--register-tool
    'programming_plan_create "Programming Plan Create"
-   (concat "Create the durable TODO plan for substantial coding, then start its "
-           "first dependency-ready item before a gated action. This does not enter "
-           "read-only Plan Mode. TODO items are control points, not a transcript: "
+   (concat "Create the durable TODO plan for substantial coding. In ordinary "
+           "coding the first dependency-ready item starts atomically; do not issue "
+           "a separate start transition. In read-only Plan Mode items remain "
+           "pending for user approval. TODO items are control points, not a transcript: "
            "use the fewest items that preserve real dependencies, approvals, and "
            "distinct acceptance outcomes. Combine related edits and their "
            "verification when one observable result closes both. Each item needs "
@@ -1318,7 +1324,9 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
   (chat-capability--register-tool
    'programming_plan_transition "Programming Plan Transition"
    (concat "Start, complete, block, or skip one plan item using the observed "
-           "revision. Completion requires known evidence ids. Transitions are "
+           "revision. The first item is already active after ordinary plan "
+           "creation; complete only that active item, then start the next pending "
+           "item. Completion requires known evidence ids. Transitions are "
            "serial: wait for each result and use its returned revision before "
            "requesting the next transition.")
    '((:name "plan_id" :type "string" :required t)

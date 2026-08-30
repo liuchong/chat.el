@@ -80,7 +80,28 @@
       :type 'chat-work-plan-invalid)
      (should (eq 'in-progress
                  (chat-work-plan-item-status
-                  (car (chat-work-plan-items plan))))))))
+                 (car (chat-work-plan-items plan))))))))
+
+(ert-deftest chat-work-plan-start-first-ready-honors-dependencies-and-order ()
+  "The compound start chooses the earliest ready item under one revision."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-work-plan-test--session))
+          (plan
+           (chat-work-plan-create
+            session "Start ready"
+            '(((id . "dependent") (title . "Dependent")
+               (dependencies . ["root"]))
+              ((id . "root") (title . "Root"))))))
+     (setq plan
+           (chat-work-plan-start-first-ready
+            session (chat-work-plan-id plan) 1))
+     (should (= 2 (chat-work-plan-revision plan)))
+     (should (eq 'pending
+                 (chat-work-plan-item-status
+                  (car (chat-work-plan-items plan)))))
+     (should (eq 'in-progress
+                 (chat-work-plan-item-status
+                  (cadr (chat-work-plan-items plan))))))))
 
 (ert-deftest chat-work-plan-completion-requires-resolvable-evidence ()
   "Terminal success is backed by a known runtime evidence id."

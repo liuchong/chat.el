@@ -64,8 +64,12 @@ allows an audited skip only for:
 
 The runtime checks again at the tool boundary before a mutating tool, child
 task, project verification or repair action. An applicable active plan must
-also have one dependency-ready `in-progress` item; merely creating a plan does
-not authorize work. Otherwise the action is blocked with `plan-required`; the
+also have one dependency-ready `in-progress` item. The provider-facing
+`programming_plan_create` operation is present in the initial programming menu
+and atomically starts the earliest dependency-ready item for ordinary coding;
+the lower-level store primitive still treats creation and execution as separate
+state transitions. In read-only Plan Mode creation leaves every item pending
+for user approval. Otherwise the action is blocked with `plan-required`; the
 Agent can create or advance the plan and retry. A prompt request alone is not
 considered enforcement.
 
