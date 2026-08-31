@@ -56,11 +56,20 @@ invalid measurement identity.
 
 ## Verification
 
-The complete canonical batch passed 1911/1911 with zero skipped or unexpected
+The complete canonical batch passed 1913/1913 with zero skipped or unexpected
 results when run with the full Rust toolchain PATH. The Agent end-to-end suite
 passed 3/3. Focused tests prove model pinning across follow-up options, provider
 override resolution, child identity propagation, actual-request wire records
 and Eval rejection of identity drift.
+
+The first post-fix DeepSeek probe exposed a separate evidence-persistence
+defect. Both behavioral judges passed, but one result's metadata exceeded the
+old aggregate value limit and was replaced wholesale by a truncation marker.
+The campaign correctly refused completion because task, campaign and request
+identity could no longer be validated. The persistence contract now bounds
+scalar leaves, collection length and nesting depth independently while
+preserving container shape and identity keys. Resume, cancellation, missing
+judge executable and oversized-metadata tests cover this rule.
 
 Live results will be added after the implementation revision is clean and
 committed. The live matrix is limited to `deepseek/deepseek-v4-flash` and

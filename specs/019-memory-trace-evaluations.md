@@ -109,6 +109,13 @@ aborting the remaining suite.
 revision, fixture identity and digest, start and finish timestamps, duration, aggregate
 status, named checks and bounded metadata. Results are immutable atomic JSON files.
 
+Bounding is structural. Scalar text is redacted and byte-bounded, collections have an
+item bound, and nesting has a depth bound. Exceeding one leaf limit replaces that leaf
+with an explicit truncation record; it must not replace the enclosing metadata object.
+Identity and decision fields such as task, campaign, provider, concrete model and actual
+request IDs therefore remain recoverable even when a sibling diagnostic is oversized.
+Persistence that erases those fields is invalid evidence and cannot complete a campaign.
+
 The built-in offline suite covers:
 
 - editing ownership and bounded file facts;

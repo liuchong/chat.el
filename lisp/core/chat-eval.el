@@ -23,7 +23,15 @@
   :type 'boolean :group 'chat)
 
 (defcustom chat-eval-max-value-bytes 4096
-  "Maximum encoded bytes kept for one expected or actual value."
+  "Maximum encoded bytes kept for one scalar evaluation value."
+  :type 'integer :group 'chat)
+
+(defcustom chat-eval-max-collection-items 256
+  "Maximum items kept in one evaluation collection."
+  :type 'integer :group 'chat)
+
+(defcustom chat-eval-max-value-depth 16
+  "Maximum nesting depth kept in one evaluation value."
   :type 'integer :group 'chat)
 
 (defcustom chat-eval-redact-patterns
@@ -132,24 +140,11 @@
       (setq text (replace-regexp-in-string pattern "[redacted]" text t)))
     text))
 
-(defun chat-eval--sanitize-value (value)
-  "Return a bounded, JSON-safe projection of VALUE."
-  (let* ((clean
-          (cond
-           ((stringp value) (chat-eval--redact-string value))
-           ((or (numberp value) (eq value t) (null value)) value)
-           ((symbolp value) (symbol-name value))
-           ((vectorp value)
-            (mapcar #'chat-eval--sanitize-value (append value nil)))
-           ((listp value)
-            (mapcar
-             (lambda (entry)
-               (if (consp entry)
-                   (cons (car entry)
-                         (chat-eval--sanitize-value (cdr entry)))
-                 (chat-eval--sanitize-value entry)))
-             value))
-           (t (format "%S" value))))
+(defun chat-eval--bounded-scalar (value)
+  "Return a redacted and byte-bounded JSON scalar for VALUE."
+  (let* ((clean (if (stringp value)
+                    (chat-eval--redact-string value)
+                  value))
          (encoded
           (condition-case nil
               (json-encode clean)
@@ -158,6 +153,55 @@
     (if (<= bytes chat-eval-max-value-bytes)
         clean
       `((truncated . t) (originalBytes . ,bytes)))))
+
+(defun chat-eval--sanitize-value (value &optional depth)
+  "Return a structurally bounded, JSON-safe projection of VALUE.
+
+Container shape and small identity fields remain durable even when a sibling
+contains oversized diagnostic text.  DEPTH is internal recursion state."
+  (let ((depth (or depth 0)))
+    (cond
+     ((>= depth chat-eval-max-value-depth)
+      '((truncated . t) (reason . "maxDepth")))
+     ((stringp value) (chat-eval--bounded-scalar value))
+     ((or (numberp value) (eq value t) (null value)) value)
+     ((symbolp value) (chat-eval--bounded-scalar (symbol-name value)))
+     ((vectorp value)
+      (chat-eval--sanitize-value (append value nil) depth))
+     ((consp value)
+      (if (proper-list-p value)
+          (let ((items value)
+                (alist-p
+                 (and value
+                      (seq-every-p
+                       (lambda (item)
+                         (and (consp item)
+                              (or (symbolp (car item))
+                                  (stringp (car item)))))
+                       value)))
+                (count 0)
+                clean)
+            (while (and items (< count chat-eval-max-collection-items))
+              (let ((item (pop items)))
+                (push
+                 (if alist-p
+                     (cons (car item)
+                           (chat-eval--sanitize-value
+                            (cdr item) (1+ depth)))
+                   (chat-eval--sanitize-value item (1+ depth)))
+                 clean))
+              (setq count (1+ count)))
+            (when items
+              (push (if alist-p
+                        `(truncatedCollection
+                          (omittedItems . ,(length items)))
+                      `((truncated . t)
+                        (omittedItems . ,(length items))))
+                    clean))
+            (nreverse clean))
+        (cons (car value)
+              (chat-eval--sanitize-value (cdr value) (1+ depth)))))
+     (t (chat-eval--bounded-scalar (format "%S" value))))))
 
 (defun chat-eval--normalize-check (check)
   "Validate and sanitize CHECK."

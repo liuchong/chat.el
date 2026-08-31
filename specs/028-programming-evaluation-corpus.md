@@ -244,6 +244,9 @@ A trial without actual request-identity evidence is invalid. If any request
 uses a provider or concrete model different from the frozen campaign pair, the
 trial fails closed as an identity error and the campaign cannot contribute to
 model qualification, adaptation evidence or cross-provider comparison.
+These identity records and the task/campaign keys that bind them are protected
+structural evidence: value bounding may truncate large diagnostic leaves but
+must never collapse the enclosing metadata object or discard completion keys.
 
 Token boundaries are explicit. `firstRequestTokenUsage` measures fixed prompt,
 context-selection and provider-schema cost; `finalRequestTokenUsage` describes
@@ -257,7 +260,9 @@ invalid attempts remain excluded from both correctness and token comparison.
 
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive
-provider traffic.
+provider traffic. Runtime result JSON is also structurally bounded: strings,
+collection sizes and nesting depth are limited independently so a large answer
+cannot erase the small identity facts needed for validation and resume.
 
 New records start from
 `.agents/templates/programming-evaluation-record-template.md`. This keeps the

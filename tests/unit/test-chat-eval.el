@@ -130,6 +130,48 @@
        (should-not (string-match-p "abcdefghijklmnop" json))
        (should-not (string-match-p (make-string 100 ?x) json))))))
 
+(ert-deftest chat-eval-metadata-keeps-structure-when-one-leaf-is-oversized ()
+  "Large diagnostics cannot erase durable campaign and request identity."
+  (chat-eval-test-with-runtime
+   (let ((chat-eval-max-value-bytes 80))
+     (chat-eval-register
+      (chat-eval-test--scenario
+       "structured-metadata"
+       (lambda (_fixture)
+         (list (chat-eval-check "works" t t t)))))
+     (let* ((result
+             (chat-eval-run
+              "structured-metadata"
+              `((taskId . "elisp-failing-test")
+                (executor
+                 (provider . "deepseek")
+                 (model . "deepseek-v4-flash")
+                 (requestModels
+                  . [((provider . "deepseek")
+                      (model . "deepseek-v4-flash")
+                      (requestId . "request-1"))]))
+                (diagnostic . ,(make-string 1000 ?x)))))
+            (loaded (chat-eval-load-result
+                     (chat-eval--result-file (chat-eval-result-id result))))
+            (metadata (chat-eval-result-metadata loaded))
+            (executor (alist-get 'executor metadata))
+            (request (car (alist-get 'requestModels executor))))
+       (should (equal "elisp-failing-test" (alist-get 'taskId metadata)))
+       (should (equal "deepseek" (alist-get 'provider executor)))
+       (should (equal "deepseek-v4-flash" (alist-get 'model request)))
+       (should (eq t (alist-get 'truncated
+                                (alist-get 'diagnostic metadata))))))))
+
+(ert-deftest chat-eval-values-bound-collection-size-and-depth ()
+  "Structural bounds emit evidence instead of retaining unbounded containers."
+  (let* ((chat-eval-max-collection-items 2)
+         (chat-eval-max-value-depth 2)
+         (collection (chat-eval--sanitize-value '(1 2 3 4)))
+         (nested (chat-eval--sanitize-value '(((value . "deep"))))))
+    (should (= 3 (length collection)))
+    (should (= 2 (alist-get 'omittedItems (car (last collection)))))
+    (should (string-match-p "maxDepth" (prin1-to-string nested)))))
+
 (ert-deftest chat-eval-export-is-public-bounded-and-redacted ()
   "Result export uses the same bounded privacy projection as persistence."
   (chat-eval-test-with-runtime
