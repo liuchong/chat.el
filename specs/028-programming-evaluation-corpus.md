@@ -92,7 +92,12 @@ evidence and must not be committed.
 
 Historical comparison executes implementation behavior from the exact frozen
 checkout while loading the immutable campaign and result contract from the
-current harness. This boundary is governed by explicit protocol versions for:
+current harness. The harness reloads and verifies both the generic Eval result
+serializer and the coding campaign orchestrator after loading the historical
+implementation. A frozen implementation may therefore provide Agent, tool and
+transport behavior, but it cannot control result bounding, persistence, resume
+identity or final campaign validation. This boundary is governed by explicit
+protocol versions for:
 
 1. binding provider and concrete model to an Agent run;
 2. observing normalized request events at the model transport boundary;
@@ -309,6 +314,13 @@ gate use first-request input tokens from all valid trials, regardless of task
 correctness. Correctness failures remain failures in the success-rate gates but
 do not erase an otherwise trustworthy performance sample. Infrastructure-
 invalid attempts remain excluded from both correctness and token comparison.
+
+Campaign token usage contains only the normalized numeric counters named by
+this contract. Provider-specific raw usage objects remain transport diagnostics
+and are not duplicated into task results. Result bounding applies independently
+to scalar leaves, collection length and nesting depth; it may replace a large
+diagnostic leaf with truncation evidence, but it cannot replace the enclosing
+metadata object or erase task, campaign, provider, model or request identity.
 
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive

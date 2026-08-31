@@ -145,6 +145,32 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
   (equal (file-name-as-directory (file-truename left))
          (file-name-as-directory (file-truename right))))
 
+(defconst chat-campaign-runner--harness-contracts
+  '(("lisp/core/chat-eval.el" . chat-eval--result-to-json)
+    ("lisp/agent/chat-coding-eval.el" . chat-coding-eval--start-campaign))
+  "Harness-owned modules and representative contract functions.")
+
+(defun chat-campaign-runner--load-harness-contracts (implementation-root)
+  "Load and verify harness-owned contracts for IMPLEMENTATION-ROOT.
+
+The frozen checkout owns product behavior.  The current harness always owns
+campaign orchestration and durable result serialization, so historical code
+cannot change or erase the evidence schema used for comparison."
+  (unless (chat-campaign-runner--same-root-p
+           implementation-root chat-campaign-runner--harness-root)
+    (dolist (contract chat-campaign-runner--harness-contracts)
+      (load (expand-file-name (car contract)
+                              chat-campaign-runner--harness-root)
+            nil nil t)))
+  (dolist (contract chat-campaign-runner--harness-contracts)
+    (let ((owner (symbol-file (cdr contract) 'defun)))
+      (unless (and owner
+                   (file-in-directory-p
+                    (file-truename owner)
+                    chat-campaign-runner--harness-root))
+        (error "Campaign contract %s is not owned by harness %s"
+               (cdr contract) chat-campaign-runner--harness-root)))))
+
 (defun chat-campaign-runner--install-runtime-home (runtime-home)
   "Install isolated RUNTIME-HOME without leaving a stale tilde directory."
   (when runtime-home
@@ -311,13 +337,7 @@ one is retained for investigation or a later invocation."
         (capability-version
          (and (boundp 'chat-model-capabilities-schema-version)
               chat-model-capabilities-schema-version)))
-    (unless (chat-campaign-runner--same-root-p
-             implementation-root chat-campaign-runner--harness-root)
-      ;; Keep implementation behavior frozen while sharing the campaign and
-      ;; result contract from the harness revision.
-      (load (expand-file-name "lisp/agent/chat-coding-eval.el"
-                              chat-campaign-runner--harness-root)
-            nil nil t))
+    (chat-campaign-runner--load-harness-contracts implementation-root)
     (chat-campaign-runner--configure-implementation-contracts
      agent-version observer-version capability-version))
   (setq chat-default-model provider

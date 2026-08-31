@@ -289,6 +289,50 @@
      (should (equal (file-truename rustup-home) (getenv "RUSTUP_HOME")))
      (should (equal harness default-directory)))))
 
+(ert-deftest chat-campaign-runner-keeps-result-contracts-harness-owned ()
+  "A frozen implementation cannot supply campaign persistence functions."
+  (chat-test-with-temp-dir
+   (let* ((harness (file-name-as-directory
+                    (expand-file-name "harness" temp-dir)))
+          (implementation (file-name-as-directory
+                           (expand-file-name "implementation" temp-dir)))
+          (chat-campaign-runner--harness-root harness)
+          loaded)
+     (dolist (contract chat-campaign-runner--harness-contracts)
+       (let ((file (expand-file-name (car contract) harness)))
+         (make-directory (file-name-directory file) t)
+         (write-region "" nil file nil 'silent)))
+     (make-directory implementation t)
+     (cl-letf (((symbol-function 'load)
+                (lambda (file &rest _arguments) (push file loaded)))
+               ((symbol-function 'symbol-file)
+                (lambda (symbol &optional _type)
+                  (expand-file-name
+                   (car (rassq symbol chat-campaign-runner--harness-contracts))
+                   harness))))
+       (chat-campaign-runner--load-harness-contracts implementation))
+     (should
+      (equal (mapcar (lambda (contract)
+                       (expand-file-name (car contract) harness))
+                     chat-campaign-runner--harness-contracts)
+             (nreverse loaded))))))
+
+(ert-deftest chat-campaign-runner-rejects-foreign-result-contract-owner ()
+  "Runner fails closed when a persistence function still belongs elsewhere."
+  (chat-test-with-temp-dir
+   (let* ((harness (file-name-as-directory
+                    (expand-file-name "harness" temp-dir)))
+          (foreign (expand-file-name "foreign/chat-eval.el" temp-dir))
+          (chat-campaign-runner--harness-root harness))
+     (make-directory harness t)
+     (make-directory (file-name-directory foreign) t)
+     (write-region "" nil foreign nil 'silent)
+     (cl-letf (((symbol-function 'symbol-file)
+                (lambda (_symbol &optional _type) foreign)))
+       (should-error
+        (chat-campaign-runner--load-harness-contracts harness)
+        :type 'error)))))
+
 (ert-deftest chat-campaign-runner-always-isolates-and-cleans-runtime-home ()
   "The runner never reads developer state when no runtime HOME is supplied."
   (chat-test-with-temp-dir
@@ -499,15 +543,19 @@
                 '(:type tool-event :event (:type tool-error)))
        (funcall on-event '(:type turn-start))
        (funcall on-event
-                '(:type model-usage
-                  :usage (:input-tokens 11 :output-tokens 4 :total-tokens 15)))
+                (list :type 'model-usage
+                      :usage
+                      (list :input-tokens 11 :output-tokens 4 :total-tokens 15
+                            :raw `((provider_detail . ,(make-string 5000 ?x))))))
        (funcall model-observer
                 (chat-model-event-make
                  'started 'eval-provider "model" "request-2" 1 nil))
        (funcall on-event '(:type turn-start))
        (funcall on-event
-                '(:type model-usage
-                  :usage (:input-tokens 21 :output-tokens 8 :total-tokens 29)))
+                (list :type 'model-usage
+                      :usage
+                      (list :input-tokens 21 :output-tokens 8 :total-tokens 29
+                            :raw `((provider_detail . ,(make-string 5000 ?y))))))
        (funcall on-event
                 '(:type agent-end :status completed :content "done"
                   :steps 1 :tool-calls nil :tool-results nil)))
@@ -516,8 +564,12 @@
      (should (= 2 (alist-get 'approvalCount metadata)))
      (should (= 11 (plist-get (alist-get 'firstRequestTokenUsage metadata)
                               :input-tokens)))
+     (should-not (plist-member (alist-get 'firstRequestTokenUsage metadata)
+                               :raw))
      (should (= 29 (plist-get (alist-get 'finalRequestTokenUsage metadata)
                               :total-tokens)))
+     (should-not (plist-member (alist-get 'finalRequestTokenUsage metadata)
+                               :raw))
      (should (= 44 (plist-get (alist-get 'totalTokenUsage metadata)
                               :total-tokens)))
      (should (= 2 (alist-get 'requestCount metadata)))

@@ -1075,6 +1075,18 @@ ON-COMPLETE receives results in execution order and the suite state."
     :cache-read-tokens :cache-write-tokens)
   "Normalized usage counters retained for each live request.")
 
+(defun chat-coding-eval--normalize-token-usage (usage)
+  "Return known numeric counters from normalized USAGE.
+
+Provider payloads remain transport diagnostics.  Campaign evidence retains the
+portable counters it compares and never duplicates the provider-specific
+`:raw' object into every task result."
+  (let (normalized)
+    (dolist (key chat-coding-eval--token-usage-keys normalized)
+      (let ((value (plist-get usage key)))
+        (when (numberp value)
+          (setq normalized (plist-put normalized key value)))))))
+
 (defun chat-coding-eval--sum-token-usage (samples)
   "Return token counters summed independently across usage SAMPLES."
   (let (total)
@@ -1720,11 +1732,14 @@ ordinary application execution always uses protocol v2.")
          :on-event
          (lambda (event)
            (when (plist-member event :usage)
-             (let ((usage (copy-tree (plist-get event :usage))))
-               (unless first-usage
-                 (setq first-usage usage))
-               (setq final-usage usage)
-               (push usage usage-samples)))
+             (let ((usage
+                    (chat-coding-eval--normalize-token-usage
+                     (plist-get event :usage))))
+               (when usage
+                 (unless first-usage
+                   (setq first-usage usage))
+                 (setq final-usage usage)
+                 (push usage usage-samples))))
            (let ((type (plist-get event :type))
                  (tool-type (and (eq (plist-get event :type) 'tool-event)
                                  (plist-get (plist-get event :event) :type))))
