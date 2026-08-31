@@ -94,6 +94,8 @@ Tests must prove:
 - a queued message is unaffected by later prompt changes;
 - a switch left pending when a run ends applies to the next real send;
 - application replaces the transient row with one durable display-only record;
+- an open work shelf remains below the transient row while live output grows,
+  without losing shelf content or moving the input boundary;
 - direct command switching updates the prompt target;
 - unknown and ambiguous targets leave all state unchanged;
 - passive hints and common-prefix completion remain non-selectable and bounded;

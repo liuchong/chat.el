@@ -1978,10 +1978,17 @@ long transcript never scans the whole conversation."
   (setq chat-ui--work-shelf-start (copy-marker (point) nil))
   (setq chat-ui--work-shelf-end (copy-marker (point) t))
   (chat-ui--render-work-shelf)
+  ;; `chat-ui--render-work-shelf' restores its normal live-tail semantics;
+  ;; initialization still has to insert the divider and prompt at this point.
+  (set-marker-insertion-type chat-ui--work-shelf-start nil)
   (set-marker-insertion-type chat-ui--work-shelf-end nil)
   (insert (propertize "───\n" 'face 'shadow))
   (insert (chat-ui--input-prompt))
-  (setq chat-ui--input-overlay (point-marker)))
+  (setq chat-ui--input-overlay (point-marker))
+  ;; Only future live output shares the shelf boundary.  Both ends must
+  ;; advance together while the shelf is collapsed or its region reverses.
+  (set-marker-insertion-type chat-ui--work-shelf-start t)
+  (set-marker-insertion-type chat-ui--work-shelf-end t))
 
 (defun chat-ui--work-shelf-section-expanded-p (section-id)
   "Return non-nil when SECTION-ID is expanded in this buffer."
@@ -2062,13 +2069,22 @@ long transcript never scans the whole conversation."
        (lambda ()
          (let ((inhibit-read-only t)
                (inhibit-modification-hooks t))
-           (goto-char chat-ui--work-shelf-start)
-           (delete-region chat-ui--work-shelf-start chat-ui--work-shelf-end)
-           (dolist (section sections)
-             (chat-ui--insert-work-shelf-section section))
-           (set-marker chat-ui--work-shelf-end (point))
-           (setq chat-ui--work-shelf-section-ids
-                 (mapcar #'chat-work-shelf-section-id sections))))))))
+           ;; During shelf insertion the start must stay before its own text;
+           ;; between renders it advances across live transcript insertion.
+           (set-marker-insertion-type chat-ui--work-shelf-start nil)
+           (set-marker-insertion-type chat-ui--work-shelf-end t)
+           (unwind-protect
+               (progn
+                 (goto-char chat-ui--work-shelf-start)
+                 (delete-region chat-ui--work-shelf-start
+                                chat-ui--work-shelf-end)
+                 (dolist (section sections)
+                   (chat-ui--insert-work-shelf-section section))
+                 (set-marker chat-ui--work-shelf-end (point))
+                 (setq chat-ui--work-shelf-section-ids
+                       (mapcar #'chat-work-shelf-section-id sections)))
+             (set-marker-insertion-type chat-ui--work-shelf-start t)
+             (set-marker-insertion-type chat-ui--work-shelf-end t))))))))
 
 (defun chat-ui--refresh-work-shelf-sections (event)
   "Incrementally refresh only work-shelf sections invalidated by EVENT."

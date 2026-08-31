@@ -86,6 +86,18 @@
      (should (equal before (chat-session-metadata session)))
      (should-not (chat-model-selection-pending session)))))
 
+(ert-deftest chat-ui-unknown-model-name-does-not-change-selection ()
+  "An unknown target fails before it can dirty persisted session state."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-session-create "unknown-model" 'kimi))
+          (before (copy-tree (chat-session-metadata session))))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (should-error (chat-ui--resolve-model-target "missing-model")
+                     :type 'user-error))
+     (should (equal before (chat-session-metadata session)))
+     (should-not (chat-model-selection-pending session)))))
+
 (ert-deftest chat-agent-model-switch-applies-at-next-turn-boundary ()
   "Scheduling does not mutate a run until the boundary function executes."
   (let* ((old (chat-test-model-target 'kimi))
@@ -247,6 +259,79 @@
            (should (equal operation-id
                           (plist-get (chat-message-metadata (car records))
                                      :model-switch-id)))))))))
+
+(ert-deftest chat-ui-idle-model-command-applies-on-next-real-send ()
+  "An idle command waits without a request, then the next send consumes it."
+  (chat-test-with-temp-dir
+   (let ((session (chat-session-create "idle-model-command" 'kimi))
+         (response-count 0))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (cl-letf (((symbol-function 'chat-ui--checkpoint-user-message) #'ignore)
+                 ((symbol-function 'chat-ui--get-response)
+                  (lambda () (setq response-count (1+ response-count)))))
+         (chat-ui--command-model "deepseek")
+         (should (= response-count 0))
+         (should (eq 'kimi (chat-session-model-id session)))
+         (should (eq 'deepseek
+                     (chat-model-target-provider
+                      (chat-model-selection-prepared session))))
+         (should (chat-model-selection-pending session))
+         (should (chat-model-selection-dirty-p session))
+         (chat-ui--send-user-message "continue")
+         (should (= response-count 1))
+         (should (eq 'deepseek (chat-session-model-id session)))
+         (should-not (chat-model-selection-pending session))
+         (should-not (chat-model-selection-dirty-p session))
+         (let ((records
+                (seq-filter
+                 (lambda (message)
+                   (eq 'command-reply (chat-transcript-category message)))
+                 (chat-session-messages session))))
+           (should (= 1 (length records)))))))))
+
+(ert-deftest chat-ui-model-command-stays-after-live-output-before-work-shelf ()
+  "The transient command floats below live prose and above an open shelf."
+  (chat-test-with-temp-dir
+   (let* ((session (chat-session-create "model-row-position" 'kimi))
+          (target (chat-test-model-target 'deepseek)))
+     (chat-session-metadata-set session 'code-enabled t)
+     (chat-work-plan-create
+      session "Model placement"
+      '(((id . "placement") (title . "Keep the model row above tools"))))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (chat-ui-setup-buffer session)
+       (setq-local chat-ui--live-response-content "partial output")
+       (let* ((pending (chat-ui--request-model-switch target 'command))
+              (operation-id (alist-get 'id pending)))
+         (chat-ui--render-live-region)
+         (chat-ui-toggle-work-shelf)
+         (dolist (content '("partial output" "partial output continued"))
+           (setq-local chat-ui--live-response-content content)
+           (chat-ui--render-live-region)
+           (goto-char (point-min))
+           (search-forward content)
+           (let ((output-end (point)))
+             (goto-char (point-min))
+             (let ((match (text-property-search-forward
+                           'chat-ui-transient-model-switch operation-id t)))
+               (should match)
+               (should (< output-end (prop-match-beginning match)))
+               (should (<= (prop-match-end match)
+                           (marker-position chat-ui--messages-end)))
+               (should (<= (marker-position chat-ui--messages-end)
+                           (marker-position chat-ui--work-shelf-start)))
+               (should (< (marker-position chat-ui--work-shelf-start)
+                          (marker-position chat-ui--work-shelf-end)))
+               (should (<= (marker-position chat-ui--work-shelf-end)
+                           (marker-position chat-ui--input-overlay)))
+               (should (string-match-p
+                        "TODO 0/1"
+                        (buffer-substring-no-properties
+                         chat-ui--work-shelf-start
+                         chat-ui--work-shelf-end)))))))))))
 
 (ert-deftest chat-ui-model-command-pends-without-interrupting-active-run ()
   "The command schedules the next continuation and leaves this request alone."
