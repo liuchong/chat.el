@@ -36,6 +36,17 @@
       (error "%s must be a positive integer" name))
     (string-to-number value)))
 
+(defun chat-campaign-runner--validate-qualification-model (provider model)
+  "Require the exact qualified MODEL identity for a known PROVIDER."
+  (let ((required
+         (pcase provider
+           ('deepseek "deepseek-v4-flash")
+           ('kimi-code "k3-256k"))))
+    (when (and required (not (equal model required)))
+      (error "Campaign provider %s requires exact model %s, not %s"
+             provider required model))
+    model))
+
 (defun chat-campaign-runner--git-output (root &rest arguments)
   "Return trimmed Git output under ROOT for ARGUMENTS."
   (with-temp-buffer
@@ -177,6 +188,7 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
        implementation-clean harness-clean toolchain suite)
   (unless (member role '("baseline" "current"))
     (error "CHAT_CAMPAIGN_ROLE must be baseline or current"))
+  (chat-campaign-runner--validate-qualification-model provider model)
   (unless (file-regular-p manifest)
     (error "Campaign manifest is unavailable: %s" manifest))
   (setq implementation-clean

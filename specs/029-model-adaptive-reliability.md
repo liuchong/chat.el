@@ -124,7 +124,9 @@ The initial cross-provider qualification matrix is:
 
 `k3` is explicitly excluded from this matrix. A campaign request for Kimi must
 record the exact model `k3-256k`; an alias or resolved model mismatch makes the
-campaign invalid.
+campaign invalid. The live qualification runner rejects a known provider/model
+mismatch before readiness or any other provider request. DeepSeek qualification
+likewise requires the exact `deepseek-v4-flash` identity.
 
 For each provider/model pair, run the same immutable core manifest and report:
 
@@ -169,4 +171,3 @@ session migration or a second Agent implementation.
 - Language and task-category regressions remain visible independently.
 - DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` both pass readiness and a
   bounded core campaign before the first cross-provider policy is promoted.
-

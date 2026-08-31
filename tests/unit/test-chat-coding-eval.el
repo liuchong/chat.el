@@ -181,6 +181,26 @@
       (should-error
        (chat-campaign-runner--positive-integer "CHAT_TEST_INTEGER" 1)))))
 
+(ert-deftest chat-campaign-runner-requires-exact-qualification-models ()
+  "Known providers cannot silently run an alias or a costlier model."
+  (should (equal "deepseek-v4-flash"
+                 (chat-campaign-runner--validate-qualification-model
+                  'deepseek "deepseek-v4-flash")))
+  (should (equal "k3-256k"
+                 (chat-campaign-runner--validate-qualification-model
+                  'kimi-code "k3-256k")))
+  (should-error
+   (chat-campaign-runner--validate-qualification-model 'kimi-code "k3"))
+  (should-error
+   (chat-campaign-runner--validate-qualification-model
+    'kimi-code "kimi-for-coding"))
+  (should-error
+   (chat-campaign-runner--validate-qualification-model
+    'deepseek "deepseek-chat"))
+  (should (equal "model-a"
+                 (chat-campaign-runner--validate-qualification-model
+                  'provider-a "model-a"))))
+
 (ert-deftest chat-campaign-runner-freezes-revision-and-worktree ()
   "Only the expected clean checkout is eligible for an actual campaign."
   (let (dirty)
