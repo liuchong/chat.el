@@ -15,6 +15,7 @@
 (require 'chat-llm)
 (require 'chat-session)
 (require 'chat-agent)
+(require 'chat-approval-guard)
 (require 'chat-code)
 (require 'chat-model-capabilities)
 
@@ -1723,17 +1724,21 @@ Return the unique repetition/scenario key."
        (passedCount . ,passed)
        (complete . t)))))
 
+(defun chat-coding-eval--verification-commands (task)
+  "Return exact command-judge argv lists for TASK."
+  (seq-keep
+   (lambda (judge)
+     (when (equal (chat-coding-eval--json-value judge 'type) "command")
+       (copy-sequence (chat-coding-eval--json-value judge 'command))))
+   (chat-coding-eval-task-judges task)))
+
 (defun chat-coding-eval--verification-guidance (task)
   "Return exact command-judge guidance for TASK, or an empty string."
   (let ((commands
-         (seq-keep
-          (lambda (judge)
-            (when (equal (chat-coding-eval--json-value judge 'type)
-                         "command")
-              (mapconcat #'shell-quote-argument
-                         (chat-coding-eval--json-value judge 'command)
-                         " ")))
-          (chat-coding-eval-task-judges task))))
+         (mapcar
+          (lambda (argv)
+            (mapconcat #'shell-quote-argument argv " "))
+          (chat-coding-eval--verification-commands task))))
     (if commands
         (concat
          "\n\nVerification commands (run these exact targeted checks):\n"
@@ -1782,6 +1787,9 @@ ordinary application execution always uses protocol v2.")
             (chat-session-create
              (format "Evaluation: %s" (chat-coding-eval-task-id task))
              provider resolved-model))
+           (runtime-task-id (chat-session-new-message-id "agent-task"))
+           (verification-commands
+            (chat-coding-eval--verification-commands task))
            (prompt
             (format
              (concat "%s\n\nWork only inside the current workspace. "
@@ -1811,6 +1819,9 @@ ordinary application execution always uses protocol v2.")
            (metadata-builder nil))
       (chat-session-set-working-directory session workspace)
       (chat-code-enable session workspace)
+      (when verification-commands
+        (chat-approval-guard-set-verification-contract
+         session runtime-task-id workspace verification-commands "evaluation"))
       (setf (chat-session-approval-mode session) chat-coding-eval-approval-mode)
       (setq
        metadata-builder
@@ -1896,6 +1907,7 @@ ordinary application execution always uses protocol v2.")
          :profile 'code
          :project-root workspace
          :track-task t
+         :task-id runtime-task-id
          :task-title (chat-coding-eval-task-id task)
          :task-kind 'evaluation
          :transport 'stream

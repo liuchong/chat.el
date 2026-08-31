@@ -723,6 +723,104 @@ code matches against."
            (should (equal (chat-approval-guard-verdict-matched-rule verdict)
                           chat-approval-guard--project-check-rule))))))))
 
+(ert-deftest chat-approval-guard-active-verification-contract-is-exact-and-local ()
+  "A trusted task-scoped command is deterministic without widening scripts."
+  (chat-test-with-temp-dir
+   (let* ((project (expand-file-name "project/" temp-dir))
+          (outside (expand-file-name "outside/" temp-dir))
+          (session (make-chat-session :id "verification-contract"))
+          (tool (test-chat-guard-tool
+                 'programming_compile_task '(write outbound)))
+          (shell-tool (test-chat-guard-tool 'shell_execute '(write outbound)))
+          (chat-approval-guard-provider 'test-provider)
+          (requests 0))
+     (make-directory project t)
+     (make-directory outside t)
+     (chat-session-metadata-set session 'activeTaskId "task-1")
+     (chat-approval-guard-set-verification-contract
+      session "task-1" project '(("sh" "test-one" "active")) "evaluation")
+     (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-tool-caller--execution-directory)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-model-request-result)
+                (lambda (_provider _messages success _error &rest _)
+                  (setq requests (1+ requests))
+                  (funcall
+                   success
+                   '(:content
+                     "{\"decision\":\"deny\",\"reason\":\"contract mismatch\",\"confidence\":\"high\"}")))))
+       (let (verdict)
+         (chat-approval-guard-request
+          tool
+          '(:name "programming_compile_task"
+            :arguments (("command" . "sh test-one active")
+                        ("directory" . ".")))
+          session (lambda (result) (setq verdict result)))
+         (should (chat-approval-guard-verdict-allows-p verdict))
+         (should (equal (chat-approval-guard-verdict-matched-rule verdict)
+                        chat-approval-guard--verification-contract-rule))
+         (should (= requests 0)))
+       (dolist (case
+                `((,tool "sh test-one other" ".")
+                  (,tool "sh test-one active && echo extra" ".")
+                  (,tool "sh test-one active" ,outside)
+                  (,shell-tool "sh test-one active" ".")))
+         (let (verdict)
+           (chat-approval-guard-request
+            (nth 0 case)
+            (list :name (symbol-name (chat-forged-tool-id (nth 0 case)))
+                  :arguments `(("command" . ,(nth 1 case))
+                               ("directory" . ,(nth 2 case))))
+            session (lambda (result) (setq verdict result)))
+           (should (eq (chat-approval-guard-verdict-decision verdict) 'deny))))
+       (chat-session-metadata-set session 'activeTaskId "task-2")
+       (let (verdict)
+         (chat-approval-guard-request
+          tool
+          '(:name "programming_compile_task"
+            :arguments (("command" . "sh test-one active")
+                        ("directory" . ".")))
+          session (lambda (result) (setq verdict result)))
+         (should (eq (chat-approval-guard-verdict-decision verdict) 'deny)))
+       (chat-session-metadata-set session 'activeTaskId "task-1")
+       (chat-approval-guard-set-verification-contract
+        session "task-1" project '(("rm" "-rf" "/")) "evaluation")
+       (let (verdict)
+         (chat-approval-guard-request
+          tool
+          '(:name "programming_compile_task"
+            :arguments (("command" . "rm -rf /")
+                        ("directory" . ".")))
+          session (lambda (result) (setq verdict result)))
+         (should (eq (chat-approval-guard-verdict-decision verdict) 'deny)))
+       (should (= requests 6))))))
+
+(ert-deftest chat-approval-guard-verification-contract-validates-authority ()
+  "Malformed or unrecognized runtime contracts never become authority."
+  (chat-test-with-temp-dir
+   (let ((session (make-chat-session :id "invalid-verification-contract")))
+     (should-error
+      (chat-approval-guard-set-verification-contract
+       session "task-1" temp-dir nil "evaluation"))
+     (should-error
+      (chat-approval-guard-set-verification-contract
+       session "task-1" temp-dir '(("sh" "test-one")) "model"))
+     (should-error
+      (chat-approval-guard-set-verification-contract
+       session "" temp-dir '(("sh" "test-one")) "evaluation"))
+     (chat-session-metadata-set session 'activeTaskId "task-1")
+     (let ((contract
+            (chat-approval-guard-set-verification-contract
+             session "task-1" temp-dir '(("sh" "test-one")) "evaluation")))
+       (dolist (schema '(2 "1"))
+         (let ((invalid (copy-tree contract)))
+           (setf (alist-get 'schemaVersion invalid) schema)
+           (chat-session-metadata-set session 'verificationContract invalid)
+           (should-not
+            (chat-approval-guard--verification-contract
+             session (list :project-root temp-dir)))))))))
+
 (ert-deftest chat-approval-guard-project-check-fast-path-keeps-narrow-boundaries ()
   "Arbitrary, compound, wrong-tool and out-of-project calls still use the model."
   (chat-test-with-temp-dir

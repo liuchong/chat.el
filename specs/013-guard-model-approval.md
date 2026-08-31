@@ -618,6 +618,19 @@ Go、Rust、Python、JavaScript/TypeScript、Zig、Clojure、Java、C/C++ 与通
 规则并记录 `source=rule`;已有 exact command entry 仍优先,never-allow 与工具自身的
 隔离边界仍是不可绕过的下层约束。
 
+受信任 runtime 还可以为一个活动 task 签发**精确验证合同**,用于项目脚本等无法仅凭
+可执行文件名称证明语义、但已经由系统任务定义、项目配置或 verification adapter 明确
+声明的命令。合同是 session metadata 中有 schema version 的结构记录,至少绑定 source、
+task ID、canonical project root、逐条 argv 和 canonical execution directory。source 只能是
+runtime 内建的 `evaluation`、`project-config` 或 `verification-adapter`;模型输出、提示词和
+工具参数不能创建或修改合同。
+
+只有当前 `activeTaskId`、project root、directory 和完整 argv 全部逐项相等,命令只有一个
+shell segment,工具为 `programming_compile_task`,并且 never-allow 地板没有命中时才走
+确定性 allow。任务切换、session reload 后没有相同 active task、参数增删、目录变化、
+命令串联、普通 shell 工具或 malformed/future schema 全部不匹配,继续进入 C 层或由地板
+拒绝。该合同不会把脚本名称加入全局白名单,也不会从一次模型 verdict 学出持久授权。
+
 **B 层:逐条枚举,写在提示词里,作为效果规则的锚点。** 这一层是本轮按要求加的,而且
 它的作用不止是"兜住重要情形"——**列出来的具体命令能反过来提升效果规则的实际效果**。
 抽象规则"让只读命令执行其他程序的选项使它不再只读"单独看是含糊的,配上
@@ -915,6 +928,10 @@ spec 012 记过的那个形状("同一条 grant 生效与否取决于工具恰�
      的取值只能是 C 层规则(或用户补充规则),不能是某个锚点例子。
 26d. "丢弃未提交的工作"这条规则存在,且 `git checkout -- .`、`git reset --hard`、
      `git clean -fd`、`git stash drop` 作为锚点在提示词中出现。
+26e. 精确验证合同只对受信任 source、当前 task、相同 canonical root/directory、完整相同
+     argv 和 `programming_compile_task` 生效;任一字段变化都不走快路,且匹配时不发模型
+     请求。测试至少覆盖项目脚本、参数变化、复合命令、越界目录、错误工具、task 切换、
+     空命令集和未知 source。
 
 ### 影子运行
 

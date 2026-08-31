@@ -62,6 +62,8 @@
 (declare-function chat-session-id "chat-session" (session))
 (declare-function chat-session-model-id "chat-session" (session))
 (declare-function chat-session-model-name "chat-session" (session))
+(declare-function chat-session-metadata-get "chat-session" (session key))
+(declare-function chat-session-metadata-set "chat-session" (session key value))
 (declare-function chat-session-tool-config "chat-session" (session))
 (declare-function chat-subagent--session-depth "chat-subagent" (session))
 (declare-function chat-forged-tool-id "chat-tool-forge" (tool))
@@ -216,6 +218,17 @@ whatever these say."
           " project's own build output directories.")
   "Policy rule cited by the deterministic project-check fast path.")
 
+(defconst chat-approval-guard--verification-contract-rule
+  (concat "ALLOW: exact verification commands issued by the trusted runtime"
+          " for the active task inside its enforced project boundary.")
+  "Policy rule cited by an active runtime verification contract.")
+
+(defconst chat-approval-guard--verification-contract-schema-version 1)
+
+(defconst chat-approval-guard--verification-contract-sources
+  '("evaluation" "project-config" "verification-adapter")
+  "Trusted runtime sources that may issue an exact verification contract.")
+
 (defconst chat-approval-guard--builtin-rules
   (list
    "ALLOW: read files and metadata inside the project."
@@ -225,6 +238,7 @@ whatever these say."
    (concat "ALLOW: search text, list directories, and read process or"
            " environment information inside the project (rg, grep, ls, and"
            " find in query-only form).")
+   chat-approval-guard--verification-contract-rule
    chat-approval-guard--project-check-rule
    chat-approval-guard--ordinary-project-write-rule
    (concat "DENY: writing or deleting outside the directories writes are"
@@ -316,6 +330,129 @@ before the guard is asked, by the command gate and by
        :reason (format "exact allow entry matched: %s" command)
        :confidence 'high
        :model "guard-entry")))))
+
+(defun chat-approval-guard--verification-argv-p (argv)
+  "Return non-nil when ARGV is a bounded exact command vector."
+  (and (listp argv)
+       argv
+       (<= (length argv) 128)
+       (seq-every-p
+        (lambda (argument)
+          (and (stringp argument)
+               (not (string-empty-p argument))
+               (<= (string-bytes argument) 4096)))
+        argv)))
+
+(defun chat-approval-guard--canonical-directory (directory)
+  "Return canonical DIRECTORY with a trailing slash, or nil."
+  (when (and (stringp directory) (file-directory-p directory))
+    (file-name-as-directory
+     (condition-case nil
+         (file-truename directory)
+       (error (expand-file-name directory))))))
+
+(defun chat-approval-guard-set-verification-contract
+    (session task-id project-root commands source)
+  "Install trusted exact COMMANDS for TASK-ID in SESSION.
+
+PROJECT-ROOT is also the execution directory for every command.  COMMANDS is a
+list of argv lists, never shell text.  SOURCE must name a trusted runtime
+producer; model output and prompt text are not accepted as contract sources."
+  (unless session
+    (error "Verification contract requires a session"))
+  (unless (and (stringp task-id)
+               (not (string-empty-p task-id))
+               (<= (string-bytes task-id) 256))
+    (error "Verification contract requires a bounded task id"))
+  (unless (member source chat-approval-guard--verification-contract-sources)
+    (error "Unknown verification contract source: %S" source))
+  (let ((root (chat-approval-guard--canonical-directory project-root)))
+    (unless root
+      (error "Verification contract requires an existing project root"))
+    (unless (and (listp commands) commands (<= (length commands) 64)
+                 (seq-every-p #'chat-approval-guard--verification-argv-p
+                              commands))
+      (error "Verification contract requires bounded argv commands"))
+    (let ((contract
+           `((schemaVersion
+              . ,chat-approval-guard--verification-contract-schema-version)
+             (source . ,source)
+             (taskId . ,task-id)
+             (projectRoot . ,root)
+             (commands
+              . ,(mapcar
+                  (lambda (argv)
+                    `((argv . ,(copy-sequence argv))
+                      (directory . ,root)))
+                  commands)))))
+      (chat-session-metadata-set session 'verificationContract contract)
+      contract)))
+
+(defun chat-approval-guard--verification-contract (session env)
+  "Return SESSION's valid active verification contract for ENV, or nil."
+  (when session
+    (let* ((contract (chat-session-metadata-get session 'verificationContract))
+           (schema (alist-get 'schemaVersion contract))
+           (source (alist-get 'source contract))
+           (task-id (alist-get 'taskId contract))
+           (active-task-id (chat-session-metadata-get session 'activeTaskId))
+           (root (chat-approval-guard--canonical-directory
+                  (alist-get 'projectRoot contract)))
+           (environment-root (chat-approval-guard--canonical-directory
+                              (plist-get env :project-root)))
+           (commands (alist-get 'commands contract)))
+      (when (and (integerp schema)
+                 (= schema
+                    chat-approval-guard--verification-contract-schema-version)
+                 (member source chat-approval-guard--verification-contract-sources)
+                 (stringp task-id)
+                 (equal task-id active-task-id)
+                 root environment-root (equal root environment-root)
+                 (listp commands) commands
+                 (seq-every-p
+                  (lambda (entry)
+                    (and (chat-approval-guard--verification-argv-p
+                          (alist-get 'argv entry))
+                         (equal root
+                                (chat-approval-guard--canonical-directory
+                                 (alist-get 'directory entry)))))
+                  commands))
+        contract))))
+
+(defun chat-approval-guard--verification-contract-verdict
+    (tool call env session)
+  "Return an exact active-task verification verdict, or nil."
+  (let* ((tool-id (chat-forged-tool-id tool))
+         (arguments (plist-get call :arguments))
+         (command (and (eq tool-id 'programming_compile_task)
+                       (cdr (assoc "command" arguments))))
+         (given-directory (or (cdr (assoc "directory" arguments)) "."))
+         (contract (chat-approval-guard--verification-contract session env))
+         (directory (and contract
+                         (chat-approval-guard--resolve given-directory env)))
+         (canonical-directory
+          (chat-approval-guard--canonical-directory directory))
+         (segments (and (stringp command)
+                        (chat-command-gate-segments command)))
+         (argv (and (= (length segments) 1)
+                    (chat-command-gate-split (car segments))))
+         (match
+          (and argv canonical-directory
+               (seq-find
+                (lambda (entry)
+                  (and (equal argv (alist-get 'argv entry))
+                       (equal canonical-directory
+                              (alist-get 'directory entry))))
+                (alist-get 'commands contract)))))
+    (when (and match
+               (null (chat-approval-guard-never-allow-p
+                      tool-id arguments env)))
+      (chat-approval-guard-verdict-create
+       :decision 'allow
+       :matched-rule chat-approval-guard--verification-contract-rule
+       :reason "exact active-task verification contract matched"
+       :confidence 'high
+       :model "guard-rule"))))
 
 (defconst chat-approval-guard--system-prompt-preamble
   "You are a permission adjudicator for a coding assistant. You are not the
@@ -890,10 +1027,12 @@ the compile task's enforced filesystem and network boundary."
        :confidence 'high
        :model "guard-rule"))))
 
-(defun chat-approval-guard--local-verdict (tool call env)
+(defun chat-approval-guard--local-verdict (tool call env &optional session)
   "Return a deterministic verdict for TOOL and CALL, or nil for the model."
   (or (chat-approval-guard--entry-verdict call)
       (chat-approval-guard--ordinary-project-write-verdict tool call env)
+      (chat-approval-guard--verification-contract-verdict
+       tool call env session)
       (chat-approval-guard--project-check-verdict tool call env)))
 
 (defconst chat-approval-guard--network-programs
@@ -1494,7 +1633,8 @@ will not come is a hung turn."
   (let* ((provider (chat-approval-guard--provider session))
          (env (chat-approval-guard--environment session))
          (refusal (chat-approval-guard--gate-refusal tool call))
-         (local-verdict (chat-approval-guard--local-verdict tool call env))
+         (local-verdict
+          (chat-approval-guard--local-verdict tool call env session))
          (started (current-time))
          (settled nil)
          (model (format "%s%s" provider

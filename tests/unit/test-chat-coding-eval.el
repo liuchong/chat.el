@@ -1005,8 +1005,18 @@
                 (lambda (value) (setq config value) nil)))
        (funcall (chat-coding-eval-agent-executor 'eval-provider "model")
                 task temp-dir #'ignore))
-     (let ((prompt (chat-message-content
-                    (car (plist-get config :messages)))))
+     (let* ((prompt (chat-message-content
+                     (car (plist-get config :messages))))
+            (session (plist-get config :session))
+            (task-id (plist-get config :task-id))
+            (contract
+             (chat-session-metadata-get session 'verificationContract)))
+       (should (equal task-id (alist-get 'taskId contract)))
+       (should (equal "evaluation" (alist-get 'source contract)))
+       (should
+        (equal '("emacs" "-Q" "--eval"
+                 "(ert-run-tests-batch-and-exit 'sample-test)")
+               (alist-get 'argv (car (alist-get 'commands contract)))))
        (should (string-match-p
                 (regexp-quote "Verification commands (run these exact targeted checks):")
                 prompt))
