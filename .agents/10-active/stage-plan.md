@@ -40,9 +40,8 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-Commit the balanced 42-task corpus foundation after the canonical suite passes.
-Then persist exact toolchain path/version provenance and add conservative
-language-aware project verification adapters. The complete offline gate must
+Commit versioned toolchain provenance after the canonical suite passes, then
+add conservative language-aware project verification adapters. The complete offline gate must
 pass before exact-model mutation smokes or repeated provider campaigns begin.
 DeepSeek and Kimi results remain independent and per-language.
 

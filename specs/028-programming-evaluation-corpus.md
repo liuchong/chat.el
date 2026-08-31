@@ -173,6 +173,16 @@ The manifest-level `requiredExecutables` list names every external executable
 used behind a fixture wrapper. Preflight resolves the union of that list and
 the first argv item of every command judge. A wrapper such as `sh test-one`
 must never make a missing compiler, runtime or test runner appear available.
+Each supported executable has one fixed, no-network version command with a
+five-second upper bound. The resolved record is sorted by executable name and
+contains the absolute invocation path, its canonical target and bounded version
+output. The probe runs through the invocation path so multi-call binaries and
+version-manager shims preserve their command identity. Unknown
+version probes fail closed even when an executable with that name exists.
+Campaign schema v2 stores this record in `campaign.json` and includes it in the
+configuration digest. Resume repeats preflight and rejects path or version
+drift before scheduling a missing trial. Earlier campaign schemas are not
+migrated or resumed.
 Every command judge start is also a terminal boundary: a process creation
 failure records the command, a `not-started` result and the underlying error.
 Any later synchronous evaluation failure records an explicit error result and

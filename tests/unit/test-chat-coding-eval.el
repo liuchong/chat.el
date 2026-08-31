@@ -325,12 +325,17 @@
            fixture
            '(((type . "command") (name . "missing")
               (command . ("chat-campaign-tool-that-does-not-exist")))))))
-    (should
-     (equal (file-truename (executable-find "emacs"))
-            (alist-get "emacs"
-                       (chat-campaign-runner--validate-judge-executables
-                        (list available))
-                       nil nil #'equal)))
+    (let ((entry
+           (car (chat-campaign-runner--validate-judge-executables
+                 (list available)))))
+      (should (equal "emacs" (alist-get 'name entry)))
+      (should
+       (equal (file-truename (executable-find "emacs"))
+              (alist-get 'target entry)))
+      (should
+       (equal (expand-file-name (executable-find "emacs"))
+              (alist-get 'path entry)))
+      (should-not (string-empty-p (alist-get 'version entry))))
     (should-error
      (chat-campaign-runner--validate-judge-executables (list missing))
      :type 'error)
@@ -342,6 +347,64 @@
     (should-error
      (chat-campaign-runner--validate-judge-executables (list missing))
      :type 'error)))
+
+(ert-deftest chat-coding-eval-toolchain-is-versioned-and-deterministic ()
+  "Toolchain evidence includes hidden and direct dependencies in stable order."
+  (let ((task
+         (chat-coding-eval-test--task
+          default-directory
+          '(((type . "command") (name . "wrapped")
+             (command . ("sh" "test-one")))))))
+    (setf (chat-coding-eval-task-required-executables task)
+          '("fake-compiler"))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (name) (format "/tools/%s" name)))
+              ((symbol-function 'file-truename)
+               (lambda (path) (concat path ".target")))
+              ((symbol-function 'chat-coding-eval--probe-executable-version)
+               (lambda (name path)
+                 (format "%s@%s" name path))))
+      (should
+       (equal
+        '(((name . "fake-compiler")
+           (path . "/tools/fake-compiler")
+           (target . "/tools/fake-compiler.target")
+           (version . "fake-compiler@/tools/fake-compiler"))
+          ((name . "sh")
+           (path . "/tools/sh")
+           (target . "/tools/sh.target")
+           (version . "sh@/tools/sh")))
+        (chat-coding-eval-resolve-toolchain (list task)))))))
+
+(ert-deftest chat-coding-eval-toolchain-probe-records-real-shell ()
+  "The bounded version probe records the resolved local shell identity."
+  (let* ((task
+          (chat-coding-eval-test--task
+           default-directory
+           '(((type . "command") (name . "shell")
+              (command . ("sh" "-c" "exit 0"))))))
+         (toolchain (chat-coding-eval-resolve-toolchain (list task)))
+         (entry (car toolchain)))
+    (should (equal "sh" (alist-get 'name entry)))
+    (should (file-name-absolute-p (alist-get 'path entry)))
+    (should (file-name-absolute-p (alist-get 'target entry)))
+    (should (stringp (alist-get 'version entry)))
+    (should-not (string-empty-p (alist-get 'version entry)))))
+
+(ert-deftest chat-coding-eval-toolchain-rejects-unknown-and-timed-out-probes ()
+  "Tool identity cannot be guessed or allowed to leave a live probe."
+  (let ((task
+         (chat-coding-eval-test--task
+          default-directory
+          '(((type . "no-change") (name . "unchanged"))))))
+    (setf (chat-coding-eval-task-required-executables task) '("true"))
+    (should-error (chat-coding-eval-resolve-toolchain (list task)))
+    (let ((chat-coding-eval--tool-version-probes
+           (cons '("sleep" "1") chat-coding-eval--tool-version-probes))
+          (chat-coding-eval-tool-version-timeout-seconds 0.01))
+      (setf (chat-coding-eval-task-required-executables task) '("sleep"))
+      (should-error (chat-coding-eval-resolve-toolchain (list task)))
+      (should-not (get-process "chat-tool-version-sleep")))))
 
 (ert-deftest chat-campaign-runner-runtime-home-keeps-an-absolute-directory ()
   "Changing HOME cannot leave subprocesses resolving an obsolete ~/ path."
@@ -437,6 +500,9 @@
   (chat-test-with-temp-dir
    (let ((existing (expand-file-name "existing" temp-dir))
          (new (expand-file-name "new" temp-dir))
+         (toolchain '(((name . "fixture") (path . "/tools/fixture")
+                       (target . "/tools/fixture")
+                       (version . "fixture 1"))))
          calls)
      (make-directory existing)
      (cl-letf (((symbol-function 'chat-coding-eval-resume-live)
@@ -451,18 +517,18 @@
         (eq 'resumed
             (chat-campaign-runner--start-or-resume
              existing 'provider-a 5 "/manifest.json" "model-a" "campaign-a"
-             "revision-a" "current")))
+             "revision-a" "current" toolchain)))
        (should
-        (equal (list 'resume existing "/manifest.json" "revision-a")
+        (equal (list 'resume existing "/manifest.json" "revision-a" toolchain)
                (car calls)))
        (should
         (eq 'started
             (chat-campaign-runner--start-or-resume
              new 'provider-a 5 "/manifest.json" "model-a" "campaign-b"
-             "revision-a" "baseline")))
+             "revision-a" "baseline" toolchain)))
        (should
         (equal (list 'start 'provider-a 5 "/manifest.json" "model-a"
-                     "campaign-b" "revision-a" "baseline")
+                     "campaign-b" "revision-a" "baseline" toolchain)
                (car calls)))))))
 
 (ert-deftest chat-coding-eval-suite-has-fixed-balanced-coverage ()
@@ -820,7 +886,11 @@
             "baseline-001" 'provider-a "model-a" 5
             chat-coding-eval-test-manifest
             :implementation-revision "baseline-revision"
-            :role "baseline"))
+            :role "baseline"
+            :toolchain
+            '(((name . "emacs") (path . "/tools/emacs")
+               (target . "/tools/emacs")
+               (version . "GNU Emacs test")))))
           (directory (plist-get campaign :directory))
           (descriptor (plist-get campaign :descriptor)))
      (should (file-exists-p (expand-file-name "campaign.json" directory)))
@@ -828,6 +898,10 @@
      (should (= 64 (length (alist-get 'configurationDigest descriptor))))
      (should (equal "baseline-revision"
                     (alist-get 'implementationRevision descriptor)))
+     (should
+      (equal "GNU Emacs test"
+             (alist-get
+              'version (car (alist-get 'toolchain descriptor)))))
      (should-error (chat-coding-eval--complete-campaign campaign nil))
      (should-not (file-exists-p
                   (expand-file-name "completion.json" directory)))
@@ -836,7 +910,11 @@
        "baseline-001" 'provider-a "model-a" 5
        chat-coding-eval-test-manifest
        :implementation-revision "baseline-revision"
-       :role "baseline")))))
+       :role "baseline"
+       :toolchain
+       '(((name . "emacs") (path . "/tools/emacs")
+          (target . "/tools/emacs")
+          (version . "GNU Emacs test"))))))))
 
 (ert-deftest chat-coding-eval-suite-persists-only-in-its-result-directory ()
   "Suite result routing cannot mix campaign records into the global store."
@@ -977,7 +1055,11 @@
           (campaign
            (chat-coding-eval-prepare-campaign
             "drift-001" 'provider-a "model-a" 1 manifest
-            :implementation-revision "resume-revision"))
+            :implementation-revision "resume-revision"
+            :toolchain
+            '(((name . "fixture") (path . "/tools/fixture")
+               (target . "/tools/fixture")
+               (version . "fixture 1")))))
           (directory (plist-get campaign :directory)))
      (should-error
       (chat-coding-eval--load-open-campaign
@@ -985,11 +1067,23 @@
      (let ((chat-coding-eval-approval-mode 'manual))
        (should-error
         (chat-coding-eval--load-open-campaign
-         directory manifest "resume-revision")))
+         directory manifest "resume-revision"
+         '(((name . "fixture") (path . "/tools/fixture")
+            (target . "/tools/fixture")
+            (version . "fixture 1"))))))
+     (should-error
+      (chat-coding-eval--load-open-campaign
+       directory manifest "resume-revision"
+       '(((name . "fixture") (path . "/tools/fixture")
+          (target . "/tools/fixture")
+          (version . "fixture 2")))))
      (write-region "\n" nil manifest t 'silent)
      (should-error
       (chat-coding-eval--load-open-campaign
-       directory manifest "resume-revision")))))
+       directory manifest "resume-revision"
+       '(((name . "fixture") (path . "/tools/fixture")
+          (target . "/tools/fixture")
+          (version . "fixture 1"))))))))
 
 (ert-deftest chat-coding-eval-campaign-lock-is-exclusive-and-recoverable ()
   "Only one live process may schedule missing campaign trials."

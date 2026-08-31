@@ -30,6 +30,12 @@ wrappers, generated-path contracts, complete executable preflight and
 reusable offline semantic gate; the complete gate is explicitly blocked by
 missing local `lein` and `tsc` executables. No M20 provider campaign has run.
 
+Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
+record inside the immutable configuration digest. Version probes are fixed and
+bounded; resume rejects executable or version drift before trial scheduling.
+The mechanism is complete, while local environment readiness remains blocked
+by the same two missing tools.
+
 The transport audit found no remaining split to implement:
 `chat-model-request-events` already normalizes native streaming and the
 asynchronous fallback into one ordered model-event contract, and all major
@@ -483,8 +489,7 @@ session-export tests pass.
 
 ## Next Stage
 
-Finish M20 without reusing M19 evidence. First persist resolved toolchain paths
-and versions in immutable campaign descriptors and complete conservative
+Finish M20 without reusing M19 evidence. Complete conservative
 project-verification adapters for the seven added languages. Then provide the
 two missing deterministic toolchains, pass the complete offline gate, and run
 one exact-model mutation smoke per language. Repeated DeepSeek
@@ -502,7 +507,7 @@ one exact-model mutation smoke per language. Repeated DeepSeek
 
 ## Immediate Next Step
 
-Run the repository-standard canonical suite for the extended corpus foundation,
-clean generated artifacts, commit and push the stage. Continue with descriptor
-toolchain provenance and language-aware verification adapters; do not start
-provider qualification while `lein` or `tsc` is absent.
+Run the repository-standard canonical suite for versioned toolchain provenance,
+clean generated artifacts, commit and push the stage. Continue with
+language-aware verification adapters; do not start provider qualification while
+`lein` or `tsc` is absent.

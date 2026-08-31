@@ -232,23 +232,8 @@ one is retained for investigation or a later invocation."
     content))
 
 (defun chat-campaign-runner--validate-judge-executables (tasks)
-  "Resolve every declared or command judge executable required by TASKS."
-  (let (names resolved missing)
-    (dolist (task tasks)
-      (setq names
-            (append (chat-coding-eval-task-required-executables task)
-                    names))
-      (dolist (judge (chat-coding-eval-task-judges task))
-        (when (equal "command" (alist-get 'type judge))
-          (push (car (alist-get 'command judge)) names))))
-    (dolist (name (sort (delete-dups names) #'string<))
-      (if-let ((path (executable-find name)))
-          (push (cons name (file-truename path)) resolved)
-        (push name missing)))
-    (when missing
-      (error "Campaign judge executables are unavailable: %s"
-             (string-join (nreverse missing) ", ")))
-    (nreverse resolved)))
+  "Resolve versioned judge toolchain evidence required by TASKS."
+  (chat-coding-eval-resolve-toolchain tasks))
 
 (defun chat-campaign-runner--descriptor-summary (descriptor)
   "Return bounded JSON summary for campaign DESCRIPTOR."
@@ -262,21 +247,23 @@ one is retained for investigation or a later invocation."
      (expectedResultCount . ,(alist-get 'expectedResultCount descriptor))
      (implementationRevision .
                              ,(alist-get 'implementationRevision descriptor))
+     (toolchain . ,(alist-get 'toolchain descriptor))
      (manifestDigest . ,(alist-get 'manifestDigest descriptor))
      (configurationDigest . ,(alist-get 'configurationDigest descriptor)))))
 
 (defun chat-campaign-runner--start-or-resume
     (campaign-directory provider repetitions manifest model campaign-id
-                        implementation-revision role)
+                        implementation-revision role toolchain)
   "Start a new campaign or resume validated missing work in CAMPAIGN-DIRECTORY."
   (if (file-exists-p campaign-directory)
       (progn
         (unless (file-directory-p campaign-directory)
           (error "Campaign path is not a directory: %s" campaign-directory))
         (chat-coding-eval-resume-live
-         campaign-directory manifest implementation-revision))
+         campaign-directory manifest implementation-revision toolchain))
     (chat-coding-eval-run-live
-     provider repetitions manifest model campaign-id implementation-revision role)))
+     provider repetitions manifest model campaign-id implementation-revision role
+     toolchain)))
 
 (defun chat-campaign-runner--main-in-isolated-runtime ()
   "Validate configuration, then preflight or run one live campaign."
@@ -355,14 +342,16 @@ one is retained for investigation or a later invocation."
          (chat-coding-eval-load-suite manifest)))
   (princ
    (format "CAMPAIGN_TOOLCHAIN_READY executables=%s\n"
-           (mapconcat #'car toolchain ",")))
+           (mapconcat (lambda (entry) (alist-get 'name entry))
+                      toolchain ",")))
   (if preflight
       (let* ((chat-coding-eval-campaign-directory
               (make-temp-file "chat-campaign-preflight-" t))
              (campaign
               (chat-coding-eval-prepare-campaign
                campaign-id provider model repetitions manifest
-               :implementation-revision implementation-revision :role role))
+               :implementation-revision implementation-revision :role role
+               :toolchain toolchain))
              (descriptor (plist-get campaign :descriptor)))
         (unwind-protect
             (princ
@@ -387,7 +376,7 @@ one is retained for investigation or a later invocation."
             (setq suite
                   (chat-campaign-runner--start-or-resume
                    campaign-directory provider repetitions manifest model
-                   campaign-id implementation-revision role))
+                   campaign-id implementation-revision role toolchain))
             (while (and (file-exists-p lock) (< (float-time) deadline))
               (accept-process-output nil 1))
             (cond

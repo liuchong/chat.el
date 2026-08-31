@@ -27,13 +27,14 @@
 - Zig, Java, C, C++ and SQL pass the reusable fixture semantic verifier
 - The complete offline gate is blocked by missing `lein` and `tsc`; never turn
   this into skipped trials or silently shrink the matrix
-- Exact toolchain paths and versions still need immutable descriptor storage
+- Campaign schema v2 stores invocation paths, canonical targets and versions in
+  the immutable configuration digest and rejects drift on resume
 - Project verification adapters for the seven languages remain incomplete
 - Run exact-model live work only after the offline gate: DeepSeek
   `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
 - The detailed current record is
-  `stage-2026-09-01-extended-language-corpus-foundation.md`
+  `stage-2026-09-01-versioned-toolchain-provenance.md`
 
 ## Avoid
 

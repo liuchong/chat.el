@@ -22,7 +22,7 @@
 
 (defconst chat-coding-eval-fixture-generator-schema-version 1)
 
-(defconst chat-coding-eval-campaign-schema-version 1)
+(defconst chat-coding-eval-campaign-schema-version 2)
 
 (defconst chat-coding-eval--source-root
   (let ((module (or load-file-name buffer-file-name)))
@@ -35,6 +35,23 @@
    "\\|go\\|rs\\|zig\\|clj\\|cljc\\|cljs\\|java\\|c\\|h"
    "\\|cc\\|cpp\\|cxx\\|hh\\|hpp\\|hxx\\|sql\\)\\'")
   "Source extensions used by the fixed coding Eval corpus.")
+
+(defconst chat-coding-eval--tool-version-probes
+  '(("cargo" "--version")
+    ("clang" "--version")
+    ("clang++" "--version")
+    ("emacs" "--version")
+    ("go" "version")
+    ("java" "-version")
+    ("javac" "-version")
+    ("lein" "version")
+    ("node" "--version")
+    ("python3" "--version")
+    ("sh" "-c" "printf 'shell=%s' \"${BASH_VERSION:-POSIX}\"")
+    ("sqlite3" "--version")
+    ("tsc" "--version")
+    ("zig" "version"))
+  "Bounded version commands accepted in campaign toolchain evidence.")
 
 (defcustom chat-coding-eval-workspace-directory
   (expand-file-name "coding-eval/" temporary-file-directory)
@@ -56,6 +73,10 @@
 (defcustom chat-coding-eval-max-command-output-bytes (* 64 1024)
   "Maximum command-judge output retained in a result check."
   :type 'integer :group 'chat)
+
+(defcustom chat-coding-eval-tool-version-timeout-seconds 5
+  "Maximum seconds allowed for one campaign tool version probe."
+  :type 'number :group 'chat)
 
 (defcustom chat-coding-eval-approval-mode 'guarded
   "Approval mode used by the built-in live Agent executor."
@@ -362,6 +383,98 @@
     (sort tasks (lambda (left right)
                   (string< (chat-coding-eval-task-id left)
                            (chat-coding-eval-task-id right))))))
+
+(defun chat-coding-eval--required-executable-names (tasks)
+  "Return the sorted executable dependency union for TASKS."
+  (let (names)
+    (dolist (task tasks)
+      (setq names
+            (append (chat-coding-eval-task-required-executables task)
+                    names))
+      (dolist (judge (chat-coding-eval-task-judges task))
+        (when (equal "command" (alist-get 'type judge))
+          (push (car (alist-get 'command judge)) names))))
+    (sort (delete-dups names) #'string<)))
+
+(defun chat-coding-eval--probe-executable-version (name path)
+  "Return bounded version output for executable NAME at PATH."
+  (let ((arguments (cdr (assoc name chat-coding-eval--tool-version-probes))))
+    (unless arguments
+      (error "No bounded version probe is registered for executable: %s" name))
+    (let ((buffer (generate-new-buffer " *chat-tool-version*"))
+          process)
+      (unwind-protect
+          (progn
+            (let ((process-connection-type nil))
+              (setq process
+                    (make-process
+                     :name (format "chat-tool-version-%s" name)
+                     :buffer buffer :stderr buffer :noquery t
+                     :command (cons path arguments))))
+            (let ((deadline
+                   (+ (float-time)
+                      chat-coding-eval-tool-version-timeout-seconds)))
+              (while (and (process-live-p process)
+                          (< (float-time) deadline))
+                (accept-process-output process 0.05))
+              (when (process-live-p process)
+                (delete-process process)
+                (error "Tool version probe timed out: %s" name)))
+            (unless (and (eq (process-status process) 'exit)
+                         (zerop (process-exit-status process)))
+              (error "Tool version probe failed: %s" name))
+            (let* ((raw (with-current-buffer buffer (buffer-string)))
+                   (version
+                    (string-trim
+                     (replace-regexp-in-string "[[:space:]]+" " " raw))))
+              (when (string-empty-p version)
+                (error "Tool version probe returned no identity: %s" name))
+              (substring version 0 (min 512 (length version)))))
+        (when (and process (process-live-p process))
+          (delete-process process))
+        (kill-buffer buffer)))))
+
+(defun chat-coding-eval--validate-toolchain (toolchain)
+  "Validate and return deterministic TOOLCHAIN evidence."
+  (unless (listp toolchain)
+    (error "Campaign toolchain must be a list"))
+  (let ((names (mapcar (lambda (entry) (alist-get 'name entry)) toolchain))
+        seen)
+    (dolist (entry toolchain)
+      (let ((name (alist-get 'name entry))
+            (path (alist-get 'path entry))
+            (target (alist-get 'target entry))
+            (version (alist-get 'version entry)))
+        (unless (and (stringp name) (not (string-empty-p name))
+                     (stringp path) (file-name-absolute-p path)
+                     (stringp target) (file-name-absolute-p target)
+                     (stringp version) (not (string-empty-p version)))
+          (error "Campaign toolchain entry is incomplete"))
+        (when (member name seen)
+          (error "Campaign toolchain contains duplicate executable: %s" name))
+        (push name seen)))
+    (unless (equal names (sort (copy-sequence names) #'string<))
+      (error "Campaign toolchain entries must be sorted by executable name")))
+  toolchain)
+
+(defun chat-coding-eval-resolve-toolchain (tasks)
+  "Resolve versioned executable evidence required by TASKS or fail."
+  (let (resolved missing)
+    (dolist (name (chat-coding-eval--required-executable-names tasks))
+      (if-let ((candidate (executable-find name)))
+          (let ((path (expand-file-name candidate)))
+            (push `((name . ,name)
+                    (path . ,path)
+                    (target . ,(file-truename path))
+                    (version .
+                             ,(chat-coding-eval--probe-executable-version
+                               name path)))
+                  resolved))
+        (push name missing)))
+    (when missing
+      (error "Campaign judge executables are unavailable: %s"
+             (string-join (nreverse missing) ", ")))
+    (chat-coding-eval--validate-toolchain (nreverse resolved))))
 
 (defun chat-coding-eval-suite-coverage (tasks)
   "Return category and language counts for TASKS."
@@ -1182,7 +1295,7 @@ portable counters it compares and never duplicates the provider-specific
 
 (defun chat-coding-eval--campaign-configuration
     (provider model capability-snapshot approval-mode repetitions task-count
-              manifest-digest implementation-revision)
+              manifest-digest implementation-revision toolchain)
   "Return canonical campaign configuration fields."
   `((provider . ,(if (symbolp provider) (symbol-name provider) provider))
     (model . ,model)
@@ -1195,7 +1308,8 @@ portable counters it compares and never duplicates the provider-specific
     (repetitions . ,repetitions)
     (taskCount . ,task-count)
     (manifestDigest . ,manifest-digest)
-    (implementationRevision . ,implementation-revision)))
+    (implementationRevision . ,implementation-revision)
+    (toolchain . ,toolchain)))
 
 (defun chat-coding-eval--configuration-digest (configuration)
   "Return the stable digest for canonical CONFIGURATION."
@@ -1274,7 +1388,7 @@ portable counters it compares and never duplicates the provider-specific
 
 (cl-defun chat-coding-eval-prepare-campaign
     (campaign-id provider model repetitions manifest
-                 &key implementation-revision (role "current"))
+                 &key implementation-revision (role "current") toolchain)
   "Create and return an isolated live campaign descriptor.
 
 The returned plist contains :directory, :result-metadata and :descriptor."
@@ -1290,6 +1404,9 @@ The returned plist contains :directory, :result-metadata and :descriptor."
   (unless (file-regular-p manifest)
     (user-error "Campaign manifest does not exist: %s" manifest))
   (let* ((tasks (chat-coding-eval-load-suite manifest))
+         (resolved-toolchain
+          (chat-coding-eval--validate-toolchain
+           (or toolchain (chat-coding-eval-resolve-toolchain tasks))))
          (revision
           (chat-coding-eval--implementation-revision implementation-revision))
          (manifest-digest (chat-coding-eval--file-digest manifest))
@@ -1298,7 +1415,8 @@ The returned plist contains :directory, :result-metadata and :descriptor."
          (configuration
           (chat-coding-eval--campaign-configuration
            provider model capability-snapshot chat-coding-eval-approval-mode
-           repetitions (length tasks) manifest-digest revision))
+           repetitions (length tasks) manifest-digest revision
+           resolved-toolchain))
          (configuration-digest
           (chat-coding-eval--configuration-digest configuration))
          (directory
@@ -1340,7 +1458,7 @@ The returned plist contains :directory, :result-metadata and :descriptor."
     value))
 
 (defun chat-coding-eval--load-open-campaign
-    (directory manifest &optional implementation-revision)
+    (directory manifest &optional implementation-revision toolchain)
   "Load and validate unfinished campaign DIRECTORY against MANIFEST."
   (let* ((directory (file-name-as-directory (expand-file-name directory)))
          (directory-name (directory-file-name directory)))
@@ -1381,13 +1499,19 @@ The returned plist contains :directory, :result-metadata and :descriptor."
             (chat-coding-eval--required-string
              descriptor 'configurationDigest))
            (tasks (chat-coding-eval-load-suite manifest))
+           (descriptor-toolchain
+            (chat-coding-eval--validate-toolchain
+             (alist-get 'toolchain descriptor)))
+           (current-toolchain
+            (chat-coding-eval--validate-toolchain
+             (or toolchain (chat-coding-eval-resolve-toolchain tasks))))
            (current-revision
             (chat-coding-eval--implementation-revision
              implementation-revision))
            (configuration
             (chat-coding-eval--campaign-configuration
              provider-name model capability-snapshot approval-mode repetitions
-             task-count manifest-digest revision)))
+             task-count manifest-digest revision descriptor-toolchain)))
       (unless (= (or (alist-get 'schemaVersion descriptor) 0)
                  chat-coding-eval-campaign-schema-version)
         (error "Unsupported coding evaluation campaign schema"))
@@ -1416,6 +1540,8 @@ The returned plist contains :directory, :result-metadata and :descriptor."
       (unless (equal approval-mode
                      (symbol-name chat-coding-eval-approval-mode))
         (error "Campaign approval mode differs from the current runtime"))
+      (unless (equal descriptor-toolchain current-toolchain)
+        (error "Campaign toolchain differs from the current runtime"))
       (unless (and (chat-coding-eval--digest-p manifest-digest)
                    (equal manifest-digest
                           (chat-coding-eval--file-digest manifest)))
@@ -1881,7 +2007,7 @@ task immediately, including rate limits and exhausted usage quotas."
        (signal (car err) (cdr err))))))
 
 (defun chat-coding-eval-resume-live
-    (campaign-directory &optional manifest implementation-revision)
+    (campaign-directory &optional manifest implementation-revision toolchain)
   "Resume missing trials in CAMPAIGN-DIRECTORY.
 
 The immutable descriptor, MANIFEST, current runtime configuration and every
@@ -1895,7 +2021,7 @@ durable result must agree before any missing trial is scheduled."
       (user-error "No coding evaluation manifest is available"))
     (let* ((campaign
             (chat-coding-eval--load-open-campaign
-             campaign-directory file implementation-revision))
+             campaign-directory file implementation-revision toolchain))
            (descriptor (plist-get campaign :descriptor)))
       (chat-coding-eval--start-campaign
        campaign
@@ -1904,7 +2030,7 @@ durable result must agree before any missing trial is scheduled."
 
 (defun chat-coding-eval-run-live
     (provider repetitions &optional manifest model-name campaign-id
-              implementation-revision role)
+              implementation-revision role toolchain)
   "Run the coding suite with PROVIDER for REPETITIONS.
 
 MODEL-NAME defaults to PROVIDER's registered model."
@@ -1932,7 +2058,8 @@ MODEL-NAME defaults to PROVIDER's registered model."
             (or campaign-id (chat-coding-eval--campaign-id))
             provider resolved-model repetitions file
             :implementation-revision implementation-revision
-            :role (or role "current"))))
+            :role (or role "current")
+            :toolchain toolchain)))
       (chat-coding-eval--start-campaign campaign provider resolved-model))))
 
 (provide 'chat-coding-eval)
