@@ -60,8 +60,49 @@ Homebrew made executable preflight and verification commands appear blocked;
 omitting `~/.cargo/bin` skipped two Rust isolation checks. Those runs diagnose
 an invalid acceptance environment and are not product results.
 
+## Harness Ownership Incident
+
+The next formal baseline
+`m19-baseline-deepseek-v4-flash-3cc672e-r1` was stopped after two results. The
+120-second result initially captured request identity, but the frozen M9
+checkout then serialized its 4,166-byte executor metadata with the historical
+whole-object bound. The durable metadata became only a truncation marker, so
+task, campaign and request identities disappeared together. Continuing would
+have produced infrastructure-invalid samples.
+
+The systemic defect was contract ownership, not the 4 KiB scalar limit. The
+runner loaded current coding campaign orchestration over the historical Agent,
+but left the generic Eval serializer owned by the frozen checkout. It now
+reloads both current harness modules after the historical implementation and
+verifies representative persistence functions resolve inside the harness root.
+The implementation still owns Agent, tool and transport behavior; it cannot
+control result bounding, persistence, resume identity or final validation.
+
+Campaign usage now projects only the five normalized numeric counters. Raw
+provider usage remains transport diagnostics and is not copied into every task
+result. Generic Eval keeps its independent scalar, collection and depth bounds,
+so oversized optional leaves cannot erase their enclosing identity structure.
+
+## Harness Ownership Verification
+
+- revision `296d2b6bc1539ddadf61703f65c28a5de13fb01a`;
+- focused Eval/campaign/acceptance tests: 96/96 passed;
+- canonical suite: 1925/1925 passed;
+- integration and E2E commands passed; E2E was 3/3;
+- frozen and current 30-task, five-repetition preflights passed against the same
+  manifest digest and exact `deepseek/deepseek-v4-flash` identity;
+- the real frozen-baseline campaign
+  `m19-baseline-terminal-evidence-smoke-296d2b6-r1` reached the exact 120-second
+  task timeout and completed with status `timed-out`;
+- its 3,934-byte result retained task, repetition, campaign, implementation,
+  provider and model identity, ten non-empty request IDs, ten requests and nine
+  usage samples; all request identities were exact DeepSeek v4 Flash;
+- no `raw` usage key was persisted and metadata was not replaced by a truncation
+  marker;
+- the temporary one-task manifest and every campaign process were removed.
+
 ## Remaining Work
 
-Start fresh full baseline and current campaigns from clean revision `11d8a43`.
-The bounded timeout smoke is diagnostic evidence only and cannot enter either
-30-by-5 formal sample matrix.
+Both stopped formal campaign directories remain immutable incident evidence and
+must never be resumed. Start fresh full baseline and current campaigns from
+clean revision `296d2b6`. Neither timeout smoke enters the 30-by-5 sample matrix.

@@ -1881,3 +1881,23 @@ clean revision `11d8a43` 上的 frozen-baseline timeout smoke
 `timed-out`，同时保留三条非空 request ID，全部精确为
 `deepseek/deepseek-v4-flash`，并保留三份 usage sample。该 smoke 只验证终止证据链，
 不进入正式 30-by-5 样本；fresh full baseline/current campaign 可以开始。
+
+第二次 formal baseline `m19-baseline-deepseek-v4-flash-3cc672e-r1` 在两条结果后停止。
+120 秒任务的 executor metadata 达到 4,166 bytes，冻结 M9 checkout 的旧 Eval serializer
+把整个对象替换成 truncation marker，导致 task、campaign 与 request identity 同时丢失。
+根因不是上限太小，而是 current harness 只覆盖了 coding campaign orchestrator，没有覆盖
+generic Eval result serializer，被测历史实现错误地控制了证据格式。
+
+Revision `296d2b6` 把该边界完善为 harness ownership 合同：加载历史产品实现后，runner
+重新加载并校验 current `chat-eval` 与 `chat-coding-eval` 两个合同模块；历史 checkout
+继续提供 Agent、tool 与 transport 行为，但不能控制 bounding、persistence、resume identity
+或 final validation。campaign token usage 只保留五个 normalized numeric counters，不再重复
+provider raw payload；通用 serializer 仍按 scalar、collection、depth 分层限界，不提高 4 KiB
+限制掩盖问题。
+
+定向 96/96、canonical 1925/1925、integration 与 E2E 均通过；两侧 30-by-5 preflight
+通过。真实冻结基线 120 秒 smoke
+`m19-baseline-terminal-evidence-smoke-296d2b6-r1` 得到 `timed-out`，3,934-byte result
+完整保留十条精确 DeepSeek request ID、十次 request、九份 usage sample 及全部 campaign
+身份，raw usage key 为零且 metadata 未被整体截断。两个 formal 失败目录均只作事故证据，
+下一步必须在 clean `296d2b6` 上创建全新 baseline/current 150/150 campaign。

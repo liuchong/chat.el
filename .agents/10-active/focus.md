@@ -15,31 +15,24 @@ notes, evidence, restart/compaction recovery, verification, isolation, Review
 and collaboration contracts are implemented on the shared session/event/UI
 infrastructure.
 
-Implementation revision `54db3f1` defines the reusable 12-language corpus and
-keeps the 30-task core comparison separate from the future 42-task extension.
-Its DeepSeek v4 Flash current campaign
-`m19-current-deepseek-v4-flash-54db3f1` completed 150/150: every language was
-30/30, every category was 25/25, out-of-scope writes were zero, and all 20
-declared generated-output occurrences were audited and cleaned. Runtime,
-quality and canonical records for the same clean revision passed 9/9, 20/20
-and 1859/1859 respectively.
+Earlier complete campaigns remain useful historical capability evidence, but
+cannot satisfy final acceptance after the harness contract changed. Two later
+formal baseline directories were stopped after exposing terminal-evidence and
+serializer-ownership defects; both are immutable incident evidence and cannot
+be resumed.
 
-Fresh campaigns at harness revision `f0b0701` are complete. The frozen M9
-baseline passed 17/150 while the current implementation passed 150/150. Current
-results are 30/30 for every language and 25/25 for every category, with zero
-out-of-scope writes and zero cleanup failures. Three current code 18 attempts
-were quarantined and resumed without consuming trial identities; the baseline
-had no infrastructure attempts.
+Clean revision `296d2b6` now makes the current harness own both generic Eval
+result persistence and coding campaign orchestration while the frozen checkout
+continues to own product behavior. A real 120-second frozen-baseline timeout
+retained ten exact `deepseek/deepseek-v4-flash` request identities and bounded
+normalized usage without copying raw provider payloads. Focused tests pass
+96/96, canonical passes 1925/1925, integration and E2E pass, and both formal
+30-task by five-repetition preflights pass.
 
-M19 final acceptance is now failed on measured token efficiency, not missing
-live evidence. The current final-request input-token median is 12,242 versus
-9,223 for the baseline, above the 110 percent ceiling. The large-repository
-gate is blocked because the baseline `python-locate` task failed all five
-trials, leaving no passed baseline sample under the current gate definition.
-A first-request diagnostic also measures 5,413.5 current tokens versus 1,921.5
-baseline tokens, locating the main cost in resident prompt and tool contracts
-rather than only in longer successful tool loops. Keep the 150/150 capability
-result; next reduce fixed context/schema cost and rerun both immutable roles.
+M19 remains incomplete. The immediate work is to create fresh baseline and
+current 150-result campaigns on revision `296d2b6`, then rerun strict final
+aggregation and address only the measured acceptance failures. No smoke or
+historical campaign may fill the formal matrix.
 
 The next recorded expansion is M20, after the fixed M19 comparison: Zig,
 Clojure, Java, TypeScript, C, C++ and SQL each receive the same six task
