@@ -191,3 +191,29 @@ campaigns must restart from zero on the resulting clean revision; no result from
 Focused authority and live-tool-path regressions passed 2/2. The canonical suite
 then passed 1,894/1,894 with zero skipped and zero unexpected results while the
 Rust toolchain was explicitly available on `PATH`.
+
+## Reasoning Continuation Failure On `0ff4ac8`
+
+The authority correction worked: mutating trials created durable active Plans,
+and the completion barrier requested another step when the model first returned
+prose without closing one. That next request exposed a separate transport defect.
+
+| Metric | Result |
+|---|---:|
+| Read-only trials passed | 10/10 |
+| Mutating trials rejected by transport | 20/20 |
+| Rejection text | missing required `reasoning_content` |
+
+Wire evidence showed successful continuation through ten assistant tool-call
+messages. The first plain assistant progress message retained reasoning in local
+metadata, but the OpenAI-compatible formatter replayed reasoning only for tool
+calls. The Plan barrier then produced request twelve, which the provider rejected
+because that plain assistant message lacked its required continuation field.
+
+This is deterministic common-layer evidence, not model randomness. The model
+capability contract now separates reasoning support from continuation shape and
+supports `tool-calls` and `all-assistant` replay modes. Both exact-model campaigns
+must restart on the clean revision containing that correction.
+
+The focused model capability and request-formatting set passed 64/64. The full
+canonical suite passed 1,898/1,898 with zero skipped and zero unexpected results.

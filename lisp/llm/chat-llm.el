@@ -350,17 +350,25 @@ not both claim the same ids."
         (error "Only user messages may contain input attachments"))
       (vconcat (mapcar #'chat-llm--openai-content-part parts)))))
 
-(defun chat-llm--format-one-message (msg &optional replay-reasoning)
+(defun chat-llm--format-one-message (msg &optional reasoning-replay)
   "Convert one chat-message MSG to a provider payload alist.
 
-When REPLAY-REASONING is non-nil, include recorded reasoning on an
-assistant tool-call message.  Some reasoning transports require that
-field on the following tool-result request; other transports must not
-receive it."
-  (let ((role (chat-message-role msg))
-        (content (or (chat-message-text msg) ""))
-        (calls (chat-message-tool-calls msg))
-        (metadata (chat-message-metadata msg)))
+REASONING-REPLAY is `tool-calls', `all-assistant' or `unknown'.  The
+first mode includes recorded reasoning only on assistant tool-call
+messages.  The second includes it on every assistant message that has
+recorded reasoning.  Unknown transports receive no continuation field."
+  (let* ((role (chat-message-role msg))
+         (content (or (chat-message-text msg) ""))
+         (calls (chat-message-tool-calls msg))
+         (metadata (chat-message-metadata msg))
+         (reasoning
+          (when (and (eq role :assistant)
+                     (or (eq reasoning-replay 'all-assistant)
+                         (and (eq reasoning-replay 'tool-calls) calls)))
+            (let ((recorded (plist-get metadata :reasoning)))
+              (when (and (stringp recorded)
+                         (not (string-blank-p recorded)))
+                recorded)))))
     (cond
      ((eq role :tool)
       `((role . "tool")
@@ -368,22 +376,24 @@ receive it."
                              (chat-message-id msg)
                              "call"))
         (content . ,content)))
-     ((and (eq role :assistant) calls)
-      `((role . "assistant")
-        (content . ,(if (string-blank-p content) json-null content))
-        ,@(when-let* ((reasoning
-                       (and replay-reasoning
-                            (plist-get metadata :reasoning))))
-            (when (and (stringp reasoning)
-                       (not (string-blank-p reasoning)))
-              `((reasoning_content . ,reasoning))))
-        (tool_calls . ,(vconcat
-                        (seq-map-indexed
-                         (lambda (call index)
-                           (chat-llm--tool-call-payload msg call (1+ index)))
-                         calls)))))
-     ((and (eq role :assistant) (string-blank-p content))
+     ((and (eq role :assistant) (string-blank-p content)
+           (null calls) (null reasoning))
       nil)
+     ((eq role :assistant)
+      `((role . "assistant")
+        (content . ,(if (and calls (string-blank-p content))
+                        json-null
+                      (chat-llm--openai-content msg)))
+        ,@(when reasoning
+            `((reasoning_content . ,reasoning)))
+        ,@(when calls
+            `((tool_calls .
+                          ,(vconcat
+                            (seq-map-indexed
+                             (lambda (call index)
+                               (chat-llm--tool-call-payload
+                                msg call (1+ index)))
+                             calls)))))))
      (t
       `((role . ,(if (keywordp role)
                      (substring (symbol-name role) 1)
@@ -415,31 +425,32 @@ construction rather than by two fallbacks happening to match."
               results (cdr results)))
       (nreverse out))))
 
-(defun chat-llm--format-messages (messages &optional replay-reasoning)
+(defun chat-llm--format-messages (messages &optional reasoning-replay)
   "Convert chat MESSAGE structs to API format.
 This is the convertToLlm boundary: empty assistant messages are
 dropped, :tool messages keep tool_call_id, and assistant tool
 calls become provider tool_calls.  Persisted assistant messages
 that still store tool-results on the same struct are expanded
-into tool role messages.  REPLAY-REASONING is forwarded to
+into tool role messages.  REASONING-REPLAY is forwarded to
 `chat-llm--format-one-message'."
   (let (out)
     (dolist (msg messages)
       (let ((formatted (chat-llm--format-one-message
-                        msg replay-reasoning)))
+                        msg reasoning-replay)))
         (when formatted
           (push formatted out)))
       (dolist (tool-msg (chat-llm--synthetic-tool-messages msg))
         (push tool-msg out)))
     (vconcat (nreverse out))))
 
-(defun chat-llm--replay-reasoning-p (provider model)
-  "Return non-nil when PROVIDER and MODEL explicitly support reasoning.
+(defun chat-llm--reasoning-replay-mode (provider model)
+  "Return the explicit reasoning continuation mode for PROVIDER MODEL.
 
-This predicate is intentionally conservative: an unknown capability
-does not authorize adding a provider-specific request field."
-  (eq t (chat-model-capabilities-reasoning
-         (chat-model-capabilities-resolve provider model))))
+An unknown capability does not authorize adding a provider-specific
+request field."
+  (let ((mode (chat-model-capabilities-reasoning-replay
+               (chat-model-capabilities-resolve provider model))))
+    (if (memq mode '(tool-calls all-assistant)) mode 'unknown)))
 
 (defun chat-llm--request-builder (config)
   "Return the request builder function from CONFIG."
@@ -492,7 +503,7 @@ does not authorize adding a provider-specific request field."
       (list :model model
             :messages (chat-llm--format-messages
                        messages
-                       (chat-llm--replay-reasoning-p provider model))
+                       (chat-llm--reasoning-replay-mode provider model))
             :temperature temperature
             :stream stream
             :max_tokens max-tokens))))
@@ -1172,7 +1183,7 @@ OPTIONS is an optional plist of request parameters."
                          :messages
                          (chat-llm--format-messages
                           messages
-                          (chat-llm--replay-reasoning-p provider model))
+                          (chat-llm--reasoning-replay-mode provider model))
                          :temperature temperature
                          :max_tokens max-tokens
                          :stream stream))

@@ -74,15 +74,15 @@ identity shared with another protocol, or the model list it serves."
            "deepseek-v4-flash-vision-exp")
  :model-capabilities
  '(("deepseek-v4-flash" .
-    (:reasoning t :tool-choice (auto)
+    (:reasoning t :reasoning-replay all-assistant :tool-choice (auto)
      :structured-output (json-object)
      :supported-options (:max-tokens)))
    ("deepseek-v4-pro" .
-    (:reasoning t :tool-choice (auto)
+    (:reasoning t :reasoning-replay all-assistant :tool-choice (auto)
      :structured-output (json-object)
      :supported-options (:max-tokens)))
    ("deepseek-v4-flash-vision-exp" .
-    (:reasoning t :tool-choice (auto)
+    (:reasoning t :reasoning-replay all-assistant :tool-choice (auto)
      :input-modalities (text image)
      :structured-output (json-object)
      :supported-options (:max-tokens)))))

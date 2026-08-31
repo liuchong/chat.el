@@ -490,7 +490,7 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
       (should (equal (cdr (assoc 'tool_call_id tool)) "call-1")))))
 
 (ert-deftest chat-llm-format-messages-replays-reasoning-for-tool-call ()
-  "Reasoning replay is explicit and limited to assistant tool calls."
+  "The tool-call replay mode includes only tool-call continuations."
   (let* ((assistant
           (make-chat-message
            :role :assistant
@@ -501,26 +501,38 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
          (without-replay (aref (chat-llm--format-messages
                                 (list assistant)) 0))
          (with-replay (aref (chat-llm--format-messages
-                             (list assistant) t) 0)))
+                             (list assistant) 'tool-calls) 0)))
     (should-not (assoc 'reasoning_content without-replay))
     (should (equal (cdr (assoc 'reasoning_content with-replay))
                    "inspect before editing"))))
 
-(ert-deftest chat-llm-format-messages-never-replays-plain-reasoning ()
-  "A reasoning-only assistant message remains ordinary content."
+(ert-deftest chat-llm-format-messages-replays-plain-reasoning-when-required ()
+  "The all-assistant mode preserves a plain assistant continuation."
   (let* ((assistant
           (make-chat-message :role :assistant
                              :content "done"
                              :metadata '(:reasoning "private work")))
          (formatted (aref (chat-llm--format-messages
-                           (list assistant) t) 0)))
+                           (list assistant) 'all-assistant) 0)))
+    (should (equal (cdr (assoc 'reasoning_content formatted))
+                   "private work"))))
+
+(ert-deftest chat-llm-tool-call-mode-omits-plain-reasoning ()
+  "The narrower continuation mode does not add plain-step reasoning."
+  (let* ((assistant
+          (make-chat-message :role :assistant
+                             :content "done"
+                             :metadata '(:reasoning "private work")))
+         (formatted (aref (chat-llm--format-messages
+                           (list assistant) 'tool-calls) 0)))
     (should-not (assoc 'reasoning_content formatted))))
 
 (ert-deftest chat-llm-openai-request-replays-reasoning-by-capability ()
   "An explicitly reasoning model carries its tool-call thought forward."
   (chat-llm-register-openai-compatible-provider
    'reasoning-wire-test "Reasoning Wire" "https://example.invalid/v1" "r1"
-   :capabilities '(:stream t :tools t :reasoning t))
+   :capabilities '(:stream t :tools t :reasoning t
+                   :reasoning-replay tool-calls))
   (let* ((assistant
           (make-chat-message
            :role :assistant :content ""
@@ -532,6 +544,31 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
          (wire-message (aref (plist-get request :messages) 0)))
     (should (equal (cdr (assoc 'reasoning_content wire-message))
                    "retain this continuation"))))
+
+(ert-deftest chat-llm-deepseek-replays-plain-assistant-reasoning ()
+  "DeepSeek's next request preserves reasoning from a prose Plan step."
+  (let* ((assistant
+          (make-chat-message
+           :role :assistant :content "The work is ready to finalize."
+           :metadata '(:reasoning "verify the open plan before closing")))
+         (request (chat-llm--build-request
+                   'deepseek (list assistant)
+                   '(:model "deepseek-v4-flash")))
+         (wire-message (aref (plist-get request :messages) 0)))
+    (should (equal (cdr (assoc 'reasoning_content wire-message))
+                   "verify the open plan before closing"))))
+
+(ert-deftest chat-llm-kimi-256k-replays-plain-assistant-reasoning ()
+  "Kimi k3-256k uses the same complete continuation contract."
+  (let* ((assistant
+          (make-chat-message
+           :role :assistant :content "The work is ready to finalize."
+           :metadata '(:reasoning "verify the open plan before closing")))
+         (request (chat-llm-kimi-code--build-request
+                   (list assistant) '(:model "k3-256k")))
+         (wire-message (aref (alist-get 'messages request) 0)))
+    (should (equal (cdr (assoc 'reasoning_content wire-message))
+                   "verify the open plan before closing"))))
 
 (ert-deftest chat-llm-openai-request-omits-reasoning-when-unknown ()
   "An unknown capability never authorizes a provider-specific field."

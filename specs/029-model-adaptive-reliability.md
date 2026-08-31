@@ -52,6 +52,7 @@ The common layer owns all non-negotiable behavior:
 - scoped authority, approval, path boundaries and checkpoint semantics;
 - structured context, Goal, plan, TODO and work-note continuity;
 - typed tool contracts and explicit tool errors;
+- capability-declared reasoning continuation across every multi-step request;
 - stale-write detection, deterministic verification and cleanup;
 - bounded step, request, time, retry and repair budgets;
 - honest completion: blocked permissions and failed writes are surfaced directly;
@@ -127,6 +128,13 @@ record the exact model `k3-256k`; an alias or resolved model mismatch makes the
 campaign invalid. The live qualification runner rejects a known provider/model
 mismatch before readiness or any other provider request. DeepSeek qualification
 likewise requires the exact `deepseek-v4-flash` identity.
+
+Reasoning continuation is a transport fact in the common layer, not a prompt
+adaptation. Each concrete model declares whether its recorded reasoning is
+replayed on tool-call assistant messages only or on every assistant message.
+Unknown continuation shape authorizes no provider-specific request field. A
+provider rejection caused by missing required continuation invalidates the run
+as a common transport defect; it is not counted as stochastic model failure.
 
 For each provider/model pair, run the same immutable core manifest and report:
 

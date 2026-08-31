@@ -26,10 +26,10 @@
   "Model capability declarations and discovery cache."
   :group 'chat-llm)
 
-(defconst chat-model-capabilities-schema-version 1
+(defconst chat-model-capabilities-schema-version 2
   "Current `chat-model-capabilities' schema version.")
 
-(defconst chat-model-discovery-cache-schema-version 1
+(defconst chat-model-discovery-cache-schema-version 2
   "Current model discovery cache schema version.")
 
 (define-error 'chat-model-discovery-unsupported-schema
@@ -54,19 +54,20 @@
        (schema-version chat-model-capabilities-schema-version)
        provider model (source 'unknown) updated-at expires-at
        (stream 'unknown) (tools 'unknown) (tool-choice 'unknown)
-       (reasoning 'unknown) (input-modalities 'unknown)
+       (reasoning 'unknown) (reasoning-replay 'unknown)
+       (input-modalities 'unknown)
        (structured-output 'unknown) (context-window 'unknown)
        (max-output-tokens 'unknown) (supported-options 'unknown))))
   "Resolved, versioned facts for one provider MODEL.
 
-Boolean capabilities use t, nil or `unknown'.  Collection and numeric
-capabilities also use `unknown' when no declaration is available."
+Boolean capabilities use t, nil or `unknown'.  Enumerated, collection and
+numeric capabilities also use `unknown' when no declaration is available."
   schema-version provider model source updated-at expires-at
-  stream tools tool-choice reasoning input-modalities structured-output
-  context-window max-output-tokens supported-options)
+  stream tools tool-choice reasoning reasoning-replay input-modalities
+  structured-output context-window max-output-tokens supported-options)
 
 (defconst chat-model-capabilities--fields
-  '(:stream :tools :tool-choice :reasoning :input-modalities
+  '(:stream :tools :tool-choice :reasoning :reasoning-replay :input-modalities
     :structured-output :context-window :max-output-tokens
     :supported-options)
   "Capability keys accepted in registration plists.")
@@ -165,6 +166,8 @@ with the same provider, model and source replaces the earlier one."
      (setf (chat-model-capabilities-tool-choice capabilities) value))
     (:reasoning
      (setf (chat-model-capabilities-reasoning capabilities) value))
+    (:reasoning-replay
+     (setf (chat-model-capabilities-reasoning-replay capabilities) value))
     (:input-modalities
      (setf (chat-model-capabilities-input-modalities capabilities) value))
     (:structured-output
@@ -216,6 +219,8 @@ with the same provider, model and source replaces the earlier one."
     (:tools (chat-model-capabilities-tools capabilities))
     (:tool-choice (chat-model-capabilities-tool-choice capabilities))
     (:reasoning (chat-model-capabilities-reasoning capabilities))
+    (:reasoning-replay
+     (chat-model-capabilities-reasoning-replay capabilities))
     (:input-modalities (chat-model-capabilities-input-modalities capabilities))
     (:structured-output
      (chat-model-capabilities-structured-output capabilities))

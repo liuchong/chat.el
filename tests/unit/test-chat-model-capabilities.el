@@ -26,7 +26,21 @@
     (chat-llm-register-provider 'caps-unknown :model "m")
     (let ((caps (chat-model-capabilities-resolve 'caps-unknown "m")))
       (should (eq (chat-model-capabilities-stream caps) 'unknown))
-      (should (eq (chat-model-capabilities-tools caps) 'unknown)))))
+      (should (eq (chat-model-capabilities-tools caps) 'unknown))
+      (should (eq (chat-model-capabilities-reasoning-replay caps)
+                  'unknown)))))
+
+(ert-deftest chat-model-capabilities-resolve-reasoning-replay-mode ()
+  "A model-specific continuation mode overlays the provider default."
+  (test-chat-model-capabilities--isolated
+    (chat-llm-register-provider
+     'caps-replay :model "m"
+     :capabilities '(:reasoning t :reasoning-replay tool-calls)
+     :model-capabilities
+     '(("m" . (:reasoning-replay all-assistant))))
+    (let ((caps (chat-model-capabilities-resolve 'caps-replay "m")))
+      (should (eq (chat-model-capabilities-reasoning-replay caps)
+                  'all-assistant)))))
 
 (ert-deftest chat-model-capabilities-resolve-source-priority ()
   "User facts outrank discovery, model static facts and fallback facts."

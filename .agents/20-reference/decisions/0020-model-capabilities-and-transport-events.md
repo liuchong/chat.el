@@ -24,8 +24,9 @@ not silently redefine what a request is allowed to do.
 
 ## Decision
 
-`chat-model-capabilities` version 1 is the provider-neutral model contract. It
-records streaming, tools, tool-choice modes, reasoning, input modalities,
+`chat-model-capabilities` version 2 is the provider-neutral model contract. It
+records streaming, tools, tool-choice modes, reasoning, reasoning continuation,
+input modalities,
 structured output, context and output limits, and supported request options.
 `unknown` is distinct from both true and false. Core behavior never infers a
 capability from a model-name pattern.
@@ -55,10 +56,13 @@ context compaction, Guard and coding helpers use the normalized runtime or its
 result compatibility wrapper. Protocol-shaped payloads do not escape the model
 adapter boundary.
 
-Reasoning remains metadata on the assistant step that produced it. An OpenAI
-compatible adapter replays it only when that step also contains tool calls and
-the selected model explicitly declares reasoning support. Unknown or false
-capabilities do not authorize adding the provider-specific continuation field.
+Reasoning remains metadata on the assistant step that produced it. OpenAI
+compatible adapters use the selected model's `reasoning-replay` mode. The mode
+is `tool-calls` when only assistant tool-call messages need continuation,
+`all-assistant` when every assistant message with recorded reasoning must carry
+it, and `unknown` when no provider-specific continuation field is authorized.
+Reasoning support and continuation shape are separate facts: a model may expose
+reasoning without accepting either OpenAI-compatible replay shape.
 
 ## Consequences
 
@@ -78,4 +82,5 @@ event, but session audit projections retain only bounded normalized counters.
 The M2 implementation is covered by 1405 passing tests. Offline fixtures cover
 two protocol shapes, streaming and asynchronous results, reasoning, text,
 partial tool calls, zero-valued usage counters, discovery precedence and cache
-versioning, pre-dispatch rejection, duplicate callbacks and reasoning replay.
+versioning, pre-dispatch rejection, duplicate callbacks, tool-call-only replay
+and all-assistant replay.

@@ -65,7 +65,7 @@ Uses OpenAI-compatible format."
     `((model . ,model)
       (messages . ,(chat-llm--format-messages
                     messages
-                    (chat-llm--replay-reasoning-p 'kimi-code model)))
+                    (chat-llm--reasoning-replay-mode 'kimi-code model)))
       ;; 这个端点只接受 temperature 1，k3、k3-256k、kimi-for-coding 一律
       ;; 如此，别的值一律 400 invalid temperature。调用方给的值只能丢掉：
       ;; chat-ui 固定传 0.7，照传过去每个请求都会失败。
@@ -164,6 +164,10 @@ generation, the highspeed one gated behind a higher tier.")
                  :reasoning t :input-modalities (text)
                  :structured-output unknown
                  :supported-options (:max-tokens))
+ :model-capabilities
+ (mapcar (lambda (model)
+           (cons model '(:reasoning-replay all-assistant)))
+         chat-llm-kimi-code-models)
  :headers #'chat-llm-kimi-code--headers
  :build-request-fn #'chat-llm-kimi-code--build-request
  :response-fn #'chat-llm-kimi-code--parse-response

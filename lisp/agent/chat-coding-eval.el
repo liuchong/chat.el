@@ -1002,6 +1002,8 @@ ON-COMPLETE receives results in execution order and the suite state."
        (tools . ,(chat-model-capabilities-tools facts))
        (toolChoice . ,(chat-model-capabilities-tool-choice facts))
        (reasoning . ,(chat-model-capabilities-reasoning facts))
+       (reasoningReplay .
+                        ,(chat-model-capabilities-reasoning-replay facts))
        (structuredOutput .
                          ,(chat-model-capabilities-structured-output facts))
        (contextWindow . ,(chat-model-capabilities-context-window facts))

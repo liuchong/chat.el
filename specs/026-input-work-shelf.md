@@ -104,6 +104,15 @@ bounded ordered message projection and Queue actions without moving input focus.
 Editing a queued message increments its revision and preserves its identity and
 audit history. Queue remains distinct from staged or draft messages: a queued
 message is committed for later dispatch, while a staged message is not yet queued.
+Recalling a queued message first places its authoritative record in `editing`;
+that state is a scheduler barrier, so no cached older revision may dispatch while
+the input buffer owns the edit.
+
+Insert-mode input that has been sent but not yet injected is not a shelf provider
+and is not Queue. It is an uneditable transient transcript projection immediately
+above the shelf. Durable or streaming conversation output renders before it, so
+the projection stays at the bottom of the transcript until injection atomically
+replaces it with the durable user turn.
 
 ## Non-Goals
 
@@ -134,4 +143,7 @@ Tests must prove:
 - provider rendering is bounded and performs no synchronous filesystem/Git scan;
 - Queue actions, revisions and ordering remain identical between shelf and
   transcript projections;
+- a queued record in `editing` cannot dispatch an older revision;
+- an insert-mode sent projection remains below live output, is never editable and
+  disappears exactly when the durable user turn appears;
 - the former separate projections are removed, and the full canonical suite passes.
