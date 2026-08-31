@@ -3,7 +3,7 @@
 - Date: 2026-09-01
 - Scope: M20 focused C control and M21 cross-provider diagnosis
 - Status: focused control complete; broader language and provider matrices pending
-- Revisions: `aa7f5be`, `14d7492`, `d21d276`
+- Revisions: `aa7f5be`, `14d7492`, `d21d276`, `0709d50`
 - Manifest: `tests/fixtures/coding-eval/manifest-c-mutation-smoke.json`
 - Manifest digest: `3dc5af4afb8f0586148c7a43d39a87f97d1aabbbf3e6915bbadc74d93a705520`
 
@@ -86,12 +86,53 @@ network-denied execution boundary. Follow-up work must compare normalized
 command provenance and effects, retain fail-closed behavior for unknown
 scripts, and measure each provider separately.
 
+## Task-Bound Verification Contract
+
+Revision `0709d50cb37e05c08a563d92fcf82fa5cb8f123f` replaces that provider-dependent
+middle decision only when a trusted runtime already owns an exact verification
+contract. The schema binds source, active task ID, canonical project root,
+canonical execution directory and complete argv. It applies only to
+`programming_compile_task`, requires one shell segment and remains below the
+never-allow floor. A task, path, argument, tool or schema mismatch falls back to
+the ordinary Guard path; arbitrary script names never become global rules.
+
+The same C control was rerun from a clean committed revision. Both traces
+recorded `source=rule`, `model=guard-rule` and the exact reason
+`exact active-task verification contract matched` for `sh test-one active`.
+Neither provider requested a model Guard verdict for that command. Kimi no
+longer detoured through a direct Clang command.
+
+| Metric | DeepSeek | Kimi Code |
+|---|---:|---:|
+| Campaign | `m20-c-contract-deepseek-v4-flash-0709d50-r1` | `m20-c-contract-kimi-k3-256k-0709d50-r1` |
+| Exact model | `deepseek-v4-flash` | `k3-256k` |
+| Trial status | passed | passed |
+| Duration | 19,610 ms | 76,174 ms |
+| Requests / steps | 12 / 12 | 9 / 9 |
+| Tool calls / results | 19 / 19 | 11 / 11 |
+| Tool errors | 1 | 0 |
+| Approval events | 4 | 4 |
+| Total tokens | 110,144 | 65,274 |
+| Changed files | `sample.c` | `sample.c` |
+| Out-of-scope files | 0 | 0 |
+| Workspace cleaned | yes | yes |
+
+Each trace again contains exactly one `programming_task_output` read with
+`terminal=true`, `status="succeeded"`, `exitCode=0` and empty output. The
+contract made the authorization behavior deterministic, but it did not erase
+provider latency or planning differences: this single Kimi sample used fewer
+steps and no tool errors while taking longer than the preceding sample. Latency
+must therefore remain provider-separated and repetition-based rather than
+being inferred from one control.
+
 ## Verification
 
 - work unit tests: 20/20 passed;
 - capability unit tests: 36/36 passed;
 - work platform integration tests: 2/2 passed;
-- canonical suite: 1,972/1,972 passed;
+- canonical suite at `d21d276`: 1,972/1,972 passed;
+- task-bound contract focused tests: 3/3 passed;
+- canonical suite at `0709d50`: 1,974/1,974 passed;
 - changed Lisp files byte-compiled successfully;
 - generated `.elc` files were removed;
 - both focused workspaces and declared generated artifacts were cleaned;
@@ -101,6 +142,8 @@ scripts, and measure each provider separately.
 
 - `/Users/liu/.chat/evaluations/m20-c-control-d21d276/m20-c-control-deepseek-v4-flash-d21d276-r1`
 - `/Users/liu/.chat/evaluations/m20-c-control-d21d276/m20-c-control-kimi-k3-256k-d21d276-r1`
+- `/Users/liu/.chat/evaluations/m20-c-contract-0709d50/m20-c-contract-deepseek-v4-flash-0709d50-r1`
+- `/Users/liu/.chat/evaluations/m20-c-contract-0709d50/m20-c-contract-kimi-k3-256k-0709d50-r1`
 
 These bounded local results retain trial and request identity. Provider wire
 payloads and copied workspaces are not committed.
@@ -129,7 +172,7 @@ PASS: the exact-model C focused control proves task-scoped verification fallback
 ## Remaining Work
 
 1. Apply the quiet-task control to later language mutation smokes.
-2. Add provider-separated Guard decision evidence for normalized verification
-   commands without widening arbitrary script authority.
+2. Extend the same exact contract through reviewed project configuration and
+   verification adapters without widening arbitrary script authority.
 3. Continue the remaining M20 language smokes and M21 bounded campaigns; do not
    pool DeepSeek and Kimi results.

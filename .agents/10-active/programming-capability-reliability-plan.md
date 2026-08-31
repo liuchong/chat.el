@@ -1387,6 +1387,13 @@ DeepSeek `deepseek-v4-flash` 以 14 步、40.442 秒通过；Kimi Code `k3-256k`
 这只关闭跨厂商 focused control，不替代其余六种扩展语言 smoke 或重复矩阵。完整记录见
 `.agents/30-records/logs/stage-2026-09-01-verification-fallback-and-task-outcomes.md`。
 
+Revision `0709d50` 进一步把 Eval 已声明的 exact command judge 投影成受信 runtime
+验证合同，精确绑定 source、当前 task ID、canonical root/directory 和完整 argv，并保持
+never-allow 地板。相同 C control 中，DeepSeek 以 12 步、19.610 秒通过，Kimi Code 以
+9 步、76.174 秒通过；两侧 `sh test-one active` 均由同一条 `guard-rule` 合同放行，均未
+请求模型 Guard verdict，且仍只读取一次结构化成功终态。该结果关闭这一条脚本授权差异，
+不把单次延迟当作 provider 性能结论，也不替代剩余语言和重复矩阵。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
@@ -1448,6 +1455,13 @@ fallback。第三，后台任务必须返回可判定的结构化终态，不能
 不是允许任意项目脚本的依据。下一步应比较同命令的规则命中、Guard verdict、延迟和实际
 隔离边界，优先把可证明安全且稳定的形态提升为共同确定性规则；无法证明脚本效果时继续
 fail closed，禁止用宽泛白名单或延长任务时限掩盖随机性。
+
+Revision `0709d50` 完成该差异的 common-layer 对照：只有 Eval runtime 预先签发且与当前
+task、root、directory、argv 完全一致的命令才走确定性快路。DeepSeek 与 Kimi 的 live
+wire 均记录 `source=rule`、`model=guard-rule` 和相同 matched rule，Kimi 不再改走直接
+Clang。参数、目录、工具、task、schema 任一变化及 never-allow 命令均不匹配。该结果说明
+模型随机性应优先由可证明的结构合同消除；剩余规划和延迟差异继续按 provider 独立采样，
+不需要为这个已关闭的问题增加模型特判。
 
 #### 退出条件
 
