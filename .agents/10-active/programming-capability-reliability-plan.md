@@ -1844,3 +1844,17 @@ closed 为 identity error，即使代码 judge 通过也不能形成有效 trial
 `deepseek/deepseek-v4-flash` 和各自 implementation revision 上预检成功；提交后还必须以
 clean harness revision 重做 descriptor 与最小 live smoke，再创建 fresh 150/150 paired
 campaign，当前 M19 仍未完成。
+
+提交 `16cccd1a9506dabc8a6ca40e07cb470d1b47b4f8` 后，两侧 clean descriptor 预检
+正式通过：均为 30 tasks、5 repetitions、150 expected，manifest digest 均为
+`0164487205a6fab51be67eebdfb9d7dad48ec7c68ccadb20b513c2da5e344dcc`；current 与
+baseline configuration digest 分别为
+`b4acc7e3dbb3d5d6c8096faa3ac9f8af71dda62a514b9dd7eb1db476e09bdf98` 和
+`722b792a9138e5e60b7243cdca9114f25acd3c2657472ef5190048b4f9be0880`。
+
+同 revision 的一任务 live smoke 也完成。current 通过，三次 task request 全部观测为
+`deepseek/deepseek-v4-flash`；冻结 baseline 正常完成，四次 task request 也全部为该精确
+模型。baseline 因历史 streaming 文本损坏、未完整输出目标符号而未通过内容 judge，这是
+应保留的旧实现能力失败，不是身份或 runner 失败。完整记录见
+`.agents/30-records/logs/stage-2026-08-31-frozen-campaign-protocols.md`。下一步创建 fresh
+30-by-5 baseline/current campaign；这两个 smoke 不进入最终样本。

@@ -58,6 +58,16 @@ baseline task passed 0/5. M19 remains open for resident prompt and tool-schema
 cost reduction followed by fresh paired campaigns. The fixed corpus includes a
 measured 10,000-indexed-file large-repository task.
 
+The final campaign path now uses explicit Agent configuration, normalized
+request-observer and capability-projection protocol versions instead of
+revision-specific guesses. All campaigns run under an automatically isolated
+runtime HOME, and actual request identities come from transport `started`
+events. Clean preflight and one-task live smoke succeeded for both current and
+the frozen M9 checkout on harness revision `16cccd1`; every observed task
+request used exact `deepseek-v4-flash`. The frozen smoke retained its historical
+streaming-content failure as a model-ability result. Full fresh 30-by-5 paired
+campaigns and final aggregation remain open.
+
 The input prompt now owns one default-closed two-level work shelf. Its bounded
 TODO, changed-files, Goal and Plan providers replace the former separate
 always-visible projections. Provider events refresh only their section, while
