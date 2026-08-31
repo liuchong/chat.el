@@ -1554,6 +1554,7 @@ Return the unique repetition/scenario key."
            first-usage
            final-usage
            usage-samples
+           request-identities
            (request-count 0)
            (tool-errors 0)
            (approvals 0)
@@ -1566,7 +1567,8 @@ Return the unique repetition/scenario key."
        run
        (chat-agent-start
         (list
-         :model provider
+         :provider provider
+         :model resolved-model
          :messages
          (list (make-chat-message
                 :id (chat-session-new-message-id "coding-eval")
@@ -1580,6 +1582,11 @@ Return the unique repetition/scenario key."
          :transport 'stream
          :on-event
          (lambda (event)
+           (when (eq (plist-get event :type) 'model-request-started)
+             (push (list :provider (plist-get event :provider)
+                         :model (plist-get event :model)
+                         :request-id (plist-get event :request-id))
+                   request-identities))
            (when (eq (plist-get event :type) 'turn-start)
              (cl-incf request-count))
            (when (plist-member event :usage)
@@ -1599,17 +1606,45 @@ Return the unique repetition/scenario key."
              (when (eq (or tool-type type) 'stale-file)
                (cl-incf stale-writes)))
            (when (eq (plist-get event :type) 'agent-end)
-             (funcall
-              done
-              (plist-get event :status)
-              (or (plist-get event :content) "")
-              `((provider . ,(symbol-name provider))
-                (model . ,resolved-model)
-                (modelCapabilitySnapshot . ,capabilities)
-                (profile . "code")
-                (transport . "stream")
-                (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
-                (failureReason . ,(plist-get event :reason))
+             (let* ((identities (nreverse request-identities))
+                    (identity-valid
+                     (and identities
+                          (cl-every
+                           (lambda (identity)
+                             (and (eq (plist-get identity :provider) provider)
+                                  (equal (plist-get identity :model)
+                                         resolved-model)))
+                           identities)))
+                    (identity-error
+                     (unless identity-valid
+                       (format "model identity drift: expected %s/%s, observed %S"
+                               provider resolved-model
+                               (mapcar
+                                (lambda (identity)
+                                  (cons (plist-get identity :provider)
+                                        (plist-get identity :model)))
+                                identities)))))
+               (funcall
+                done
+                (if identity-valid (plist-get event :status) 'error)
+                (or (plist-get event :content) "")
+                `((provider . ,(symbol-name provider))
+                  (model . ,resolved-model)
+                  (requestModels .
+                                 ,(mapcar
+                                   (lambda (identity)
+                                     `((provider . ,(symbol-name
+                                                     (plist-get identity :provider)))
+                                       (model . ,(plist-get identity :model))
+                                       (requestId . ,(plist-get identity :request-id))))
+                                   identities))
+                  (modelCapabilitySnapshot . ,capabilities)
+                  (profile . "code")
+                  (transport . "stream")
+                  (approvalMode . ,(symbol-name
+                                    chat-coding-eval-approval-mode))
+                  (failureReason . ,(or identity-error
+                                        (plist-get event :reason)))
                 (firstRequestTokenUsage . ,first-usage)
                 (finalRequestTokenUsage . ,final-usage)
                 (totalTokenUsage .
@@ -1630,7 +1665,7 @@ Return the unique repetition/scenario key."
                 (toolErrorCount . ,tool-errors)
                 (approvalCount . ,approvals)
                 (staleWriteCount . ,stale-writes)
-                (verificationRetryCount . 0))))))))
+                (verificationRetryCount . 0)))))))))
         (lambda () (chat-agent-cancel run))))))
 
 (defconst chat-coding-eval--campaign-pause-error-pattern

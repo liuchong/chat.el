@@ -226,6 +226,7 @@ sub-agent that will run commands nobody sees."
    :created-at (current-time)
    :updated-at (current-time)
    :model-id (or (and parent (chat-session-model-id parent)) 'kimi)
+   :model-name (and parent (chat-session-model-name parent))
    :messages messages
    :tool-config (copy-tree (and parent
                                 (chat-session-tool-config parent)))
@@ -275,14 +276,25 @@ summary string or alist.  This helper provides isolated child-session
     (name prompt parent-session success error-callback &optional budget options)
   "Start nested agent NAME for PROMPT and report through callbacks.
 
-OPTIONS may declare `:profile', `:model', `:project-root' and
-`:base-revision'.  A project root creates a session-owned worktree before the
-agent starts."
+OPTIONS may declare `:profile', `:provider', `:model', `:project-root' and
+`:base-revision'.  PROVIDER names the adapter and MODEL is its concrete remote
+model id.  A project root creates a session-owned worktree before the agent
+starts."
   (let* ((depth (1+ (chat-subagent--session-depth parent-session)))
          (_ (chat-subagent--ensure-depth depth parent-session))
          (id (chat-subagent--id))
          (profile (plist-get options :profile))
-         (model (plist-get options :model))
+         (parent-provider (and parent-session
+                               (chat-session-model-id parent-session)))
+         (provider (or (plist-get options :provider)
+                       parent-provider
+                       'kimi))
+         (model (or (plist-get options :model)
+                    (and (eq provider parent-provider)
+                         parent-session
+                         (chat-session-model-name parent-session))
+                    (plist-get (chat-llm-get-provider-config provider)
+                               :model)))
          (message
           (make-chat-message
            :id (chat-session-new-message-id "subagent-user")
@@ -292,13 +304,13 @@ agent starts."
          (child-session
           (chat-subagent--child-session
            name (list message) parent-session depth id))
+         (_identity
+          (setf (chat-session-model-id child-session) provider
+                (chat-session-model-name child-session) model))
          (_profile
           (when profile
             (chat-session-set-tool-config child-session
                                           (list :profile profile))))
-         (_model
-          (when model
-            (setf (chat-session-model-id child-session) model)))
          (workspace
           (when-let* ((root (plist-get options :project-root)))
             (require 'chat-workspace)
@@ -326,10 +338,11 @@ agent starts."
          run
          (chat-agent-start
           (list
-       :model (chat-session-model-id child-session)
-       :messages (list message)
-       :session child-session
-       :profile profile
+           :provider provider
+           :model model
+           :messages (list message)
+           :session child-session
+           :profile profile
        :project-root (chat-session-working-directory child-session)
        :transport 'stream
        :max-steps (chat-subagent-budget subagent)

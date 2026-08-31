@@ -27,6 +27,7 @@
 (require 'chat-agent-profile)
 
 (declare-function chat-agent-run-state-session "chat-agent-types" (run))
+(declare-function chat-agent-run-state-provider "chat-agent-types" (run))
 (declare-function chat-agent-run-state-model "chat-agent-types" (run))
 (declare-function chat-agent-run-state-transport "chat-agent-types" (run))
 (declare-function chat-agent-run-state-max-steps "chat-agent-types" (run))
@@ -103,8 +104,9 @@ a run that worked into a run that failed while being watched."
     (pcase (plist-get event :type)
       ('agent-start
        (when run
-         (list (cons 'model (chat-agent-wire--name
-                             (chat-agent-run-state-model run)))
+         (list (cons 'provider (chat-agent-wire--name
+                                (chat-agent-run-state-provider run)))
+               (cons 'model (chat-agent-run-state-model run))
                (cons 'transport (chat-agent-wire--name
                                  (chat-agent-run-state-transport run)))
                (cons 'max_steps (chat-agent-run-state-max-steps run))
@@ -114,6 +116,13 @@ a run that worked into a run that failed while being watched."
        (chat-agent-profile-snapshot
         (plist-get event :profile)
         (and run (chat-agent-run-execution-session run))))
+      ('model-request-started
+       (list (cons 'provider (chat-agent-wire--name
+                              (plist-get event :provider)))
+             (cons 'model (chat-agent-wire--short
+                           (plist-get event :model)))
+             (cons 'request_id (chat-agent-wire--short
+                                (plist-get event :request-id)))))
       ('context-transformed
        (list (cons 'message_count (plist-get event :message-count))))
       ('context-bundle

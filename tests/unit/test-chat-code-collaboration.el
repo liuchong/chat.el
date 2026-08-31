@@ -25,7 +25,8 @@
 (defmacro chat-code-collaboration-test--isolated (&rest body)
   "Run BODY with isolated durable collaboration registries."
   (declare (indent 0) (debug t))
-  `(let ((chat-task-directory (expand-file-name "tasks/" chat-state-dir))
+  `(let ((chat-llm-providers (copy-tree chat-llm-providers))
+         (chat-task-directory (expand-file-name "tasks/" chat-state-dir))
          (chat-task--registry (make-hash-table :test 'equal))
          (chat-task--loaded-p t)
          (chat-task-auto-save nil)
@@ -36,6 +37,8 @@
          (chat-code-collaboration--children (make-hash-table :test 'equal))
          (chat-event-observer-functions nil)
          (chat-event-blocker-functions nil))
+     (chat-llm-register-provider
+      'test-model :name "Test Model" :model "test-model-v1")
      ,@body))
 
 (defun chat-code-collaboration-test--prepared-child
@@ -183,6 +186,18 @@
     (should-not (assq 'transcript data))
     (should (equal (alist-get 'changedFiles data) '("a.el")))
     (should (equal (alist-get 'checkpointIds data) '("cp-1")))))
+
+(ert-deftest chat-code-collaboration-freezes-child-model-identity ()
+  "A declared child carries provider and concrete model as separate fields."
+  (chat-test-with-temp-dir
+   (chat-code-collaboration-test--repo temp-dir)
+   (chat-code-collaboration-test--isolated
+     (let ((parent (chat-session-create "Parent" 'test-model)))
+       (chat-session-set-working-directory parent temp-dir)
+       (let ((child (chat-code-collaboration-declare
+                     parent "Edit a.txt" '("a.txt"))))
+         (should (eq 'test-model (chat-code-child-provider child)))
+         (should (equal "test-model-v1" (chat-code-child-model child))))))))
 
 (provide 'test-chat-code-collaboration)
 ;;; test-chat-code-collaboration.el ends here

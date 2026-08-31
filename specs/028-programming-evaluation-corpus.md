@@ -228,6 +228,8 @@ Every significant campaign record includes:
 
 - campaign ID and role, implementation revision and clean-tree state;
 - provider, concrete model, capability snapshot and configuration digest;
+- the actual provider, concrete model and request id emitted for every real
+  model request, not only the requested campaign identity;
 - manifest path, manifest digest, task revisions and expected sample count;
 - valid, passed, failed, cancelled, timed-out, errored and quarantined counts;
 - per-language and per-category rates, safety violations and cleanup residue;
@@ -236,7 +238,12 @@ Every significant campaign record includes:
 - exact failed task identities, root-cause class and whether a code, prompt,
   fixture or infrastructure change followed;
 - a final `PASS`, `FAIL`, `BLOCKED` or `INVALID` verdict using the repository
-vocabulary in the fixture README.
+  vocabulary in the fixture README.
+
+A trial without actual request-identity evidence is invalid. If any request
+uses a provider or concrete model different from the frozen campaign pair, the
+trial fails closed as an identity error and the campaign cannot contribute to
+model qualification, adaptation evidence or cross-provider comparison.
 
 Token boundaries are explicit. `firstRequestTokenUsage` measures fixed prompt,
 context-selection and provider-schema cost; `finalRequestTokenUsage` describes

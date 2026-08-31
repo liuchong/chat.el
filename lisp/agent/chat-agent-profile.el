@@ -740,16 +740,17 @@ The original session and its message history are never mutated."
       (let* ((project-root (or (plist-get config :project-root)
                                default-directory))
              (profile (chat-agent-profile-resolve selected project-root))
-             (base-provider (plist-get config :model))
+             (base-provider (plist-get config :provider))
+             (base-model (plist-get config :model))
              (provider (or (chat-agent-profile-provider profile)
                            base-provider))
              (request-options (copy-tree
                                (or (plist-get config :request-options) nil)))
              (model (or (chat-agent-profile-model profile)
                         (and (eq provider base-provider)
-                             (or (plist-get request-options :model)
-                                 (and session
-                                      (chat-session-model-name session))))))
+                             base-model)
+                        (plist-get (chat-llm-get-provider-config provider)
+                                   :model)))
              (tool-config
               (chat-agent-profile--effective-tool-config session profile))
              (base-approval (chat-approval-effective-mode session))
@@ -779,13 +780,6 @@ The original session and its message history are never mutated."
                  (chat-agent-profile-diagnostics profile)
                  (list (format "approval mode %s could not weaken %s"
                                profile-approval base-approval)))))
-        (when (and (chat-agent-profile-provider profile)
-                   (not (eq provider base-provider))
-                   (null (chat-agent-profile-model profile)))
-          (setq request-options
-                (chat-agent-profile--plist-delete request-options :model)))
-        (when (and model (chat-agent-profile-model profile))
-          (setq request-options (plist-put request-options :model model)))
         (when (and (stringp instructions)
                    (not (string-blank-p instructions)))
           (setq messages
@@ -800,7 +794,8 @@ The original session and its message history are never mutated."
                         :revision (chat-agent-profile-revision profile)))
                  messages)))
         (let ((prepared (copy-tree config)))
-          (setq prepared (plist-put prepared :model provider))
+          (setq prepared (plist-put prepared :provider provider))
+          (setq prepared (plist-put prepared :model model))
           (setq prepared (plist-put prepared :messages messages))
           (setq prepared (plist-put prepared :request-options request-options))
           (setq prepared (plist-put prepared :profile-resolved profile))

@@ -74,6 +74,12 @@ unchanged. A `profile-resolved` event stores a bounded reproducibility snapshot
 with profile revision, source digest, model choice, skill revisions, effective
 authority and conflict diagnostics.
 
+Profile resolution produces separate provider and concrete-model values. A
+provider override without an explicit model resolves that provider's default;
+it never inherits the previous provider's model. The resulting pair is frozen
+on the Agent Run before dispatch. Profiles, follow-up options, retries and child
+execution cannot replace the model after the Run starts.
+
 Context-budget and background fields are part of the versioned shape so later
 task and context stages can consume them. M3 resolves and snapshots these
 fields; it does not claim task scheduling or a new context compaction policy.
@@ -90,6 +96,7 @@ runtime extensions use named `chat-runtime-hook` declarations.
 - every extension uses the existing runtime and lifecycle contracts;
 - project-local extension data is inactive until explicitly trusted;
 - model conflicts fail before a request reaches a provider;
+- every Run and child Run has one immutable provider/concrete-model pair;
 - no skill or profile silently widens tools or weakens approval;
 - resolved behavior is inspectable, reproducible and session-audited;
 - changing a profile does not rewrite history.

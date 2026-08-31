@@ -34,6 +34,13 @@ availability attempts are classified separately from admissible model trials;
 DNS, TLS, connection, rate-limit, quota, capacity and service failures do not
 become evidence that a model cannot program.
 
+Provider and concrete model are immutable fields of one Agent Run. They are
+resolved once before dispatch, persisted in the Run and forced into every
+initial, retry, tool-follow-up and steering request. Configuration reloads,
+profile overlays and request-option hooks cannot change them. Each transport
+start emits its actual provider, model and request id; missing evidence or a
+mismatch invalidates the trial before its behavioral result is considered.
+
 Evidence is eligible to change policy only when it is:
 
 - produced by a committed, versioned fixture and deterministic judge;
@@ -174,6 +181,8 @@ session migration or a second Agent implementation.
   adaptation loaded.
 - An unmatched or stale adaptation has no behavioral effect.
 - Exact provider/model/capability identity is persisted and visible in records.
+- Every real request in a trial matches the Run identity; missing or mismatched
+  request evidence makes the trial invalid.
 - Infrastructure attempts never alter model success rates.
 - A candidate and control campaign can be compared without changing fixtures or
   acceptance thresholds.

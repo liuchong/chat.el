@@ -75,12 +75,17 @@ nil 必须是合法值而不是"未初始化"：绝大多数会话不需要指�
 默认那个"，而默认值可能在配置里变。把 nil 写成具体值等于把一次快照钉死在会话
 里——正是今天 registry 快照那个毛病，只是搬到了会话上。
 
-### 2.2 请求带的是会话的模型名
+### 2.2 Agent Run 冻结具体模型名
 
 四条 payload 构造路径已经都认 `options` 里的 `:model`（`chat-llm.el:324`、
 `chat-llm.el:899`、`chat-llm-kimi-code.el:61`、`chat-llm-claude.el:97`），
-`:request-options` 也已经从 agent 配置贯通到 transport。所以这一条是接线，不是
-新机制：会话有模型名就放进 `:request-options`，没有就不放。
+`:request-options` 也已经从 agent 配置贯通到 transport。Agent 启动时必须把 provider
+与具体模型解析成两个独立字段：会话钉住模型时使用会话值，否则读取该 provider
+当时的默认值。解析结果写入 Run，并由 Run 强制写入每一轮、重试和 follow-up 请求。
+
+`model-name=nil` 仍表示“下一次 Run 使用 provider 当时的默认值”，不表示正在执行的
+Run 可以随配置变化漂移。Run 启动后，Profile、后续请求选项、配置重载和 provider
+默认值变化都不得改变它的具体模型。缺少非空具体模型时必须在 transport 前失败。
 
 ### 2.3 切换必须一次说清两件事
 
@@ -91,6 +96,12 @@ nil 必须是合法值而不是"未初始化"：绝大多数会话不需要指�
 
 切到另一家时，如果没有指定新模型名，会话的模型名必须清空而不是留着。留着就是让
 DeepSeek 收到 `k3`。
+
+### 2.5 供应商身份与模型身份不可复用同一字段
+
+provider 符号只选择 adapter、协议与端点；具体模型必须是单独的非空字符串。父 Agent、
+子 Agent、Profile、后台任务和 Eval 都使用这一合同。任何把 provider 符号写进具体模型
+字段，或只保存 provider 而在每轮重新猜模型的入口，均为合同错误。
 
 ## Requirement 3: 菜单是"厂商 → 模型"
 
@@ -138,8 +149,9 @@ non-blocking 约束。
 
 6. 新会话的 `model-name` 是 nil
 7. `model-name` 存盘后读回仍是同一个值，nil 也读回 nil
-8. 会话有 `model-name` 时，请求的 `:request-options` 带上它
-9. 会话没有 `model-name` 时，请求不带 `:model`，由 provider 决定
+8. 会话有 `model-name` 时，Agent Run 冻结该具体模型，且每一轮请求都带上它
+9. 会话没有 `model-name` 时，Agent Run 启动时冻结 provider 当时的默认模型；配置在
+   Run 中途变化不影响后续轮次
 10. `chat-set-model` 带模型名时，两者一起生效
 11. `chat-set-model` 不带模型名切到另一家时，旧模型名被清掉
 12. 切到 provider 不认识的模型名要报错，且会话不变
@@ -157,6 +169,8 @@ non-blocking 约束。
 
 19. Kimi Code 的四个模型 ID 与 DeepSeek 的三个都能被选中并发出请求
 20. `deepseek` 注册项的默认模型是一个真实模型 ID，不是别名
+21. Profile、follow-up options 和子 Agent 均不能覆盖已启动 Run 的具体模型
+22. 每个真实请求均记录实际 provider 与具体模型，缺失或漂移使 live Eval 无效
 
 ## Notes
 

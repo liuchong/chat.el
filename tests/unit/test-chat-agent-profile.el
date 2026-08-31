@@ -85,18 +85,21 @@
     :required-capabilities '(:reasoning t))
    (should-error
     (chat-agent-profile-prepare-config
-     (list :profile 'reasoner :model 'demo :messages nil))
+     (list :profile 'reasoner :provider 'demo :messages nil))
     :type 'chat-agent-profile-capability-mismatch)))
 
-(ert-deftest chat-agent-profile-provider-override-drops-old-model-name ()
-  "Changing providers cannot carry a pinned model name across vendors."
+(ert-deftest chat-agent-profile-provider-override-resolves-new-model-name ()
+  "Changing providers freezes the new default instead of carrying the old id."
   (chat-agent-profile-test--isolated
    (chat-agent-profile-test--register 'other :provider 'deepseek)
    (let ((prepared
           (chat-agent-profile-prepare-config
-           (list :profile 'other :model 'kimi :messages nil
-                 :request-options '(:model "k3" :timeout 10)))))
-     (should (eq (plist-get prepared :model) 'deepseek))
+           (list :profile 'other :provider 'kimi :model "k3" :messages nil
+                 :request-options '(:timeout 10)))))
+     (should (eq (plist-get prepared :provider) 'deepseek))
+     (should (equal
+              (plist-get (chat-llm-get-provider-config 'deepseek) :model)
+              (plist-get prepared :model)))
      (should-not (plist-member (plist-get prepared :request-options)
                                :model))
      (should (= (plist-get (plist-get prepared :request-options) :timeout)
@@ -168,7 +171,7 @@
     'reader :skills '(writer) :tools '(read) :tools-specified-p t)
    (should-error
     (chat-agent-profile-prepare-config
-     (list :profile 'reader :model 'demo :messages nil))
+     (list :profile 'reader :provider 'demo :messages nil))
     :type 'chat-agent-profile-authority-expansion)))
 
 (ert-deftest chat-agent-profile-cannot-weaken-session-approval ()
@@ -183,7 +186,7 @@
       :approval-mode 'dangerous)
      (let* ((prepared
              (chat-agent-profile-prepare-config
-              (list :profile 'attempt :model 'demo :session session
+              (list :profile 'attempt :provider 'demo :session session
                     :messages nil :max-steps 12)))
             (execution (plist-get prepared :execution-session))
             (profile (plist-get prepared :profile-resolved)))
@@ -202,7 +205,7 @@
    (chat-agent-profile-test--register 'shallow :subagent-limit 1)
    (let* ((prepared
            (chat-agent-profile-prepare-config
-            (list :profile 'shallow :model 'kimi :messages nil)))
+            (list :profile 'shallow :provider 'kimi :messages nil)))
           (execution (plist-get prepared :execution-session)))
      (should (= (plist-get (chat-session-tool-config execution)
                            :subagent-max-depth)
@@ -239,7 +242,7 @@
                     :tool-config '(:enabled-tools (read) :disabled-tools (shell))))
           (prepared
            (chat-agent-profile-prepare-config
-            (list :profile 'writer :model 'demo :session session
+            (list :profile 'writer :provider 'demo :session session
                   :messages nil)))
           (snapshot
            (chat-agent-profile-snapshot
@@ -267,7 +270,7 @@
                   'stub)))
        (setq run
              (chat-agent-start
-              (list :profile 'review :model 'kimi :session session
+              (list :profile 'review :provider 'kimi :session session
                     :messages (list user) :max-steps 10
                     :on-event (lambda (event) (push event events))))))
      (should (= (chat-agent-run-state-max-steps run) 4))

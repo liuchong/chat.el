@@ -54,7 +54,7 @@
             '(:content "Remote result received"))
            requests)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :session session
              :messages (list (chat-e2e--user-message "Use the remote tool"))
              :on-event (lambda (event) (push event events)))))
@@ -91,7 +91,7 @@
             '(:content "Nested result received"))
            requests)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :session session
              :messages (list (chat-e2e--user-message "Delegate this"))
              :on-event (lambda (event) (push event events)))))
@@ -175,7 +175,7 @@
                  (_ (error "Unexpected model request %s" request-number)))
                (list :cancel #'ignore))))
          (chat-agent-start
-          (list :model 'kimi
+          (list :provider 'kimi
                 :session session
                 :messages
                 (list (chat-e2e--user-message

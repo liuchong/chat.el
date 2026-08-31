@@ -294,9 +294,10 @@
           (parent (make-chat-session
                    :id "parent" :name "Parent" :model-id 'kimi
                    :metadata '((subagentDepth . 0))))
-          summary)
+          summary captured-config)
      (cl-letf (((symbol-function 'chat-agent-start)
                 (lambda (config)
+                  (setq captured-config config)
                   (funcall
                    (plist-get config :on-event)
                    (list :type 'agent-end :status 'completed
@@ -307,9 +308,18 @@
         (lambda (value) (setq summary value))
         #'ert-fail 3))
      (should (equal (cdr (assoc 'summary summary)) "child summary"))
+     (should (eq 'kimi (plist-get captured-config :provider)))
+     (should (equal (plist-get (chat-llm-get-provider-config 'kimi) :model)
+                    (plist-get captured-config :model)))
      (let ((subagent
             (car (hash-table-values chat-subagent--registry))))
        (should (= (chat-subagent-depth subagent) 1))
+       (should (eq 'kimi
+                   (chat-session-model-id
+                    (chat-subagent-child-session subagent))))
+       (should (equal (plist-get (chat-llm-get-provider-config 'kimi) :model)
+                      (chat-session-model-name
+                       (chat-subagent-child-session subagent))))
        (should (= (length
                    (chat-session-messages
                     (chat-subagent-child-session subagent)))

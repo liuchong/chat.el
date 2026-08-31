@@ -384,22 +384,17 @@ direction can overwrite a Plan or Goal that the tool just committed."
                   (null
                    (chat-model-capabilities-tools
                     (chat-model-capabilities-resolve
-                     (chat-agent-run-state-model run)
-                     (or (plist-get base :model)
-                         (and (chat-agent-run-execution-session run)
-                              (chat-session-model-name
-                               (chat-agent-run-execution-session run)))
-                         (plist-get
-                          (chat-llm-get-provider-config
-                           (chat-agent-run-state-model run))
-                          :model))))))
+                     (chat-agent-run-state-provider run)
+                     (chat-agent-run-state-model run)))))
                  (fboundp 'chat-tool-caller-provider-tools))
         (let* ((chat-tool-caller-current-session
                 (chat-agent-run-execution-session run))
                (tools (chat-tool-caller-provider-tools)))
           (when tools
             (setq base (plist-put base :tools tools))))))
-    base))
+    ;; Provider profiles and follow-up options may change budgets, never model
+    ;; identity.  Pin last so no secondary option source can override the run.
+    (plist-put base :model (chat-agent-run-state-model run))))
 
 (defun chat-agent--context-selection (run)
   "Return RUN's request-time scoped context bundle."
@@ -433,7 +428,7 @@ direction can overwrite a Plan or Goal that the tool just committed."
                 plan-session task-id
                 (chat-agent-run-state-work-plan-projection-revision run))))
          (window (chat-context-window-for-model
-                  (chat-agent-run-state-model run)))
+                  (chat-agent-run-state-provider run)))
          (max-chars
           (* 4 (+ (chat-context-allocation-tokens 'resident-rules window)
                   (chat-context-allocation-tokens 'project-notes window))))
@@ -525,7 +520,7 @@ state and are rebuilt after compaction instead of entering the transcript."
          (messages (chat-agent--insert-context-messages
                     base-messages bundle))
          (context (chat-context-budget-state
-                   messages (chat-agent-run-state-model run)))
+                   messages (chat-agent-run-state-provider run)))
          (reminders
           (delq nil
                 (list (chat-agent-budget-reminder
@@ -683,12 +678,18 @@ RETRY-ATTEMPT counts transport retries for this one model turn."
     (setf (chat-agent-run-state-handle run) nil)
     (let ((request-handle
            (chat-model-request-events
-            (chat-agent-run-state-model run)
+            (chat-agent-run-state-provider run)
             request-messages
             (lambda (event)
         (unless (chat-agent-run-state-cancelled run)
           (let ((payload (chat-model-event-payload event)))
             (pcase (chat-model-event-type event)
+              ('started
+               (chat-agent--emit
+                run 'model-request-started
+                :provider (chat-model-event-provider event)
+                :model (chat-model-event-model event)
+                :request-id (chat-model-event-request-id event)))
               ('text-delta
                (setq received-payload t)
                (when stream

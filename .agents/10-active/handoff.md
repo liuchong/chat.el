@@ -24,6 +24,11 @@
   repetitions and 150 expected results with the same frozen manifest
 - M19 remains incomplete until fresh baseline/current live campaigns use one
   identical concrete provider/model identity and the strict aggregate passes
+- Kimi campaigns before the immutable Run-identity correction are
+  identity-unverified; the passing `3e38e49` campaign actually used K2.7 for
+  task requests and is invalid as `k3-256k` evidence
+- Exact-model acceptance now requires one `model-request-started` record for
+  every real request; missing or mismatched provider/model identity fails closed
 - DeepSeek Flash may be used, but it requires fresh campaign identities for
   both roles; never mix it with Kimi or historical campaign samples
 - The provider transport boundary and bounded current-file reading were already
@@ -33,8 +38,8 @@
 - Export is an allowlisted public projection, not a backup: never add prompts,
   reasoning, tool traffic, raw transport data, paths or arbitrary metadata to
   its default contract
-- Development verification passes 1817/1817 canonical tests, 7/7 focused
-  export tests and 4/4 documentation-contract tests
+- Development verification passes 1911/1911 canonical tests and 3/3 Agent
+  end-to-end tests with the complete Rust toolchain PATH
 
 ## Avoid
 

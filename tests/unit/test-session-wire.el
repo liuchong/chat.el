@@ -247,6 +247,19 @@ answer came back."
     (should (equal 2 (alist-get 'count payload)))
     (should (equal '("m1" "m2") (alist-get 'message_ids payload)))))
 
+(ert-deftest chat-wire-records-the-model-used-by-each-real-request ()
+  "Request evidence carries provider, concrete model, and request id."
+  (let ((payload
+         (chat-agent-wire-payload
+          '(:type model-request-started
+            :provider kimi-code
+            :model "k3-256k"
+            :request-id "request-42"
+            :run nil))))
+    (should (equal "kimi-code" (alist-get 'provider payload)))
+    (should (equal "k3-256k" (alist-get 'model payload)))
+    (should (equal "request-42" (alist-get 'request_id payload)))))
+
 (ert-deftest chat-wire-a-tool-result-is-measured-not-copied ()
   "A tool event records the size of its result, not the result."
   (let* ((summary (make-string 40000 ?y))
@@ -281,13 +294,14 @@ answer it."
                        '(:content "done"))
                  calls)))
        (chat-agent-start
-        (list :model 'kimi
+        (list :provider 'kimi
               :session session
               :messages (list (chat-agent-test--user-message)))))
      (let ((kinds (mapcar (lambda (r) (alist-get 'kind r))
                           (chat-session-wire-read
                            (chat-session-id session)))))
        (should (member "agent-start" kinds))
+       (should (member "model-request-started" kinds))
        (should (member "turn-start" kinds))
        (should (member "turn-ended" kinds))
        (should (member "tool-event" kinds))
@@ -295,6 +309,7 @@ answer it."
        ;; Two turns, because the tool result had to go back.
        (should (= 2 (cl-count "turn-start" kinds :test #'equal)))
        (should (= 2 (cl-count "turn-ended" kinds :test #'equal)))
+       (should (= 2 (cl-count "model-request-started" kinds :test #'equal)))
        (should-not (member "turn-failed" kinds)))
      (dolist (record (chat-session-wire-read (chat-session-id session)))
        (when (member (alist-get 'kind record) '("turn-start" "turn-ended"))
@@ -305,7 +320,8 @@ answer it."
      (let ((size (file-attribute-size
                   (file-attributes (chat-session-wire-file
                                     (chat-session-id session))))))
-       (should (< size 8192))))))
+       ;; Two request-identity records are now part of the evidence contract.
+       (should (< size 9216))))))
 
 (ert-deftest chat-wire-records-say-which-turn-they-belong-to ()
   "Events carry the turn, so a run's rounds can be told apart."
@@ -317,7 +333,7 @@ answer it."
                 (chat-agent-test--stub-transport
                  '((:content "answer")) calls)))
        (chat-agent-start
-        (list :model 'kimi
+        (list :provider 'kimi
               :session session
               :messages (list (chat-agent-test--user-message)))))
      (let ((turns (delq nil
@@ -337,7 +353,7 @@ answer it."
                   (funcall error "transport unavailable")
                   'stub-handle)))
        (chat-agent-start
-        (list :model 'kimi
+        (list :provider 'kimi
               :session session
               :messages (list (chat-agent-test--user-message)))))
      (let* ((records (chat-session-wire-read (chat-session-id session)))
@@ -361,7 +377,7 @@ answer it."
                 (lambda (&rest _args) 'stub-handle)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi
+              (list :provider 'kimi
                     :session session
                     :messages (list (chat-agent-test--user-message))))))
      (should (chat-agent-cancel run))

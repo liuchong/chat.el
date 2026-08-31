@@ -33,7 +33,7 @@
 
 (cl-defstruct (chat-code-child
                (:constructor chat-code-child-create))
-  id task-id goal allowed-paths resources model profile budget evidence
+  id task-id goal allowed-paths resources provider model profile budget evidence
   base-revision parent-session child-session workspace status summary
   changed-files verification-id checkpoint-ids error)
 
@@ -109,8 +109,8 @@
 
 (cl-defun chat-code-collaboration-declare
     (parent-session goal allowed-paths
-                    &key resources model (profile 'code) (budget 12) evidence
-                    base-revision)
+                    &key resources provider model (profile 'code) (budget 12)
+                    evidence base-revision)
   "Declare one coding child with explicit ownership and completion evidence."
   (unless (chat-session-p parent-session)
     (signal 'chat-code-collaboration-invalid (list "missing parent session")))
@@ -121,7 +121,18 @@
             (list "allowed paths must be non-empty")))
   (unless (and (integerp budget) (> budget 0))
     (signal 'chat-code-collaboration-invalid (list "invalid child budget")))
-  (let* ((root (chat-code-collaboration--root
+  (let* ((provider (or provider (chat-session-model-id parent-session)))
+         (model (or model
+                    (and (eq provider (chat-session-model-id parent-session))
+                         (chat-session-model-name parent-session))
+                    (plist-get (chat-llm-get-provider-config provider) :model)))
+         (_identity
+          (unless (and (symbolp provider)
+                       (stringp model)
+                       (not (string-blank-p model)))
+            (signal 'chat-code-collaboration-invalid
+                    (list "child requires provider and concrete model"))))
+         (root (chat-code-collaboration--root
                 (chat-session-working-directory parent-session)))
          (allowed (delete-dups
                    (mapcar (lambda (path)
@@ -136,7 +147,8 @@
            :id id :task-id id :goal goal :allowed-paths allowed
            :resources (chat-code-collaboration--resources
                        root allowed resources)
-           :model model :profile profile :budget budget :evidence evidence
+           :provider provider :model model :profile profile
+           :budget budget :evidence evidence
            :base-revision base :parent-session parent-session
            :status 'declared)))
     (puthash id child chat-code-collaboration--children)
@@ -146,6 +158,9 @@
   "Return the bounded parent-visible contract for CHILD."
   `((id . ,(chat-code-child-id child))
     (status . ,(symbol-name (chat-code-child-status child)))
+    (provider . ,(and (chat-code-child-provider child)
+                      (symbol-name (chat-code-child-provider child))))
+    (model . ,(chat-code-child-model child))
     (summary . ,(and (chat-code-child-summary child)
                      (chat-code-collaboration--bounded
                       (chat-code-child-summary child))))
@@ -260,6 +275,7 @@
                      (funcall fail message))
                    (chat-code-child-budget child)
                    (list :profile (chat-code-child-profile child)
+                         :provider (chat-code-child-provider child)
                          :model (chat-code-child-model child)
                          :project-root root
                          :base-revision (chat-code-child-base-revision child)))))

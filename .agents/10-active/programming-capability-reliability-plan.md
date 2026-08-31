@@ -1794,3 +1794,25 @@ Revision `0d9ab98` 的提交后对照保持相同 manifest 与任务上限。Dee
 build/test/lint argv 形态才确定性放行。普通 shell、任意解释器代码、复合命令和越界目录
 仍进入模型 Guard。正反边界测试 4/4、canonical 1907/1907；下一步在包含该规则的 clean
 revision 上再次执行两个精确模型，验证 Kimi 是否完成写入、检查与最终回答闭环。
+
+### 2026-08-31 模型身份漂移纠正
+
+随后对 Kimi 控制台记录与 runner 调用链的逐层核对发现，上述“精确 `k3-256k`”结论
+混淆了 readiness 请求与实际任务请求。runner readiness 明确发送 `k3-256k`，但 Agent
+Run 只保存 provider；用户 campaign setup 在 readiness 后重载 provider 默认值，实际任务
+因此可能落到 K2.7。最新两任务 campaign
+`rerun-kimi-code-k3-256k-3e38e49-20260831-r1` 的两个 judge 虽然通过，但任务请求实际显示
+为 K2.7，故该 campaign 对 K3 资格判定为 **INVALID**。Revision `60196d3`、`4cf9d27`、
+`2795a8f`、`abfbcfe` 与 `0d9ab98` 的 Kimi 结果统一降级为“具体模型身份未验证”：可保留
+为共同层问题诊断，不得用于 K3 资格、模型定向策略或跨厂商比较。既往 DeepSeek 结果虽与
+provider 默认值一致，也没有逐请求身份证据；严格的 exact-model 验收同样只接受本次修复
+之后的新 campaign。
+
+修复必须是系统合同而非 runner 补丁：Agent Run 分别保存不可变的 provider 与具体模型；
+启动时解析一次，初始请求、transport retry、tool follow-up 与 steering 后续轮次全部由 Run
+强制注入同一具体模型。Profile、配置重载、请求 options 和子 Agent 不得在 Run 中途覆盖。
+模型 runtime 每次真实 transport 启动发出 `model-request-started`，session wire、UI 诊断和
+coding Eval 保存实际 provider/model/request id。Eval 缺少该证据或发现任何漂移时 fail
+closed 为 identity error，即使代码 judge 通过也不能形成有效 trial。实现通过完整 canonical
+后，只能用新 clean revision 分别重跑 `deepseek-v4-flash` 与 `k3-256k`；K2.7 与 `k3`
+都不属于本轮验收矩阵。

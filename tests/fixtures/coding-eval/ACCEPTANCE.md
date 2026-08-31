@@ -12,6 +12,8 @@ Before any provider request, freeze and record:
 - implementation revision and clean-tree state;
 - harness revision;
 - provider, concrete model and capability snapshot;
+- one actual request-identity record per model request, containing provider,
+  concrete model and request id;
 - manifest path, digest and task revisions;
 - language registry path and digest;
 - behavioral manifest and, when measuring repository scale, the exact focused
@@ -110,6 +112,11 @@ attempt was admissible. A valid trial passes only when all applicable judges
 pass, writes stay within `allowedPaths`, claimed verification exists, read-only
 tasks make no edits, and declared generated output is removed.
 
+The requested campaign identity is not proof of the model actually used. Every
+real request must report the same provider and concrete model as the frozen
+trial. Missing request evidence or any mismatch is `INVALID`, even when the
+task's code judges pass.
+
 Infrastructure attempts that fail before admissible model work are quarantined.
 They do not consume a repetition/task identity and do not become model failures.
 Missing tools or dependencies block the relevant campaign before the first
@@ -138,7 +145,7 @@ Examples:
 PASS: core-current-r1 contains 150/150 unique valid trials at abc1234; all correctness, scope, cleanup and declared performance gates passed.
 FAIL: core-current-r1 is complete but failed live-eval-first-request-input-token-budget; 150 valid trials are affected. See the M19 stage record.
 BLOCKED: extended-smoke-r1 produced no admissible conclusion because the TypeScript compiler failed preflight; attempts were quarantined and trial identities remain pending.
-INVALID: core-current-r1 cannot be compared because its manifest digest differs from the frozen baseline campaign.
+INVALID: core-current-r1 cannot be compared because one real request used a model different from its frozen campaign identity.
 ```
 
 Never soften `FAIL` to partial success, turn `BLOCKED` into a model defect, or
@@ -154,6 +161,7 @@ code adjustment, or completes a milestone gate. Start from
 Retain these facts:
 
 - campaign and revision identity;
+- requested identity and the ordered actual request identities;
 - manifest and configuration digests;
 - expected, valid, passed, failed, cancelled, timed-out, errored and quarantined counts;
 - per-language and per-category rates;

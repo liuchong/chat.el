@@ -113,7 +113,8 @@
                          'request-footprint-handle)))
               (chat-agent-start
                (list
-                :model 'deepseek
+                :provider 'deepseek
+                :model "deepseek-v4-flash"
                 :messages
                 (list (make-chat-message
                        :id "request-footprint-user" :role :user

@@ -57,7 +57,7 @@ car collects the messages of every request."
                 '((:content "最终回答" :raw-request "r" :raw-response "s"))
                 calls)))
       (setq run (chat-agent-start
-                 (list :model 'kimi
+                 (list :provider 'kimi
                        :messages (list (chat-agent-test--user-message))
                        :on-event (lambda (event) (setq events (append events (list event)))))))
       (let ((end (car (last events))))
@@ -85,7 +85,7 @@ car collects the messages of every request."
                  (should (eq result 'verification-evidence))
                  "Verification: failed (0/1 steps passed)")))
       (chat-agent-start
-       (list :model 'kimi :session session
+       (list :provider 'kimi :session session
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (push event events)))))
     (let ((end (seq-find (lambda (event)
@@ -120,7 +120,7 @@ car collects the messages of every request."
                  'retry-timer)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :transport 'stream
                    :messages (list (chat-agent-test--user-message))
                    :on-event (lambda (event) (push event events)))))
@@ -168,7 +168,7 @@ car collects the messages of every request."
                (lambda (value) (setq timer-cancelled value))))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :transport 'stream
                    :messages (list (chat-agent-test--user-message)))))
       (funcall callback
@@ -199,7 +199,7 @@ car collects the messages of every request."
                  'retry-timer)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :transport 'stream
                    :messages (list (chat-agent-test--user-message)))))
       (should scheduled)
@@ -214,7 +214,7 @@ car collects the messages of every request."
                  'reasoning-handle)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :transport 'stream
                    :messages (list (chat-agent-test--user-message))
                    :on-event (lambda (event) (push event events)))))
@@ -244,13 +244,13 @@ car collects the messages of every request."
                (chat-agent-test--stub-transport '((:content "done")) calls-a)))
       (setq run-a
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :messages (list (chat-agent-test--user-message))))))
     (cl-letf (((symbol-function 'chat-llm-request-async)
                (chat-agent-test--stub-transport '((:content "done")) calls-b)))
       (setq run-b
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :messages (list (chat-agent-test--user-message))))))
     (let ((read-set-a (chat-agent-run-state-read-set run-a))
           (read-set-b (chat-agent-run-state-read-set run-b)))
@@ -279,7 +279,7 @@ car collects the messages of every request."
                  '((:content "done")) (list nil))))
        (setq run
              (chat-agent-start
-              (list :model 'kimi
+              (list :provider 'kimi
                     :messages (list (chat-agent-test--user-message))
                     :session session
                     :track-task t))))
@@ -303,7 +303,7 @@ car collects the messages of every request."
                 (chat-agent-test--stub-transport nil (list nil))))
        (setq run
              (chat-agent-start
-              (list :model 'kimi
+              (list :provider 'kimi
                     :messages (list (chat-agent-test--user-message))
                     :session session
                     :track-task t))))
@@ -335,7 +335,7 @@ car collects the messages of every request."
                  calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi
+              (list :provider 'kimi
                     :messages (list (chat-agent-test--user-message))
                     :session session
                     :track-task t))))
@@ -367,7 +367,7 @@ car collects the messages of every request."
                       '(:content "工具结果已收到"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (let ((end (car (last events))))
@@ -390,7 +390,7 @@ car collects the messages of every request."
                   (:content "修复后的回答"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (should (= (length (car calls)) 2))
@@ -412,7 +412,7 @@ car collects the messages of every request."
                                (list :content chat-agent-test--tool-call-json)))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :max-steps 3
              :on-event (lambda (event) (setq events (append events (list event))))))
@@ -432,7 +432,7 @@ car collects the messages of every request."
                  (setq saved-success success)
                  'stub-handle)))
       (setq run (chat-agent-start
-                 (list :model 'kimi
+                 (list :provider 'kimi
                        :messages (list (chat-agent-test--user-message))
                        :on-event (lambda (event) (setq events (append events (list event)))))))
       (should (chat-agent-active-p run))
@@ -462,7 +462,7 @@ car collects the messages of every request."
                       '(:content "重新发出的回答"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (should (= (car exec-counter) 0))
@@ -487,7 +487,7 @@ car collects the messages of every request."
                 '((:content "回答"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :steering-fn (lambda (_run)
                             (unless steered
@@ -517,7 +517,7 @@ left the model unable to say which was the correction."
     (cl-letf (((symbol-function 'chat-llm-request-async)
                (chat-agent-test--stub-transport '((:content "回答")) calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :steering-fn
              (lambda (_run)
@@ -548,7 +548,7 @@ when it arrived is noise."
     (cl-letf (((symbol-function 'chat-llm-request-async)
                (chat-agent-test--stub-transport '((:content "回答")) calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :steering-fn (lambda (_run)
                             (unless steered
@@ -577,7 +577,7 @@ steps spent on the question left the correction two."
                 (list (list :content chat-agent-test--tool-call-json))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :should-stop-fn (lambda (_run _processed) t)
              :on-event (lambda (event) (setq events (append events (list event))))))
@@ -600,10 +600,11 @@ steps spent on the question left the correction two."
     (should (string-match-p (make-string 50 ?x) text))))
 
 (ert-deftest chat-agent-uses-followup-request-options-after-first-turn ()
-  "Test follow-up turns merge the dedicated request options."
+  "Follow-up options merge without changing the immutable model identity."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
         (exec-counter (list 0))
-        (seen-options nil))
+        (seen-options nil)
+        run)
     (chat-agent-test--register-demo-tool exec-counter)
     (cl-letf (((symbol-function 'chat-llm-request-async)
                (lambda (_model _messages success _error options)
@@ -612,14 +613,34 @@ steps spent on the question left the correction two."
                                       (list :content chat-agent-test--tool-call-json)
                                     '(:content "done")))
                  'stub-handle)))
-      (chat-agent-start
-       (list :model 'kimi
-             :messages (list (chat-agent-test--user-message))
-             :request-options '(:timeout 60 :temperature 0.7)
-             :followup-request-options '(:timeout 300)))
+      (setq run
+            (chat-agent-start
+             (list :provider 'kimi
+                   :model "pinned-model"
+                   :messages (list (chat-agent-test--user-message))
+                   :request-options
+                   '(:model "wrong-first" :timeout 60 :temperature 0.7)
+                   :followup-request-options
+                   '(:model "wrong-followup" :timeout 300))))
+      (should (eq 'kimi (chat-agent-run-state-provider run)))
+      (should (equal "pinned-model" (chat-agent-run-state-model run)))
       (should (= (plist-get (car seen-options) :timeout) 300))
       (should (= (plist-get (cadr seen-options) :timeout) 60))
-      (should (equal (plist-get (car seen-options) :temperature) 0.7)))))
+      (should (equal (plist-get (car seen-options) :temperature) 0.7))
+      (should (cl-every
+               (lambda (options)
+                 (equal "pinned-model" (plist-get options :model)))
+               seen-options)))))
+
+(ert-deftest chat-agent-refuses-a-run-without-concrete-model-identity ()
+  "A provider without a model cannot start an untraceable Agent run."
+  (let ((chat-llm-providers (copy-tree chat-llm-providers)))
+    (chat-llm-register-provider 'identity-test-provider :name "Identity Test")
+    (should-error
+     (chat-agent-start
+      (list :provider 'identity-test-provider
+            :messages (list (chat-agent-test--user-message))))
+     :type 'error)))
 
 (ert-deftest chat-agent-transform-context-runs-before-dispatch ()
   "Test per-step context transforms rewrite messages before transport."
@@ -629,7 +650,7 @@ steps spent on the question left the correction two."
                 '((:content "ok"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :transform-context-fn
              (lambda (_run messages)
@@ -656,7 +677,7 @@ steps spent on the question left the correction two."
                       '(:content "done"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :prepare-next-turn-fn
              (lambda (_run processed)
@@ -682,7 +703,7 @@ steps spent on the question left the correction two."
                  'stub-handle)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :messages (list (chat-agent-test--user-message))
                    :queue-mode 'lifo)))
       (chat-agent-steer
@@ -715,7 +736,7 @@ steps spent on the question left the correction two."
                  (setq saved-success success)
                  'stub-handle)))
       (setq run (chat-agent-start
-                 (list :model 'kimi
+                 (list :provider 'kimi
                        :messages (list (chat-agent-test--user-message)))))
       (chat-agent-add-cancel-function
        run
@@ -772,7 +793,7 @@ steps spent on the question left the correction two."
                   calls)))
         (setq run
               (chat-agent-start
-               (list :model 'kimi
+               (list :provider 'kimi
                      :messages (list (chat-agent-test--user-message)))))))
     (should (= first-count 1))
     (should (= second-count 0))
@@ -794,7 +815,7 @@ steps spent on the question left the correction two."
                       '(:content "native done"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (should (= (car exec-counter) 1))
@@ -822,7 +843,7 @@ steps spent on the question left the correction two."
                   (:content "after follow-up"))
                 calls)))
       (setq run (chat-agent-start
-                 (list :model 'kimi
+                 (list :provider 'kimi
                        :messages (list (chat-agent-test--user-message))
                        :on-event
                        (lambda (event)
@@ -849,7 +870,7 @@ steps spent on the question left the correction two."
                (chat-agent-test--stub-transport
                 '((:content "checkpoint") (:content "done")) calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :followup-fn
              (lambda (_processed)
@@ -876,7 +897,7 @@ steps spent on the question left the correction two."
        run
        (chat-agent-start
         (list
-         :model 'kimi
+         :provider 'kimi
          :messages (list (chat-agent-test--user-message))
          :on-event
          (lambda (event)
@@ -911,7 +932,7 @@ steps spent on the question left the correction two."
                       '(:content "blocked noted"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))))
       (should (= (car exec-counter) 0))
       (let ((tool (car (last (cadr (car calls))))))
@@ -956,7 +977,7 @@ steps spent on the question left the correction two."
                 transport-calls)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :messages (list (chat-agent-test--user-message)))))
       (should (= (length callbacks) 2))
       (funcall (cdr (assoc "two" callbacks)) "second")
@@ -998,7 +1019,7 @@ steps spent on the question left the correction two."
                  '(:content "done"))
                 transport-calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))))
       (should (equal (mapcar #'car callbacks) '("one")))
       (funcall (cdr (car callbacks)) "first")
@@ -1024,7 +1045,7 @@ steps spent on the question left the correction two."
                 calls)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :messages (list (chat-agent-test--user-message))))))
     (should (= 0 (car exec-counter)))
     (should (equal '("test policy refused")
@@ -1074,7 +1095,7 @@ steps spent on the question left the correction two."
                  '(:content "done"))
                 transport-calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message)))))
     (should (equal (mapcar #'car callbacks) '("shared")))
     (funcall (cdr (car callbacks)) "first")
@@ -1116,7 +1137,7 @@ steps spent on the question left the correction two."
                 transport-calls)))
       (setq run
             (chat-agent-start
-             (list :model 'kimi
+             (list :provider 'kimi
                    :messages (list (chat-agent-test--user-message)))))
       (should (chat-agent-cancel run))
       (should (= cancel-count 2))
@@ -1157,7 +1178,7 @@ OPTIONS collects the options plist of every request in its car."
                 '((:content "done" :raw-request "r" :raw-response "s"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :max-steps 300
              :on-event #'ignore))
@@ -1174,7 +1195,7 @@ the one the model skips."
                 '((:content "done" :raw-request "r" :raw-response "s"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :max-steps 1
              :on-event #'ignore))
@@ -1199,7 +1220,7 @@ nothing to call."
               ((symbol-function 'chat-tool-caller-provider-tools)
                (lambda () '((:name "demo")))))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :max-steps 1
              :on-event #'ignore))
@@ -1216,7 +1237,7 @@ nothing to call."
               ((symbol-function 'chat-tool-caller-provider-tools)
                (lambda () '((:name "demo")))))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :max-steps 10
              :on-event #'ignore))
@@ -1238,7 +1259,7 @@ nothing to call."
            :timestamp (current-time)
            :metadata '(:tool-system-prompt-base "Base contract")))
          (run (chat-agent--run-create
-               :model 'kimi :execution-session execution
+               :provider 'kimi :execution-session execution
                :max-steps 20 :messages (list message))))
     (dolist (id '(programming_plan_create programming_plan_transition))
       (chat-tool-forge-register
@@ -1261,7 +1282,7 @@ nothing to call."
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Plan barrier" 'kimi))
           (run (chat-agent--run-create
-                :model 'kimi :session session :execution-session session
+                :provider 'kimi :session session :execution-session session
                 :messages (list (chat-agent-test--user-message))
                 :step 2 :max-steps 6))
           continued events)
@@ -1296,7 +1317,7 @@ nothing to call."
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Plan budget" 'kimi))
           (run (chat-agent--run-create
-                :model 'kimi :session session :execution-session session
+                :provider 'kimi :session session :execution-session session
                 :messages (list (chat-agent-test--user-message))
                 :step 4 :max-steps 5)))
      (chat-work-plan-create
@@ -1314,7 +1335,7 @@ nothing to call."
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Blocked plan" 'kimi))
           (run (chat-agent--run-create
-                :model 'kimi :session session :execution-session session
+                :provider 'kimi :session session :execution-session session
                 :messages (list (chat-agent-test--user-message))
                 :step 2 :max-steps 8))
           plan)
@@ -1340,7 +1361,7 @@ nothing to call."
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Completed plan" 'kimi))
           (run (chat-agent--run-create
-                :model 'kimi :session session :execution-session session
+                :provider 'kimi :session session :execution-session session
                 :messages (list (chat-agent-test--user-message))
                 :step 2 :max-steps 8))
           (chat-work-plan-evidence-resolver-functions
@@ -1386,7 +1407,8 @@ nothing to call."
   (chat-test-with-temp-dir
    (let* ((chat-session-directory temp-dir)
           (chat-tool-forge--registry (make-hash-table :test 'eq))
-          (chat-llm-providers '((kimi :context-window 100000)))
+          (chat-llm-providers
+           '((kimi :model "test-model" :context-window 100000)))
           (chat-approval-required-effects nil)
           (session (chat-session-create "Plan state authority" 'kimi))
           (execution (copy-chat-session session))
@@ -1417,7 +1439,7 @@ nothing to call."
                  calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi :session session
+              (list :provider 'kimi :session session
                     :execution-session execution
                     :messages (list (chat-agent-test--user-message))
                     :max-steps 3
@@ -1449,7 +1471,7 @@ budget chatter in the saved history."
                 '((:content "done" :raw-request "r" :raw-response "s"))
                 calls)))
       (setq run (chat-agent-start
-                 (list :model 'kimi
+                 (list :provider 'kimi
                        :messages (list (chat-agent-test--user-message))
                        :max-steps 1
                        :on-event #'ignore)))
@@ -1483,7 +1505,7 @@ budget chatter in the saved history."
                 (chat-agent-test--stub-transport '((:content "done")) calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi :session session
+              (list :provider 'kimi :session session
                     :messages (list (chat-agent-test--user-message))
                     :project-root temp-dir :context-target-path temp-dir
                     :context-fragments (list instruction)))))
@@ -1535,7 +1557,7 @@ budget chatter in the saved history."
                 (chat-agent-test--stub-transport '((:content "done")) calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi :session session
+              (list :provider 'kimi :session session
                     :messages (list (chat-agent-test--user-message))
                     :project-root temp-dir :context-target-path temp-dir))))
      (let* ((fragments
@@ -1562,7 +1584,7 @@ budget chatter in the saved history."
                 '((:content "done" :raw-request "r" :raw-response "s"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :max-steps 'unlimited
              :on-event (lambda (event) (setq events (append events (list event))))))
@@ -1594,7 +1616,7 @@ budget chatter in the saved history."
                 '((:content "最终回答" :raw-request "r" :raw-response "s"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (let ((message (car (chat-agent-test--appended events))))
@@ -1618,7 +1640,7 @@ budget chatter in the saved history."
                             :raw-request "r2" :raw-response "s2"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (let* ((messages (chat-agent-test--appended events))
@@ -1674,7 +1696,7 @@ after a steer would file the rest of this turn under the next one."
                             :raw-request "r" :raw-response "s"))
                 calls)))
       (chat-agent-start
-       (list :model 'kimi
+       (list :provider 'kimi
              :messages (list (chat-agent-test--user-message))
              :on-event (lambda (event) (setq events (append events (list event))))))
       (let ((message (car (chat-agent-test--appended events))))
@@ -1772,7 +1794,7 @@ per piece for that to stop being true."
                    (funcall success tool-result)
                    'done)))
         (chat-agent-start
-         (list :model 'kimi
+         (list :provider 'kimi
                :session session
                :messages (list (chat-agent-test--user-message)))))
       (should (= before-count 1))
@@ -1782,7 +1804,8 @@ per piece for that to stop being true."
   "A code run feeds a plan refusal back without invoking the write tool."
   (chat-test-with-temp-dir
    (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
-         (chat-llm-providers '((kimi :context-window 100000)))
+         (chat-llm-providers
+          '((kimi :model "test-model" :context-window 100000)))
          (chat-approval-required-effects nil)
          (session (chat-session-create "Plan gate" 'kimi))
          (calls (list nil))
@@ -1804,7 +1827,7 @@ per piece for that to stop being true."
                  calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi :session session
+              (list :provider 'kimi :session session
                     :messages (list (chat-agent-test--user-message))))))
      (ert-info ((format "calls=%S results=%S status=%S reason=%S"
                         (car calls) (chat-agent-run-state-tool-results run)
@@ -1821,7 +1844,8 @@ per piece for that to stop being true."
   "Plan Mode is an execution boundary even when a work-plan item is active."
   (chat-test-with-temp-dir
    (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
-         (chat-llm-providers '((kimi :context-window 100000)))
+         (chat-llm-providers
+          '((kimi :model "test-model" :context-window 100000)))
          (chat-approval-required-effects nil)
          (session (chat-session-create "Read-only planning" 'kimi))
          (calls (list nil))
@@ -1852,7 +1876,7 @@ per piece for that to stop being true."
                  calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi :session session
+              (list :provider 'kimi :session session
                     :messages (list (chat-agent-test--user-message))
                     :max-steps 2))))
      (should (= executions 0))
@@ -1875,7 +1899,8 @@ per piece for that to stop being true."
   "An active plan admits the write and appears only in request context."
   (chat-test-with-temp-dir
    (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
-         (chat-llm-providers '((kimi :context-window 100000)))
+         (chat-llm-providers
+          '((kimi :model "test-model" :context-window 100000)))
          (chat-approval-required-effects nil)
          (session (chat-session-create "Planned write" 'kimi))
          (calls (list nil))
@@ -1905,7 +1930,7 @@ per piece for that to stop being true."
                  calls)))
        (setq run
              (chat-agent-start
-              (list :model 'kimi :session session
+              (list :provider 'kimi :session session
                     :messages (list (chat-agent-test--user-message))
                     :max-steps 2)))
        (should-not

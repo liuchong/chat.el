@@ -264,7 +264,7 @@ one that was asked."
    (let* ((chat-session-directory temp-dir)
           (session (chat-session-create "Steer Session" 'kimi))
           (run (chat-agent--run-create
-                :model 'kimi
+                :provider 'kimi
                 :messages nil
                 :max-steps 10)))
      (with-temp-buffer
@@ -1854,27 +1854,32 @@ Carried over, `k3' would be sent to DeepSeek, which can only refuse it."
    (should (eq 'kimi-code (chat-session-model-id chat--current-session)))
    (should (equal "k3" (chat-session-model-name chat--current-session)))))
 
-(defun chat-ui-auto-test--request-options ()
-  "Return the request options a run would hand the transport."
-  (let ((options nil))
+(defun chat-ui-auto-test--agent-config ()
+  "Return the config the UI hands to the Agent kernel."
+  (let ((captured nil))
     (cl-letf (((symbol-function 'chat-agent-start)
                (lambda (config)
-                 (setq options (plist-get config :request-options))
+                 (setq captured config)
                  nil)))
       (chat-ui--start-agent-run 'stream))
-    options))
+    captured))
 
 (ert-deftest chat-ui-the-pinned-model-is-what-the-request-carries ()
   "The point of pinning.  Read out of the same options the transport gets."
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code "k3-256k")
-   (should (equal "k3-256k"
-                  (plist-get (chat-ui-auto-test--request-options) :model))))
-  ;; An unpinned session says nothing, leaving the choice to the provider
-  ;; at request time -- including after its default changes.
+   (let* ((config (chat-ui-auto-test--agent-config))
+          (diagnostics
+           (chat-request-diagnostics-snapshot chat-ui--current-request-id)))
+     (should (eq 'kimi-code (plist-get config :provider)))
+     (should (equal "k3-256k" (plist-get config :model)))
+     (should (eq 'kimi-code (plist-get diagnostics :provider)))
+     (should (equal "k3-256k" (plist-get diagnostics :model)))))
+  ;; An unpinned session resolves the provider default once when the run starts.
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code)
-   (should-not (plist-member (chat-ui-auto-test--request-options) :model))))
+   (should (equal (plist-get (chat-llm-get-provider-config 'kimi-code) :model)
+                  (plist-get (chat-ui-auto-test--agent-config) :model)))))
 
 (ert-deftest chat-ui-switching-provider-is-refused-mid-response ()
   "The reply would come back from a provider that was never asked."

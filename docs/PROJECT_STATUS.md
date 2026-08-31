@@ -168,6 +168,24 @@ and the canonical development suite passes 1818/1818. A committed one-task
 124-result campaign remains immutable incident evidence; fresh final campaigns
 are still required at the next frozen revision.
 
+An audit of the Kimi dashboard then found a model-identity defect in the shared
+Agent path. Campaign readiness explicitly requested `k3-256k`, while the task
+Run retained only the provider and could later use the provider's K2.7 default.
+The passing campaign named
+`rerun-kimi-code-k3-256k-3e38e49-20260831-r1` is therefore invalid as K3
+evidence, and earlier Kimi samples are identity-unverified rather than exact-K3
+qualification. Prior exact-model claims are not accepted without per-request
+evidence, including DeepSeek results that happened to match its default.
+
+The Agent now treats provider and concrete model as separate immutable Run
+identity. It resolves the pair once before dispatch, forces that model into
+every initial, retry and follow-up request, and propagates the same contract to
+profiles, UI runs, Eval, subagents and coding children. Every real transport
+start emits `model-request-started` with provider, concrete model and request
+id; session wire and diagnostics retain it, while coding Eval fails closed on
+missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
+`k3-256k` campaigns are required before cross-provider evidence is accepted.
+
 ## Implemented Areas
 
 ### Chat Core
@@ -252,6 +270,8 @@ are still required at the next frozen revision.
 ### Agent Runtime Events
 
 - versioned lifecycle identity, correlation, provenance and bounded payloads
+- immutable provider/concrete-model identity with one actual request record per
+  transport start
 - ordered synchronous blockers with modify/refuse outcomes and timeout policy
 - isolated post-persistence observers that cannot fail the run
 - session-wire audit for turns, tools, permissions, compaction, tasks and
@@ -339,7 +359,7 @@ are still required at the next frozen revision.
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el`
 - 1907 regression tests discovered
-- 1907 passing
+- 1911 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

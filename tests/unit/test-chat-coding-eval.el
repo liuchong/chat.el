@@ -440,18 +440,25 @@
   "Live Eval uses its workspace as project context and records real events."
   (chat-test-with-temp-dir
    (let* ((task (chat-coding-eval-test--task temp-dir nil))
-          config metadata)
+          config status metadata)
      (cl-letf (((symbol-function 'chat-agent-start)
                 (lambda (value) (setq config value) nil)))
        (funcall (chat-coding-eval-agent-executor 'eval-provider "model")
                 task temp-dir
-                (lambda (_status _content value) (setq metadata value))))
+                (lambda (value _content details)
+                  (setq status value
+                        metadata details))))
      (let ((session (plist-get config :session))
            (on-event (plist-get config :on-event)))
+       (should (eq 'eval-provider (plist-get config :provider)))
+       (should (equal "model" (plist-get config :model)))
        (should (chat-code-session-p session))
        (should (equal (file-name-as-directory temp-dir)
                       (file-name-as-directory
                        (chat-code-session-project-root session))))
+       (funcall on-event
+                '(:type model-request-started :provider eval-provider
+                  :model "model" :request-id "request-1"))
        (funcall on-event
                 '(:type tool-event
                   :event (:type approval-guard-pending)))
@@ -463,6 +470,9 @@
        (funcall on-event
                 '(:type model-usage
                   :usage (:input-tokens 11 :output-tokens 4 :total-tokens 15)))
+       (funcall on-event
+                '(:type model-request-started :provider eval-provider
+                  :model "model" :request-id "request-2"))
        (funcall on-event '(:type turn-start))
        (funcall on-event
                 '(:type model-usage
@@ -470,6 +480,7 @@
        (funcall on-event
                 '(:type agent-end :status completed :content "done"
                   :steps 1 :tool-calls nil :tool-results nil)))
+     (should (eq status 'completed))
      (should (= 1 (alist-get 'toolErrorCount metadata)))
      (should (= 2 (alist-get 'approvalCount metadata)))
      (should (= 11 (plist-get (alist-get 'firstRequestTokenUsage metadata)
@@ -479,7 +490,39 @@
      (should (= 44 (plist-get (alist-get 'totalTokenUsage metadata)
                               :total-tokens)))
      (should (= 2 (alist-get 'requestCount metadata)))
-     (should (= 2 (alist-get 'usageSampleCount metadata))))))
+     (should (= 2 (alist-get 'usageSampleCount metadata)))
+     (should
+      (equal '(((provider . "eval-provider")
+                (model . "model")
+                (requestId . "request-1"))
+               ((provider . "eval-provider")
+                (model . "model")
+                (requestId . "request-2")))
+             (alist-get 'requestModels metadata))))))
+
+(ert-deftest chat-coding-eval-agent-rejects-model-identity-drift ()
+  "Live Eval fails closed when a real request uses another model."
+  (chat-test-with-temp-dir
+   (let* ((task (chat-coding-eval-test--task temp-dir nil))
+          config status metadata)
+     (cl-letf (((symbol-function 'chat-agent-start)
+                (lambda (value) (setq config value) nil)))
+       (funcall (chat-coding-eval-agent-executor 'eval-provider "model")
+                task temp-dir
+                (lambda (value _content details)
+                  (setq status value
+                        metadata details))))
+     (let ((on-event (plist-get config :on-event)))
+       (funcall on-event
+                '(:type model-request-started :provider eval-provider
+                  :model "other-model" :request-id "request-1"))
+       (funcall on-event
+                '(:type agent-end :status completed :content "done"
+                  :steps 1 :tool-calls nil :tool-results nil)))
+     (should (eq status 'error))
+     (should (string-match-p
+              "model identity drift: expected eval-provider/model"
+              (alist-get 'failureReason metadata))))))
 
 (ert-deftest chat-coding-eval-total-usage-never-fills-a-missing-counter ()
   "A partial provider usage field is omitted instead of counted as zero."

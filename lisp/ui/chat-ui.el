@@ -540,12 +540,12 @@ improvement."
          #'chat-ui--maybe-show-request-hint
          buffer)))
 
-(defun chat-ui--begin-request (session model transport)
-  "Create a diagnostics request trace for SESSION, MODEL, and TRANSPORT."
+(defun chat-ui--begin-request (session provider model transport)
+  "Create a diagnostics trace for SESSION, PROVIDER, MODEL, and TRANSPORT."
   (let ((request-id
          (chat-request-diagnostics-create
           'chat
-          model
+          provider
           model
           (list :session-id (chat-session-id session)
                 :session-name (chat-session-name session)))))
@@ -4006,6 +4006,17 @@ assistant response being filled in."
           ;; transcript renders completed tool activity and final text, so
           ;; partial call arguments and token counters need no visible row.
           nil)
+         ((eq type 'model-request-started)
+          (when request-id
+            (chat-request-diagnostics-record
+             request-id 'model-request-started
+             :provider (plist-get event :provider)
+             :model (plist-get event :model)
+             :request-id (plist-get event :request-id)
+             :summary
+             (format "Requested %s/%s"
+                     (plist-get event :provider)
+                     (plist-get event :model)))))
          ((eq type 'model-usage)
           nil)
          ((eq type 'model-retry)
@@ -4154,14 +4165,17 @@ assistant response being filled in."
   "Start an agent run for the current session through TRANSPORT."
   (message "%s" (chat-i18n 'response-starting "Getting response from AI..."))
   (let* ((session chat--current-session)
-         (model (chat-session-model-id session))
+         (provider (chat-session-model-id session))
+         (model (or (chat-session-model-name session)
+                    (plist-get (chat-llm-get-provider-config provider) :model)))
          ;; The session records more than a request should carry: command
          ;; replies and captured shell output are there for the reader.
          (messages (chat-transcript-model-messages
                     (chat-session-messages session)))
          (msg-id (chat-session-new-message-id))
          (ui-buffer (current-buffer))
-         (request-id (chat-ui--begin-request session model transport))
+         (request-id
+          (chat-ui--begin-request session provider model transport))
          ;; No header is drawn up front: the tail draws its own once
          ;; there is something under it, and until then the narrative
          ;; line is what says the request is in flight.  A header planted
@@ -4209,7 +4223,8 @@ assistant response being filled in."
                 transport (length messages-with-tools))
       (setq chat-ui--active-agent-run
             (chat-agent-start
-             (list :model model
+             (list :provider provider
+                   :model model
                    :messages messages-with-tools
                    :session session
                    :track-task t
@@ -4233,15 +4248,8 @@ assistant response being filled in."
                    :request-options
                    (append
                     (list :temperature 0.7
-                          :max-tokens (chat-ui--request-output-budget model)
+                          :max-tokens (chat-ui--request-output-budget provider)
                           :timeout chat-ui-request-timeout)
-                    ;; Only when the session pinned one.  Absent, every
-                    ;; payload builder falls back to the provider's
-                    ;; current default, which is what an unpinned
-                    ;; session wants -- including after the default
-                    ;; changes under it.
-                    (when-let ((name (chat-session-model-name session)))
-                      (list :model name))
                     (when request-id
                       (list :request-id request-id)))
                    :followup-request-options

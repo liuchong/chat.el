@@ -72,6 +72,7 @@
 (defun chat-agent--create-task (config)
   "Create the foreground runtime task requested by CONFIG."
   (let* ((session (plist-get config :session))
+         (provider (plist-get config :provider))
          (model (plist-get config :model))
          (task
           (chat-task-adopt
@@ -88,7 +89,8 @@
            :session-id (and session (chat-session-id session))
            :source 'agent
            :payload
-           `((model . ,(and model (symbol-name model)))
+           `((provider . ,(and provider (symbol-name provider)))
+             (model . ,model)
              (transport . ,(symbol-name
                             (or (plist-get config :transport) 'sync))))
            :metadata '((adapter . "agent"))
@@ -103,7 +105,9 @@
 
 CONFIG is a plist with these keys:
 
-  :model           provider symbol (required)
+  :provider        provider symbol (required)
+  :model           concrete remote model name (optional only when the provider
+                   registration supplies one)
   :messages        initial list of chat-message structs (required)
   :session         session passed to tool execution
   :profile         optional agent profile id
@@ -143,6 +147,23 @@ Events are delivered synchronously through :on-event.  The final
 :tool-results, :tool-events, :raw-request, :raw-response, and :steps."
   (setq config (chat-agent-profile-prepare-config config))
   (let* ((session (plist-get config :session))
+         (provider (plist-get config :provider)))
+    (unless (symbolp provider)
+      (error "Agent run requires a provider symbol"))
+    (let* ((model (or (plist-get config :model)
+                      (and session
+                           (eq provider (chat-session-model-id session))
+                           (chat-session-model-name session))
+                      (plist-get (chat-llm-get-provider-config provider)
+                                 :model)))
+           (request-options
+            (plist-put (copy-tree (plist-get config :request-options))
+                       :model model))
+           (_validated-model
+            (unless (and (stringp model) (not (string-blank-p model)))
+              (error "Agent run requires a concrete model for %s" provider)))
+           (config (plist-put (plist-put config :model model)
+                              :request-options request-options))
          (previous-active-id
           (and session
                (cdr (assoc 'activeTaskId
@@ -151,7 +172,8 @@ Events are delivered synchronously through :on-event.  The final
                     (chat-agent--create-task config)))
          (on-event (plist-get config :on-event))
          (run (chat-agent--run-create
-              :model (plist-get config :model)
+              :provider provider
+              :model model
               :messages (plist-get config :messages)
               :session session
               :execution-session (plist-get config :execution-session)
@@ -180,7 +202,7 @@ Events are delivered synchronously through :on-event.  The final
                              chat-agent-max-steps)
               :step-budget (or (plist-get config :max-steps)
                                chat-agent-max-steps)
-              :request-options (plist-get config :request-options)
+              :request-options request-options
               :followup-request-options
               (plist-get config :followup-request-options)
               :queue-mode (or (plist-get config :queue-mode) 'fifo)
@@ -210,7 +232,7 @@ Events are delivered synchronously through :on-event.  The final
          (chat-task-transition task 'failed
                                :error (error-message-string err)))
        (chat-agent--set-active-task-id session previous-active-id)
-       (signal (car err) (cdr err))))))
+       (signal (car err) (cdr err)))))))
 
 (defun chat-agent-cancel (run)
   "Cancel RUN and return non-nil when a live run was cancelled."

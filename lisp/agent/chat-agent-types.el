@@ -12,7 +12,7 @@
 ;; Event types delivered through :on-event:
 ;;
 ;;   agent-start  profile-resolved  context-transformed  context-bundle
-;;   turn-start  turn-ended  turn-failed
+;;   turn-start  turn-ended  turn-failed  model-request-started
 ;;   stream-chunk
 ;;   stream-reasoning  stream-result  model-tool-call-delta  model-usage
 ;;   model-retry
@@ -55,7 +55,7 @@ reused.  Waiting is asynchronous and remains cancellable."
 (cl-defstruct (chat-agent-run-state
                (:constructor chat-agent--run-create)
                (:copier nil))
-  model messages session execution-session profile transport task-id run-id
+  provider model messages session execution-session profile transport task-id run-id
   project-root context-target-path context-fragments last-context-bundle
   goal-projection-revision work-plan-projection-revision
   (work-plan-finalization-attempts 0)
