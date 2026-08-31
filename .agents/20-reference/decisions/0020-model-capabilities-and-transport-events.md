@@ -59,8 +59,10 @@ adapter boundary.
 Reasoning remains metadata on the assistant step that produced it. OpenAI
 compatible adapters use the selected model's `reasoning-replay` mode. The mode
 is `tool-calls` when only assistant tool-call messages need continuation,
-`all-assistant` when every assistant message with recorded reasoning must carry
-it, and `unknown` when no provider-specific continuation field is authorized.
+`all-assistant` when every assistant message must carry the field, and `unknown`
+when no provider-specific continuation field is authorized. Required replay is
+a field-presence contract: an assistant step with no recorded reasoning carries
+an empty string instead of silently omitting `reasoning_content`.
 Reasoning support and continuation shape are separate facts: a model may expose
 reasoning without accepting either OpenAI-compatible replay shape.
 

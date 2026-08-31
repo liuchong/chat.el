@@ -361,14 +361,14 @@ recorded reasoning.  Unknown transports receive no continuation field."
          (content (or (chat-message-text msg) ""))
          (calls (chat-message-tool-calls msg))
          (metadata (chat-message-metadata msg))
+         (replay-reasoning
+          (and (eq role :assistant)
+               (or (eq reasoning-replay 'all-assistant)
+                   (and (eq reasoning-replay 'tool-calls) calls))))
          (reasoning
-          (when (and (eq role :assistant)
-                     (or (eq reasoning-replay 'all-assistant)
-                         (and (eq reasoning-replay 'tool-calls) calls)))
+          (when replay-reasoning
             (let ((recorded (plist-get metadata :reasoning)))
-              (when (and (stringp recorded)
-                         (not (string-blank-p recorded)))
-                recorded)))))
+              (if (stringp recorded) recorded "")))))
     (cond
      ((eq role :tool)
       `((role . "tool")
@@ -384,7 +384,7 @@ recorded reasoning.  Unknown transports receive no continuation field."
         (content . ,(if (and calls (string-blank-p content))
                         json-null
                       (chat-llm--openai-content msg)))
-        ,@(when reasoning
+        ,@(when replay-reasoning
             `((reasoning_content . ,reasoning)))
         ,@(when calls
             `((tool_calls .

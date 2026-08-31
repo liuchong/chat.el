@@ -217,3 +217,15 @@ must restart on the clean revision containing that correction.
 
 The focused model capability and request-formatting set passed 64/64. The full
 canonical suite passed 1,898/1,898 with zero skipped and zero unexpected results.
+
+The first live retry on `467affb` narrowed the contract further. A mutating trial
+reached Plan finalization after fourteen successful requests, but the final prose
+step contained zero reasoning characters. Although the resolved capability was
+correctly `all-assistant`, the formatter omitted `reasoning_content` when local
+metadata was empty, and request fifteen was rejected. Replay therefore governs
+field presence, not only preservation of nonempty text. The invalid campaign was
+stopped after three results, and its stale lock and interrupted fixture were
+removed before changing the implementation again.
+
+The field-presence regression passed in the 65-test focused set. The canonical
+suite then passed 1,899/1,899 with zero skipped and zero unexpected results.

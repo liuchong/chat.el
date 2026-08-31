@@ -132,6 +132,8 @@ likewise requires the exact `deepseek-v4-flash` identity.
 Reasoning continuation is a transport fact in the common layer, not a prompt
 adaptation. Each concrete model declares whether its recorded reasoning is
 replayed on tool-call assistant messages only or on every assistant message.
+When replay applies, field presence is mandatory even if the model returned no
+reasoning text; the adapter emits an empty value rather than omitting the field.
 Unknown continuation shape authorizes no provider-specific request field. A
 provider rejection caused by missing required continuation invalidates the run
 as a common transport defect; it is not counted as stochastic model failure.

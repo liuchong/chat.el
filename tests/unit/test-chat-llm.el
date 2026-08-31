@@ -517,6 +517,15 @@ anything else, on k3, k3-256k and kimi-for-coding alike, while
     (should (equal (cdr (assoc 'reasoning_content formatted))
                    "private work"))))
 
+(ert-deftest chat-llm-all-assistant-replay-keeps-empty-field-present ()
+  "Required continuation presence is distinct from nonempty reasoning."
+  (let* ((assistant
+          (make-chat-message :role :assistant :content "done"))
+         (formatted (aref (chat-llm--format-messages
+                           (list assistant) 'all-assistant) 0)))
+    (should (assoc 'reasoning_content formatted))
+    (should (equal (cdr (assoc 'reasoning_content formatted)) ""))))
+
 (ert-deftest chat-llm-tool-call-mode-omits-plain-reasoning ()
   "The narrower continuation mode does not add plain-step reasoning."
   (let* ((assistant
