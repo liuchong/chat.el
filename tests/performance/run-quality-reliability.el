@@ -61,6 +61,8 @@
 (defconst chat-quality-reliability--semantic-fixtures
   '(("python" "alpha" "a.py" 1
      "def alpha():\n    return 1\ndef caller():\n    return alpha()\n")
+    ("javascript" "aleph" "a.js" 1
+     "function aleph() { return 1; }\nconst callerJs = aleph;\n")
     ("typescript" "beta" "b.ts" 1
      "function beta() { return 1; }\nexport const caller = beta;\n")
     ("emacs-lisp" "gamma" "c.el" 1
@@ -68,8 +70,20 @@
     ("go" "Delta" "d.go" 2
      "package sample\nfunc Delta() int { return 1 }\nfunc Caller() int { return Delta() }\n")
     ("rust" "epsilon" "e.rs" 1
-     "fn epsilon() -> i32 { 1 }\nfn caller() -> i32 { epsilon() }\n"))
-  "Deterministic five-language semantic fixture definitions.")
+     "fn epsilon() -> i32 { 1 }\nfn caller() -> i32 { epsilon() }\n")
+    ("zig" "zeta" "f.zig" 1
+     "fn zeta() i32 { return 1; }\nfn callerZig() i32 { return zeta(); }\n")
+    ("clojure" "eta" "g.clj" 1
+     "(defn eta [] 1)\n(defn caller-clj [] (eta))\n")
+    ("java" "theta" "H.java" 1
+     "public static int theta() { return 1; }\npublic static int callerJava() { return theta(); }\n")
+    ("c" "iota" "i.c" 1
+     "int iota(void) { return 1; }\nint caller_c(void) { return iota(); }\n")
+    ("cpp" "kappa" "j.cpp" 1
+     "int kappa() { return 1; }\nint caller_cpp() { return kappa(); }\n")
+    ("sql" "lambda_view" "k.sql" 1
+     "CREATE VIEW lambda_view AS SELECT 1 AS value;\nSELECT * FROM lambda_view;\n"))
+  "Deterministic 12-language semantic fixture definitions.")
 
 (defun chat-quality-reliability--run-test (name)
   "Run ERT test NAME and return a bounded result alist."

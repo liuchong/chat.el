@@ -80,7 +80,8 @@
   "Directed scenario required beside the Goal projection samples.")
 
 (defconst chat-coding-acceptance-quality-languages
-  '("python" "typescript" "emacs-lisp" "go" "rust")
+  '("python" "javascript" "typescript" "emacs-lisp" "go" "rust"
+    "zig" "clojure" "java" "c" "cpp" "sql")
   "Languages required in the deterministic semantic corpus.")
 
 (defconst chat-coding-acceptance-quality-scenarios
@@ -1321,7 +1322,7 @@ fail it."
        (chat-coding-acceptance--metric-valid-p top-five)
        (and (numberp top-five) (>= top-five 0.90)))
       (chat-coding-acceptance--reliability-gate
-       "semantic-language-spread" "all five languages within 10 points"
+       "semantic-language-spread" "all 12 languages within 10 points"
        (chat-coding-acceptance--field semantic 'byLanguage)
        (chat-coding-acceptance--quality-language-metrics-valid-p semantic)
        (chat-coding-acceptance--quality-language-spread-p semantic)))

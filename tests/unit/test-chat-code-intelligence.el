@@ -131,15 +131,23 @@
        (delete-file outside)))))
 
 (ert-deftest chat-code-intelligence-index-fixture-meets-definition-and-reference-targets ()
-  "The five-language fallback fixture exceeds M11 accuracy thresholds."
+  "The 12-language fallback fixture exceeds semantic accuracy thresholds."
   (chat-test-with-temp-dir
    (let* ((files
            `(("a.py" . "def alpha():\n    return 1\ndef caller():\n    return alpha()\n")
+             ("a.js" . "function aleph() { return 1; }\nconst callerJs = aleph;\n")
              ("b.ts" . "function beta() { return 1; }\nexport const caller = beta;\n")
              ("c.el" . "(defun gamma () 1)\n(defun caller () (gamma))\n")
              ("d.go" . "package sample\nfunc Delta() int { return 1 }\nfunc Caller() int { return Delta() }\n")
-             ("e.rs" . "fn epsilon() -> i32 { 1 }\nfn caller() -> i32 { epsilon() }\n")))
-          (names '("alpha" "beta" "gamma" "Delta" "epsilon"))
+             ("e.rs" . "fn epsilon() -> i32 { 1 }\nfn caller() -> i32 { epsilon() }\n")
+             ("f.zig" . "fn zeta() i32 { return 1; }\nfn callerZig() i32 { return zeta(); }\n")
+             ("g.clj" . "(defn eta [] 1)\n(defn caller-clj [] (eta))\n")
+             ("H.java" . "public static int theta() { return 1; }\npublic static int callerJava() { return theta(); }\n")
+             ("i.c" . "int iota(void) { return 1; }\nint caller_c(void) { return iota(); }\n")
+             ("j.cpp" . "int kappa() { return 1; }\nint caller_cpp() { return kappa(); }\n")
+             ("k.sql" . "CREATE VIEW lambda_view AS SELECT 1 AS value;\nSELECT * FROM lambda_view;\n")))
+          (names '("alpha" "aleph" "beta" "gamma" "Delta" "epsilon"
+                   "zeta" "eta" "theta" "iota" "kappa" "lambda_view"))
           (chat-code-intel--active-indexes (make-hash-table :test 'equal))
           index
           (definition-hits 0)
@@ -164,6 +172,28 @@
      (should (> reference-returned 0))
      (should (>= (/ (float reference-true) reference-returned) 0.95))
      (should (>= (/ (float reference-true) (length names)) 0.90)))))
+
+(ert-deftest chat-code-intelligence-extended-parsers-keep-structure-types ()
+  "Extended fallback parsers retain useful function and type categories."
+  (dolist
+      (case
+       '((zig "const Node = struct {};\n" "Node" struct)
+         (clojure "(defprotocol Store (load-one [this]))\n" "Store" interface)
+         (java "public interface Store {}\n" "Store" interface)
+         (cpp "class Store {};\n" "Store" class)
+         (sql "CREATE TABLE records (id INTEGER);\n" "records" class)))
+    (with-temp-buffer
+      (insert (nth 1 case))
+      (let ((symbols (chat-code-intel-extract-buffer-symbols (nth 0 case))))
+        (should (= (length symbols) 1))
+        (should (equal (chat-code-symbol-name (car symbols)) (nth 2 case)))
+        (should (eq (chat-code-symbol-type (car symbols)) (nth 3 case)))))))
+
+(ert-deftest chat-code-intelligence-c-rejects-cpp-class-declarations ()
+  "The C fallback never admits a C++ class as a C declaration."
+  (with-temp-buffer
+    (insert "class Store {};\n")
+    (should-not (chat-code-intel-extract-buffer-symbols 'c))))
 
 (ert-deftest chat-code-intelligence-five-language-adversarial-corpus-is-searchable ()
   "Fallback indexing handles the complete M11 adversarial corpus shape."

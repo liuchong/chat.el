@@ -99,7 +99,10 @@
   "Find all source files in PROJECT-ROOT."
   (let (files)
     (when (file-directory-p project-root)
-      (dolist (ext '("py" "js" "ts" "jsx" "tsx" "el" "go" "rs" "rb" "java" "c" "cpp"))
+      (dolist (ext '("py" "js" "mjs" "cjs" "ts" "mts" "cts" "jsx" "tsx"
+                     "el" "go" "rs" "zig" "clj" "cljc" "cljs" "rb"
+                     "java" "c" "h" "cc" "cpp" "cxx" "hh" "hpp" "hxx"
+                     "sql"))
         (setq files (append files
                            (directory-files-recursively
                             project-root
@@ -142,6 +145,11 @@
     ('emacs-lisp (chat-code-intel--parse-elisp-symbols))
     ('go (chat-code-intel--parse-go-symbols))
     ('rust (chat-code-intel--parse-rust-symbols))
+    ('zig (chat-code-intel--parse-zig-symbols))
+    ('clojure (chat-code-intel--parse-clojure-symbols))
+    ('java (chat-code-intel--parse-java-symbols))
+    ((or 'c 'cpp) (chat-code-intel--parse-c-family-symbols language))
+    ('sql (chat-code-intel--parse-sql-symbols))
     (_ nil)))
 
 (defun chat-code-intel-extract-symbols (file-path)
@@ -307,6 +315,124 @@ without depending on its implementation name."
                      (_ 'struct))
              :line (line-number-at-pos)
              :column nil :signature nil :docstring nil)
+            symbols))
+    symbols))
+
+(defun chat-code-intel--parse-zig-symbols ()
+  "Parse Zig functions and named container declarations."
+  (let (symbols)
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(?:pub[[:space:]]+\\)?fn[[:space:]]+\\([[:alpha:]_][[:alnum:]_]*\\)"
+            nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 1) :type 'function
+             :line (line-number-at-pos))
+            symbols))
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(?:pub[[:space:]]+\\)?const[[:space:]]+\\([[:alpha:]_][[:alnum:]_]*\\)[[:space:]]*=[[:space:]]*\\(struct\\|enum\\|union\\)"
+            nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 1)
+             :type (if (string= (match-string 2) "enum") 'enum 'struct)
+             :line (line-number-at-pos))
+            symbols))
+    symbols))
+
+(defun chat-code-intel--parse-clojure-symbols ()
+  "Parse common Clojure definitions without evaluating forms."
+  (let (symbols)
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*(\\(defn\\|defmacro\\|def\\|defprotocol\\|defrecord\\|deftype\\)[[:space:]]+\\([[:alpha:]_*+!?<>/=.-][[:alnum:]_*+!?<>/=.-]*\\)"
+            nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 2)
+             :type (pcase (match-string 1)
+                     ("defmacro" 'macro)
+                     ("defprotocol" 'interface)
+                     ((or "defrecord" "deftype") 'struct)
+                     ("def" 'variable)
+                     (_ 'function))
+             :line (line-number-at-pos))
+            symbols))
+    symbols))
+
+(defun chat-code-intel--declaration-line-p ()
+  "Return non-nil when the current C-family match begins like a declaration."
+  (save-excursion
+    (beginning-of-line)
+    (not (looking-at-p
+          "[[:space:]]*\\(?:return\\|throw\\|new\\|if\\|for\\|while\\|switch\\|catch\\|sizeof\\)\\_>"))))
+
+(defun chat-code-intel--parse-c-like-functions ()
+  "Parse C-shaped function declarations in the current buffer."
+  (let (symbols)
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(?:[[:alnum:]_$:<>,.*&?]+[[:space:]]+\\)+\\([[:alpha:]_$][[:alnum:]_$]*\\)[[:space:]]*("
+            nil t)
+      (when (chat-code-intel--declaration-line-p)
+        (push (make-chat-code-symbol
+               :name (match-string 1) :type 'function
+               :line (line-number-at-pos))
+              symbols)))
+    symbols))
+
+(defun chat-code-intel--parse-java-symbols ()
+  "Parse Java methods and named type declarations."
+  (let ((symbols (chat-code-intel--parse-c-like-functions)))
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(?:public\\|protected\\|private\\|abstract\\|final\\|static\\|sealed\\|non-sealed\\|strictfp\\|[[:space:]]\\)*\\(class\\|interface\\|enum\\|record\\)[[:space:]]+\\([[:alpha:]_$][[:alnum:]_$]*\\)"
+            nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 2)
+             :type (pcase (match-string 1)
+                     ("interface" 'interface)
+                     ("enum" 'enum)
+                     (_ 'class))
+             :line (line-number-at-pos))
+            symbols))
+    symbols))
+
+(defun chat-code-intel--parse-c-family-symbols (language)
+  "Parse C or C++ symbols for LANGUAGE."
+  (let ((symbols (chat-code-intel--parse-c-like-functions)))
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*\\(?:typedef[[:space:]]+\\)?\\(struct\\|union\\|enum\\|class\\)[[:space:]]+\\([[:alpha:]_][[:alnum:]_]*\\)"
+            nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 2)
+             :type (pcase (match-string 1)
+                     ("enum" 'enum)
+                     ("class" 'class)
+                     (_ 'struct))
+             :line (line-number-at-pos))
+            symbols))
+    (if (eq language 'cpp) symbols
+      (seq-remove (lambda (symbol)
+                    (eq (chat-code-symbol-type symbol) 'class))
+                  symbols))))
+
+(defun chat-code-intel--parse-sql-symbols ()
+  "Parse SQL schema objects introduced by CREATE statements."
+  (let ((case-fold-search t)
+        symbols)
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^[[:space:]]*create[[:space:]]+\\(?:or[[:space:]]+replace[[:space:]]+\\)?\\(table\\|view\\|function\\|procedure\\|trigger\\)[[:space:]]+\\(?:if[[:space:]]+not[[:space:]]+exists[[:space:]]+\\)?[\"`[]?\\([[:alpha:]_][[:alnum:]_]*\\)"
+            nil t)
+      (push (make-chat-code-symbol
+             :name (match-string 2)
+             :type (pcase (downcase (match-string 1))
+                     ("table" 'class)
+                     ("view" 'interface)
+                     ("trigger" 'method)
+                     (_ 'function))
+             :line (line-number-at-pos))
             symbols))
     symbols))
 

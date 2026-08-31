@@ -455,6 +455,13 @@
                (eq 'blocked (chat-coding-acceptance-gate-status gate)))
              gates))))
 
+(ert-deftest chat-coding-acceptance-quality-language-contract-is-complete ()
+  "The semantic gate names every language in the qualification contract."
+  (should
+   (equal chat-coding-acceptance-quality-languages
+          '("python" "javascript" "typescript" "emacs-lisp" "go" "rust"
+            "zig" "clojure" "java" "c" "cpp" "sql"))))
+
 (ert-deftest chat-coding-acceptance-quality-language-details-are-required ()
   "Missing per-language metrics block rather than report a regression."
   (let* ((record (chat-coding-acceptance-test--quality-record))

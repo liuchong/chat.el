@@ -26,6 +26,21 @@
       (accept-process-output nil 0.005))
     result))
 
+(ert-deftest chat-repo-map-admits-the-complete-language-set ()
+  "Every qualification language enters the same repository map pipeline."
+  (chat-test-with-temp-dir
+   (let ((chat-repo-map--cache (make-hash-table :test 'equal))
+         (files '("a.py" "b.js" "c.ts" "d.el" "e.go" "f.rs"
+                  "g.zig" "h.clj" "I.java" "j.c" "k.cpp" "l.sql")))
+     (dolist (file files)
+       (with-temp-file (expand-file-name file temp-dir)
+         (insert "symbol reference\n")))
+     (let* ((result (chat-test-repo-map--refresh temp-dir))
+            (map (chat-repo-map-get temp-dir)))
+       (should (eq (plist-get result :status) 'ok))
+       (should (= (hash-table-count (chat-repo-map-entries map))
+                  (length files)))))))
+
 (ert-deftest chat-repo-map-refreshes-only-changed-files-and-keeps-cjk-paths ()
   "Refreshes reuse unchanged entries and retain canonical CJK paths."
   (chat-test-with-temp-dir

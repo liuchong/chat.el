@@ -61,7 +61,7 @@
   :group 'chat-repo-map)
 
 (defconst chat-repo-map--source-pattern
-  "\\.\\(py\\|js\\|ts\\|jsx\\|tsx\\|el\\|go\\|rs\\|rb\\|java\\|c\\|cc\\|cpp\\|h\\|hpp\\)\\'"
+  "\\.\\(py\\|js\\|mjs\\|cjs\\|ts\\|mts\\|cts\\|jsx\\|tsx\\|el\\|go\\|rs\\|zig\\|clj\\|cljc\\|cljs\\|rb\\|java\\|c\\|h\\|cc\\|cpp\\|cxx\\|hh\\|hpp\\|hxx\\|sql\\)\\'"
   "File name pattern admitted to the repo map.")
 
 (defconst chat-repo-map--ignored-directories
