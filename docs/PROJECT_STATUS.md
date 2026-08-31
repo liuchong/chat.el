@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 
 ## Summary
 
@@ -338,15 +338,16 @@ are still required at the next frozen revision.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el`
-- 1810 regression tests discovered
-- 1810 passing
+- 1903 regression tests discovered
+- 1903 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`
 - deterministic end-to-end command: `emacs -Q -batch -l tests/run-e2e-tests.el -f ert-run-tests-batch-and-exit`
-- deterministic coding-fixture and workflow/MCP integration: 2 passing;
+- deterministic coding-fixture, workflow/MCP and background-task integration:
+  3 passing;
   2 online provider checks skip when credentials are absent
-- primary-loop MCP and nested-agent end-to-end paths: 2 passing
+- primary-loop MCP, nested-agent and background-task end-to-end paths: 3 passing
 - five built-in offline Eval scenarios passing; run them directly with
   `chat-eval-run-all` after loading `chat.el`
 - 10,000-file performance gates passing: 31.0ms maximum wall slice and

@@ -1756,3 +1756,10 @@ Revision `2795a8f` 再次使用精确模型 `kimi-code/k3-256k` 复测：locate 
 此后没有 approval、execution 或 tool 事件，未复现取消后副作用。本轮取消瞬间没有在途
 Guard 请求，因此迟到 verdict 竞态仍以三条确定性测试作为直接证明，不把该 live 样本夸大
 为完整竞态覆盖。命令引用质量与交互工具适用性进入 Kimi 定向适配数据项。
+
+2026-08-31 对后台任务要求进行逐项审计后，核心实现已满足 durable identity、非阻塞进程、
+完成回调、bounded output、session ownership 与 wire 生命周期，但原 integration/E2E 未证明
+Agent 的完整操作链。当前已在 Spec 016 加入可执行 BDD 场景；integration 贯通审批、tool
+caller、scheduler、execution、callback、wire 与跨 session 拒绝，E2E 贯通 Agent 的
+`work_task_start -> work_task_output -> final answer` 三步。结果为 integration 3/3、E2E
+3/3、canonical 1903/1903；两个需要真实凭据的 provider integration 按设计 skipped。

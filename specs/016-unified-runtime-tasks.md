@@ -90,3 +90,29 @@ load the owning session so restart-time actions update both durable projections.
 - future and legacy schemas have deterministic migration behavior;
 - foreground, workflow, process and subagent work appear in one tree;
 - no live execution object is serialized.
+
+## Executable Behavior Scenarios
+
+### Background Work Does Not Block The Agent
+
+Given an Agent in session A and a permitted bounded command, when the Agent
+calls `work_task_start`, then it receives a durable task identity before the
+process reaches a terminal state and may continue its model loop. When the
+process finishes, the adapter invokes its completion hook once, the unified
+task and process projections agree on the terminal outcome, and session A can
+read bounded output through `work_task_output`.
+
+### Background Evidence Is Session Scoped
+
+Given a task owned by session A, when session B calls `work_task_output` with
+the observed task ID, then the operation fails without returning any output.
+Session A's wire contains correlated task and execution lifecycle events;
+session B receives neither those event bodies nor the task log path.
+
+### Agent Observes A Completed Background Result
+
+Given a multi-step Agent response, when one step starts a background command
+and a later step reads its result, then the final assistant response can use
+the returned output without blocking the first tool call until completion.
+The end-to-end test must exercise the registered tools through the normal
+Agent/tool-caller path, not by calling the process adapter directly.

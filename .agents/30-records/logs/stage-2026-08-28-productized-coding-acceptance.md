@@ -392,3 +392,26 @@ This is positive live evidence that cancellation no longer produced a
 post-run side effect in this sample. No Guard request was pending at its exact
 cancellation instant, so the delayed-verdict race remains proven by the three
 deterministic cancellation tests rather than overstated as live coverage.
+
+## 2026-08-31 Background Task Full-Path Acceptance
+
+An objective audit found that Spec 016, the durable scheduler, process adapter,
+completion callback, bounded output and session ownership checks already
+existed, but integration and E2E suites did not prove the complete Agent path.
+Spec 016 now contains executable Given/When/Then scenarios for non-blocking
+start, completion observation and cross-session isolation.
+
+The new integration scenario starts a permitted background process through the
+registered tool caller, observes permission, task and execution events in the
+owner session wire, receives exactly one completion hook, reads bounded output
+as the owner and proves another session cannot read it. Its first run exposed
+that the expected wire omitted the real permission-requested/resolved events;
+the expectation was corrected to preserve the fuller lifecycle rather than
+discarding those events.
+
+The new E2E scenario drives the primary Agent through three model steps:
+`work_task_start`, `work_task_output`, then a final answer based on the returned
+output. The complete E2E suite passes 3/3, deterministic integration passes
+3/3 with two credential-dependent provider tests skipped, and the canonical
+suite passes 1903/1903. All test processes reached terminal state and no helper
+process remained after either runner.
