@@ -1358,6 +1358,13 @@ reference precision/recall 和 Top-5 hit rate，四项均为 `1.0`；canonical s
 1955/1955。该结果只关闭语义质量门，不替代七种扩展语言的完整离线 fixture、mutation
 smoke 或 live campaign。
 
+Revision `d958435` 已关闭七种扩展语言的完整离线 fixture 和 campaign preflight 门禁：
+42-task manifest 的 passing normalization 与三类 seeded defect 均确定性通过，manifest
+级离线检查在 provider readiness 前执行；DeepSeek `deepseek-v4-flash` 与 Kimi Code
+`k3-256k` 在同一干净 revision、同一 manifest digest 下分别产生独立 configuration
+digest。coding Eval 为 55/55，canonical suite 为 1960/1960。该阶段未调用模型 API，
+因此不关闭逐语言 mutation smoke、跨厂商 live campaign 或重复统计门禁。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
