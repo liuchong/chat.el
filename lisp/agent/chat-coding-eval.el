@@ -1744,6 +1744,20 @@ Return the unique repetition/scenario key."
          "checks are allowed.")
       "")))
 
+(defun chat-coding-eval--execution-guidance (task)
+  "Return deterministic workflow guidance for the bounded shape of TASK."
+  (if (and (= 1 (length (chat-coding-eval-task-allowed-paths task)))
+           (member (chat-coding-eval-task-category task)
+                   '("single-file-fix" "failing-test-fix")))
+      (concat
+       "\n\nThis is an intentionally bounded single-file repair. Do not create "
+       "a durable TODO plan. Once the exact edit is known, call "
+       "`programming_plan_skip` with reason `single-bounded-action` and the "
+       "exact write tool (`files_write`, `files_replace`, or `files_patch`), "
+       "perform that one edit, run the declared targeted verification, and "
+       "finish when it passes.")
+    ""))
+
 (defun chat-coding-eval--agent-config-v2 (provider model common-config)
   "Bind PROVIDER and concrete MODEL to COMMON-CONFIG for Agent protocol v2."
   (append (list :provider provider :model model) common-config))
@@ -1768,9 +1782,10 @@ ordinary application execution always uses protocol v2.")
             (format
              (concat "%s\n\nWork only inside the current workspace. "
                      "The only paths you may change are: %s. "
-                     "Finish with a concise answer describing the result.%s")
+                     "Finish with a concise answer describing the result.%s%s")
              (chat-coding-eval-task-prompt task)
              (string-join (chat-coding-eval-task-allowed-paths task) ", ")
+             (chat-coding-eval--execution-guidance task)
              (chat-coding-eval--verification-guidance task)))
            (capabilities
             (chat-coding-eval--capability-snapshot provider resolved-model))

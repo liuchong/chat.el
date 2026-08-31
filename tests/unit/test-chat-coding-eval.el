@@ -996,8 +996,35 @@
                  "These commands are the complete task verification contract.")
                 prompt))
        (should (string-match-p
+                (regexp-quote
+                 "This is an intentionally bounded single-file repair.")
+                prompt))
+       (should (string-match-p
+                (regexp-quote
+                 "programming_plan_skip")
+                prompt))
+       (should (string-match-p
                 (regexp-quote "do not run a broader test suite")
                 prompt))))))
+
+(ert-deftest chat-coding-eval-execution-guidance-is-shape-specific ()
+  "Only a bounded one-file repair receives the audited skip workflow."
+  (let ((task
+         (chat-coding-eval-test--task
+          default-directory
+          '(((type . "command") (name . "targeted")
+             (command . ("sh" "test-one")))))))
+    (should (string-match-p
+             "single-bounded-action"
+             (chat-coding-eval--execution-guidance task)))
+    (setf (chat-coding-eval-task-allowed-paths task)
+          '("sample.py" "helper.py"))
+    (should (string-empty-p
+             (chat-coding-eval--execution-guidance task)))
+    (setf (chat-coding-eval-task-allowed-paths task) '("sample.py")
+          (chat-coding-eval-task-category task) "refactor")
+    (should (string-empty-p
+             (chat-coding-eval--execution-guidance task)))))
 
 (ert-deftest chat-coding-eval-agent-omits-guidance-without-command-judge ()
   "Non-command judges do not invent an executable verification step."

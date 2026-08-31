@@ -923,7 +923,13 @@ being a thing the reader could do when the two surfaces merged."
            :is-active t))))
     (let ((guidance (chat-tool-caller--plan-usage-guidance tools)))
       (should (string-match-p "durable TODO list" guidance))
+      (should (string-match-p "Answer-only and read-only work needs no plan"
+                              guidance))
+      (should (string-match-p "substantial coding" guidance))
       (should (string-match-p "before the first gated action" guidance))
+      (should (string-match-p "programming_plan_skip" guidance))
+      (should (string-match-p "single-bounded-action" guidance))
+      (should (string-match-p "one matching mutation" guidance))
       (should (string-match-p "starts its first dependency-ready item atomically"
                               guidance))
       (should (string-match-p "control points, not narration" guidance))
