@@ -162,6 +162,8 @@ Retain these facts:
 
 - campaign and revision identity;
 - requested identity and the ordered actual request identities;
+- exact request count and request IDs for passed, failed, cancelled, timed-out
+  and errored live trials; a terminal status never permits identity omission;
 - manifest and configuration digests;
 - expected, valid, passed, failed, cancelled, timed-out, errored and quarantined counts;
 - per-language and per-category rates;

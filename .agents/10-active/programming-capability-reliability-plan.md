@@ -1858,3 +1858,20 @@ baseline configuration digest 分别为
 应保留的旧实现能力失败，不是身份或 runner 失败。完整记录见
 `.agents/30-records/logs/stage-2026-08-31-frozen-campaign-protocols.md`。下一步创建 fresh
 30-by-5 baseline/current campaign；这两个 smoke 不进入最终样本。
+
+第一次 full baseline `m19-baseline-deepseek-v4-flash-e4367f8-r1` 在两条结果后主动停止。
+`elisp-locate` 保留了三次精确 request identity；`elisp-failing-test` 达到 120 秒预算后却被
+写成 `cancelled` 且 executor metadata 为空。根因是外层 timeout 调用 Agent cancel 时，Agent
+同步发出 `agent-end: cancelled` 抢先完成 Eval；旧 executor 合同只有 cancel function，没有
+终止前冻结进行中证据的接口。该目录作为事故证据保留，implementation 改变后禁止恢复。
+
+Eval executor 合同现改为 typed handle：`snapshot` 先冻结 answer、request identity、usage 与
+计数，`cancel` 后停止底层工作；Eval 在调用前记录权威外层终态，迟到或同步的 Agent callback
+不能覆盖 `timed-out`/`cancelled` 与快照。最终聚合器独立检查每个 live trial 的 requestCount、
+request ID 和 provider/model 一致性，缺失或漂移一律归为 infrastructure-invalid，不能填满
+样本矩阵。定向 Eval/runtime/acceptance 测试 92/92 通过；完整记录见
+`.agents/30-records/logs/stage-2026-08-31-terminal-evidence-handle.md`。
+
+共享测试沙箱同时补齐 durable task directory、registry 与 scheduler guard 隔离，消除了三个
+依赖测试顺序的后台任务失败。带完整 Homebrew 与 Rustup PATH 的 canonical suite 为
+1923/1923；缺少这些工具链的运行只说明验收环境无效，不记为产品结论。

@@ -49,6 +49,10 @@
      (unwind-protect
          (let* ((chat-state-dir (make-temp-file "chat-state-" t))
                 (chat-session-directory (expand-file-name "sessions/" chat-state-dir))
+                (chat-task-directory (expand-file-name "tasks/" chat-state-dir))
+                (chat-task--registry (make-hash-table :test 'equal))
+                (chat-task--loaded-p t)
+                (chat-task--scheduling-p nil)
                 (chat-tool-forge-directory (expand-file-name "tools/" chat-state-dir))
                 (chat-edit-backup-directory (expand-file-name "backups/" chat-state-dir))
                 (chat-code-intel-index-directory (expand-file-name "index/" chat-state-dir))

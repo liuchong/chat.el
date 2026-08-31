@@ -894,7 +894,10 @@
                 (lambda (_provider) t))
                ((symbol-function 'chat-coding-eval-agent-executor)
                 (lambda (_provider _model)
-                  (lambda (_task _workspace _done) #'ignore))))
+                  (lambda (_task _workspace _done)
+                    (chat-coding-eval-executor-handle-create
+                     :cancel #'ignore
+                     :snapshot (lambda () '(:metadata ((requestCount . 0)))))))))
        (setq suite
              (chat-coding-eval--start-campaign
               campaign 'provider-a "model-a"))
@@ -1103,7 +1106,8 @@
              "def divide(left, right):\n    if right == 0:\n        raise ValueError(\"zero divisor\")\n    return left / right"
              t t)
             (write-region (point-min) (point-max) file nil 'silent)))
-        (funcall done 'completed "fixed" nil))
+        (funcall done 'completed "fixed" nil)
+        nil)
       :on-complete (lambda (value _state) (setq result value)))
      (should (chat-coding-eval-test--wait (lambda () result) 5))
      (should (eq 'passed (chat-eval-result-status result)))
@@ -1173,7 +1177,8 @@
                                      chat-test-fixtures-dir))
           (judges '(((type . "no-change") (name . "unchanged"))))
           (task (chat-coding-eval-test--task fixture judges))
-          crash-result cancel-result timeout-result cancel-called)
+          crash-result cancel-result timeout-result cancel-called
+          timeout-cancel-called)
      (chat-coding-eval-run
       task (lambda (&rest _args) (error "executor crashed"))
       :on-complete (lambda (value _state) (setq crash-result value)))
@@ -1181,18 +1186,53 @@
      (let ((state
             (chat-coding-eval-run
              task
-             (lambda (_task _workspace _done)
-               (lambda () (setq cancel-called t)))
+             (lambda (_task _workspace done)
+               (chat-coding-eval-executor-handle-create
+                :cancel
+                (lambda ()
+                  (setq cancel-called t)
+                  (funcall done 'cancelled "late" '((late . t))))
+                :snapshot
+                (lambda ()
+                  '(:answer "partial"
+                    :metadata ((requestCount . 1)
+                               (requestModels . (((provider . "fixture")
+                                                  (model . "model")
+                                                  (requestId . "request-1")))))))))
              :on-complete (lambda (value _state) (setq cancel-result value)))))
        (should (chat-coding-eval-cancel state)))
      (should cancel-called)
      (should (eq 'cancelled (chat-eval-result-status cancel-result)))
+     (should (= 1 (alist-get 'requestCount
+                             (alist-get 'executor
+                                        (chat-eval-result-metadata
+                                         cancel-result)))))
      (setf (chat-coding-eval-task-timeout-seconds task) 0.03)
      (chat-coding-eval-run
-      task (lambda (_task _workspace _done) nil)
+      task
+      (lambda (_task _workspace done)
+        (chat-coding-eval-executor-handle-create
+         :cancel
+         (lambda ()
+           (setq timeout-cancel-called t)
+           (funcall done 'cancelled "late" '((late . t))))
+         :snapshot
+         (lambda ()
+           '(:metadata ((requestCount . 2)
+                        (requestModels . (((provider . "fixture")
+                                           (model . "model")
+                                           (requestId . "request-1"))
+                                          ((provider . "fixture")
+                                           (model . "model")
+                                           (requestId . "request-2")))))))))
       :on-complete (lambda (value _state) (setq timeout-result value)))
      (should (chat-coding-eval-test--wait (lambda () timeout-result)))
+     (should timeout-cancel-called)
      (should (eq 'timed-out (chat-eval-result-status timeout-result)))
+     (should (= 2 (alist-get 'requestCount
+                             (alist-get 'executor
+                                        (chat-eval-result-metadata
+                                         timeout-result)))))
      (should-not
       (directory-files chat-coding-eval-workspace-directory nil "test-task-")))))
 
@@ -1215,7 +1255,8 @@
            (chat-coding-eval-run
             task
             (lambda (_task _workspace done)
-              (funcall done 'completed "done" nil))
+              (funcall done 'completed "done" nil)
+              nil)
             :on-complete (lambda (value _state) (setq result value))))
      (setq process (chat-coding-eval-run-state-process state))
      (should (chat-coding-eval-test--wait (lambda () result)))

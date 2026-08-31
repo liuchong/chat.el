@@ -75,6 +75,37 @@
     (should (= 2 (length (chat-coding-acceptance--valid-results
                           (list errored cancelled)))))))
 
+(ert-deftest chat-coding-acceptance-requires-live-terminal-request-identity ()
+  "Every live terminal status keeps exact observed request identity evidence."
+  (let* ((check (chat-eval-check "executor-status" nil 'completed 'timed-out))
+         (valid
+          (chat-coding-acceptance-test--result
+           'timed-out (list check)
+           '((provider . "provider") (model . "model")
+             (requestCount . 1)
+             (requestModels . (((provider . "provider") (model . "model")
+                                (requestId . "request-1")))))))
+         (missing
+          (chat-coding-acceptance-test--result
+           'timed-out (list check)
+           '((provider . "provider") (model . "model")
+             (requestCount . 0) (requestModels . nil)))))
+    (setf (chat-eval-result-metadata valid)
+          (cons '(campaignId . "campaign")
+                (chat-eval-result-metadata valid))
+          (chat-eval-result-metadata missing)
+          (cons '(campaignId . "campaign")
+                (chat-eval-result-metadata missing)))
+    (should (chat-coding-acceptance--live-request-identity-valid-p valid))
+    (should-not (chat-coding-acceptance--live-request-identity-valid-p missing))
+    (should (eq 'model-ability
+                (chat-coding-acceptance-classify-failure valid)))
+    (should (eq 'infrastructure
+                (chat-coding-acceptance-classify-failure missing)))
+    (should (equal (list valid)
+                   (chat-coding-acceptance--valid-results
+                    (list valid missing))))))
+
 (ert-deftest chat-coding-acceptance-reads-json-round-tripped-first-request-usage ()
   "First-request usage remains measurable after JSON round trip."
   (let ((result
@@ -683,7 +714,11 @@
 (ert-deftest chat-coding-acceptance-large-repo-evidence-matches-core-revisions ()
   "Dedicated token trials must preserve core task and implementation identity."
   (let* ((judge (chat-eval-check "judge" t t t))
-         (executor '((provider . fixed-provider) (model . fixed-model)
+         (executor '((provider . "fixed-provider") (model . "fixed-model")
+                     (requestCount . 1)
+                     (requestModels . (((provider . "fixed-provider")
+                                        (model . "fixed-model")
+                                        (requestId . "request-1"))))
                      (profile . code) (transport . openai)
                      (approvalMode . guarded)))
          (core-baseline

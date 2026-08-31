@@ -194,6 +194,35 @@ test rather than the frozen provider/model identity."
          (cons field (chat-coding-acceptance--field snapshot field)))
        chat-coding-acceptance--capability-identity-fields))))
 
+(defun chat-coding-acceptance--live-request-identity-valid-p (result)
+  "Return non-nil when live RESULT has complete observed request identity."
+  (let* ((metadata (chat-eval-result-metadata result))
+         (campaign-id (chat-coding-acceptance--field metadata 'campaignId)))
+    (if (not (and (stringp campaign-id) (not (string-empty-p campaign-id))))
+        t
+      (let* ((executor (chat-coding-acceptance--field metadata 'executor))
+             (provider (chat-coding-acceptance--field executor 'provider))
+             (model (chat-coding-acceptance--field executor 'model))
+             (request-count
+              (chat-coding-acceptance--field executor 'requestCount))
+             (stored (chat-coding-acceptance--field executor 'requestModels))
+             (requests (if (vectorp stored) (append stored nil) stored)))
+        (and (stringp provider) (not (string-empty-p provider))
+             (stringp model) (not (string-empty-p model))
+             (integerp request-count) (> request-count 0)
+             (listp requests) (= request-count (length requests))
+             (seq-every-p
+              (lambda (request)
+                (let ((request-id
+                       (chat-coding-acceptance--field request 'requestId)))
+                  (and (equal provider
+                              (chat-coding-acceptance--field request 'provider))
+                       (equal model
+                              (chat-coding-acceptance--field request 'model))
+                       (stringp request-id)
+                       (not (string-empty-p request-id)))))
+              requests))))))
+
 (defun chat-coding-acceptance-classify-failure (result)
   "Classify failed coding RESULT into one public failure kind."
   (when (not (eq (chat-eval-result-status result) 'passed))
@@ -209,6 +238,8 @@ test rather than the frozen provider/model identity."
                         (or (chat-eval-check-detail check) "")))
               (seq-remove #'chat-eval-check-passed checks) " "))))
       (cond
+       ((not (chat-coding-acceptance--live-request-identity-valid-p result))
+        'infrastructure)
        ((or (eq (chat-eval-result-status result) 'blocked)
             (string-match-p "\\(?:permission\\|approval\\|blocked\\|denied\\)" text))
         'permission-block)
@@ -389,7 +420,8 @@ GATE-LABEL distinguishes an independently measured campaign in the result."
   "Return RESULTS excluding infrastructure-invalid trials."
   (seq-remove
    (lambda (result)
-     (eq (chat-coding-acceptance-classify-failure result) 'infrastructure))
+     (or (not (chat-coding-acceptance--live-request-identity-valid-p result))
+         (eq (chat-coding-acceptance-classify-failure result) 'infrastructure)))
    results))
 
 (defun chat-coding-acceptance--success-rate (results)

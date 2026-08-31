@@ -79,14 +79,19 @@
   fixture-directory prompt allowed-paths generated-paths timeout-seconds judges tags
   fixture-generator fixture-generator-digest)
 
+(cl-defstruct (chat-coding-eval-executor-handle
+               (:constructor chat-coding-eval-executor-handle-create))
+  cancel snapshot)
+
 (cl-defstruct (chat-coding-eval-run-state
                (:constructor chat-coding-eval-run-state-create-record))
   task fixture-digest fixture-revision workspace workspace-id baseline
   fixture-file-count fixture-indexed-file-count
   started-at setup-duration-ms agent-duration-ms judge-started-at
   judge-duration-ms answer metadata
-  changed-files generated-files out-of-scope-files checks executor-cancel process timer
-  on-complete cleanup-p result-directory result-metadata done-p)
+  changed-files generated-files out-of-scope-files checks executor-handle
+  termination-status process timer on-complete cleanup-p result-directory
+  result-metadata done-p)
 
 (cl-defstruct (chat-coding-eval-suite-state
                (:constructor chat-coding-eval-suite-state-create-record))
@@ -723,14 +728,15 @@
   "Handle executor STATUS, ANSWER and METADATA for STATE."
   (unless (chat-coding-eval-run-state-done-p state)
     (chat-coding-eval--cancel-timer state)
-    (setf (chat-coding-eval-run-state-answer state) answer
-          (chat-coding-eval-run-state-metadata state) metadata
-          (chat-coding-eval-run-state-agent-duration-ms state)
-          (max 0 (- (funcall chat-eval-clock-function)
-                    (chat-coding-eval-run-state-started-at state)
-                    (or (chat-coding-eval-run-state-setup-duration-ms state)
-                        0))))
-    (condition-case post-error
+    (unless (chat-coding-eval-run-state-termination-status state)
+      (setf (chat-coding-eval-run-state-answer state) answer
+            (chat-coding-eval-run-state-metadata state) metadata
+            (chat-coding-eval-run-state-agent-duration-ms state)
+            (max 0 (- (funcall chat-eval-clock-function)
+                      (chat-coding-eval-run-state-started-at state)
+                      (or (chat-coding-eval-run-state-setup-duration-ms state)
+                          0))))
+      (condition-case post-error
         (let* ((task (chat-coding-eval-run-state-task state))
                (changed
                 (chat-coding-eval--changed-files
@@ -782,14 +788,53 @@
                   (list (chat-eval-check
                          "evaluator-post-processing" nil 'completed 'error
                          detail))))
-           (chat-coding-eval--finish state 'error detail)))))))
+           (chat-coding-eval--finish state 'error detail))))))))
+
+(defun chat-coding-eval--capture-executor-snapshot (state)
+  "Freeze in-flight executor evidence into STATE before termination."
+  (when-let* ((handle (chat-coding-eval-run-state-executor-handle state))
+              (snapshot (chat-coding-eval-executor-handle-snapshot handle)))
+    (condition-case snapshot-error
+        (let ((value (funcall snapshot)))
+          (unless (and (listp value) (plist-member value :metadata))
+            (error "Executor snapshot must contain :metadata"))
+          (when (plist-member value :answer)
+            (setf (chat-coding-eval-run-state-answer state)
+                  (plist-get value :answer)))
+          (setf (chat-coding-eval-run-state-metadata state)
+                (plist-get value :metadata)))
+      (error
+       (setf (chat-coding-eval-run-state-checks state)
+             (append
+              (chat-coding-eval-run-state-checks state)
+              (list (chat-eval-check
+                     "executor-snapshot" nil 'captured 'error
+                     (error-message-string snapshot-error)))))))))
+
+(defun chat-coding-eval--terminate (state status detail)
+  "Terminate STATE with authoritative STATUS, DETAIL and in-flight evidence."
+  (unless (chat-coding-eval-run-state-done-p state)
+    (setf (chat-coding-eval-run-state-termination-status state) status
+          (chat-coding-eval-run-state-agent-duration-ms state)
+          (max 0 (- (funcall chat-eval-clock-function)
+                    (chat-coding-eval-run-state-started-at state)
+                    (or (chat-coding-eval-run-state-setup-duration-ms state)
+                        0))))
+    (chat-coding-eval--capture-executor-snapshot state)
+    (when-let* ((handle (chat-coding-eval-run-state-executor-handle state))
+                (cancel (chat-coding-eval-executor-handle-cancel handle)))
+      (ignore-errors (funcall cancel)))
+    (unless (chat-coding-eval-run-state-done-p state)
+      (setf (chat-coding-eval-run-state-checks state)
+            (append
+             (chat-coding-eval-run-state-checks state)
+             (list (chat-eval-check "executor-status" nil 'completed status))))
+      (chat-coding-eval--finish state status detail))))
 
 (defun chat-coding-eval-cancel (state)
   "Cancel coding evaluation STATE and return non-nil once."
   (unless (chat-coding-eval-run-state-done-p state)
-    (when-let ((cancel (chat-coding-eval-run-state-executor-cancel state)))
-      (ignore-errors (funcall cancel)))
-    (chat-coding-eval--finish state 'cancelled "Evaluation cancelled")
+    (chat-coding-eval--terminate state 'cancelled "Evaluation cancelled")
     t))
 
 (cl-defun chat-coding-eval-run
@@ -798,8 +843,10 @@
   "Run TASK with asynchronous EXECUTOR in a disposable workspace.
 
 EXECUTOR is called with TASK, workspace and a completion callback accepting
-STATUS, ANSWER and METADATA.  It may return a zero-argument cancellation
-function.  ON-COMPLETE receives the immutable result and run state."
+STATUS, ANSWER and METADATA.  It returns nil after synchronous completion or a
+`chat-coding-eval-executor-handle' whose cancellation and snapshot callbacks
+freeze in-flight evidence before termination.  ON-COMPLETE receives the
+immutable result and run state."
   (chat-coding-eval--validate-task task)
   (unless (functionp executor)
     (error "Coding evaluation executor must be callable"))
@@ -845,21 +892,20 @@ function.  ON-COMPLETE receives the immutable result and run state."
             (chat-coding-eval-task-timeout-seconds task) nil
             (lambda ()
               (unless (chat-coding-eval-run-state-done-p state)
-                (when-let ((cancel
-                            (chat-coding-eval-run-state-executor-cancel state)))
-                  (ignore-errors (funcall cancel)))
-                (setf (chat-coding-eval-run-state-checks state)
-                      (list (chat-eval-check "executor-status" nil
-                                             'completed 'timed-out)))
-                (chat-coding-eval--finish state 'timed-out
-                                          "Evaluation task timeout")))))
+                (chat-coding-eval--terminate
+                 state 'timed-out "Evaluation task timeout")))))
           (condition-case executor-error
-              (setf (chat-coding-eval-run-state-executor-cancel state)
-                    (funcall
-                     executor task workspace
-                     (lambda (status answer metadata)
-                       (chat-coding-eval--executor-finished
-                        state status answer metadata))))
+              (let ((handle
+                     (funcall
+                      executor task workspace
+                      (lambda (status answer metadata)
+                        (chat-coding-eval--executor-finished
+                         state status answer metadata)))))
+                (unless (or (null handle)
+                            (chat-coding-eval-executor-handle-p handle))
+                  (error "Executor must return nil or an executor handle"))
+                (setf (chat-coding-eval-run-state-executor-handle state)
+                      handle))
             (error
              (setf (chat-coding-eval-run-state-checks state)
                    (list (chat-eval-check
@@ -1571,10 +1617,10 @@ ordinary application execution always uses protocol v2.")
              (chat-coding-eval--verification-guidance task)))
            (capabilities
             (chat-coding-eval--capability-snapshot provider resolved-model))
-           first-usage
-           final-usage
-           usage-samples
-           request-identities
+           (first-usage nil)
+           (final-usage nil)
+           (usage-samples nil)
+           (request-identities nil)
            (model-event-observer
             (lambda (event)
               (when (eq (chat-model-event-type event) 'started)
@@ -1585,10 +1631,71 @@ ordinary application execution always uses protocol v2.")
            (tool-errors 0)
            (approvals 0)
            (stale-writes 0)
-           run)
+           (run nil)
+           (metadata-builder nil))
       (chat-session-set-working-directory session workspace)
       (chat-code-enable session workspace)
       (setf (chat-session-approval-mode session) chat-coding-eval-approval-mode)
+      (setq
+       metadata-builder
+       (lambda (failure-reason steps tool-calls tool-results)
+         (let* ((identities (reverse request-identities))
+                (identity-valid
+                 (and identities
+                      (cl-every
+                       (lambda (identity)
+                         (and (eq (plist-get identity :provider) provider)
+                              (equal (plist-get identity :model)
+                                     resolved-model)))
+                       identities)))
+                (identity-error
+                 (unless identity-valid
+                   (format "model identity drift: expected %s/%s, observed %S"
+                           provider resolved-model
+                           (mapcar
+                            (lambda (identity)
+                              (cons (plist-get identity :provider)
+                                    (plist-get identity :model)))
+                            identities)))))
+           (list
+            :identity-valid identity-valid
+            :metadata
+            `((provider . ,(symbol-name provider))
+              (model . ,resolved-model)
+              (requestModels .
+                             ,(mapcar
+                               (lambda (identity)
+                                 `((provider . ,(symbol-name
+                                                 (plist-get identity :provider)))
+                                   (model . ,(plist-get identity :model))
+                                   (requestId . ,(plist-get identity :request-id))))
+                               identities))
+              (modelCapabilitySnapshot . ,capabilities)
+              (profile . "code")
+              (transport . "stream")
+              (approvalMode . ,(symbol-name chat-coding-eval-approval-mode))
+              (failureReason . ,(or identity-error failure-reason))
+              (firstRequestTokenUsage . ,first-usage)
+              (finalRequestTokenUsage . ,final-usage)
+              (totalTokenUsage .
+                               ,(chat-coding-eval--sum-token-usage
+                                 usage-samples))
+              (requestCount . ,(length identities))
+              (usageSampleCount . ,(length usage-samples))
+              (sessionId . ,(chat-session-id session))
+              (runtimeTaskId . ,(and run
+                                      (chat-agent-run-state-task-id run)))
+              (workspaceId . ,(file-name-nondirectory
+                               (directory-file-name workspace)))
+              (checkpointId . nil)
+              (traceId . nil)
+              (steps . ,steps)
+              (toolCallCount . ,(length tool-calls))
+              (toolResultCount . ,(length tool-results))
+              (toolErrorCount . ,tool-errors)
+              (approvalCount . ,approvals)
+              (staleWriteCount . ,stale-writes)
+              (verificationRetryCount . 0))))))
       (setq
        run
        (chat-agent-start
@@ -1629,67 +1736,27 @@ ordinary application execution always uses protocol v2.")
              (when (eq (or tool-type type) 'stale-file)
                (cl-incf stale-writes)))
            (when (eq (plist-get event :type) 'agent-end)
-             (let* ((identities (nreverse request-identities))
-                    (identity-valid
-                     (and identities
-                          (cl-every
-                           (lambda (identity)
-                             (and (eq (plist-get identity :provider) provider)
-                                  (equal (plist-get identity :model)
-                                         resolved-model)))
-                           identities)))
-                    (identity-error
-                     (unless identity-valid
-                       (format "model identity drift: expected %s/%s, observed %S"
-                               provider resolved-model
-                               (mapcar
-                                (lambda (identity)
-                                  (cons (plist-get identity :provider)
-                                        (plist-get identity :model)))
-                                identities)))))
+             (let ((snapshot
+                    (funcall metadata-builder
+                             (plist-get event :reason)
+                             (plist-get event :steps)
+                             (plist-get event :tool-calls)
+                             (plist-get event :tool-results))))
                (funcall
                 done
-                (if identity-valid (plist-get event :status) 'error)
+                (if (plist-get snapshot :identity-valid)
+                    (plist-get event :status)
+                  'error)
                 (or (plist-get event :content) "")
-                `((provider . ,(symbol-name provider))
-                  (model . ,resolved-model)
-                  (requestModels .
-                                 ,(mapcar
-                                   (lambda (identity)
-                                     `((provider . ,(symbol-name
-                                                     (plist-get identity :provider)))
-                                       (model . ,(plist-get identity :model))
-                                       (requestId . ,(plist-get identity :request-id))))
-                                   identities))
-                  (modelCapabilitySnapshot . ,capabilities)
-                  (profile . "code")
-                  (transport . "stream")
-                  (approvalMode . ,(symbol-name
-                                    chat-coding-eval-approval-mode))
-                  (failureReason . ,(or identity-error
-                                        (plist-get event :reason)))
-                (firstRequestTokenUsage . ,first-usage)
-                (finalRequestTokenUsage . ,final-usage)
-                (totalTokenUsage .
-                                 ,(chat-coding-eval--sum-token-usage
-                                   usage-samples))
-                (requestCount . ,(length identities))
-                (usageSampleCount . ,(length usage-samples))
-                (sessionId . ,(chat-session-id session))
-                (runtimeTaskId . ,(and run
-                                        (chat-agent-run-state-task-id run)))
-                (workspaceId . ,(file-name-nondirectory
-                                 (directory-file-name workspace)))
-                (checkpointId . nil)
-                (traceId . nil)
-                (steps . ,(plist-get event :steps))
-                (toolCallCount . ,(length (plist-get event :tool-calls)))
-                (toolResultCount . ,(length (plist-get event :tool-results)))
-                (toolErrorCount . ,tool-errors)
-                (approvalCount . ,approvals)
-                (staleWriteCount . ,stale-writes)
-                (verificationRetryCount . 0))))))))))
-        (lambda () (chat-agent-cancel run))))))
+                (plist-get snapshot :metadata)))))))))
+      (chat-coding-eval-executor-handle-create
+       :cancel (lambda () (chat-agent-cancel run))
+       :snapshot
+       (lambda ()
+         (let ((snapshot
+                (funcall metadata-builder
+                         "evaluation terminated before agent-end" nil nil nil)))
+           (list :answer "" :metadata (plist-get snapshot :metadata)))))))))
 
 (defconst chat-coding-eval--campaign-pause-error-pattern
   (concat

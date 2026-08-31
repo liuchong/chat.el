@@ -119,6 +119,20 @@ context window and output-token limit. Serializer version, provenance and a
 new implementation-only runtime feature are evidence but not frozen model
 identity. Any disagreement in a stable field remains a comparison failure.
 
+Asynchronous executors expose a typed terminal-evidence handle. Its snapshot
+operation freezes bounded answer, request identity, usage and execution counts;
+its cancel operation stops the underlying run only after that snapshot. Eval
+records the authoritative outer terminal intent before calling either one, so
+a synchronous cancellation callback cannot replace task `timed-out` with Agent
+`cancelled` or erase in-flight evidence. A synchronous executor returns nil
+after completion. Ambiguous callable or result-shaped return values are invalid.
+
+Final aggregation revalidates this contract independently for every live
+terminal status. Request count must be positive and equal the number of stored
+request identities. Every identity must have a request ID and match the frozen
+executor provider/model. Missing or drifting evidence is infrastructure-invalid
+and cannot satisfy the required sample matrix, even when the code judge passed.
+
 ## 3. Task Matrix
 
 Every language has exactly one task in each category:

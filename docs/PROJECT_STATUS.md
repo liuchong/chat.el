@@ -68,6 +68,15 @@ request used exact `deepseek-v4-flash`. The frozen smoke retained its historical
 streaming-content failure as a model-ability result. Full fresh 30-by-5 paired
 campaigns and final aggregation remain open.
 
+The first full baseline attempt then exposed a terminal-evidence race: outer
+task timeout could be replaced by synchronous Agent cancellation and lose all
+in-flight request identities. Eval executors now return a typed snapshot/cancel
+handle, outer terminal intent is authoritative, and final aggregation rejects
+any live result whose request count, IDs or provider/model evidence is missing
+or inconsistent. The interrupted campaign is incident evidence only and will
+not be resumed. The shared test sandbox now also isolates durable task state;
+the complete provisioned canonical suite passes 1923/1923 with no skips.
+
 The input prompt now owns one default-closed two-level work shelf. Its bounded
 TODO, changed-files, Goal and Plan providers replace the former separate
 always-visible projections. Provider events refresh only their section, while
