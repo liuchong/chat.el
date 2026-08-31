@@ -1739,3 +1739,13 @@ Kimi mutation 在 120 秒截止：首次 Guard 审查 20.005 秒超时 abstain�
 `programming_plan_transition`，但创建 Plan 后的当轮菜单未暴露生命周期工具。当前修复
 要求 Plan 创建原子地移除 create、暴露其余生命周期工具，并在非 Plan Mode 暴露执行
 工具；不得放宽完成门槛。提交后必须用两个精确模型重跑相同场景。
+
+Revision `4cf9d27` 的同场景复测中，DeepSeek mutation 58.280 秒通过、locate
+18.872 秒通过，证明 Plan 生命周期修复已在真实 API 路径生效。Kimi `k3-256k` locate
+14.042 秒通过，mutation 仍于 120.100 秒取消：首次 Guard 20.005 秒超时，重试在
+12.022 秒后 allow，但比 Agent 取消晚 4.227 秒，随后尝试在已清理 workspace 启动命令。
+当前新增稳定 cancellation handle：活动取消目标从 Guard 请求切换到获批后的实际工具；
+取消后的迟到 verdict 不执行工具，竞态中已启动工具也能被同一 handle 取消。该修复先
+关闭取消后副作用风险；Kimi Guard 延迟及 A/B/C 层定向优化继续保留为独立 M21 数据项，
+不得靠放宽 fail-closed 或删除 120 秒门槛掩盖。迟到 verdict、获批后切换和同步快速批准
+三种取消时序均有定向测试，规范全量入口通过 1903/1903。

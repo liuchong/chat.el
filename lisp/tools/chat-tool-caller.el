@@ -1107,7 +1107,8 @@ or did not for the same reason.
 A denial arrives through SUCCESS, not ERROR-CALLBACK.  It is a policy
 outcome the assistant should read and route around, and reporting it as a
 tool fault gets it the wrong wording and the wrong handling from the agent
-loop."
+loop.  Return one stable cancellation handle whose active target follows
+the call from authorization into asynchronous execution."
   (let* ((chat-tool-caller-current-execution-context execution-context)
          (chat-tool-caller-current-state-session (or state-session session))
          (tool (chat-tool-caller-call-tool call))
@@ -1116,65 +1117,93 @@ loop."
          (tool-id (intern name))
          (actual-session (or session
                              (when (boundp 'chat--current-session)
-                               chat--current-session))))
+                               chat--current-session)))
+         (cancelled nil)
+         (active-handle nil)
+         (stable-handle
+          (list
+           :cancel
+           (lambda ()
+             (setq cancelled t)
+             (chat-tool-caller-cancel-handle active-handle)))))
     (condition-case err
-        (chat-tool-caller--with-execution-context actual-session
-          (chat-tool-caller--notify
-           observer
-           (append (list :type 'tool-call
-                         :tool name
-                         :arguments arguments)
-                   (when tool
-                     (chat-tool-caller--permission-metadata tool))))
-          (cond
-           ((null tool)
-            (funcall success (format "Error: Tool '%s' not found" name)))
-           ((not (chat-session-tool-enabled-p actual-session tool-id))
-            (let ((text (format "Error: Tool '%s' is disabled for this session"
-                                name)))
-              (chat-tool-caller--notify
-               observer
-               (list :type 'tool-error :tool name :result-summary text))
-              (funcall success text)))
-           ((not (chat-tool-caller--tool-available-in-session-p
-                  tool actual-session))
-            (let ((text (format "Error: Tool '%s' is unavailable for this turn"
-                                name)))
-              (chat-tool-caller--notify
-               observer
-               (list :type 'tool-error :tool name :result-summary text))
-              (funcall success text)))
-           (t
-            (chat-approval-authorize-async
-             tool call actual-session observer
-             (lambda (consent reason)
-               ;; Re-established here: with a guard this callback runs from
-               ;; an HTTP response, by which time the bindings above are
-               ;; gone.
-               (let ((chat-tool-caller-current-execution-context
-                      execution-context)
-                     (chat-tool-caller-current-state-session
-                      (or state-session actual-session)))
-                 (chat-tool-caller--with-execution-context actual-session
-                   (cond
-                    ((not consent)
-                     (let ((text (chat-tool-caller--denial-text name reason)))
-                       (chat-tool-caller--notify
-                        observer
-                        (list :type 'tool-error
-                              :tool name
-                              :result-summary
-                              (chat-tool-caller--compact-text text)))
-                       (funcall success text)))
-                    ((chat-forged-tool-async-function tool)
-                     (chat-tool-caller--run-async-tool
-                      tool name arguments consent
-                      observer success error-callback))
-                    (t
-                     (funcall success
-                              (chat-tool-caller--execute-authorized
-                               tool call actual-session observer
-                               consent)))))))))))
+        (progn
+          (chat-tool-caller--with-execution-context actual-session
+            (chat-tool-caller--notify
+             observer
+             (append (list :type 'tool-call
+                           :tool name
+                           :arguments arguments)
+                     (when tool
+                       (chat-tool-caller--permission-metadata tool))))
+            (cond
+             ((null tool)
+              (funcall success (format "Error: Tool '%s' not found" name)))
+             ((not (chat-session-tool-enabled-p actual-session tool-id))
+              (let ((text
+                     (format "Error: Tool '%s' is disabled for this session"
+                             name)))
+                (chat-tool-caller--notify
+                 observer
+                 (list :type 'tool-error :tool name :result-summary text))
+                (funcall success text)))
+             ((not (chat-tool-caller--tool-available-in-session-p
+                    tool actual-session))
+              (let ((text
+                     (format "Error: Tool '%s' is unavailable for this turn"
+                             name)))
+                (chat-tool-caller--notify
+                 observer
+                 (list :type 'tool-error :tool name :result-summary text))
+                (funcall success text)))
+             (t
+              (let ((authorization-handle
+                     (chat-approval-authorize-async
+                      tool call actual-session observer
+                      (lambda (consent reason)
+                        ;; Re-established here: with a guard this callback runs
+                        ;; from an HTTP response, by which time the bindings
+                        ;; above are gone.  A cancelled call ignores a late
+                        ;; verdict entirely; no tool may begin after its run
+                        ;; has already ended.
+                        (unless cancelled
+                          (let ((chat-tool-caller-current-execution-context
+                                 execution-context)
+                                (chat-tool-caller-current-state-session
+                                 (or state-session actual-session)))
+                            (chat-tool-caller--with-execution-context
+                                actual-session
+                              (cond
+                               ((not consent)
+                                (let ((text
+                                       (chat-tool-caller--denial-text
+                                        name reason)))
+                                  (chat-tool-caller--notify
+                                   observer
+                                   (list :type 'tool-error
+                                         :tool name
+                                         :result-summary
+                                         (chat-tool-caller--compact-text
+                                          text)))
+                                  (funcall success text)))
+                               ((chat-forged-tool-async-function tool)
+                                (setq
+                                 active-handle
+                                 (chat-tool-caller--run-async-tool
+                                  tool name arguments consent
+                                  observer success error-callback)))
+                               (t
+                                (funcall
+                                 success
+                                 (chat-tool-caller--execute-authorized
+                                  tool call actual-session observer
+                                  consent)))))))))))
+                ;; Fast-path approval may invoke the callback synchronously.
+                ;; Preserve the actual tool handle installed by that callback;
+                ;; otherwise track the still-pending authorization request.
+                (unless active-handle
+                  (setq active-handle authorization-handle))))))
+          stable-handle)
       (error
        (let ((text (format "Error executing tool '%s': %s"
                            name (error-message-string err)))

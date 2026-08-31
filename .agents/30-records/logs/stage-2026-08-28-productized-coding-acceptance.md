@@ -362,3 +362,22 @@ Both campaigns were intentionally stopped after these two diagnostic tasks.
 They remain immutable diagnostic evidence and do not replace a complete paired
 acceptance campaign. The Plan lifecycle fix must be committed and the same
 provider/model cases rerun on the new revision.
+
+Revision `4cf9d27` reran those exact provider/model cases. DeepSeek passed both:
+`coding/elisp-failing-test` in 58.280 seconds and `coding/elisp-locate` in
+18.872 seconds. The mutation changed only `sample.el`, passed its exact ERT
+judge, closed its Plan and cleaned the workspace. This verifies the Plan menu
+repair through the live API rather than only through unit tests.
+
+Kimi `k3-256k` passed locate in 14.042 seconds but its mutation was cancelled
+at 120.100 seconds after changing only `sample.el`. The first compile review
+again timed out at 20.005 seconds. A later retry returned allow after 12.022
+seconds, but it arrived 4.227 seconds after the Agent and workspace had already
+been cancelled. The callback then attempted to start the compile in the deleted
+workspace. This exposed a cancellation contract defect independent of verdict
+quality: the caller retained the Guard request handle and did not switch its
+cancellation target to the authorized tool. The tool caller now returns one
+stable handle whose active target moves from approval to execution; late
+verdicts after cancellation cannot start a tool. Focused cancellation tests
+cover the late-verdict, post-approval tool and synchronous fast-approval
+stages. The canonical repository suite passes 1903/1903 after this repair.

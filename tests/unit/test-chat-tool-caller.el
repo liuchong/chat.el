@@ -1021,6 +1021,85 @@ being a thing the reader could do when the two surfaces merged."
      (should (equal observed-observation-context context))
      (should (string= result "ok")))))
 
+(ert-deftest chat-tool-caller-cancellation-ignores-a-late-approval ()
+  "A verdict arriving after cancellation must not start the tool."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         decision
+         approval-cancelled
+         (executions 0)
+         result)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'late-tool :name "Late Tool" :language 'elisp
+      :compiled-function
+      (lambda ()
+        (cl-incf executions)
+        "ran")
+      :is-active t))
+    (cl-letf (((symbol-function 'chat-approval-authorize-async)
+               (lambda (_tool _call _session _observer callback)
+                 (setq decision callback)
+                 (list :cancel (lambda () (setq approval-cancelled t))))))
+      (let ((handle
+             (chat-tool-caller-execute-async
+              '(:name "late-tool" :arguments nil)
+              nil #'ignore (lambda (value) (setq result value)) #'ert-fail)))
+        (chat-tool-caller-cancel-handle handle)
+        (should approval-cancelled)
+        (funcall decision 'guard nil)))
+    (should (zerop executions))
+    (should-not result)))
+
+(ert-deftest chat-tool-caller-cancellation-follows-the-active-stage ()
+  "One stable handle cancels the tool that replaces its approval request."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         decision
+         approval-cancelled
+         tool-cancelled)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'staged-tool :name "Staged Tool" :language 'elisp
+      :async-function
+      (lambda (_arguments _success _error)
+        (list :cancel (lambda () (setq tool-cancelled t))))
+      :is-active t))
+    (cl-letf (((symbol-function 'chat-approval-authorize-async)
+               (lambda (_tool _call _session _observer callback)
+                 (setq decision callback)
+                 (list :cancel (lambda () (setq approval-cancelled t))))))
+      (let ((handle
+             (chat-tool-caller-execute-async
+              '(:name "staged-tool" :arguments nil)
+              nil #'ignore #'ignore #'ert-fail)))
+        (funcall decision 'guard nil)
+        (chat-tool-caller-cancel-handle handle)))
+    (should tool-cancelled)
+    (should-not approval-cancelled)))
+
+(ert-deftest chat-tool-caller-cancellation-preserves-a-synchronous-tool-handle ()
+  "Synchronous approval must not overwrite the running tool handle."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         approval-cancelled
+         tool-cancelled)
+    (chat-tool-forge-register
+     (make-chat-forged-tool
+      :id 'fast-tool :name "Fast Tool" :language 'elisp
+      :async-function
+      (lambda (_arguments _success _error)
+        (list :cancel (lambda () (setq tool-cancelled t))))
+      :is-active t))
+    (cl-letf (((symbol-function 'chat-approval-authorize-async)
+               (lambda (_tool _call _session _observer callback)
+                 (funcall callback 'rule nil)
+                 (list :cancel (lambda () (setq approval-cancelled t))))))
+      (let ((handle
+             (chat-tool-caller-execute-async
+              '(:name "fast-tool" :arguments nil)
+              nil #'ignore #'ignore #'ert-fail)))
+        (chat-tool-caller-cancel-handle handle)))
+    (should tool-cancelled)
+    (should-not approval-cancelled)))
+
 (ert-deftest chat-tool-caller-publishes-typed-file-consistency-errors ()
   "File consistency failures retain a stable type in observer events."
   (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))

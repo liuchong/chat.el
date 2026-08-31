@@ -923,6 +923,10 @@ spec 012 记过的那个形状("同一条 grant 生效与否取决于工具恰�
     理由说明该入口无法咨询 guard。
 32. `chat-tool-caller-process-response-data` 不再执行任何工具;既有关于它的测试改为
     只断言结果 plist 的构造。
+32a. 异步工具调用从授权开始到工具结束只向上层暴露一个稳定的 cancellation handle。
+     handle 在 Guard 请求、获批后的实际工具之间切换当前取消目标;取消发生后,迟到的
+     verdict 不得启动工具、发布 post-tool 或调用 success/error callback。若 verdict 与
+     取消并发,已经启动的实际工具成为当前取消目标,不能继续持有已经结束的 Guard 请求。
 
 ### 可见性
 
