@@ -92,6 +92,7 @@ watching a run must not be able to change what the run does.")
      (chat-agent-run-state-step run))
     (chat-agent--finish run 'stopped 'max-steps))
    (t
+    (chat-agent--apply-pending-model-switch run)
     (setf (chat-agent-run-state-step run)
           (1+ (chat-agent-run-state-step run)))
     (chat-agent--apply-steering run)
@@ -102,6 +103,26 @@ watching a run must not be able to change what the run does.")
     (setf (chat-agent-run-state-turn-open run) t)
     (chat-agent--emit run 'turn-start)
     (chat-agent--dispatch run))))
+
+(defun chat-agent--apply-pending-model-switch (run)
+  "Atomically apply RUN's pending model switch before a request starts."
+  (when-let ((switch (chat-agent-run-state-pending-model-switch run)))
+    (let ((provider (plist-get switch :provider))
+          (model (plist-get switch :model)))
+      (setf (chat-agent-run-state-provider run) provider
+            (chat-agent-run-state-model run) model
+            (chat-agent-run-state-request-options run)
+            (plist-put (copy-tree
+                        (or (plist-get switch :request-options)
+                            (chat-agent-run-state-request-options run)))
+                       :model model)
+            (chat-agent-run-state-pending-model-switch run) nil)
+      (chat-agent--emit run 'model-switched
+                        :provider provider
+                        :model model
+                        :operation-id (plist-get switch :operation-id)
+                        :source (plist-get switch :source))
+      switch)))
 
 (defun chat-agent--transform-context (run)
   "Let RUN transform its message context for this step."

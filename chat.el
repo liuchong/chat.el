@@ -98,6 +98,7 @@ Returns the list of files that were loaded."
 (require 'chat-content)
 (require 'chat-message-stage)
 (require 'chat-session)
+(require 'chat-model-selection)
 (require 'chat-session-export)
 (require 'chat-session-wire)
 (require 'chat-event)
@@ -872,9 +873,11 @@ the header and in which commands do anything."
   ;; `chat-ui-beginning-of-input'.
   (chat-markdown-setup-buffer)
   (setq-local completion-at-point-functions
-              '(chat-ui--command-completion-at-point
+              '(chat-ui--model-argument-completion-at-point
+                chat-ui--command-completion-at-point
                 chat-ui--path-completion-at-point))
   (setq-local chat-input-hint-providers nil)
+  (chat-input-hint-register-provider #'chat-ui--model-argument-hint-model t)
   (chat-input-hint-register-provider #'chat-ui--command-hint-model t)
   (add-hook 'post-command-hook #'chat-input-hint-refresh t t)
   ;; The prompt is read-only text, so re-running the mode over a buffer

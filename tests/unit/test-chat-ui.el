@@ -34,8 +34,8 @@
        (goto-char (point-max))
        (should (search-backward ">" nil t))))))
 
-(ert-deftest chat-set-model-retargets-and-persists-session ()
-  "Test switching model updates the session, the status line and the file."
+(ert-deftest chat-set-model-prepares-and-persists-the-next-target ()
+  "Prompt selection persists without changing the active session target."
   (chat-test-with-temp-dir
    (let* ((chat-session-auto-save t)
           (session (chat-session-create "Switch Session" 'kimi)))
@@ -43,15 +43,20 @@
        (setq-local chat--current-session session)
        (chat-ui-setup-buffer session)
        (chat-test-silently (chat-set-model 'kimi-code))
-       (should (eq (chat-session-model-id session) 'kimi-code))
-       (goto-char (point-min))
-       (should (search-forward "Model: kimi-code" nil t))
-       ;; Reload from disk: the switch has to survive a restart.
+       (should (eq (chat-session-model-id session) 'kimi))
+       (should (eq 'kimi-code
+                   (chat-model-target-provider
+                    (chat-model-selection-prepared session))))
+       (should (chat-model-selection-dirty-p session))
+       ;; Reload from disk: preparation has to survive a restart.
        (let ((reloaded (chat-session-load (chat-session-id session))))
-         (should (eq (chat-session-model-id reloaded) 'kimi-code)))))))
+         (should (eq 'kimi (chat-session-model-id reloaded)))
+         (should (eq 'kimi-code
+                     (chat-model-target-provider
+                      (chat-model-selection-prepared reloaded)))))))))
 
-(ert-deftest chat-set-model-slash-command-switches-without-sending ()
-  "Test /model <name> in the input area switches instead of being sent.
+(ert-deftest chat-set-model-slash-command-queues-a-boundary-switch ()
+  "Test /model <name> creates a pending switch instead of being sent.
 
 The help text has always advertised this command."
   (chat-test-with-temp-dir
@@ -67,7 +72,11 @@ The help text has always advertised this command."
          (chat-test-silently (chat-ui-send-message)))
        (should-not sent)
        (should-not (chat-session-messages session))
-       (should (eq (chat-session-model-id session) 'kimi-code))))))
+       (should (eq (chat-session-model-id session) 'kimi))
+       (should (eq 'kimi-code
+                   (chat-model-target-provider
+                    (chat-model-selection-prepared session))))
+       (should (chat-model-selection-pending session))))))
 
 (ert-deftest chat-set-model-rejects-unknown-provider ()
   "Test switching to an unregistered provider leaves the session alone."
@@ -78,18 +87,18 @@ The help text has always advertised this command."
        (should-error (chat-set-model 'no-such-provider) :type 'user-error)
        (should (eq (chat-session-model-id session) 'kimi))))))
 
-(ert-deftest chat-set-model-refuses-while-response-in-flight ()
-  "Test switching model is refused while a response is still arriving.
-
-Letting it through would return the reply from a provider other than the
-one that was asked."
+(ert-deftest chat-set-model-prepares-while-response-is-in-flight ()
+  "Prompt selection can prepare the next send without touching this reply."
   (chat-test-with-temp-dir
    (let ((session (chat-session-create "Switch Session" 'kimi)))
      (with-temp-buffer
        (setq-local chat--current-session session)
        (setq-local chat-ui--active-request-handle 'pending)
-       (should-error (chat-set-model 'kimi-code) :type 'user-error)
-       (should (eq (chat-session-model-id session) 'kimi))))))
+       (chat-test-silently (chat-set-model 'kimi-code))
+       (should (eq (chat-session-model-id session) 'kimi))
+       (should (eq 'kimi-code
+                   (chat-model-target-provider
+                    (chat-model-selection-prepared session))))))))
 
 (ert-deftest chat-set-model-offers-enabled-providers-for-completion ()
   "Test completion candidates come from the enabled provider registry."
@@ -1528,11 +1537,15 @@ symbol and not its display name."
 
 (ert-deftest chat-ui-the-prompt-draws-the-vendor-not-the-protocol-alias ()
   "Two transports for one vendor must select the same packaged logo."
-  (let (drawn-provider)
-    (cl-letf (((symbol-function 'chat-ui--session-provider)
-               (lambda () 'deepseek-anthropic))
-              ((symbol-function 'chat-ui--session-model-name)
-               (lambda (&optional _session) "deepseek-v4-flash"))
+  (let ((chat--current-session t)
+        drawn-provider)
+    (cl-letf (((symbol-function 'chat-model-selection-prepared)
+               (lambda (_session)
+                 (make-chat-model-target
+                  :provider 'deepseek-anthropic
+                  :model "deepseek-v4-flash")))
+              ((symbol-function 'chat-model-selection-dirty-p)
+               (lambda (_session) nil))
               ((symbol-function 'chat-llm-get-provider-config)
                (lambda (_provider) '(:name "DeepSeek (Anthropic)")))
               ((symbol-function 'chat-llm-provider-vendor)
@@ -1707,10 +1720,13 @@ someone sees when they go to switch."
      (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
                ((symbol-function 'completing-read)
                 (lambda (_prompt collection &rest _)
-                  (seq-find (lambda (label) (string-prefix-p "Claude" label))
+                  (seq-find (lambda (label) (string-prefix-p "claude/" label))
                             collection))))
       (chat-ui-switch-model)
-      (should (eq 'claude (chat-session-model-id chat--current-session)))
+      (should (eq 'kimi (chat-session-model-id chat--current-session)))
+      (should (eq 'claude
+                  (chat-model-target-provider
+                   (chat-model-selection-prepared chat--current-session))))
       ;; And the prompt says so, or the two places that name the model
       ;; would disagree.
       (should (string-match-p
@@ -1746,9 +1762,11 @@ runs."
             (should (symbolp (car (cdr item))))
             (should (stringp (cdr (cdr item))))))
         ;; Whichever vendor came first, both halves of its item landed.
-        (let ((provider (chat-session-model-id chat--current-session)))
+        (let* ((prepared
+                (chat-model-selection-prepared chat--current-session))
+               (provider (chat-model-target-provider prepared)))
           (should (memq provider '(kimi claude)))
-          (should (member (chat-session-model-name chat--current-session)
+          (should (member (chat-model-target-model prepared)
                           (chat-llm-provider-models provider)))))))))
 
 (ert-deftest chat-ui-the-menu-groups-models-under-their-vendor ()
@@ -1796,8 +1814,11 @@ companies."
    (should (chat-llm-get-provider-config 'kimi-code-anthropic))
    (chat-set-model 'kimi-code-anthropic "k3")
    (should (eq 'kimi-code-anthropic
-               (chat-session-model-id chat--current-session)))
-   (should (equal "k3" (chat-session-model-name chat--current-session)))))
+               (chat-model-target-provider
+                (chat-model-selection-prepared chat--current-session))))
+   (should (equal "k3"
+                  (chat-model-target-model
+                   (chat-model-selection-prepared chat--current-session))))))
 
 (ert-deftest chat-ui-the-menu-marks-where-the-session-already-is ()
   "The first question on opening the menu is where you already are."
@@ -1826,16 +1847,13 @@ preventing mistakes and starts causing them."
                                 :model))
        prompt)))))
 
-(ert-deftest chat-ui-an-unpinned-session-follows-the-provider-default ()
-  "nil is a value, not an absence: it means \"whatever the default is\".
-
-Writing the default into the session would freeze one snapshot of a
-setting the configuration may change -- the registry bug, moved."
+(ert-deftest chat-ui-an-unpinned-choice-resolves-the-provider-default ()
+  "A provider-only choice becomes one concrete prepared target."
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code)
-   (should (null (chat-session-model-name chat--current-session)))
    (should (equal (plist-get (chat-llm-get-provider-config 'kimi-code) :model)
-                  (chat-ui--session-model-name)))))
+                  (chat-model-target-model
+                   (chat-model-selection-prepared chat--current-session))))))
 
 (ert-deftest chat-ui-switching-vendor-drops-the-old-vendor-model ()
   "A model id belongs to the vendor that serves it.
@@ -1844,15 +1862,18 @@ Carried over, `k3' would be sent to DeepSeek, which can only refuse it."
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code "k3")
    (chat-set-model 'deepseek)
-   (should (null (chat-session-model-name chat--current-session)))))
+   (let ((prepared (chat-model-selection-prepared chat--current-session)))
+     (should (eq 'deepseek (chat-model-target-provider prepared)))
+     (should-not (equal "k3" (chat-model-target-model prepared))))))
 
 (ert-deftest chat-ui-a-model-the-provider-does-not-serve-is-refused ()
   "And the session is left where it was, not half-moved."
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code "k3")
    (should-error (chat-set-model 'deepseek "k3") :type 'user-error)
-   (should (eq 'kimi-code (chat-session-model-id chat--current-session)))
-   (should (equal "k3" (chat-session-model-name chat--current-session)))))
+   (let ((prepared (chat-model-selection-prepared chat--current-session)))
+     (should (eq 'kimi-code (chat-model-target-provider prepared)))
+     (should (equal "k3" (chat-model-target-model prepared))))))
 
 (defun chat-ui-auto-test--agent-config ()
   "Return the config the UI hands to the Agent kernel."
@@ -1868,6 +1889,8 @@ Carried over, `k3' would be sent to DeepSeek, which can only refuse it."
   "The point of pinning.  Read out of the same options the transport gets."
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code "k3-256k")
+   (chat-ui--activate-model-target
+    (chat-model-selection-prepared chat--current-session))
    (let* ((config (chat-ui-auto-test--agent-config))
           (diagnostics
            (chat-request-diagnostics-snapshot chat-ui--current-request-id)))
@@ -1878,18 +1901,26 @@ Carried over, `k3' would be sent to DeepSeek, which can only refuse it."
   ;; An unpinned session resolves the provider default once when the run starts.
   (chat-ui-auto-test--with-session
    (chat-set-model 'kimi-code)
+   (chat-ui--activate-model-target
+    (chat-model-selection-prepared chat--current-session))
    (should (equal (plist-get (chat-llm-get-provider-config 'kimi-code) :model)
                   (plist-get (chat-ui-auto-test--agent-config) :model)))))
 
-(ert-deftest chat-ui-switching-provider-is-refused-mid-response ()
-  "The reply would come back from a provider that was never asked."
+(ert-deftest chat-ui-switching-provider-prepares-mid-response ()
+  "The prompt can change while the active reply stays on its pinned model."
   (chat-ui-auto-test--with-session
    (chat-ui-auto-test--with-providers '(kimi claude)
     (cl-letf (((symbol-function 'display-popup-menus-p) (lambda () nil))
               ((symbol-function 'completing-read)
-               (lambda (_prompt collection &rest _) (car collection)))
+               (lambda (_prompt collection &rest _)
+                 (seq-find (lambda (label) (string-prefix-p "claude/" label))
+                           collection)))
               ((symbol-function 'chat-ui--response-active-p) (lambda () t)))
-      (should-error (chat-ui-switch-model) :type 'user-error)))))
+      (chat-ui-switch-model)
+      (should (eq 'kimi (chat-session-model-id chat--current-session)))
+      (should (eq 'claude
+                  (chat-model-target-provider
+                   (chat-model-selection-prepared chat--current-session))))))))
 
 (ert-deftest chat-ui-switching-provider-says-so-when-there-is-nothing-to-pick ()
   "One provider is not a menu."

@@ -260,6 +260,21 @@ answer came back."
     (should (equal "k3-256k" (alist-get 'model payload)))
     (should (equal "request-42" (alist-get 'request_id payload)))))
 
+(ert-deftest chat-wire-records-an-applied-model-switch ()
+  "Applied switches retain their identity without carrying the run."
+  (let ((payload
+         (chat-agent-wire-payload
+          '(:type model-switched
+            :provider deepseek
+            :model "deepseek-v4-flash"
+            :operation-id "model-switch-42"
+            :source command
+            :run nil))))
+    (should (equal "deepseek" (alist-get 'provider payload)))
+    (should (equal "deepseek-v4-flash" (alist-get 'model payload)))
+    (should (equal "model-switch-42" (alist-get 'operation_id payload)))
+    (should (equal "command" (alist-get 'source payload)))))
+
 (ert-deftest chat-wire-a-tool-result-is-measured-not-copied ()
   "A tool event records the size of its result, not the result."
   (let* ((summary (make-string 40000 ?y))

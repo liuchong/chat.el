@@ -123,6 +123,15 @@ a run that worked into a run that failed while being watched."
                            (plist-get event :model)))
              (cons 'request_id (chat-agent-wire--short
                                 (plist-get event :request-id)))))
+      ('model-switched
+       (list (cons 'provider (chat-agent-wire--name
+                              (plist-get event :provider)))
+             (cons 'model (chat-agent-wire--short
+                           (plist-get event :model)))
+             (cons 'operation_id (chat-agent-wire--short
+                                  (plist-get event :operation-id)))
+             (cons 'source (chat-agent-wire--name
+                            (plist-get event :source)))))
       ('context-transformed
        (list (cons 'message_count (plist-get event :message-count))))
       ('context-bundle

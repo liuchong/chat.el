@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'chat-agent-types)
 (require 'chat-agent-loop)
 (require 'chat-agent-profile)
@@ -273,6 +274,39 @@ Events are delivered synchronously through :on-event.  The final
   (when (chat-agent-run-state-p run)
     (setf (chat-agent-run-state-followup-queue run) nil)
     t))
+
+(defun chat-agent-schedule-model-switch
+    (run provider model operation-id source request-options)
+  "Apply PROVIDER and MODEL to RUN at its next request boundary.
+OPERATION-ID and SOURCE identify the user-visible transition.  Scheduling
+never cancels or mutates the request already in flight; a newer schedule
+replaces an older one that has not yet reached a boundary.  REQUEST-OPTIONS
+is the complete provider-specific base for subsequent requests."
+  (unless (chat-agent-run-state-p run)
+    (user-error "No agent run can accept a model switch"))
+  (unless (and (symbolp provider)
+               (stringp model)
+               (not (string-empty-p model)))
+    (user-error "A model switch needs a provider and concrete model"))
+  (setf (chat-agent-run-state-pending-model-switch run)
+        (list :provider provider
+              :model model
+              :operation-id operation-id
+              :source source
+              :request-options (copy-tree request-options)))
+  (chat-agent-run-state-pending-model-switch run))
+
+(defun chat-agent-cancel-model-switch (run &optional operation-id)
+  "Cancel RUN's pending model switch and return non-nil when one was cleared.
+When OPERATION-ID is non-nil, leave a newer or otherwise different operation
+alone.  This keeps UI supersession from cancelling intent it did not create."
+  (when (chat-agent-run-state-p run)
+    (let ((pending (chat-agent-run-state-pending-model-switch run)))
+      (when (and pending
+                 (or (null operation-id)
+                     (equal operation-id (plist-get pending :operation-id))))
+        (setf (chat-agent-run-state-pending-model-switch run) nil)
+        t))))
 
 (defun chat-agent-stop (run &optional reason)
   "Stop RUN without treating it as an error."

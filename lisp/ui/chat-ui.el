@@ -30,6 +30,7 @@
 (declare-function chat-wiki-dispatch "chat-wiki" (arg))
 (declare-function ansi-color-apply "ansi-color" (string))
 (require 'chat-session)
+(require 'chat-model-selection)
 (require 'chat-content)
 (require 'chat-message-stage)
 (require 'chat-checkpoint)
@@ -142,6 +143,9 @@ the binding is lexical and does nothing at all.")
 
 (defvar chat-ui--send-content-parts-consumed nil
   "Non-nil when the current dispatch recorded or queued its attachments.")
+
+(defvar chat-ui--submitted-model-target nil
+  "Model target captured by the input currently crossing a send boundary.")
 
 (defconst chat-ui-send-modes '(insert queue interrupt)
   "How input is handled when a run is already in progress.
@@ -821,6 +825,46 @@ whoever is reading it."
                :frequency (chat-ui--command-usage-count canonical))))
           chat-ui--command-table))))))
 
+(defun chat-ui--model-argument-bounds ()
+  "Return bounds of a `/model' target being typed at point, or nil."
+  (when (and (chat-ui--point-in-input-p)
+             (= (point) (point-max)))
+    (let* ((input-start (marker-position chat-ui--input-overlay))
+           (text (buffer-substring-no-properties input-start (point))))
+      (when (string-match
+             "\\`[/／]model[[:space:]]+\\([^[:space:]]*\\)\\'" text)
+        (cons (+ input-start (match-beginning 1))
+              (+ input-start (match-end 1)))))))
+
+(defun chat-ui--model-argument-completion-at-point ()
+  "Complete a `/model' target without opening a selection session."
+  (when-let ((bounds (chat-ui--model-argument-bounds)))
+    (list (car bounds)
+          (cdr bounds)
+          (mapcar #'car (chat-ui--model-target-candidates))
+          :exclusive 'no
+          :company-kind (lambda (_candidate) 'value))))
+
+(defun chat-ui--model-argument-hint-model ()
+  "Return passive configured-model hints after `/model', or nil."
+  (when-let ((bounds (chat-ui--model-argument-bounds)))
+    (let ((prefix (buffer-substring-no-properties (car bounds) (cdr bounds))))
+      (make-chat-input-hint-model
+       :source 'model-target
+       :prefix prefix
+       :anchor-start (car bounds)
+       :anchor-end (cdr bounds)
+       :candidates
+       (mapcar
+        (lambda (entry)
+          (make-chat-input-hint-candidate
+           :key (car entry)
+           :completion (car entry)
+           :display (car entry)
+           :annotation ""
+           :frequency 0))
+        (chat-ui--model-target-candidates))))))
+
 (defun chat-ui--path-token-p (token)
   "Return non-nil when TOKEN looks like a file path fragment."
   (and (stringp token)
@@ -1488,6 +1532,19 @@ the reader was looking."
        (when ,inside
          (goto-char chat-ui--messages-end)))))
 
+(defun chat-ui--insert-pending-model-switch ()
+  "Insert the current pending model switch as a transient bottom row."
+  (when-let* ((pending (and chat--current-session
+                            (chat-model-selection-pending
+                             chat--current-session)))
+              (provider (alist-get 'provider pending))
+              (model (alist-get 'model pending)))
+    (insert
+     (propertize
+      (format "  Pending model switch: %s/%s\n" provider model)
+      'face 'shadow
+      'chat-ui-transient-model-switch (alist-get 'id pending)))))
+
 (defun chat-ui--render-live-region ()
   "Redraw the in-flight tail of the current turn.
 
@@ -1539,6 +1596,7 @@ prose, and the fence that would have closed it is never reconsidered."
             (chat-ui--insert-formatted-response content)
             (insert "\n\n")))
         (chat-ui--insert-live-trailers)
+        (chat-ui--insert-pending-model-switch)
         (set-marker chat-ui--messages-end (point)))
       (setq chat-ui--last-render
             (and body
@@ -1715,7 +1773,7 @@ the badge directly against the model name."
     ""))
 
 (defun chat-ui--prompt-model-segment ()
-  "Return the segment naming the provider and model plain input reaches.
+  "Return the segment naming the model prepared for the next input.
 
 The model named is the one the request will actually carry, not the
 provider symbol and not its display name: a prompt that names something
@@ -1724,21 +1782,28 @@ causing them.
 
 Clickable only when there is more than one provider to choose from.  A
 `mouse-face' over a menu of one promises a choice that does not exist."
-  (let* ((provider (chat-ui--session-provider))
+  (let* ((target (and chat--current-session
+                      (chat-model-selection-prepared chat--current-session)))
+         (provider (and target (chat-model-target-provider target)))
          (vendor (and provider (chat-llm-provider-vendor provider)))
          (mark-provider (or vendor provider))
          (config (and provider (chat-llm-get-provider-config provider)))
          (display-name (plist-get config :name))
-         (model (or (chat-ui--session-model-name)
+         (model (or (and target (chat-model-target-model target))
                     (and provider (symbol-name provider))
                     ""))
+         (dirty (and chat--current-session
+                     (chat-model-selection-dirty-p chat--current-session)))
          (mark (chat-mark-for-provider mark-provider display-name))
          (switchable (> (chat-ui--model-choice-count) 1))
          (shown (truncate-string-to-width
-                 model chat-ui-prompt-model-width nil nil "\u2026"))
+                 (concat model (if dirty " (*)" ""))
+                 chat-ui-prompt-model-width nil nil "\u2026"))
          (help (if switchable
-                   (chat-i18n 'prompt-model-switch
-                              "%s -- mouse-1 to switch model" model)
+                   (if dirty
+                       (format "%s -- prepared; mouse-1 to change" model)
+                     (chat-i18n 'prompt-model-switch
+                                "%s -- mouse-1 to switch model" model))
                  model)))
     (concat
      (chat-ui--prompt-mark
@@ -2596,10 +2661,19 @@ two settings nobody can talk about."
           (when mode (cons 'mode (format "%s" mode)))))
    :subject message))
 
-(defun chat-ui--send-user-message (content &optional content-parts metadata)
+(defun chat-ui--send-user-message (content &optional content-parts metadata model-target)
   "Record CONTENT and CONTENT-PARTS as a user message, then respond.
-METADATA records provenance supplied by the input surface."
-  (let* ((attachments (or content-parts chat-ui--send-content-parts))
+METADATA records provenance supplied by the input surface.  MODEL-TARGET
+is the immutable target captured when the input was submitted."
+  (let* ((model-target (or model-target chat-ui--submitted-model-target
+                           (chat-model-selection-prepared
+                            chat--current-session)))
+         (metadata (copy-tree metadata))
+         (metadata (plist-put metadata :model-provider
+                              (chat-model-target-provider model-target)))
+         (metadata (plist-put metadata :model-name
+                              (chat-model-target-model model-target)))
+         (attachments (or content-parts chat-ui--send-content-parts))
          (parts (chat-content-parts-with-text attachments content)))
     (if (and (string-empty-p content) (null parts))
         (message "%s" (chat-i18n 'empty-message "Cannot send empty message"))
@@ -2639,6 +2713,7 @@ METADATA records provenance supplied by the input surface."
                  (message "Message not sent: checkpoint failed: %s"
                           (error-message-string err))))
               (unless checkpoint-error
+                (chat-ui--activate-model-target model-target)
                 (chat-session-add-message chat--current-session user-msg)
                 ;; A staged batch remains recoverable until its canonical
                 ;; user message has passed the checkpoint and been recorded.
@@ -2677,12 +2752,19 @@ is what lets the display group them instead of guessing from position."
                         (chat-session-messages chat--current-session)))
    :category 'user))
 
-(defun chat-ui--steer-active-agent (content)
-  "Queue CONTENT for the response that is already running."
-  (let* ((user-msg (make-chat-message
+(defun chat-ui--steer-active-agent (content &optional model-target)
+  "Queue CONTENT and MODEL-TARGET for the response already running."
+  (let* ((model-target (or model-target chat-ui--submitted-model-target))
+         (user-msg (make-chat-message
                     :id (chat-session-new-message-id)
                     :role :user
                     :content content
+                    :metadata
+                    (and model-target
+                         (list :model-provider
+                               (chat-model-target-provider model-target)
+                               :model-name
+                               (chat-model-target-model model-target)))
                     :timestamp (current-time)))
          (event (chat-ui--prompt-event
                  'user-prompt-submitted user-msg nil 'steering))
@@ -2696,6 +2778,35 @@ is what lets the display group them instead of guessing from position."
              "runtime policy returned an invalid message"))
       (chat-session-add-message chat--current-session user-msg)
       (chat-ui--redraw-conversation)
+      (when (and model-target
+                 (not
+                  (chat-model-selection-target-equal-p
+                   model-target
+                   (make-chat-model-target
+                    :provider (chat-agent-run-state-provider
+                               chat-ui--active-agent-run)
+                    :model (chat-agent-run-state-model
+                            chat-ui--active-agent-run)))))
+        (let* ((existing (chat-model-selection-pending
+                          chat--current-session))
+               (existing-target (chat-model-selection-pending-target
+                                 chat--current-session))
+               (pending
+                (if (chat-model-selection-target-equal-p
+                     existing-target model-target)
+                    existing
+                  (chat-model-selection-request
+                   chat--current-session model-target 'message))))
+          (chat-agent-schedule-model-switch
+           chat-ui--active-agent-run
+           (chat-model-target-provider model-target)
+           (chat-model-target-model model-target)
+           (alist-get 'id pending)
+           (chat-ui--pending-model-switch-source pending)
+           (chat-ui--model-switch-request-options
+            chat-ui--active-agent-run model-target))
+          (chat-ui--render-input-prompt)
+          (chat-ui--render-live-region)))
       (chat-agent-steer chat-ui--active-agent-run user-msg)
       (message "%s" (chat-i18n 'message-queued
                             "Message queued for the active response.")))))
@@ -2927,15 +3038,14 @@ is what lets the display group them instead of guessing from position."
   (message "%s" (chat-i18n 'request-cancelled "Request cancelled.")))
 
 (defun chat-ui--command-model (arg)
-  "Point this session at the provider named ARG, prompting when empty.
-
-ARG is a provider id, so it is folded and lowercased: an input method left
-in fullwidth mode would otherwise intern `ｋｉｍｉ', which is not a
-provider and reads identically to the one that is."
-  (let ((name (downcase (chat-command-fold-name arg))))
-    (if (string-empty-p name)
-        (call-interactively #'chat-set-model)
-      (chat-set-model (intern name)))))
+  "Request the model target named by ARG at the next request boundary."
+  (let ((target (or (chat-ui--resolve-model-target arg)
+                    (chat-ui--read-model-target))))
+    (when target
+      (chat-ui--request-model-switch target 'command)
+      (message "Model switch pending: %s/%s"
+               (chat-model-target-provider target)
+               (chat-model-target-model target)))))
 
 (defun chat-ui--command-shell (arg)
   "Run ARG as a shell command."
@@ -3014,18 +3124,21 @@ of one, which changes the mode for later ones."
 
 With nothing running the three modes are the same thing, because there is
 nothing to insert into, wait for, or interrupt."
-  (let ((parts (or content-parts chat-ui--send-content-parts)))
+  (let ((parts (or content-parts chat-ui--send-content-parts))
+        (chat-ui--submitted-model-target
+         (and chat--current-session
+              (chat-model-selection-prepared chat--current-session))))
     (cond
      ((not (chat-agent-active-p chat-ui--active-agent-run))
       (chat-ui--send-user-message content parts metadata))
      ((eq mode 'queue) (chat-ui--queue-send content parts metadata))
      ((eq mode 'interrupt) (chat-ui--interrupt-with content parts))
-     (parts (chat-ui--queue-send content parts))
+     (parts (chat-ui--queue-send content parts metadata))
      (t (chat-ui--steer-active-agent content)))))
 
-(defun chat-ui--draft (content parts &optional metadata)
-  "Return a queued draft for CONTENT, typed PARTS and METADATA."
-  (list :text content :parts parts :metadata metadata))
+(defun chat-ui--draft (content parts &optional metadata model-target)
+  "Return a queued draft for CONTENT, PARTS, METADATA and MODEL-TARGET."
+  (list :text content :parts parts :metadata metadata :model-target model-target))
 
 (defun chat-ui--draft-text (draft)
   "Return DRAFT text."
@@ -3039,9 +3152,15 @@ nothing to insert into, wait for, or interrupt."
   "Return DRAFT message metadata."
   (plist-get draft :metadata))
 
-(defun chat-ui--queue-send (content &optional content-parts metadata)
-  "Hold CONTENT, CONTENT-PARTS and METADATA until the run finishes."
-  (let ((draft (chat-ui--draft content content-parts metadata)))
+(defun chat-ui--draft-model-target (draft)
+  "Return the immutable model target captured by DRAFT."
+  (plist-get draft :model-target))
+
+(defun chat-ui--queue-send (content &optional content-parts metadata model-target)
+  "Hold CONTENT, CONTENT-PARTS, METADATA and MODEL-TARGET until later."
+  (let ((draft (chat-ui--draft
+                content content-parts metadata
+                (or model-target chat-ui--submitted-model-target))))
     (setq chat-ui--queued-sends (append chat-ui--queued-sends (list draft)))
     (setq chat-ui--send-content-parts-consumed (and content-parts t))
     (chat-event-publish
@@ -3070,15 +3189,17 @@ Swallowing the input would be worse than carrying a failure forward."
        (lambda ()
          (when (buffer-live-p buffer)
            (with-current-buffer buffer
-             (chat-ui--send-user-message
-              (chat-ui--draft-text next)
-              (chat-ui--draft-parts next)
-              (chat-ui--draft-metadata next)))))))))
+             (let ((chat-ui--submitted-model-target
+                    (chat-ui--draft-model-target next)))
+               (chat-ui--send-user-message
+                (chat-ui--draft-text next)
+                (chat-ui--draft-parts next)
+                (chat-ui--draft-metadata next))))))))))
 
 (defconst chat-ui--interrupted-marker "[interrupted after %s characters]"
   "How a reply cut short introduces itself to later turns.")
 
-(defun chat-ui--interrupt-with (content &optional content-parts)
+(defun chat-ui--interrupt-with (content &optional content-parts model-target)
   "Stop the current run, keep what it produced, and send CONTENT instead.
 
 Keeping it is the part that did not exist.  A cancelled run's in-flight
@@ -3099,9 +3220,11 @@ had already completed were always kept; this is about the one in flight."
         :timestamp (current-time))))
     (chat-ui-cancel-response)
     (chat-ui--redraw-conversation)
-    (if content-parts
-        (chat-ui--send-user-message content content-parts)
-      (chat-ui--send-user-message content))))
+    (let ((chat-ui--submitted-model-target
+           (or model-target chat-ui--submitted-model-target)))
+      (if content-parts
+          (chat-ui--send-user-message content content-parts)
+        (chat-ui--send-user-message content)))))
 
 (defun chat-ui--command-quick (arg)
   "Ask the model ARG once, without recording it in the session."
@@ -4019,6 +4142,16 @@ assistant response being filled in."
                      (plist-get event :model)))))
          ((eq type 'model-usage)
           nil)
+         ((eq type 'model-switched)
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (let ((target
+                     (chat-model-selection-target
+                      (plist-get event :provider)
+                      (plist-get event :model))))
+                (chat-ui--activate-model-target
+                 target (plist-get event :operation-id))
+                (chat-ui--redraw-conversation)))))
          ((eq type 'model-retry)
           ;; Runtime projection keeps the visible phase active while the
           ;; bounded wire record explains why this model request restarted.
@@ -4258,6 +4391,10 @@ assistant response being filled in."
                    :on-event
                    (chat-ui--make-agent-event-handler
                     session msg-id ui-buffer assistant-start request-id))))
+      ;; A queued message owns the model captured when it was submitted.
+      ;; If an explicit switch was requested later, its first legal boundary
+      ;; is this new run's continuation, not the queued message's first request.
+      (chat-ui--schedule-session-model-switch chat-ui--active-agent-run)
       (chat-ui--clock "start")
       (chat-ui--clock-report (format "%s send" transport)))))
 
@@ -4379,13 +4516,13 @@ Uses streaming if `chat-ui-use-streaming' is non-nil."
 
 ;;;###autoload
 (defun chat-set-model (model &optional model-name)
-  "Point the current chat session at provider MODEL.
+  "Prepare provider MODEL and MODEL-NAME for the next submitted input.
 
 Every session stores its own provider, so `chat-default-model' only
 decides what new sessions start with; a session restored from disk keeps
 whatever it was created with, even after the default changes or its
-provider stops working. This retargets the session in front of you and
-persists the change.
+provider stops working. This command persists a separate prepared target;
+the active target changes only when a submitted input crosses its boundary.
 
 MODEL-NAME pins which of that provider's models to ask for.  Given
 together rather than in two steps on purpose: between changing the
@@ -4395,10 +4532,11 @@ vendor with the old vendor's model id, which is nobody's valid pairing.
 Left out, any name the session had pinned is dropped, because a model id
 belongs to the vendor that serves it -- carrying `k3' over to DeepSeek
 would produce a request only the vendor can refuse.  The session then
-follows the new provider's default.
+resolves the new provider's current default into one concrete prepared target.
 
-Refuses while a response is in flight, because the reply would come back
-from a different provider than the one that was asked."
+The active request target is deliberately unchanged.  The prompt marks
+the prepared target dirty until a real message or `/model' transition
+reaches a request boundary."
   (interactive
    (list (intern
           (completing-read
@@ -4408,26 +4546,159 @@ from a different provider than the one that was asked."
            ;; key set moments from now is a reason to switch, and the
            ;; check below still catches a name that is nobody's provider.
            nil nil nil nil
-           (and chat--current-session
-                (symbol-name (chat-session-model-id chat--current-session)))))))
+           (when-let ((provider (chat-ui--session-provider)))
+             (symbol-name provider))))))
   (unless chat--current-session
     (user-error "No chat session in this buffer"))
-  (unless (chat-llm-get-provider-config model)
-    (user-error "Unknown provider: %s" model))
-  (when (and model-name
-             (not (member model-name (chat-llm-provider-models model))))
-    (user-error "Provider %s does not serve model %s" model model-name))
-  (when (chat-ui--response-active-p)
-    (user-error "Response in progress; cancel it before switching model"))
-  (setf (chat-session-model-id chat--current-session) model)
-  (setf (chat-session-model-name chat--current-session) model-name)
-  (when chat-session-auto-save
-    (chat-session-save chat--current-session))
-  (chat-ui--render-status-line)
-  ;; The prompt names the model too, so leaving it alone here would leave
-  ;; one of the two places that state it saying the wrong thing.
+  (let ((target (chat-model-selection-target model model-name))
+        (superseded (chat-model-selection-pending chat--current-session)))
+    ;; A manual prompt choice is newer intent than an un-applied command.
+    (chat-model-selection-prepare chat--current-session target)
+    (when (and superseded
+               (chat-agent-active-p chat-ui--active-agent-run))
+      (chat-agent-cancel-model-switch
+       chat-ui--active-agent-run (alist-get 'id superseded)))
+    (chat-ui--render-live-region))
   (chat-ui--render-input-prompt)
-  (message "Model switched to %s" (or model-name model)))
+  (message "Model prepared for the next send: %s"
+           (chat-model-target-model
+            (chat-model-selection-prepared chat--current-session))))
+
+(defun chat-ui--model-target-candidates ()
+  "Return configured model targets as (DISPLAY . TARGET) pairs."
+  (apply
+   #'append
+   (mapcar
+    (lambda (vendor)
+      (when-let* ((provider (chat-llm-vendor-primary-provider vendor)))
+        (mapcar
+         (lambda (model)
+           (cons (format "%s/%s" provider model)
+                 (chat-model-selection-target provider model)))
+         (chat-llm-provider-models provider))))
+    (chat-ui--offered-vendors))))
+
+(defun chat-ui--resolve-model-target (text)
+  "Resolve TEXT to exactly one configured model target."
+  (let* ((text (string-trim (chat-command-fold-name (or text ""))))
+         (candidates (chat-ui--model-target-candidates))
+         (direct (cdr (assoc-string text candidates t))))
+    (cond
+     (direct direct)
+     ((string-empty-p text) nil)
+     ((string-match "\\`\\([^/[:space:]]+\\)[/[:space:]]+\\(.+\\)\\'" text)
+      (chat-model-selection-target
+       (intern (downcase (match-string 1 text)))
+       (match-string 2 text)))
+     ((chat-llm-get-provider-config (intern (downcase text)))
+      (chat-model-selection-target (intern (downcase text))))
+     (t
+      (let ((matches
+             (seq-filter
+              (lambda (entry)
+                (equal (downcase text)
+                       (downcase (chat-model-target-model (cdr entry)))))
+              candidates)))
+        (cond
+         ((null matches) (user-error "Unknown model target: %s" text))
+         ((cdr matches) (user-error "Ambiguous model target: %s" text))
+         (t (cdar matches))))))))
+
+(defun chat-ui--read-model-target (&optional event)
+  "Read one configured model target, using popup EVENT when possible."
+  (let ((groups (chat-ui--model-choices)))
+    (cond
+     ((null groups) (user-error "No providers are configured"))
+     ((and event (display-popup-menus-p) (listp event))
+      (when-let ((chosen (x-popup-menu
+                          event
+                          (cons (chat-i18n 'switch-model-title "Model") groups))))
+        (chat-model-selection-target (car chosen) (cdr chosen))))
+     (t
+      (let* ((candidates (chat-ui--model-target-candidates))
+             (name (completing-read "Model: " (mapcar #'car candidates) nil t)))
+        (cdr (assoc name candidates)))))))
+
+(defun chat-ui--pending-model-switch-source (pending)
+  "Return PENDING's source as a symbol."
+  (let ((source (alist-get 'source pending)))
+    (if (symbolp source) source (and source (intern source)))))
+
+(defun chat-ui--model-switch-request-options (run target)
+  "Return complete request options for RUN after switching to TARGET."
+  (let ((options (copy-tree (chat-agent-run-state-request-options run))))
+    (setq options
+          (plist-put options :max-tokens
+                     (chat-ui--request-output-budget
+                      (chat-model-target-provider target))))
+    (plist-put options :model (chat-model-target-model target))))
+
+(defun chat-ui--append-applied-model-switch (pending target)
+  "Record applied PENDING for TARGET as display-only transcript history."
+  (when (eq (chat-ui--pending-model-switch-source pending) 'command)
+    (chat-session-add-message
+     chat--current-session
+     (chat-transcript-stamp
+      (make-chat-message
+       :id (or (alist-get 'id pending) (chat-session-new-message-id))
+       :role :system
+       :content (format "Model switched to %s/%s"
+                        (chat-model-target-provider target)
+                        (chat-model-target-model target))
+       :metadata (list :model-switch-id (alist-get 'id pending)
+                       :provider (chat-model-target-provider target)
+                       :model (chat-model-target-model target))
+       :timestamp (current-time))
+      :category 'command-reply))))
+
+(defun chat-ui--activate-model-target (target &optional operation-id)
+  "Activate TARGET for the current session and return consumed operation."
+  (let ((pending (chat-model-selection-activate
+                  chat--current-session target operation-id)))
+    (when pending
+      (chat-ui--append-applied-model-switch pending target))
+    (chat-ui--render-status-line)
+    (chat-ui--render-input-prompt)
+    pending))
+
+(defun chat-ui--request-model-switch (target source)
+  "Request TARGET for the next boundary, attributed to SOURCE."
+  (let* ((pending (chat-model-selection-request
+                   chat--current-session target source))
+         (operation-id (alist-get 'id pending)))
+    (when (chat-agent-active-p chat-ui--active-agent-run)
+      (chat-agent-schedule-model-switch
+       chat-ui--active-agent-run
+       (chat-model-target-provider target)
+       (chat-model-target-model target)
+       operation-id source
+       (chat-ui--model-switch-request-options
+        chat-ui--active-agent-run target)))
+    (chat-ui--render-input-prompt)
+    (chat-ui--render-live-region)
+    pending))
+
+(defun chat-ui--schedule-session-model-switch (run)
+  "Schedule the current session switch on RUN's next continuation boundary."
+  (when-let* ((pending (and chat--current-session
+                            (chat-model-selection-pending
+                             chat--current-session)))
+              (target (chat-model-selection-pending-target
+                       chat--current-session)))
+    (when (and (chat-agent-active-p run)
+               (not
+                (chat-model-selection-target-equal-p
+                 target
+                 (make-chat-model-target
+                  :provider (chat-agent-run-state-provider run)
+                  :model (chat-agent-run-state-model run)))))
+      (chat-agent-schedule-model-switch
+       run
+       (chat-model-target-provider target)
+       (chat-model-target-model target)
+       (alist-get 'id pending)
+       (chat-ui--pending-model-switch-source pending)
+       (chat-ui--model-switch-request-options run target)))))
 
 (defun chat-ui--offered-providers ()
   "Return the providers worth offering a reader, in display order.
@@ -4440,27 +4711,13 @@ the register was offering a catalogue and calling it a choice.
 Sensed rather than declared: there is no list to maintain, and a key
 added or removed shows up the next time the prompt is drawn.
 
-The session's own provider is included even without a key, since a
-session sitting on one has to be able to see where it is and move off."
-  (let* ((configured (chat-llm-configured-providers))
-         (current (and chat--current-session
-                       (chat-session-model-id chat--current-session))))
-    (if (and current (not (memq current configured)))
-        (cons current configured)
-      configured)))
-
-(defun chat-ui--session-model-name (&optional session)
-  "Return the model id SESSION will actually ask for.
-
-What it pinned, or the provider's current default.  The one answer to
-\"which model is this\", so that the prompt, the menu's current marker and
-the request cannot disagree."
-  (let ((session (or session chat--current-session)))
-    (when session
-      (or (chat-session-model-name session)
-          (plist-get (chat-llm-get-provider-config
-                      (chat-session-model-id session))
-                     :model)))))
+The active and prepared providers are both included without a key, since
+the prompt must show where it is, where it is going, and let the user leave."
+  (let ((configured (chat-llm-configured-providers))
+        (active (and chat--current-session
+                     (chat-session-model-id chat--current-session)))
+        (prepared (chat-ui--session-provider)))
+    (delete-dups (append (delq nil (list active prepared)) configured))))
 
 (defun chat-ui--vendor-label (vendor provider)
   "Return the display name for VENDOR, reached through PROVIDER."
@@ -4492,18 +4749,25 @@ reachable over two protocols appears once."
                     (lambda (model)
                       ;; The reader's first question on opening the menu
                       ;; is where they already are.
-                      (cons (if (and (eq provider (chat-ui--session-provider))
-                                     (equal model (chat-ui--session-model-name)))
+                      (let ((prepared (and chat--current-session
+                                           (chat-model-selection-prepared
+                                            chat--current-session))))
+                        (cons (if (and prepared
+                                       (eq provider
+                                           (chat-model-target-provider prepared))
+                                       (equal model
+                                              (chat-model-target-model prepared)))
                                 (concat "* " model)
                               (concat "  " model))
-                            (cons provider model)))
+                              (cons provider model))))
                     models))))
          (chat-ui--offered-vendors))))
 
 (defun chat-ui--session-provider ()
-  "Return the provider the current session runs on, if there is one."
+  "Return the provider prepared at the current session prompt."
   (and chat--current-session
-       (chat-session-model-id chat--current-session)))
+       (chat-model-target-provider
+        (chat-model-selection-prepared chat--current-session))))
 
 (defun chat-ui--offered-vendors ()
   "Return the vendors worth offering, the session's own included."
@@ -4520,7 +4784,7 @@ reachable over two protocols appears once."
                      (chat-ui--model-choices))))
 
 (defun chat-ui-switch-model (&optional event)
-  "Choose the model this session talks to, from a menu.
+  "Prepare the model used by the next submitted input, from a menu.
 
 Bound to a click on the model named in the prompt, which is where the
 reader is already looking when they want to change it -- the model was
@@ -4528,8 +4792,8 @@ visible in one place and changeable in another.
 
 Grouped by vendor, one item per model.  Falls back to the minibuffer
 where a popup menu cannot be drawn, because Emacs in a terminal is not an
-edge case, and going through `chat-set-model' rather than setting the
-session fields directly keeps its refusal while a response is in flight."
+edge case.  Selection is preparation only; it never mutates an in-flight
+request."
   (interactive (list last-nonmenu-event))
   (let ((groups (chat-ui--model-choices)))
     (cond
@@ -4539,29 +4803,9 @@ session fields directly keeps its refusal while a response is in flight."
       (message "%s" (chat-i18n 'only-one-provider
                                "Only one model is configured")))
      (t
-      (let* ((title (chat-i18n 'switch-model-title "Model"))
-             (chosen
-              (if (and (display-popup-menus-p) (listp event))
-                  ;; One pane per vendor; each item's value is the
-                  ;; (PROVIDER . MODEL) pair, so the click hands back
-                  ;; both halves of the answer at once.
-                  (x-popup-menu event (cons title groups))
-                (let* ((flat (apply #'append
-                                    (mapcar
-                                     (lambda (group)
-                                       (mapcar
-                                        (lambda (item)
-                                          (cons (format "%s %s"
-                                                        (car group)
-                                                        (string-trim (car item)))
-                                                (cdr item)))
-                                        (cdr group)))
-                                     groups))))
-                  (cdr (assoc (completing-read (format "%s: " title)
-                                               (mapcar #'car flat) nil t)
-                              flat))))))
-        (when chosen
-          (chat-set-model (car chosen) (cdr chosen))))))))
+      (when-let ((target (chat-ui--read-model-target event)))
+        (chat-set-model (chat-model-target-provider target)
+                        (chat-model-target-model target)))))))
 
 (defun chat-ui--handle-tool-creation (content)
   "Handle tool creation request from CONTENT."

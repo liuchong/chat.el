@@ -77,6 +77,7 @@ reused.  Waiting is asynchronous and remains cancellable."
   content tool-events tool-calls tool-results
   raw-request raw-response
   handle cancelled done status reason
+  pending-model-switch
   (steering-queue nil)
   (followup-queue nil)
   (queue-mode 'fifo)
