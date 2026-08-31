@@ -29,12 +29,16 @@
   this into skipped trials or silently shrink the matrix
 - Campaign schema v2 stores invocation paths, canonical targets and versions in
   the immutable configuration digest and rejects drift on resume
-- Project verification adapters for the seven languages remain incomplete
+- Project verification adapters cover the seven extended ecosystems using
+  explicit project authority and fail closed on ambiguous markers
+- Zig requires a declared build test step; Clojure requires Lein; Java uses
+  offline Maven or a checked-in Gradle wrapper; TypeScript
+  avoids duplicate package typechecks; C/C++/SQL require exact `make test`
 - Run exact-model live work only after the offline gate: DeepSeek
   `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
 - The detailed current record is
-  `stage-2026-09-01-versioned-toolchain-provenance.md`
+  `stage-2026-09-01-language-verification-adapters.md`
 
 ## Avoid
 

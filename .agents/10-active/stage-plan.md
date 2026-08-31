@@ -40,10 +40,11 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-Commit versioned toolchain provenance after the canonical suite passes, then
-add conservative language-aware project verification adapters. The complete offline gate must
-pass before exact-model mutation smokes or repeated provider campaigns begin.
-DeepSeek and Kimi results remain independent and per-language.
+Close the conservative language-aware project verification adapter gate, then
+resolve the missing `lein` and `tsc` toolchains without silently shrinking the
+matrix. The complete offline gate must pass before exact-model mutation smokes
+or repeated provider campaigns begin. DeepSeek and Kimi results remain
+independent and per-language.
 
 ## Stage Gate
 

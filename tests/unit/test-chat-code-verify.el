@@ -106,6 +106,102 @@
      (should (equal (mapcar #'chat-verification-step-argv steps)
                     '(("node" "test.js") ("node" "test.mjs")))))))
 
+(ert-deftest chat-code-verify-detects-authoritative-extended-language-checks ()
+  "Extended ecosystems produce checks only from authoritative markers."
+  (dolist
+      (case
+       `(("build.zig"
+          "pub fn build(b: *std.Build) void { _ = b.step(\"test\", \"Run\"); }"
+          "zig-test" ("zig" "build" "test"))
+         ("project.clj" "(defproject sample \"0\")"
+          "clojure-test" ("lein" "test"))
+         ("pom.xml" "<project/>"
+          "java-maven-test" ("mvn" "-o" "test"))
+         ("tsconfig.json" "{}"
+          "typescript-typecheck" ("tsc" "--noEmit" "--project" "tsconfig.json"))
+         ("Makefile" "test:\n\t@true\n"
+          "make-test" ("make" "test"))))
+    (chat-test-with-temp-dir
+     (with-temp-file (expand-file-name (nth 0 case) temp-dir)
+       (insert (nth 1 case)))
+     (let* ((profile (chat-code-verify-plan temp-dir nil))
+            (steps (chat-verification-profile-steps profile)))
+       (should (= (length steps) 1))
+       (should (equal (chat-verification-step-id (car steps)) (nth 2 case)))
+       (should (equal (chat-verification-step-argv (car steps)) (nth 3 case)))))))
+
+(ert-deftest chat-code-verify-prefers-project-local-typescript-compiler ()
+  "TypeScript verification uses the project's executable compiler when present."
+  (chat-test-with-temp-dir
+   (let ((compiler (expand-file-name "node_modules/.bin/tsc" temp-dir)))
+     (make-directory (file-name-directory compiler) t)
+     (with-temp-file compiler (insert "#!/bin/sh\nexit 0\n"))
+     (set-file-modes compiler #o755)
+     (with-temp-file (expand-file-name "tsconfig.json" temp-dir)
+       (insert "{}"))
+     (let* ((profile (chat-code-verify-plan temp-dir nil))
+            (step (car (chat-verification-profile-steps profile))))
+       (should (equal (chat-verification-step-argv step)
+                      (list (file-truename compiler)
+                            "--noEmit" "--project" "tsconfig.json")))))))
+
+(ert-deftest chat-code-verify-prefers-checked-in-java-wrapper ()
+  "Java verification uses the checked-in offline wrapper before global tools."
+  (chat-test-with-temp-dir
+   (let ((wrapper (expand-file-name "gradlew" temp-dir)))
+     (make-directory (expand-file-name "gradle/wrapper" temp-dir) t)
+     (with-temp-file wrapper (insert "#!/bin/sh\nexit 0\n"))
+     (set-file-modes wrapper #o755)
+     (with-temp-file (expand-file-name "build.gradle.kts" temp-dir)
+       (insert "plugins { java }"))
+     (with-temp-file
+         (expand-file-name "gradle/wrapper/gradle-wrapper.properties" temp-dir)
+       (insert "distributionUrl=local"))
+     (let* ((profile (chat-code-verify-plan temp-dir nil))
+            (step (car (chat-verification-profile-steps profile))))
+       (should (equal (chat-verification-step-argv step)
+                      (list (file-truename wrapper) "--offline" "test")))))))
+
+(ert-deftest chat-code-verify-project-config-overrides-language-detection ()
+  "Explicit project policy remains authoritative over language adapters."
+  (chat-test-with-temp-dir
+   (with-temp-file (expand-file-name "build.zig" temp-dir)
+     (insert "pub fn build(b: *std.Build) void { _ = b.step(\"test\", \"Run\"); }"))
+   (with-temp-file (expand-file-name ".chat-verification.json" temp-dir)
+     (insert
+      "{\"id\":\"explicit\",\"steps\":[{\"id\":\"chosen\",\"kind\":\"test\",\"argv\":[\"verify\"],\"required\":true}]}"))
+   (let* ((profile (chat-code-verify-plan temp-dir nil))
+          (steps (chat-verification-profile-steps profile)))
+     (should (eq (chat-verification-profile-source profile) 'project-config))
+     (should (equal (mapcar #'chat-verification-step-id steps) '("chosen"))))))
+
+(ert-deftest chat-code-verify-does-not-duplicate-package-typecheck ()
+  "A package typecheck script remains the sole TypeScript authority."
+  (chat-test-with-temp-dir
+   (with-temp-file (expand-file-name "package.json" temp-dir)
+     (insert "{\"scripts\":{\"typecheck\":\"tsc --noEmit\"}}"))
+   (with-temp-file (expand-file-name "tsconfig.json" temp-dir)
+     (insert "{}"))
+   (let* ((profile (chat-code-verify-plan temp-dir '("src/a.ts")))
+          (steps (chat-verification-profile-steps profile)))
+     (should (equal (mapcar #'chat-verification-step-id steps)
+                    '("javascript-typecheck"))))))
+
+(ert-deftest chat-code-verify-refuses-ambiguous-extended-language-markers ()
+  "A source suffix or incomplete build marker never invents a verifier."
+  (dolist (files '(("build.zig" . "pub fn build(_: *std.Build) void {}")
+                   ("deps.edn" . "{:aliases {:test {:extra-paths [\"test\"]}}}")
+                   ("build.gradle" . "plugins { id 'java' }")
+                   ("main.c" . "int main(void) { return 0; }")
+                   ("query.sql" . "select 1;")
+                   ("Makefile" . "build:\n\t@true\n")))
+    (chat-test-with-temp-dir
+     (with-temp-file (expand-file-name (car files) temp-dir)
+       (insert (cdr files)))
+     (should-not
+      (chat-verification-profile-steps
+       (chat-code-verify-plan temp-dir (list (car files))))))))
+
 (ert-deftest chat-code-verify-rejects-duplicate-step-identities ()
   "Polyglot profile composition cannot create ambiguous result identities."
   (chat-test-with-temp-dir

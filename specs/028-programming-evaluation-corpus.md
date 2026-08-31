@@ -189,6 +189,36 @@ Any later synchronous evaluation failure records an explicit error result and
 cleans the workspace. No evaluator exception may cancel the task timer and
 leave the campaign waiting without durable terminal evidence.
 
+### 3.1 Product Verification Adapter Boundary
+
+The ordinary coding runtime and the Eval corpus share language names but not
+command authority. Eval judges are fixture-owned. Product verification resolves
+commands in this order:
+
+1. `chat-code-verify-profile-function` supplied by the embedding application;
+2. the project's `.chat-verification.json` declaration;
+3. deterministic adapters whose required project marker is present;
+4. no step, reported as `not-run`, when no authority is sufficient.
+
+The deterministic adapters use the following minimum evidence:
+
+| Ecosystem | Required authority | Generated step |
+|---|---|---|
+| Zig | `build.zig` declares a literal `test` build step | `zig build test` |
+| Clojure | `project.clj` | `lein test` |
+| Java | `pom.xml`, or a checked-in executable Gradle wrapper plus wrapper metadata | offline Maven test, or offline Gradle test |
+| TypeScript | `tsconfig.json`, unless `package.json` already declares `typecheck` | project-local `tsc` when executable, otherwise `tsc --noEmit --project tsconfig.json` |
+| C, C++, SQL | an exact top-level `test:` target in the Make authority selected by Make | `make test` |
+
+Every generated step remains an argv array, required, bounded, project-rooted
+and independently identified. A missing executable becomes `blocked` at
+execution; it is not silently omitted or treated as a model failure. Source
+suffixes, a `build.zig` without a test step, a Gradle file without a checked-in
+wrapper, any unconfigured `deps.edn`, and a Makefile without an exact test target
+do not authorize a command. C, C++ and SQL intentionally have no guessed
+compile or query command because include graphs, link inputs, schemas and
+assertion semantics are project facts.
+
 ## 4. Fixture Contract
 
 Each fixture is a small standalone project with:
@@ -392,7 +422,7 @@ any repeated live task is dispatched.
 - [x] Combined corpus contains 72 unique task IDs and 12 languages.
 - [ ] All toolchains have bounded, offline preflight and recorded versions.
 - [ ] Every writing judge declares generated paths and passes repeated cleanup.
-- [ ] File detection, language profile and verification adapters cover all 12 languages.
+- [x] File detection, language profile and verification adapters cover all 12 languages.
 - [ ] Semantic quality fixtures report each supported language independently.
 - [ ] Focused live smoke passes once per added language.
 - [ ] Baseline and current extended campaigns each contain 210 valid trials.

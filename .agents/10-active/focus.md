@@ -36,6 +36,14 @@ bounded; resume rejects executable or version drift before trial scheduling.
 The mechanism is complete, while local environment readiness remains blocked
 by the same two missing tools.
 
+Project verification now covers all seven extended ecosystems without adding
+language branches to the Agent loop. Explicit project profiles remain
+authoritative; Zig, Clojure, Java and TypeScript require ecosystem markers, and
+C/C++/SQL share only an exact project `make test` authority. Incomplete build
+markers and source suffixes produce no guessed step. Focused verification is
+24/24 and the canonical suite is 1,951/1,951 with zero skipped or unexpected
+results.
+
 The transport audit found no remaining split to implement:
 `chat-model-request-events` already normalizes native streaming and the
 asynchronous fallback into one ordered model-event contract, and all major

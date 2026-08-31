@@ -425,6 +425,13 @@ ecosystem，不能按第一个 manifest 短路；生成代码、vendor、fixture
 3. 工具链 adapter 把 manifest、命令能力和运行结果转为验证步骤与证据；Agent 优先消费
    adapter 结果，不自行移动缓存、清理未跟踪目录或重复发明项目命令。
 
+产品验证的命令权威顺序固定为 embedding profile、项目
+`.chat-verification.json`、可确定 adapter、`not-run`。Zig 只接受显式 `test` build
+step；Clojure 只接受 Lein 项目；Java 使用离线 Maven
+或已提交的 Gradle wrapper；TypeScript 优先项目内 `tsc`，并避免重复 package
+`typecheck`；C、C++、SQL 只在 Make 权威中存在精确 `test:` target 时运行
+`make test`。文件扩展名、普通 build 文件或源码存在性都不能单独授权执行命令。
+
 一条语言规则只有在固定任务或真实失败中重复出现、存在可复现根因、加入后没有降低其他
 语言成功率时才能进入默认提示包或硬规则。一次样本先进入阶段记录；可确定且安全相关的
 事实进入代码，启发式经验进入软提示包，项目特有要求留在 scoped rules。每次 promotion

@@ -313,6 +313,90 @@ configuration and deterministic detection."
               '("--eval" "(ert-run-tests-batch-and-exit)"))
       t))))
 
+(defun chat-code-verify--step-id-present-p (steps id)
+  "Return non-nil when STEPS already contains ID."
+  (seq-some (lambda (step)
+              (equal (chat-verification-step-id step) id))
+            steps))
+
+(defun chat-code-verify--zig-profile (root)
+  "Return Zig checks only when BUILD.ZIG declares a test step."
+  (when-let* ((manifest
+               (chat-code-verify--read-small-file
+                (expand-file-name "build.zig" root))))
+    (when (string-match-p "\\.step[[:space:]\n]*(\"test\"" manifest)
+      (list (chat-code-verify--step
+             root "zig-test" 'test '("zig" "build" "test") t)))))
+
+(defun chat-code-verify--clojure-profile (root)
+  "Return a Clojure check for an explicit Lein project."
+  (when (file-readable-p (expand-file-name "project.clj" root))
+    (list (chat-code-verify--step
+           root "clojure-test" 'test '("lein" "test") t))))
+
+(defun chat-code-verify--java-profile (root)
+  "Return one offline Java project test when its build authority is clear."
+  (let ((gradle-wrapper (expand-file-name "gradlew" root))
+        (maven-wrapper (expand-file-name "mvnw" root)))
+    (cond
+     ((and (or (file-readable-p (expand-file-name "build.gradle" root))
+               (file-readable-p (expand-file-name "build.gradle.kts" root)))
+           (file-executable-p gradle-wrapper)
+           (file-readable-p
+            (expand-file-name "gradle/wrapper/gradle-wrapper.properties" root)))
+      (list (chat-code-verify--step
+             root "java-gradle-test" 'test
+             (list gradle-wrapper "--offline" "test") t)))
+     ((and (file-readable-p (expand-file-name "pom.xml" root))
+           (file-executable-p maven-wrapper)
+           (file-readable-p
+            (expand-file-name ".mvn/wrapper/maven-wrapper.properties" root)))
+      (list (chat-code-verify--step
+             root "java-maven-test" 'test
+             (list maven-wrapper "-o" "test") t)))
+     ((file-readable-p (expand-file-name "pom.xml" root))
+      (list (chat-code-verify--step
+             root "java-maven-test" 'test '("mvn" "-o" "test") t))))))
+
+(defun chat-code-verify--typescript-profile (root steps)
+  "Return a TypeScript compiler check unless STEPS already type-check it."
+  (when (and (file-readable-p (expand-file-name "tsconfig.json" root))
+             (not (chat-code-verify--step-id-present-p
+                   steps "javascript-typecheck")))
+    (let ((local-compiler
+           (expand-file-name "node_modules/.bin/tsc" root)))
+      (list (chat-code-verify--step
+             root "typescript-typecheck" 'typecheck
+             (list (if (file-executable-p local-compiler)
+                       local-compiler
+                     "tsc")
+                   "--noEmit" "--project" "tsconfig.json")
+             t)))))
+
+(defun chat-code-verify--make-test-profile (root)
+  "Return `make test' only for an exact top-level test target.
+This is the conservative project authority for C, C++, SQL and other
+ecosystems without a universal language-level test command."
+  (when-let* ((manifest
+               (or (chat-code-verify--read-small-file
+                    (expand-file-name "GNUmakefile" root))
+                   (chat-code-verify--read-small-file
+                    (expand-file-name "Makefile" root))
+                   (chat-code-verify--read-small-file
+                    (expand-file-name "makefile" root)))))
+    (when (string-match-p "^test[[:space:]]*:" manifest)
+      (list (chat-code-verify--step
+             root "make-test" 'test '("make" "test") t)))))
+
+(defun chat-code-verify--extended-language-steps (root steps)
+  "Return conservative extended-language checks below ROOT.
+STEPS prevents a manifest-declared TypeScript check from being duplicated."
+  (append (chat-code-verify--zig-profile root)
+          (chat-code-verify--clojure-profile root)
+          (chat-code-verify--java-profile root)
+          (chat-code-verify--typescript-profile root steps)
+          (chat-code-verify--make-test-profile root)))
+
 (defun chat-code-verify--detected-steps (root changed)
   "Return deterministic verification steps for ROOT and CHANGED files."
   (let (steps)
@@ -365,6 +449,9 @@ configuration and deterministic detection."
                     root "rust-build" 'build '("cargo" "build") t)))))
     (setq steps
           (append steps (chat-code-verify--elisp-convention-steps root)))
+    (setq steps
+          (append steps
+                  (chat-code-verify--extended-language-steps root steps)))
     (cond
      (steps steps)
      ((file-readable-p (expand-file-name "tests/run-tests.sh" root))
