@@ -408,8 +408,7 @@ anything."
   `((id . ,(chat-work-task-id task))
     (command . ,(chat-work-task-command task))
     (status . ,(symbol-name (chat-work-task-status task)))
-    (exitCode . ,(chat-work-task-exit-code task))
-    (logFile . ,(chat-work-task-log-file task))))
+    (exitCode . ,(chat-work-task-exit-code task))))
 
 (defun chat-work-task-list ()
   "Return summaries for known background tasks."

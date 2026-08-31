@@ -61,6 +61,12 @@ use `build`. Existing MCP, external subagent and transport processes remain
 explicit local paths until their own policy requirements are designed; they are
 not relabeled as isolated.
 
+An Agent-facing background-task summary exposes only its public task ID,
+command, status and exit code. Backend log paths remain internal because they
+live outside the project read boundary. Output is consumed only through the
+session-scoped task-output operation; no public result may invite the Agent to
+read an inaccessible implementation path.
+
 ## Acceptance
 
 - project reads succeed while project-external reads fail;

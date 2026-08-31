@@ -935,6 +935,21 @@ being a thing the reader could do when the two surfaces merged."
       (should (string-match-p "Do not enter Plan Mode" guidance))
       (should (string-match-p "explicitly asks" guidance)))))
 
+(ert-deftest chat-tool-caller-keeps-guidance-after-plan-creation ()
+  "An active plan keeps its transition contract without re-advertising create."
+  (let ((tools
+         (list
+          (make-chat-forged-tool
+           :id 'programming_plan_transition :name "Transition"
+           :language 'elisp :is-active t))))
+    (let ((guidance (chat-tool-caller--plan-usage-guidance tools)))
+      (should (string-match-p "A durable plan already exists" guidance))
+      (should (string-match-p "Do not call `programming_plan_create` again"
+                              guidance))
+      (should (string-match-p "programming_plan_transition" guidance))
+      (should (string-match-p "returned revision" guidance))
+      (should (string-match-p "close the plan and answer" guidance)))))
+
 (ert-deftest chat-tool-caller-restores-execution-context-after-async-approval ()
   "A delayed guard verdict keeps the task correlation of the original call."
   (chat-test-with-temp-dir

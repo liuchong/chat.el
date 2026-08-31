@@ -129,6 +129,13 @@ independent 2,000-character hard limit and is rebuilt after compaction. Each
 run records the last projected plan revision, so later turns include only
 evidence added after that revision.
 
+The provider prompt keeps lifecycle guidance for as long as plan transition
+tools are exposed. Before creation it explains the one atomic create step.
+After creation it states that the existing plan is authoritative, forbids a
+second create call, and tells the Agent to complete the active item with exact
+evidence before advancing with the returned revision. Removing the create tool
+must not also remove the instructions needed to close the active plan.
+
 ## Recovery
 
 Plans are atomically persisted and load without starting work. A plan saved

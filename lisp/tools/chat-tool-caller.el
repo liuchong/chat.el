@@ -215,20 +215,28 @@ The vector is empty when tool calling is disabled."
 
 (defun chat-tool-caller--plan-usage-guidance (tools)
   "Return plan guidance when TOOLS expose the programming plan surface."
-  (when (seq-some
-         (lambda (tool)
-           (eq (chat-forged-tool-id tool) 'programming_plan_create))
-         tools)
-    (mapconcat
-     #'identity
-     '("Programming plan boundaries:"
-       "- Before the first gated action, call the directly available `programming_plan_create`; ordinary coding creates the durable TODO list and starts its first dependency-ready item atomically."
-       "- TODO items are control points, not narration. Use the fewest items that preserve real dependencies, approvals, and distinct acceptance outcomes; combine related edits and their verification when one observable result closes both."
-       "- Successful tools return an exact Evidence ID. Pass that ID in `evidence` when completing a plan item or recording Goal evidence; never invent one."
-       "- The first item is already active after ordinary creation. Complete only the active item; then start the next pending item. Never batch dependent transitions: use each returned revision."
-       "- Do not enter Plan Mode merely to create or use that TODO list."
-       "- Call `programming_plan_mode_enter` only when the user explicitly asks for read-only planning before implementation.")
-     "\n")))
+  (let ((ids (mapcar #'chat-forged-tool-id tools)))
+    (cond
+     ((memq 'programming_plan_create ids)
+      (mapconcat
+       #'identity
+       '("Programming plan boundaries:"
+         "- Before the first gated action, call the directly available `programming_plan_create`; ordinary coding creates the durable TODO list and starts its first dependency-ready item atomically."
+         "- TODO items are control points, not narration. Use the fewest items that preserve real dependencies, approvals, and distinct acceptance outcomes; combine related edits and their verification when one observable result closes both."
+         "- Successful tools return an exact Evidence ID. Pass that ID in `evidence` when completing a plan item or recording Goal evidence; never invent one."
+         "- The first item is already active after ordinary creation. Complete only the active item; then start the next pending item. Never batch dependent transitions: use each returned revision."
+         "- Do not enter Plan Mode merely to create or use that TODO list."
+         "- Call `programming_plan_mode_enter` only when the user explicitly asks for read-only planning before implementation.")
+       "\n"))
+     ((memq 'programming_plan_transition ids)
+      (mapconcat
+       #'identity
+       '("Active programming plan:"
+         "- A durable plan already exists. Do not call `programming_plan_create` again; use `programming_plan_read` if its current item or revision is uncertain."
+         "- Successful tools return an exact Evidence ID. Pass those IDs in `evidence`; never invent evidence."
+         "- After the active item's acceptance check passes, call `programming_plan_transition` to complete that item. Then start the next dependency-ready item using the returned revision."
+         "- Never batch dependent transitions or continue inspecting after the final acceptance evidence is sufficient; close the plan and answer.")
+       "\n")))))
 
 (defun chat-tool-caller--storage-note-variant (session terse)
   "Build the storage block for SESSION at one verbosity, TERSE or not.

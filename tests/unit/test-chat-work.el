@@ -26,6 +26,7 @@
                                               default-directory))
               (id (cdr (assoc 'id summary)))
               (task (gethash id chat-work--tasks)))
+         (should-not (assq 'logFile summary))
          (while (and (process-live-p (chat-work-task-process task)))
            (accept-process-output (chat-work-task-process task) 0.1))
          (should (eq (chat-work-task-status task) 'succeeded))
