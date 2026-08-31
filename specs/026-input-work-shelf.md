@@ -91,6 +91,20 @@ Updates are event-driven and incremental. TODO, Goal, Plan Mode and changed-file
 events invalidate only their section. Future bounded sections may register through
 the same contract without modifying the prompt or inventing another region.
 
+Queue is a structured runtime source with two complete projections: an input work
+shelf projection and a transcript projection. The shelf is not the sole owner of
+Queue state. Both projections expose the same stable message IDs, ordering,
+revisions, delivery state and actions, and every mutation updates both from the
+single authoritative Queue store. The user may choose either projection without
+losing Queue functionality.
+
+The shelf Queue provider follows the same two-level disclosure rules as other
+sections. Its collapsed summary shows the bounded pending count; details show a
+bounded ordered message projection and Queue actions without moving input focus.
+Editing a queued message increments its revision and preserves its identity and
+audit history. Queue remains distinct from staged or draft messages: a queued
+message is committed for later dispatch, while a staged message is not yet queued.
+
 ## Non-Goals
 
 - a graphical toolbar, child frame, menu, selectable popup or second input area;
@@ -98,6 +112,7 @@ the same contract without modifying the prompt or inventing another region.
 - deriving session attribution from the whole worktree;
 - embedding file contents, diffs, sensitive paths or unbounded histories;
 - allowing shelf state to alter Goal, Plan, TODO, permission or execution semantics;
+- maintaining a shelf-only Queue copy or merging queued and staged message state;
 - implementing compatibility paths for the former separate input projections.
 
 ## Acceptance
@@ -117,4 +132,6 @@ Tests must prove:
   unrelated dirty files;
 - zero available sections renders no region, while the prompt control remains;
 - provider rendering is bounded and performs no synchronous filesystem/Git scan;
+- Queue actions, revisions and ordering remain identical between shelf and
+  transcript projections;
 - the former separate projections are removed, and the full canonical suite passes.

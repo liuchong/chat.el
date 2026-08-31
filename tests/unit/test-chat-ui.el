@@ -2355,6 +2355,32 @@ one that reads slightly less faithfully on all of them."
          (should (plist-get captured-config :on-event))
          (should (eq (plist-get captured-config :session) session)))))))
 
+(ert-deftest chat-ui-tool-system-message-keeps-its-rebuild-source ()
+  "The Agent can rebuild the textual tool contract after the menu changes."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Tool prompt" 'kimi)))
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (cl-letf (((symbol-function 'chat-tool-caller-build-system-prompt)
+                  (lambda (base &optional _limit _session)
+                    (concat base "\nexpanded"))))
+         (let* ((messages (chat-ui--prepare-messages-with-tools nil))
+                (system (car messages))
+                (base (plist-get (chat-message-metadata system)
+                                 :tool-system-prompt-base)))
+           (should (stringp base))
+           (should (string-match-p "helpful AI assistant" base))
+           (should (string-suffix-p "expanded"
+                                    (chat-message-content system)))))))))
+
+(ert-deftest chat-ui-stop-summary-distinguishes-plan-barriers ()
+  "A plan lifecycle stop is never described as generic step exhaustion."
+  (should (equal (chat-ui--agent-stop-summary 'active-plan-unclosed)
+                 "Stopped because the durable work plan remains open"))
+  (should (equal (chat-ui--agent-stop-summary 'work-plan-blocked)
+                 "Stopped because the durable work plan is blocked")))
+
 (ert-deftest chat-ui-the-waiting-state-is-drawn-before-the-transport ()
   "The reader has to see something between RET and the request going out.
 

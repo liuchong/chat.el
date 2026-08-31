@@ -1222,6 +1222,163 @@ nothing to call."
              :on-event #'ignore))
       (should (plist-get (car (car options)) :tools)))))
 
+(ert-deftest chat-agent-refreshes-the-text-tool-contract-every-turn ()
+  "The textual menu follows the same execution Session as native tools."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (execution
+          (make-chat-session
+           :id "dynamic-tool-menu"
+           :tool-config
+           '(:enabled-tools
+             (programming_plan_create programming_plan_transition)
+             :advertised-tools (programming_plan_transition))))
+         (message
+          (make-chat-message
+           :id "system-tools" :role :system :content "stale create prompt"
+           :timestamp (current-time)
+           :metadata '(:tool-system-prompt-base "Base contract")))
+         (run (chat-agent--run-create
+               :model 'kimi :execution-session execution
+               :max-steps 20 :messages (list message))))
+    (dolist (id '(programming_plan_create programming_plan_transition))
+      (chat-tool-forge-register
+       (make-chat-forged-tool
+        :id id :name (symbol-name id) :language 'elisp
+        :compiled-function #'ignore :is-active t)))
+    (let* ((refreshed
+            (chat-agent--refresh-tool-system-messages run (list message)))
+           (content (chat-message-content (car refreshed))))
+      (should (string-match-p "A durable plan already exists" content))
+      (should (string-match-p
+               "Do not call `programming_plan_create` again" content))
+      (should (string-match-p "programming_plan_transition" content))
+      (should-not (string-match-p "Before the first gated action" content))
+      (should (equal (chat-message-content message) "stale create prompt")))))
+
+(ert-deftest chat-agent-open-plan-is-a-bounded-completion-barrier ()
+  "A prose answer schedules plan settlement instead of reporting success."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Plan barrier" 'kimi))
+          (run (chat-agent--run-create
+                :model 'kimi :session session :execution-session session
+                :messages (list (chat-agent-test--user-message))
+                :step 2 :max-steps 6))
+          continued events)
+     (chat-work-plan-create
+      session "Finish the task"
+      '(((id . "verify") (title . "Verify the change")
+         (acceptance . "Focused test passes"))))
+     (setf (chat-agent-run-state-on-event run)
+           (lambda (event) (push event events)))
+     (cl-letf (((symbol-function 'chat-agent--turn)
+                (lambda (seen) (setq continued seen))))
+       (chat-agent--finish-or-finalize-work-plan run))
+     (should (eq continued run))
+     (should-not (chat-agent-run-state-done run))
+     (should (= 1 (chat-agent-run-state-work-plan-finalization-attempts run)))
+     (let ((message (car (last (chat-agent-run-state-messages run)))))
+       (should (plist-get (chat-message-metadata message)
+                          :work-plan-finalization))
+       (should (string-match-p "Plan .* revision 1 is still active"
+                               (chat-message-content message)))
+       (should (string-match-p "Do not create another plan"
+                               (chat-message-content message))))
+     (should (seq-some
+              (lambda (event)
+                (and (eq (plist-get event :type) 'work-plan-finalization)
+                     (eq (plist-get event :action) 'retry)))
+              events)))))
+
+(ert-deftest chat-agent-open-plan-stops-when-no-tool-turn-remains ()
+  "The final no-tools step cannot pretend an active plan was completed."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Plan budget" 'kimi))
+          (run (chat-agent--run-create
+                :model 'kimi :session session :execution-session session
+                :messages (list (chat-agent-test--user-message))
+                :step 4 :max-steps 5)))
+     (chat-work-plan-create
+      session "Finish the task"
+      '(((id . "verify") (title . "Verify")
+         (acceptance . "Test passes"))))
+     (chat-agent--finish-or-finalize-work-plan run)
+     (should (chat-agent-run-state-done run))
+     (should (eq (chat-agent-run-state-status run) 'stopped))
+     (should (eq (chat-agent-run-state-reason run) 'active-plan-unclosed)))))
+
+(ert-deftest chat-agent-blocked-plan-stops-with-its-real-reason ()
+  "A blocked plan is a truthful stop, not a completed Agent run."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Blocked plan" 'kimi))
+          (run (chat-agent--run-create
+                :model 'kimi :session session :execution-session session
+                :messages (list (chat-agent-test--user-message))
+                :step 2 :max-steps 8))
+          plan)
+     (setq plan
+           (chat-work-plan-create
+            session "Finish the task"
+            '(((id . "verify") (title . "Verify")
+               (acceptance . "Test passes")))))
+     (setq plan
+           (chat-work-plan-transition-item
+            session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+            "verify" 'in-progress))
+     (chat-work-plan-transition-item
+      session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+      "verify" 'blocked :blocker-reason "Dependency unavailable")
+     (chat-agent--finish-or-finalize-work-plan run)
+     (should (eq (chat-agent-run-state-status run) 'stopped))
+     (should (eq (chat-agent-run-state-reason run) 'work-plan-blocked)))))
+
+(ert-deftest chat-agent-terminal-plan-permits-normal-completion ()
+  "A completed plan no longer holds the Agent completion barrier open."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "Completed plan" 'kimi))
+          (run (chat-agent--run-create
+                :model 'kimi :session session :execution-session session
+                :messages (list (chat-agent-test--user-message))
+                :step 2 :max-steps 8))
+          (chat-work-plan-evidence-resolver-functions
+           (list (lambda (candidate task-id evidence-id)
+                   (and (eq candidate session)
+                        (null task-id)
+                        (equal evidence-id "test:passed")))))
+          plan)
+     (setq plan
+           (chat-work-plan-create
+            session "Finish the task"
+            '(((id . "verify") (title . "Verify")
+               (acceptance . "Test passes")))))
+     (setq plan
+           (chat-work-plan-transition-item
+            session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+            "verify" 'in-progress))
+     (chat-work-plan-transition-item
+      session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+      "verify" 'completed :evidence '("test:passed"))
+     (chat-agent--finish-or-finalize-work-plan run)
+     (should (chat-agent-run-state-done run))
+     (should (eq (chat-agent-run-state-status run) 'completed))
+     (should-not (chat-agent-run-state-reason run)))))
+
+(ert-deftest chat-agent-merges-durable-execution-session-state-back ()
+  "Transient policy Sessions do not strand durable tool state."
+  (let* ((session (make-chat-session :id "canonical"))
+         (execution (copy-chat-session session))
+         (run (chat-agent--run-create
+               :session session :execution-session execution)))
+    (chat-session-metadata-set session 'canonicalOnly "kept")
+    (chat-session-metadata-set execution 'activeWorkPlanId "plan-1")
+    (chat-agent--synchronize-execution-session run)
+    (should (equal (chat-session-metadata-get session 'canonicalOnly) "kept"))
+    (should (equal (chat-session-metadata-get session 'activeWorkPlanId)
+                   "plan-1"))))
+
 (ert-deftest chat-agent-reminder-does-not-persist-into-the-transcript ()
   "A reminder describes one step and must not accumulate in the run.
 
@@ -1638,9 +1795,14 @@ per piece for that to stop being true."
        (setq run
              (chat-agent-start
               (list :model 'kimi :session session
-                    :messages (list (chat-agent-test--user-message))))))
+                    :messages (list (chat-agent-test--user-message))
+                    :max-steps 2))))
      (should (= executions 0))
-     (let ((tool-result (car (last (cadr (car calls))))))
+     (let ((tool-result
+            (seq-find (lambda (message)
+                        (eq :tool (chat-message-role message)))
+                      (cadr (car calls)))))
+       (should tool-result)
        (should (string-match-p "Plan Mode is read-only"
                                (chat-message-content tool-result))))
      (should
@@ -1686,7 +1848,8 @@ per piece for that to stop being true."
        (setq run
              (chat-agent-start
               (list :model 'kimi :session session
-                    :messages (list (chat-agent-test--user-message)))))
+                    :messages (list (chat-agent-test--user-message))
+                    :max-steps 2)))
        (should-not
         (seq-some
          (lambda (message)

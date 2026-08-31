@@ -190,6 +190,9 @@ Events are delivered synchronously through :on-event.  The final
                               chat-agent-native-tools))))
     (when task
       (chat-agent--set-active-task-id session (chat-task-id task))
+      (when-let ((execution (chat-agent-run-state-execution-session run)))
+        (chat-session-metadata-set execution 'activeTaskId
+                                   (chat-task-id task)))
       (setf (chat-task-cancel-function task)
             (lambda (_task _reason)
               (when (chat-agent-active-p run)

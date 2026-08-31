@@ -18,7 +18,7 @@
 ;;   model-retry
 ;;   tool-batch-start  tool-event  tool-batch-end
 ;;   message-appended  truncated  response  followup  steering
-;;   prepared-next-turn  error  agent-end
+;;   prepared-next-turn  work-plan-finalization  error  agent-end
 ;;
 ;; `agent-end' :status is one of completed, stopped, error, cancelled.
 
@@ -58,6 +58,7 @@ reused.  Waiting is asynchronous and remains cancellable."
   model messages session execution-session profile transport task-id run-id
   project-root context-target-path context-fragments last-context-bundle
   goal-projection-revision work-plan-projection-revision
+  (work-plan-finalization-attempts 0)
   on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn
   max-steps request-options followup-request-options

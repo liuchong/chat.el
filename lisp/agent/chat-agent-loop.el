@@ -38,6 +38,11 @@
 (defvar chat-plugin-pre-step-functions nil)
 (defvar chat-plugin-post-turn-functions nil)
 
+(defcustom chat-agent-work-plan-finalization-max-attempts 2
+  "Maximum prompted attempts to close an active work plan before stopping."
+  :type 'integer
+  :group 'chat)
+
 (defvar chat-agent-event-functions nil
   "Functions called with every agent event, besides the run's own reader.
 
@@ -172,6 +177,95 @@ on screen, where the marker would be noise.  It belongs on the wire only."
   (and (null (plist-get processed :tool-calls))
        (not (plist-get processed :parse-error))))
 
+(defun chat-agent--applicable-open-work-plan (run)
+  "Return RUN's active or blocked task plan, if one is still open."
+  (when-let* ((session (chat-agent-run-execution-session run))
+              (plan (chat-work-plan-current session t))
+              ((memq (chat-work-plan-status plan) '(active blocked)))
+              ((or (null (chat-agent-run-state-task-id run))
+                   (null (chat-work-plan-task-id plan))
+                   (equal (chat-agent-run-state-task-id run)
+                          (chat-work-plan-task-id plan)))))
+    plan))
+
+(defun chat-agent--work-plan-finalization-turn-available-p (run)
+  "Return non-nil when RUN can still offer tools on another turn."
+  (let ((limit (chat-agent-run-state-max-steps run))
+        (next-step (1+ (chat-agent-run-state-step run))))
+    (and (< (chat-agent-run-state-work-plan-finalization-attempts run)
+            chat-agent-work-plan-finalization-max-attempts)
+         (or (eq limit 'unlimited)
+             ;; The final step deliberately advertises no tools.  A plan
+             ;; closure retry therefore needs a turn strictly before it.
+             (< next-step limit)))))
+
+(defun chat-agent--work-plan-finalization-message (plan)
+  "Return the request-only closure instruction for PLAN."
+  (let* ((slice (chat-work-plan-active-slice plan))
+         (item (plist-get slice :current-item)))
+    (string-join
+     (delq
+      nil
+      (list
+       "[work plan finalization required]"
+       (format "Plan %s revision %d is still %s."
+               (chat-work-plan-id plan)
+               (chat-work-plan-revision plan)
+               (chat-work-plan-status plan))
+       (and item
+            (format "Current item %s (%s): %s"
+                    (chat-work-plan-item-id item)
+                    (chat-work-plan-item-status item)
+                    (chat-work-plan-item-title item)))
+       (and item (chat-work-plan-item-acceptance item)
+            (format "Acceptance: %s"
+                    (chat-work-plan-item-acceptance item)))
+       "Do not create another plan and do not claim completion while this plan is open."
+       "If the acceptance condition is proven, call `programming_plan_transition` with the exact current revision and known Evidence IDs."
+       "If the work cannot be completed now, transition the current item to blocked with a concrete reason, or cancel the plan when the work is intentionally abandoned."))
+     "\n")))
+
+(defun chat-agent--finish-or-finalize-work-plan (run)
+  "Finish RUN, or schedule a bounded attempt to settle its open work plan."
+  (if-let ((plan (chat-agent--applicable-open-work-plan run)))
+      (cond
+       ((eq (chat-work-plan-status plan) 'blocked)
+        (chat-agent--emit run 'work-plan-finalization
+                          :action 'stopped
+                          :plan-id (chat-work-plan-id plan)
+                          :revision (chat-work-plan-revision plan)
+                          :status 'blocked)
+        (chat-agent--finish run 'stopped 'work-plan-blocked))
+       ((not (chat-agent--work-plan-finalization-turn-available-p run))
+        (chat-agent--emit run 'work-plan-finalization
+                          :action 'stopped
+                          :plan-id (chat-work-plan-id plan)
+                          :revision (chat-work-plan-revision plan)
+                          :status (chat-work-plan-status plan))
+        (chat-agent--finish run 'stopped 'active-plan-unclosed))
+       (t
+        (cl-incf (chat-agent-run-state-work-plan-finalization-attempts run))
+        (let ((message
+               (make-chat-message
+                :id (chat-session-new-message-id "plan-finalization")
+                :role :system
+                :content (chat-agent--work-plan-finalization-message plan)
+                :timestamp (current-time)
+                :metadata '(:ephemeral t :work-plan-finalization t))))
+          (setf (chat-agent-run-state-messages run)
+                (append (chat-agent-run-state-messages run) (list message)))
+          (chat-agent--emit run 'work-plan-finalization
+                            :action 'retry
+                            :attempt
+                            (chat-agent-run-state-work-plan-finalization-attempts
+                             run)
+                            :plan-id (chat-work-plan-id plan)
+                            :revision (chat-work-plan-revision plan)
+                            :status (chat-work-plan-status plan))
+          (chat-agent--emit run 'followup :message message)
+          (chat-agent--turn run))))
+    (chat-agent--finish run 'completed nil)))
+
 (defun chat-agent--finish (run status reason)
   "Finish RUN once with STATUS and REASON and emit the final event."
   (unless (chat-agent-run-state-done run)
@@ -207,6 +301,22 @@ on screen, where the marker would be noise.  It belongs on the wire only."
   "Return RUN's session id, or nil."
   (when-let* ((session (chat-agent-run-state-session run)))
     (chat-session-id session)))
+
+(defun chat-agent--synchronize-execution-session (run)
+  "Merge durable execution metadata back into RUN's canonical Session.
+
+The execution Session is a transient policy copy.  Tools may legitimately
+change durable session metadata through it, so the canonical in-memory
+Session must observe those changes before transcript persistence writes its
+next snapshot."
+  (let ((session (chat-agent-run-state-session run))
+        (execution (chat-agent-run-state-execution-session run)))
+    (when (and session execution (not (eq session execution)))
+      (dolist (entry (chat-session-metadata execution))
+        (chat-session-metadata-set
+         session (car entry) (copy-tree (cdr entry))))
+      (setf (chat-session-updated-at session)
+            (chat-session-updated-at execution)))))
 
 (defun chat-agent--tool-event-payload (call &optional result)
   "Return bounded lifecycle facts for CALL and optional RESULT."
@@ -295,6 +405,7 @@ on screen, where the marker would be noise.  It belongs on the wire only."
 (defun chat-agent--context-selection (run)
   "Return RUN's request-time scoped context bundle."
   (let* ((session (chat-agent-run-state-session run))
+         (plan-session (chat-agent-run-execution-session run))
          (session-id (and session (chat-session-id session)))
          (task-id (chat-agent-run-state-task-id run))
          (project-root
@@ -318,9 +429,9 @@ on screen, where the marker would be noise.  It belongs on the wire only."
          (plan-mode-fragment
           (and session (chat-plan-mode-context-fragment session)))
          (plan-fragment
-          (and session
+          (and plan-session
                (chat-work-plan-context-fragment
-                session task-id
+                plan-session task-id
                 (chat-agent-run-state-work-plan-projection-revision run))))
          (window (chat-context-window-for-model
                   (chat-agent-run-state-model run)))
@@ -376,6 +487,29 @@ on screen, where the marker would be noise.  It belongs on the wire only."
                     (chat-context-bundle-fragments bundle))
             rest)))
 
+(defun chat-agent--refresh-tool-system-messages (run messages)
+  "Rebuild request-only tool prompts in MESSAGES for the current RUN turn.
+
+Native tool schemas are selected from the execution Session on every turn.
+The textual contract must use that same menu; otherwise a plan created on an
+earlier turn can leave the model reading obsolete instructions to create it
+again even though the native create tool has already disappeared."
+  (mapcar
+   (lambda (message)
+     (let ((base (and (chat-message-p message)
+                      (plist-get (chat-message-metadata message)
+                                 :tool-system-prompt-base))))
+       (if (not (stringp base))
+           message
+         (let ((copy (copy-chat-message message)))
+           (setf (chat-message-content copy)
+                 (chat-tool-caller-build-system-prompt
+                  base
+                  (chat-agent-run-state-max-steps run)
+                  (chat-agent-run-execution-session run)))
+           copy))))
+   messages))
+
 (defun chat-agent--request-messages (run)
   "Return request context for RUN with scoped fragments and reminders.
 
@@ -386,8 +520,11 @@ last because that is where a short instruction is actually noticed.
 Context fragments are also request-only: durable notes and rules remain typed
 state and are rebuilt after compaction instead of entering the transcript."
   (let* ((bundle (chat-agent--context-selection run))
+         (base-messages
+          (chat-agent--refresh-tool-system-messages
+           run (chat-agent-run-state-messages run)))
          (messages (chat-agent--insert-context-messages
-                    (chat-agent-run-state-messages run) bundle))
+                    base-messages bundle))
          (context (chat-context-budget-state
                    messages (chat-agent-run-state-model run)))
          (reminders
@@ -644,8 +781,11 @@ of this turn under the next one."
                                     (chat-session-messages session)))
                 1)))))
 
-(defun chat-agent--make-assistant-message (run content calls raw-request raw-response)
+(defun chat-agent--make-assistant-message
+    (run content calls raw-request raw-response &optional continues)
   "Build the assistant transcript message for RUN.
+
+CONTINUES marks a tool-free reply that cannot settle the run yet.
 
 Stamped where it is made.  Nothing stamped these before -- the stamping
 API existed and only tests called it -- so a multi-round run reached disk
@@ -663,10 +803,10 @@ from roles, which cannot tell an intermediate step from a final answer."
     :timestamp (current-time))
    :turn (chat-agent--turn-number run)
    :step (chat-agent-run-state-step run)
-   ;; Tool calls mean the run continues, so this is a step and not the
-   ;; answer.
-   :category (if calls 'ai-progress 'ai-final)
-   :work (and calls 'message)))
+   ;; Tool calls or an open completion barrier mean the run continues, so
+   ;; this is a step and not the answer.
+   :category (if (or calls continues) 'ai-progress 'ai-final)
+   :work (and (or calls continues) 'message)))
 
 (defun chat-agent--make-tool-message (run call result-text)
   "Build a :tool transcript message for CALL and RESULT-TEXT."
@@ -761,6 +901,8 @@ need approval carry exclusive accesses and therefore remain serialized."
          (aset results index result)
          (remhash index running)
          (cl-incf finished)
+         (unless failed
+           (chat-agent--synchronize-execution-session run))
          (when (and (not failed)
                     (chat-agent-run-state-session run)
                     (fboundp 'chat-code-session-project-root)
@@ -947,7 +1089,10 @@ TRUNCATED is non-nil when tool calls were refused for length."
      (plist-get processed :content)
      (plist-get processed :tool-calls)
      (plist-get result :raw-request)
-     (plist-get result :raw-response))
+     (plist-get result :raw-response)
+     (and (null (plist-get processed :tool-calls))
+          (let ((plan (chat-agent--applicable-open-work-plan run)))
+            (and plan (eq (chat-work-plan-status plan) 'active)))))
     (plist-get result :reasoning)))
   (let ((calls (plist-get processed :tool-calls))
         (results (plist-get processed :tool-results)))
@@ -991,7 +1136,7 @@ TRUNCATED is non-nil when tool calls were refused for length."
             (chat-agent--turn run))
         (if (chat-agent--queue-followup run processed)
             (chat-agent--turn run)
-          (chat-agent--finish run 'completed nil)))))
+          (chat-agent--finish-or-finalize-work-plan run)))))
    (t
     (chat-agent--queue-followup run processed)
     (chat-agent--turn run))))

@@ -106,3 +106,49 @@ Post-fix canonical verification passed 1885/1885 tests with zero skipped and
 zero unexpected results. The new regression exercises a global registry that
 contains both create and transition tools while the Session advertises only
 transition, and proves that prompt guidance follows the Session menu.
+
+## Follow-up Run On `4d9aa7b`
+
+The next DeepSeek campaign used the corrected initial Session binding and passed
+all 30 trials, but it exposed a second lifecycle defect after tools changed the
+Session during the run.
+
+| Metric | Result |
+|---|---:|
+| Passed | 30/30 |
+| Median duration | 37,977 ms |
+| p90 duration | 51,472 ms |
+| Maximum duration | 83,203 ms |
+| Total requests | 258 |
+| Median requests per trial | 9 |
+| p90 requests per trial | 13 |
+| Maximum requests per trial | 17 |
+| Tool errors | 5 |
+| Approval events | 100 |
+| Total tokens | 1,434,538 |
+
+Three trials still attempted a repeated `programming_plan_create`. Only two of the
+twenty created work plans reached `completed`; the other eighteen remained
+`active` even though the Agent run reported completion. Native provider schemas
+were already rebuilt from the current execution Session, but the textual contract
+was prepared only once before the run. In addition, the execution Session is a
+transient policy copy: durable Plan metadata written through it could remain absent
+from the canonical in-memory Session and later be overwritten by transcript
+persistence.
+
+The provider-neutral correction therefore has three parts: rebuild tagged textual
+tool guidance from the current execution Session on every request, merge successful
+durable execution metadata into the canonical Session before persistence, and make
+an open Plan a bounded, audited completion barrier. A run with an active Plan may
+retry closure only while a tool-capable turn remains; otherwise it stops explicitly
+instead of claiming success. A blocked Plan stops with its real reason.
+
+Because this correction changes the implementation revision, `4d9aa7b` is also a
+diagnostic campaign. Kimi `k3-256k` was deliberately not run on the invalidated
+revision. Both exact-model campaigns restart from the next clean revision and use
+the same manifest; `k3` remains excluded.
+
+Post-correction verification passed the eight focused completion-barrier,
+dynamic-contract and Session-synchronization regressions and the full canonical
+suite at 1,893/1,893, with zero skipped and zero unexpected results. No provider
+campaign result is claimed for the uncommitted tree.

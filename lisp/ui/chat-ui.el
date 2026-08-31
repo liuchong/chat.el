@@ -3453,7 +3453,8 @@ context remain typed fragments until request projection."
              :id "system-tools"
              :role :system
              :content system-prompt
-             :timestamp (current-time))
+             :timestamp (current-time)
+             :metadata (list :tool-system-prompt-base prompt))
             messages))))
 
 (defun chat-ui--project-context (session)
@@ -3950,6 +3951,18 @@ seven event types reach the clause that reports them."
                        collect (substring (symbol-name key) 1))))
     (if keys (mapconcat #'identity keys " ") "nothing")))
 
+(defun chat-ui--agent-stop-summary (reason)
+  "Return a precise user-facing summary for agent stop REASON."
+  (pcase reason
+    ('max-steps
+     (format "Stopped after step limit (%s)"
+             (chat-agent-budget-label (chat-ui--step-limit))))
+    ('active-plan-unclosed
+     "Stopped because the durable work plan remains open")
+    ('work-plan-blocked
+     "Stopped because the durable work plan is blocked")
+    (_ (format "Stopped (%s)" (or reason "unknown reason")))))
+
 (defun chat-ui--make-agent-event-handler (session msg-id ui-buffer content-start request-id)
   "Return an agent event handler rendering into UI-BUFFER.
 SESSION, MSG-ID, CONTENT-START, and REQUEST-ID identify the pending
@@ -4060,31 +4073,45 @@ assistant response being filled in."
           (when (buffer-live-p ui-buffer)
             (with-current-buffer ui-buffer
               (chat-ui--refresh-live-surfaces))))
+         ((eq type 'work-plan-finalization)
+          (when request-id
+            (chat-request-diagnostics-record
+             request-id
+             'work-plan-finalization
+             :summary
+             (format "%s durable work plan %s at revision %s"
+                     (if (eq (plist-get event :action) 'retry)
+                         "Settling" "Stopped with")
+                     (or (plist-get event :plan-id) "unknown")
+                     (or (plist-get event :revision) "unknown"))))
+          (when (buffer-live-p ui-buffer)
+            (with-current-buffer ui-buffer
+              (chat-ui--refresh-live-surfaces))))
          ((eq type 'agent-end)
           (setq chat-ui--active-agent-run nil)
           (setq chat-ui--active-request-handle nil)
           (setq chat-ui--active-stream-process nil)
           (pcase (plist-get event :status)
             ((or 'completed 'stopped)
-             (when (buffer-live-p ui-buffer)
-               (with-current-buffer ui-buffer
-                 (chat-ui--cleanup-request-state
-                  'completed
-                  (if (eq (plist-get event :status) 'stopped)
-                      (format "Stopped after step limit (%s)"
-                              (chat-agent-budget-label
-                               (chat-ui--step-limit)))
-                    "Request completed"))))
-             (message "%s" (if (eq (plist-get event :status) 'stopped)
-                               "Stopped after tool loop limit"
-                             "Response completed"))
-             (chat-ui--finalize-response
-              session
-              msg-id
-              ui-buffer
-              content-start
-              (list :content (plist-get event :content)
-                    :tool-events (plist-get event :tool-events))))
+             (let* ((stopped (eq (plist-get event :status) 'stopped))
+                    (reason (plist-get event :reason))
+                    (summary (if stopped
+                                 (chat-ui--agent-stop-summary reason)
+                               "Request completed")))
+               (when (buffer-live-p ui-buffer)
+                 (with-current-buffer ui-buffer
+                   (chat-ui--cleanup-request-state
+                    (if stopped 'stopped 'completed) summary)))
+               (message "%s" summary)
+               (chat-ui--finalize-response
+                session
+                msg-id
+                ui-buffer
+                content-start
+                (list :content (plist-get event :content)
+                      :tool-events (plist-get event :tool-events)
+                      :stop-reason reason
+                      :tool-loop-limit-reached (eq reason 'max-steps)))))
             ('cancelled
              (when (buffer-live-p ui-buffer)
                (with-current-buffer ui-buffer
@@ -4101,7 +4128,13 @@ assistant response being filled in."
                      (eq (chat-goal-status (chat-goal-current session))
                          'active))
             (chat-goal-mark-needs-attention
-             session "Agent step budget exhausted; send a message to continue."))
+             session
+             (pcase (plist-get event :reason)
+               ('active-plan-unclosed
+                "The Agent stopped with an open durable work plan.")
+               ('work-plan-blocked
+                "The Agent stopped because its durable work plan is blocked.")
+               (_ "Agent step budget exhausted; send a message to continue."))))
           ;; After the status branches, and outside them, because waiting
           ;; meant waiting for an outcome and every one of these is one.
           (when (buffer-live-p ui-buffer)

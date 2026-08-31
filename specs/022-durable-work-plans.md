@@ -139,6 +139,22 @@ The textual prompt and native provider schemas derive from the same
 session-filtered turn menu. Neither may consult the global registry after a
 Session has narrowed its advertised tools.
 
+Both contracts are rebuilt for every request from the current execution Session.
+A tool mutation on one turn can change the next turn's menu, Plan revision and
+active item, so a system-tools message prepared before the run is only a template,
+not an immutable provider contract. The execution Session is a transient policy
+copy; successful tools merge its durable metadata into the canonical Session
+before transcript persistence can write the next snapshot. Canonical-only metadata
+is retained during that merge.
+
+An applicable `active` or `blocked` plan is a completion barrier. Tool-free prose
+while a plan is active is progress, not a final answer. The runtime may issue a
+bounded request-only finalization instruction only when another turn can still
+advertise the Plan lifecycle tools. A blocked plan stops with
+`work-plan-blocked`; an active plan that cannot be closed within the bounded
+attempts stops with `active-plan-unclosed`. A terminal plan permits ordinary Agent
+completion.
+
 ## Recovery
 
 Plans are atomically persisted and load without starting work. A plan saved
@@ -177,9 +193,11 @@ The session wire records bounded `plan-created`, `plan-updated`,
 `plan-item-started`, `plan-item-completed`, `plan-item-blocked`,
 `plan-item-skipped`, `plan-resumed`, `plan-cancelled`, `plan-completed`,
 `plan-skipped`, `plan-skip-consumed`, `plan-required` and
-`plan-revision-conflict` events. Payloads contain IDs, revisions, status and
-bounded facts, never objective or output bodies. Derived Trace can report these
-transitions and refusals without maintaining a second plan store.
+`plan-revision-conflict` events. The Agent loop additionally records
+`work-plan-finalization` when it retries closure or stops at the completion
+barrier. Payloads contain IDs, revisions, status and bounded facts, never objective
+or output bodies. Derived Trace can report these transitions and refusals without
+maintaining a second plan store.
 
 ## Acceptance
 
@@ -190,6 +208,12 @@ transitions and refusals without maintaining a second plan store.
 - cancel, restart, compaction, repair and child tasks preserve plan identity,
   current item and evidence;
 - UI and public API always show the same revision and status;
+- textual tool guidance and native provider schemas expose the same current menu
+  after every Plan transition;
+- successful execution-session metadata changes are visible in the canonical
+  Session before the next transcript save;
+- an active or blocked plan can never produce a completed Agent run, while a
+  terminal plan can complete normally;
 - 1,000 consecutive updates move neither input point nor user scroll position
   and leave no timers or overlays behind;
 - the active plan projection uses at most 5% of median input tokens on the
@@ -201,5 +225,7 @@ transitions and refusals without maintaining a second plan store.
 - plan contract and recovery: 16 focused tests;
 - native UI stability: 3 focused tests, including 1,000 updates;
 - Agent gate and request-only projection: 2 focused tests;
+- completion barrier, dynamic tool contract and execution-session synchronization:
+  8 focused tests;
 - programming profile surface: capability-pack regression coverage;
-- canonical suite: 1,655/1,655 passing before closeout documentation.
+- canonical suite: 1,893/1,893 passing after completion-barrier closeout.

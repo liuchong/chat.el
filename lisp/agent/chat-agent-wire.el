@@ -204,6 +204,15 @@ a run that worked into a run that failed while being watched."
                                        messages))))))
       ('prepared-next-turn
        (list (cons 'count (length (plist-get event :messages)))))
+      ('work-plan-finalization
+       (list (cons 'action (chat-agent-wire--name
+                            (plist-get event :action)))
+             (cons 'attempt (plist-get event :attempt))
+             (cons 'plan_id (chat-agent-wire--short
+                             (plist-get event :plan-id)))
+             (cons 'revision (plist-get event :revision))
+             (cons 'status (chat-agent-wire--name
+                            (plist-get event :status)))))
       ('error
        (list (cons 'message (chat-agent-wire--short
                              (plist-get event :message)))))
