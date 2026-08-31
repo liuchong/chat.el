@@ -331,3 +331,34 @@ fixes; final acceptance still requires fresh 30-by-5 comparison campaigns.
    pass the complete runtime, quality and canonical JSON objects to
    `chat-coding-acceptance-run-final`; do not transcribe summary values by hand.
 6. Mark M19 complete only if the immutable aggregate result is `passed`.
+
+## 2026-08-31 Dual-Provider Continuation Diagnostic
+
+Revision `60196d3` was exercised against the exact replacement models before
+the next implementation change. Campaign
+`m21-common-kimi-code-k3-256k-60196d3-r1` used `kimi-code` / `k3-256k`;
+campaign `m21-common-deepseek-v4-flash-60196d3-r1` used `deepseek` /
+`deepseek-v4-flash`. Both wire records retained assistant reasoning across
+tool turns without a provider continuation 400.
+
+Kimi passed `coding/elisp-locate` in 24.479 seconds. Its
+`coding/elisp-failing-test` run reached the 120-second task deadline after the
+first compile approval review abstained at 20.005 seconds and a retry allowed
+the command 10.804 seconds later. The late compile then observed the already
+cancelled and cleaned workspace. This is Guard latency plus cancellation-order
+evidence, not a semantic Kimi denial.
+
+DeepSeek passed `coding/elisp-locate` in 13.478 seconds. It correctly repaired
+and tested `coding/elisp-failing-test`, but the evaluator rejected completion
+because the active Plan remained open. The model attempted
+`programming_plan_transition`; the runtime replied that the tool was
+unavailable for the turn. Root cause was a non-atomic capability transition:
+Plan creation removed `programming_plan_create` and exposed execution tools,
+but did not expose the remaining Plan lifecycle operations. Plan creation now
+atomically advertises those operations before execution continues, while the
+completion barrier remains strict.
+
+Both campaigns were intentionally stopped after these two diagnostic tasks.
+They remain immutable diagnostic evidence and do not replace a complete paired
+acceptance campaign. The Plan lifecycle fix must be committed and the same
+provider/model cases rerun on the new revision.

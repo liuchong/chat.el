@@ -663,6 +663,10 @@
          (chat-work-plan-create
            session objective items
            :mode (and mode (not (string-empty-p mode)) (intern mode)))))
+    (chat-capability--advertise-tools
+     chat-capability-programming-plan-tools)
+    ;; The lifecycle group includes create for pre-plan activation.  Once this
+    ;; plan exists, keep only the operations that can read, advance, or close it.
     (chat-capability--unadvertise-tools '(programming_plan_create))
     (unless (chat-plan-mode-active-p session)
       (setq plan

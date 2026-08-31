@@ -95,6 +95,9 @@
      (memq 'programming_plan_create
            (plist-get (chat-session-tool-config execution)
                       :advertised-tools)))
+    (should (memq 'programming_plan_transition
+                  (plist-get (chat-session-tool-config execution)
+                             :advertised-tools)))
     (should (memq 'files_patch
                   (plist-get (chat-session-tool-config execution)
                              :advertised-tools)))))
@@ -421,7 +424,51 @@
       (should (memq tool
                     (plist-get (chat-session-tool-config execution)
                                :advertised-tools))))
+    (dolist (tool chat-capability-programming-plan-tools)
+      (unless (eq tool 'programming_plan_create)
+        (should (memq tool
+                      (plist-get (chat-session-tool-config execution)
+                                 :advertised-tools)))))
+    (should-not (memq 'programming_plan_create
+                      (plist-get (chat-session-tool-config execution)
+                                 :advertised-tools)))
     (should-not (chat-work-plan-current ambient))))
+
+(ert-deftest chat-capability-created-plan-transition-is-immediately-callable ()
+  "Plan creation exposes the lifecycle operation needed to close the plan."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (chat-approval-required-effects nil)
+          (session (make-chat-session :id "plan-lifecycle-menu"))
+          (chat-tool-caller-current-session session)
+          (chat-tool-caller-current-state-session session))
+     (chat-capability-register-tools)
+     (chat-session-set-tool-config
+      session
+      (list :enabled-tools chat-capability-programming-tools
+            :advertised-tools chat-capability-programming-base-tools))
+     (let* ((created
+             (chat-capability-programming-plan-create
+              "Lifecycle"
+              '(((id . "step") (title . "Implement")
+                 (acceptance . "The dependency is available.")))))
+            (plan-id (cdr (assoc 'id created)))
+            (revision (cdr (assoc 'revision created)))
+            (result
+             (chat-tool-caller-execute
+              `(:name "programming_plan_transition"
+                :arguments
+                (("plan_id" . ,plan-id)
+                 ("revision" . ,revision)
+                 ("item_id" . "step")
+                 ("status" . "blocked")
+                 ("blocker_reason" . "dependency unavailable")))
+              session)))
+       (should-not (string-match-p "unavailable for this turn" result))
+       (should (eq 'blocked
+                   (chat-work-plan-status
+                    (chat-work-plan-current session t))))))))
 
 (ert-deftest chat-capability-plan-mode-create-keeps-items-pending ()
   "Read-only Plan Mode never turns proposal creation into execution."
@@ -459,6 +506,8 @@
      (let ((config (chat-agent-profile--effective-tool-config session profile)))
        (should-not (memq 'programming_plan_create
                          (plist-get config :advertised-tools)))
+       (should (memq 'programming_plan_transition
+                     (plist-get config :advertised-tools)))
        (dolist (tool chat-capability-programming-execution-tools)
          (should (memq tool (plist-get config :advertised-tools))))))))
 

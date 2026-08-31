@@ -135,6 +135,11 @@ After creation it states that the existing plan is authoritative, forbids a
 second create call, and tells the Agent to complete the active item with exact
 evidence before advancing with the returned revision. Removing the create tool
 must not also remove the instructions needed to close the active plan.
+Creation therefore changes the current turn menu atomically: it removes
+`programming_plan_create`, exposes every authorized Plan lifecycle operation,
+and, outside read-only Plan Mode, exposes the execution tools. A lifecycle tool
+present in the provider request must remain executable against that same menu;
+schema advertisement without runtime availability is a contract violation.
 The textual prompt and native provider schemas derive from the same
 session-filtered turn menu. Neither may consult the global registry after a
 Session has narrowed its advertised tools.

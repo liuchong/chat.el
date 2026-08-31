@@ -1724,3 +1724,18 @@ M16 依赖 M12、M14 和 M15；M17 依赖 M13、M14 和 M16；M18 依赖 M14 和
 M19 依赖前述全部阶段；M20 依赖 M19 的稳定 runner、验收聚合和资源清理合同；
 M21 依赖 M19 的固定身份、失败分类和不可变 campaign，并以 M20 的语言证据逐步扩展适用范围。
 最终默认开启任何能力前，必须先在对应 manifest 的 live Eval 中证明不降低成功率。
+
+### 2026-08-31 双厂商续传与 Plan 生命周期诊断
+
+Revision `60196d3` 已使用精确模型 `kimi-code/k3-256k` 与
+`deepseek/deepseek-v4-flash` 各执行同一组 Emacs Lisp locate/mutation 场景。两侧工具轮次
+均保留 reasoning，未再出现 continuation 400；Kimi locate 24.479 秒通过，DeepSeek
+locate 13.478 秒通过。
+
+Kimi mutation 在 120 秒截止：首次 Guard 审查 20.005 秒超时 abstain，重试 10.804 秒
+后 allow，但任务已取消并清理 workspace。这一结果进入 Guard 延迟与取消顺序优化输入，
+不得误记为模型拒绝。DeepSeek mutation 已正确修改并通过精确 ERT，却因 active Plan
+未关闭被 completion barrier 拒绝；trace 证明模型实际调用了
+`programming_plan_transition`，但创建 Plan 后的当轮菜单未暴露生命周期工具。当前修复
+要求 Plan 创建原子地移除 create、暴露其余生命周期工具，并在非 Plan Mode 暴露执行
+工具；不得放宽完成门槛。提交后必须用两个精确模型重跑相同场景。
