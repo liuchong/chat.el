@@ -1755,7 +1755,9 @@ Return the unique repetition/scenario key."
        "`programming_plan_skip` with reason `single-bounded-action` and the "
        "exact write tool (`files_write`, `files_replace`, or `files_patch`), "
        "perform that one edit, run the declared targeted verification, and "
-       "finish when it passes.")
+       "finish when it passes. The skip is available only once for this task; "
+       "if the edit fails or another mutation is needed, create a durable TODO "
+       "plan instead of recording another skip.")
     ""))
 
 (defun chat-coding-eval--agent-config-v2 (provider model common-config)

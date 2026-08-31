@@ -511,6 +511,43 @@
        (dolist (tool chat-capability-programming-execution-tools)
          (should (memq tool (plist-get config :advertised-tools))))))))
 
+(ert-deftest chat-capability-bounded-skip-transitions-its-tool-menu ()
+  "A bounded skip exposes one exact edit, then verification and plan upgrade."
+  (chat-test-with-temp-dir
+   (let* ((session (make-chat-session :id "bounded-skip-menu"))
+          (profile (chat-agent-profile-resolve 'code)))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-work-plan-skip session 'single-bounded-action
+                          :tool-name "files_patch"
+                          :task-id "task-1"
+                          :action-facts '((path . "sample.el")))
+     (chat-session-metadata-set session 'activeTaskId "task-1")
+     (chat-session-metadata-set session 'code-enabled t)
+     (let ((advertised
+            (plist-get
+             (chat-agent-profile--effective-tool-config session profile)
+             :advertised-tools)))
+       (should (memq 'programming_plan_create advertised))
+       (should (memq 'programming_plan_transition advertised))
+       (should (memq 'files_patch advertised))
+       (dolist (tool '(files_write files_replace apply_patch
+                       programming_compile_task
+                       programming_verification_run))
+         (should-not (memq tool advertised))))
+     (should-not
+      (chat-work-plan-check-call
+       session '(:name "files_patch" :arguments nil)))
+     (let ((advertised
+            (plist-get
+             (chat-agent-profile--effective-tool-config session profile)
+             :advertised-tools)))
+       (should (memq 'programming_plan_create advertised))
+       (should (memq 'programming_compile_task advertised))
+       (dolist (tool chat-capability-programming-verification-tools)
+         (should (memq tool advertised)))
+       (dolist (tool '(files_write files_replace files_patch apply_patch))
+         (should-not (memq tool advertised)))))))
+
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))

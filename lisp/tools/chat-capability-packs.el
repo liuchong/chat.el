@@ -194,13 +194,17 @@
             (copy-sequence chat-capability-programming-base-tools))
            (plan (and session
                       (ignore-errors (chat-work-plan-current session))))
+           (bounded-skip
+            (and session
+                 (ignore-errors
+                   (chat-work-plan-bounded-skip-state session))))
            (plan-mode (and session
                            (ignore-errors (chat-plan-mode-active-p session)))))
       (when (or plan plan-mode)
         (setq advertised
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-plan-tools)))
-      (when plan
+      (when (and plan (eq (chat-work-plan-status plan) 'active))
         (setq advertised (delq 'programming_plan_create advertised)))
       (when (and plan (not plan-mode)
                  (seq-some
@@ -210,6 +214,21 @@
         (setq advertised
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-execution-tools)))
+      (when bounded-skip
+        (let ((tool-name (plist-get bounded-skip :tool-name))
+              (consumed-count
+               (plist-get bounded-skip :consumed-count)))
+          (if (= consumed-count 0)
+              (when-let ((tool (intern-soft tool-name))
+                         ((memq tool authorized-tools)))
+                (setq advertised
+                      (chat-capability--ordered-tool-union
+                       advertised (list tool))))
+            (setq advertised
+                  (chat-capability--ordered-tool-union
+                   advertised
+                   '(programming_compile_task)
+                   chat-capability-programming-verification-tools)))))
       (when (and session (ignore-errors (chat-goal-current session)))
         (setq advertised
               (chat-capability--ordered-tool-union

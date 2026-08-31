@@ -298,9 +298,10 @@
      (chat-work-plan-skip session 'single-bounded-action
                           :tool-name "files_write"
                           :action-facts '((path . "one.txt")))
-     (should-not
+     (should (stringp
       (chat-work-plan-check-call
-       session '(:name "files_patch" :arguments nil)))
+       session '(:name "files_patch" :arguments nil))))
+     (should-not (chat-work-plan-check-call session call))
      (should-not
       (chat-work-plan-check-call
        session '(:name "programming_compile_task" :arguments nil)))
@@ -308,6 +309,11 @@
       (chat-work-plan-check-call
        session '(:name "programming_verification_run" :arguments nil)))
      (should (stringp (chat-work-plan-check-call session call)))
+     (should-error
+      (chat-work-plan-skip session 'single-bounded-action
+                           :tool-name "files_patch"
+                           :action-facts '((path . "one.txt")))
+      :type 'chat-work-plan-invalid)
      (chat-work-plan-create session "Write"
                             '(((id . "write") (title . "Write"))))
      (should (string-match-p "Plan item required"

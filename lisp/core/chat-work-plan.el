@@ -405,6 +405,38 @@
   "Return SESSION plans newest first as immutable decoded records."
   (mapcar #'chat-work-plan--clone (chat-work-plan--session-plans session)))
 
+(defun chat-work-plan--same-task-p (left right)
+  "Return non-nil when task identifiers LEFT and RIGHT have the same scope."
+  (equal left right))
+
+(defun chat-work-plan--bounded-skip-p (plan)
+  "Return non-nil when PLAN records a single bounded mutation skip."
+  (let ((skip (chat-work-plan-skip plan)))
+    (and skip
+         (equal (chat-work-plan--get skip 'reason)
+                "single-bounded-action"))))
+
+(defun chat-work-plan--task-has-bounded-skip-p (session task-id)
+  "Return non-nil when SESSION already records a bounded skip for TASK-ID."
+  (seq-some
+   (lambda (plan)
+     (and (chat-work-plan--same-task-p
+           task-id (chat-work-plan-task-id plan))
+          (chat-work-plan--bounded-skip-p plan)))
+   (chat-work-plan--session-plans session)))
+
+(defun chat-work-plan-bounded-skip-state (session)
+  "Return the current bounded skip state for SESSION, or nil.
+The result contains the exact declared tool and whether its mutation was
+consumed.  Callers use this projection instead of decoding plan storage."
+  (when-let ((plan (chat-work-plan-current session nil)))
+    (when (and (chat-work-plan--applies-to-active-task-p session plan)
+               (chat-work-plan--bounded-skip-p plan))
+      (let ((skip (chat-work-plan-skip plan)))
+        (list :tool-name (chat-work-plan--get skip 'toolName)
+              :consumed-count
+              (or (chat-work-plan--get skip 'consumedCount) 0))))))
+
 (defun chat-work-plan--recover (session plan)
   "Block an interrupted active item in PLAN after restart."
   (when (and (eq (chat-work-plan-status plan) 'active)
@@ -732,12 +764,14 @@ Started, completed, blocked and skipped items are immutable history."
   (when (and (eq reason 'single-bounded-action)
              (not (member tool-name chat-work-plan--single-bounded-tools)))
     (signal 'chat-work-plan-invalid '("tool is not one bounded mutation")))
-  (let* ((now (chat-work-plan--now))
+  (let* ((effective-task-id
+          (or task-id (chat-work-plan--active-task-id session)))
+         (now (chat-work-plan--now))
          (plan
           (chat-work-plan-create-record
            :id (chat-session-new-message-id "work-plan-skip")
            :session-id (chat-session-id session)
-           :task-id (or task-id (chat-work-plan--active-task-id session))
+           :task-id effective-task-id
            :objective "Audited simple-task plan skip"
            :mode (chat-work-plan-enforcement-mode session)
            :status 'completed :items nil
@@ -746,6 +780,12 @@ Started, completed, blocked and skipped items are immutable history."
            :skip `((reason . ,(symbol-name reason))
                    (toolName . ,tool-name) (consumedCount . 0)
                    (actionFacts . ,action-facts)))))
+    (when (and (eq reason 'single-bounded-action)
+               (chat-work-plan--task-has-bounded-skip-p
+                session effective-task-id))
+      (signal
+       'chat-work-plan-invalid
+       '("single-bounded-action already recorded for this task; create a durable plan before another mutation")))
     (chat-work-plan-validate plan)
     (chat-work-plan--replace session plan)
     (chat-work-plan--emit 'plan-skipped plan nil
@@ -780,8 +820,8 @@ Started, completed, blocked and skipped items are immutable history."
          (= (or (chat-work-plan--get skip 'consumedCount) 0) 0)
          (member (chat-work-plan--get skip 'toolName)
                  chat-work-plan--single-bounded-tools)
-         (member (plist-get call :name)
-                 chat-work-plan--single-bounded-tools))))
+         (equal (chat-work-plan--get skip 'toolName)
+                (plist-get call :name)))))
 
 (defun chat-work-plan--skip-allows-followup-p (plan call)
   "Return non-nil when PLAN's consumed bounded skip covers verification CALL."
