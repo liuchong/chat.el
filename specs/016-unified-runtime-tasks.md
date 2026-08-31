@@ -116,3 +116,26 @@ and a later step reads its result, then the final assistant response can use
 the returned output without blocking the first tool call until completion.
 The end-to-end test must exercise the registered tools through the normal
 Agent/tool-caller path, not by calling the process adapter directly.
+
+## Structured Output Observation
+
+`work_task_output` and capability-specific projections such as
+`programming_task_output` return one structured observation. The observation
+contains `id`, `status`, `terminal`, `exitCode`, `output`, `offset`,
+`nextOffset`, `totalBytes`, `truncated`, `startedAt` and `endedAt`.
+
+`offset` and `nextOffset` are byte offsets. A caller continues a truncated read
+with the exact `nextOffset` returned by the prior observation. The adapter must
+not split a UTF-8 code point, must reject offsets beyond the current log, and
+must never load an unbounded log merely to return one page.
+
+Lifecycle fields are authoritative. In particular, an empty `output` has no
+lifecycle meaning: `terminal=false` may be a quiet running process, while
+`terminal=true`, `status="succeeded"` and `exitCode=0` is a completed quiet
+process. An Agent must not poll repeatedly or rerun an unchanged command solely
+because `output` is empty. A terminal observation is sufficient to continue the
+verification and completion flow even when the process wrote no bytes.
+
+The task owner Session is checked before any bytes are returned. The result
+does not expose a log path, process handle or other capability that lets the
+caller bypass that ownership boundary.

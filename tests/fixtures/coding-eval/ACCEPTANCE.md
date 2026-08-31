@@ -55,6 +55,21 @@ Do not copy a fragment into a temporary prompt and call that a new fixture. A
 new acceptance case receives a stable ID, a committed project, deterministic
 judges, path boundaries and cleanup declarations.
 
+### Quiet Background Verification Control
+
+At least one mutation smoke must use a successful compile or test command that
+writes no standard output. The Agent must read `programming_task_output` once,
+observe `terminal=true`, `status="succeeded"`, `exitCode=0` and `output=""`,
+then continue to its final verification decision. Repeating the same command or
+polling the same complete output solely because the output string is empty is a
+contract failure, even when the fixture judge later passes.
+
+Run this control separately for every exact provider/model under comparison.
+Do not pool the results: differences in tool use, Guard decisions, request
+count, latency or completion behavior remain provider/model evidence. A batch
+runner reaching its own terminal state does not make the contained trial pass;
+the persisted trial status and all judges remain authoritative.
+
 ## Execution Sequence
 
 1. Validate registry and manifest schema, balance, task identity and fixture digests.

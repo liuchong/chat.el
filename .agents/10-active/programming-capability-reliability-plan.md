@@ -353,10 +353,25 @@ selected Goal；历史 Goal 有界保留。状态转换必须满足：
   “完成”不是证据；
 - cancelled 和 completed 为终态；clear 只取消 selected 引用并保留审计历史，不物理删除；
 - 所有 mutation 使用 expected revision，旧 Agent step 不得覆盖用户更新或新 step；
+- Goal revision 一旦变化，下一次 Agent step 必须重新读取 objective、constraints、
+  success criteria、priority 和 checkpoint，再决定继续、重排 future plan tail 或进入
+  blocked；旧 revision 已经准备好的下一步不得直接执行。运行时发出可审计的
+  `goal-revision-observed`，记录旧/新 revision、受影响 plan/task 和调整理由；
 - active Goal 在每个请求中以 protected objective fragment 重建，只投影目标、停止条件、
   当前 checkpoint、已验证 evidence 摘要、剩余条件和 blocker，不重复注入完整日志；
 - Goal 可关联多版 work plan 和多个 runtime task。plan 完成只产生 Goal progress，task
   completed/failed 只产生执行证据，二者都不得自动把 Goal 标为 completed；
+- checkpoint 是结构化恢复点，至少分别保存当前 milestone、已接受 evidence、已失效
+  evidence、开放 blocker/risk、待接纳 requirement 摘要和下一条可执行 action；不得用一段
+  自由文本把“做过”“有效”“下一步”混在一起。阶段提交、live Eval 和设计修订都更新
+  checkpoint，但 campaign 结束、进程退出或模型自述不自动产生通过证据；
+- 长期 Goal 可以没有预计完成时间，也可以由持续维护型 stopping condition 明确保持
+  active。它的 Roadmap、小目标、优先级和旁路探索均使用独立、有 revision 的结构记录，
+  可增删和重排，但不得改写 Goal 历史、已完成 evidence 或把暂存想法冒充当前执行项；
+- 新用户要求按 Spec 027 先入 requirement admission。普通 follow-up 默认进入 backlog 并
+  完成当前原子 plan item；只有显式抢占、安全/数据损失风险、阻断性纠正或真实紧迫期限
+  才通过可审计 transition 改变当前执行。完成当前项后按 priority、依赖、Goal relevance、
+  age 和稳定 ID 重新调度，不能只因消息更新就不断抛弃在做工作；
 - 每次上下文压缩、session reload 和 Emacs restart 后，Goal identity、revision、状态、
   checkpoint、阻塞与证据集合必须等价恢复。
 
@@ -1365,6 +1380,13 @@ Revision `d958435` 已关闭七种扩展语言的完整离线 fixture 和 campai
 digest。coding Eval 为 55/55，canonical suite 为 1960/1960。该阶段未调用模型 API，
 因此不关闭逐语言 mutation smoke、跨厂商 live campaign 或重复统计门禁。
 
+Revision `d21d276` 的 C failing-test focused control 把后台验证结果改为结构化终态合同。
+DeepSeek `deepseek-v4-flash` 以 14 步、40.442 秒通过；Kimi Code `k3-256k` 以 11 步、
+61.424 秒通过。两侧都只读取一次无输出的成功任务，依据 `terminal=true`、
+`status=succeeded` 与 `exitCode=0` 结束，不再把空字符串误判为仍在运行或重复执行命令。
+这只关闭跨厂商 focused control，不替代其余六种扩展语言 smoke 或重复矩阵。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-verification-fallback-and-task-outcomes.md`。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
@@ -1414,6 +1436,18 @@ operation，verification context 通过显式 allowlist 投影；Guard 对任意
 不能由单样本形成模型特判。定向 32/32、canonical 1883/1883 通过；实现再次变化，
 该 campaign 只作诊断，完整记录见
 `.agents/30-records/logs/stage-2026-08-31-deepseek-common-path-audit.md`。
+
+2026-09-01 的 C focused control 同时验证了长期目标推进中的三条系统经验。第一，验证
+child task 必须有独立且可追踪的身份，不能继承上一任务的 fallback 状态。第二，普通执行
+先公布确定性 verification plan；只有任务作用域内明确得到空计划时才公布通用 compile
+fallback。第三，后台任务必须返回可判定的结构化终态，不能让模型从输出文本猜生命周期。
+三项均进入共同层，未建立模型分支。
+
+同一条 `sh test-one active` 在这次 live 对照中被 DeepSeek Guard 放行、被 Kimi Guard
+拒绝；Kimi 随后使用直接、确定性的 Clang 命令完成验证。这是 M21 的 provider 差异样本，
+不是允许任意项目脚本的依据。下一步应比较同命令的规则命中、Guard verdict、延迟和实际
+隔离边界，优先把可证明安全且稳定的形态提升为共同确定性规则；无法证明脚本效果时继续
+fail closed，禁止用宽泛白名单或延长任务时限掩盖随机性。
 
 #### 退出条件
 
