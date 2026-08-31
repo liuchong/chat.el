@@ -18,15 +18,20 @@ The corpus has two independently versioned manifests:
 - the **extended language manifest** adds Zig, Clojure, Java, TypeScript, C,
   C++ and SQL, with the same six categories per language.
 
-`manifest-large-repo.json` and `manifest-extended-mutation-smoke.json` are
-measured subsets, not additional behavioral corpora. The first contains the
-exact `python-locate` task from the core manifest and runs it five times for
-each implementation. The second contains exactly the seven `failing-test-fix`
-tasks from the extended manifest and runs each once per concrete model before a
-repeated campaign. Unit gates require byte-for-structure task equality with
-their source entries and equality of extended preflight/toolchain contracts.
-This keeps focused evidence reproducible without introducing a runtime task
-filter whose hidden selection could diverge from the recorded manifest digest.
+`manifest-large-repo.json` and the mutation-smoke manifests are measured
+subsets, not additional behavioral corpora. The first contains the exact
+`python-locate` task from the core manifest and runs it five times for each
+implementation. `manifest-extended-mutation-smoke.json` contains exactly the
+seven `failing-test-fix` tasks from the extended manifest and retains their
+combined offline preflight and toolchain contract. Each
+`manifest-<language>-mutation-smoke.json` contains the same canonical task for
+one extended language and only that task's external executables. These focused
+manifests allow an available language to be preflighted and compared without
+silently skipping another language whose toolchain is absent. Unit gates
+require byte-for-structure task equality with the canonical mutation smoke,
+exact corpus IDs and exact per-language executable lists. This keeps focused
+evidence reproducible without introducing a runtime task filter whose hidden
+selection could diverge from the recorded manifest digest.
 
 The combined qualification suite therefore contains 12 languages and 72 tasks.
 Keeping two manifests protects measurement identity: a result from the original
@@ -171,6 +176,12 @@ The manifest stores argv arrays, never shell fragments. A campaign records the
 exact executable path and version discovered by preflight. Missing tools, an
 uncached dependency or an unsupported version blocks the campaign before the
 first provider request; it is never converted to a skipped or passing task.
+The combined mutation manifest is the all-language gate and therefore requires
+every extended toolchain. A focused language manifest is the independent smoke
+gate and requires only that language's declared executables. It does not weaken
+or partially pass the combined gate: unavailable focused manifests remain
+explicitly blocked, while available manifests retain their own immutable
+campaign identity and provider-separated evidence.
 The Clojure fixture removes Leiningen's implicit `:base` profile during judging
 so offline qualification depends only on the fixture project, not unrelated
 interactive-tool dependencies. Product verification continues to execute the

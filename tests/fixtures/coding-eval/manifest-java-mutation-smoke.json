@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-java-mutation-smoke-v1",
+  "description": "One bounded Java repair used as a fast cross-provider mutation control.",
+  "requiredExecutables": [
+    "java",
+    "javac"
+  ],
+  "tasks": [
+    {
+      "id": "java-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "java",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "java-sample-v1",
+      "fixture": "java",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "src/Sample.java"
+      ],
+      "generatedPaths": [
+        ".chat-eval-build/java"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    }
+  ]
+}

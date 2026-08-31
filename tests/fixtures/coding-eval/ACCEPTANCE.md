@@ -137,6 +137,13 @@ They do not consume a repetition/task identity and do not become model failures.
 Missing tools or dependencies block the relevant campaign before the first
 provider request.
 
+Use `manifest-<language>-mutation-smoke.json` for this focused step. The
+manifest contains one task copied exactly from the combined mutation smoke and
+only the external executables used by that language. Do not substitute a
+runtime task filter or remove a missing tool from the combined manifest. Record
+each unavailable focused manifest as `BLOCKED`, then continue only with other
+independently identified manifests whose preflight passes.
+
 `manifest-large-repo.json` must remain an exact structural copy of the core
 `python-locate` task. Its baseline and current campaigns each contain exactly
 five unique repetitions. Final acceptance verifies that both focused campaigns

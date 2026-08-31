@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-zig-mutation-smoke-v1",
+  "description": "One bounded Zig repair used as a fast cross-provider mutation control.",
+  "requiredExecutables": [
+    "zig"
+  ],
+  "tasks": [
+    {
+      "id": "zig-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "zig",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "zig-sample-v1",
+      "fixture": "zig",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.zig"
+      ],
+      "generatedPaths": [
+        ".zig-cache",
+        "zig-out"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    }
+  ]
+}

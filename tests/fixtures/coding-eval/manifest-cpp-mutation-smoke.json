@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-cpp-mutation-smoke-v1",
+  "description": "One bounded C++ repair used as a fast cross-provider mutation control.",
+  "requiredExecutables": [
+    "clang++"
+  ],
+  "tasks": [
+    {
+      "id": "cpp-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "cpp",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "cpp-sample-v1",
+      "fixture": "cpp",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.cpp"
+      ],
+      "generatedPaths": [
+        ".chat-eval-build/cpp"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    }
+  ]
+}

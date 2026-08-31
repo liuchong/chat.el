@@ -21,6 +21,8 @@ Stable entry points:
 |---|---|---:|---:|---|
 | `manifest.json` | Emacs Lisp, Python, JavaScript, Go, Rust | 6 | 30 | executable core corpus |
 | `manifest-extended.json` | Zig, Clojure, Java, TypeScript, C, C++, SQL | 6 | 42 | executable extended corpus |
+| `manifest-extended-mutation-smoke.json` | all extended languages | 1 | 7 | combined mutation gate |
+| `manifest-<language>-mutation-smoke.json` | one extended language | 1 | 1 | independent provider control |
 
 The six categories are `locate-explain`, `single-file-fix`,
 `multi-file-change`, `refactor`, `failing-test-fix` and `read-only-review`.
@@ -39,6 +41,13 @@ accounting. A missing toolchain blocks that campaign before provider use; it
 does not change committed corpus state or count as a skipped task. Changing a
 language ID, cohort or task category is a versioned corpus-design change and
 requires registry tests plus a stage record.
+
+The combined mutation manifest intentionally blocks unless all seven extended
+toolchains are available. For incremental qualification, use the corresponding
+focused manifest. Each focused manifest is unit-checked as an exact copy of its
+canonical mutation task and declares only that language's executables. Passing
+one focused campaign never changes another language's `BLOCKED` result and
+cross-provider evidence remains separate.
 
 ## Reusable Task Shape
 

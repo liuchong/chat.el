@@ -24,9 +24,14 @@
   (expand-file-name "coding-eval/manifest-extended-mutation-smoke.json"
                     chat-test-fixtures-dir))
 
-(defconst chat-coding-eval-test-c-mutation-smoke-manifest
-  (expand-file-name "coding-eval/manifest-c-mutation-smoke.json"
-                    chat-test-fixtures-dir))
+(defconst chat-coding-eval-test-focused-mutation-smoke-manifests
+  '(("zig" "manifest-zig-mutation-smoke.json" ("zig"))
+    ("clojure" "manifest-clojure-mutation-smoke.json" ("lein"))
+    ("java" "manifest-java-mutation-smoke.json" ("java" "javac"))
+    ("typescript" "manifest-typescript-mutation-smoke.json" ("node" "tsc"))
+    ("c" "manifest-c-mutation-smoke.json" ("clang"))
+    ("cpp" "manifest-cpp-mutation-smoke.json" ("clang++"))
+    ("sql" "manifest-sql-mutation-smoke.json" ("sqlite3"))))
 
 (defconst chat-coding-eval-test-large-repo-manifest
   (expand-file-name "coding-eval/manifest-large-repo.json"
@@ -287,24 +292,32 @@
              (mapcar (lambda (task) (alist-get 'language task)) smoke-tasks)
              #'string<)))))
 
-(ert-deftest chat-coding-eval-c-smoke-is-an-exact-mutation-subset ()
-  "The fast provider control reuses the canonical C mutation task exactly."
+(ert-deftest chat-coding-eval-focused-smokes-are-exact-mutation-subsets ()
+  "Each focused smoke reuses one canonical mutation task and its own tools."
   (let* ((extended-smoke
           (chat-coding-eval-test--read-json
            chat-coding-eval-test-extended-mutation-smoke-manifest))
-         (c-smoke
-          (chat-coding-eval-test--read-json
-           chat-coding-eval-test-c-mutation-smoke-manifest))
-         (canonical
-          (seq-find
-           (lambda (task) (equal "c-failing-test" (alist-get 'id task)))
-           (alist-get 'tasks extended-smoke))))
-    (should (= 1 (alist-get 'schemaVersion c-smoke)))
-    (should (equal "coding-c-mutation-smoke-v1"
-                   (alist-get 'corpusId c-smoke)))
-    (should (equal '("clang")
-                   (append (alist-get 'requiredExecutables c-smoke) nil)))
-    (should (equal (list canonical) (alist-get 'tasks c-smoke)))))
+         (canonical-tasks (alist-get 'tasks extended-smoke)))
+    (dolist (entry chat-coding-eval-test-focused-mutation-smoke-manifests)
+      (pcase-let* ((`(,language ,filename ,required-executables) entry)
+                   (focused
+                    (chat-coding-eval-test--read-json
+                     (expand-file-name (concat "coding-eval/" filename)
+                                       chat-test-fixtures-dir)))
+                   (canonical
+                    (seq-find
+                     (lambda (task)
+                       (equal (concat language "-failing-test")
+                              (alist-get 'id task)))
+                     canonical-tasks)))
+        (should canonical)
+        (should (= 1 (alist-get 'schemaVersion focused)))
+        (should (equal (format "coding-%s-mutation-smoke-v1" language)
+                       (alist-get 'corpusId focused)))
+        (should (equal required-executables
+                       (append (alist-get 'requiredExecutables focused) nil)))
+        (should-not (assq 'preflightChecks focused))
+        (should (equal (list canonical) (alist-get 'tasks focused)))))))
 
 (defmacro chat-coding-eval-test-with-runtime (&rest body)
   "Run BODY with isolated evaluation records and workspaces."

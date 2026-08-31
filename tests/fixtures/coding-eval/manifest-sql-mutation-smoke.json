@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-sql-mutation-smoke-v1",
+  "description": "One bounded SQL repair used as a fast cross-provider mutation control.",
+  "requiredExecutables": [
+    "sqlite3"
+  ],
+  "tasks": [
+    {
+      "id": "sql-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "sql",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "sql-sample-v1",
+      "fixture": "sql",
+      "prompt": "The active status test fails. Fix the view, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.sql"
+      ],
+      "generatedPaths": [],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    }
+  ]
+}
