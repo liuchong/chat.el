@@ -36,10 +36,12 @@
   '(programming_capability_activate
     programming_plan_create
     programming_git_status
-    programming_compile_task
-    files_read files_read_lines files_list files_grep open_file
-    files_write files_replace apply_patch)
-  "Small tool menu advertised at the start of a programming run.")
+    files_read files_read_lines files_list files_grep open_file)
+  "Read-only tool menu advertised before a programming plan exists.")
+
+(defconst chat-capability-programming-execution-tools
+  '(programming_compile_task files_write files_replace apply_patch)
+  "Mutating tools advertised only after an ordinary work plan starts.")
 
 (defconst chat-capability-programming-exploration-tools
   '(programming_flymake_diagnostics
@@ -93,6 +95,7 @@
   (delete-dups
    (apply #'append
           (copy-sequence chat-capability-programming-base-tools)
+          (copy-sequence chat-capability-programming-execution-tools)
           (mapcar (lambda (entry) (copy-sequence (cdr entry)))
                   chat-capability-programming-tool-groups)))
   "Complete programming authority; only a stage-relevant subset is advertised.")
@@ -192,13 +195,24 @@
     (session profile authorized-tools)
   "Select the stage-relevant programming tools for SESSION and PROFILE."
   (when (eq (chat-agent-profile-id profile) 'code)
-    (let ((advertised (copy-sequence chat-capability-programming-base-tools)))
-      (when (and session
-                 (or (ignore-errors (chat-work-plan-current session))
-                     (ignore-errors (chat-plan-mode-active-p session))))
+    (let* ((advertised
+            (copy-sequence chat-capability-programming-base-tools))
+           (plan (and session
+                      (ignore-errors (chat-work-plan-current session))))
+           (plan-mode (and session
+                           (ignore-errors (chat-plan-mode-active-p session)))))
+      (when (or plan plan-mode)
         (setq advertised
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-plan-tools)))
+      (when (and plan (not plan-mode)
+                 (seq-some
+                  (lambda (item)
+                    (eq (chat-work-plan-item-status item) 'in-progress))
+                  (chat-work-plan-items plan)))
+        (setq advertised
+              (chat-capability--ordered-tool-union
+               advertised chat-capability-programming-execution-tools)))
       (when (and session (ignore-errors (chat-goal-current session)))
         (setq advertised
               (chat-capability--ordered-tool-union
@@ -639,7 +653,9 @@
     (unless (chat-plan-mode-active-p session)
       (setq plan
             (chat-work-plan-start-first-ready
-             session (chat-work-plan-id plan) (chat-work-plan-revision plan))))
+             session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
+      (chat-capability--advertise-tools
+       chat-capability-programming-execution-tools))
     (chat-work-plan-to-alist plan)))
 
 (defun chat-capability-programming-plan-read (&optional plan-id)
@@ -1102,7 +1118,8 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
            "before a plan exists. Use exploration for editor semantics or web "
            "lookup, goal only when "
            "explicitly requested, and batch-edit only for structured "
-           "multi-replacement; apply_patch is already available.")
+           "multi-replacement. Ordinary plan creation exposes apply_patch and "
+           "the other execution tools.")
    '((:name "capability" :type "string" :required t
       :enum ("exploration" "plan" "goal" "notes" "verification"
              "context" "batch-edit")))

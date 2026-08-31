@@ -29,10 +29,14 @@
          (config (chat-agent-profile--effective-tool-config session profile)))
     (should (equal chat-capability-programming-tools
                    (plist-get config :enabled-tools)))
+    (dolist (tool chat-capability-programming-execution-tools)
+      (should (memq tool (plist-get config :enabled-tools))))
     (should (equal chat-capability-programming-base-tools
                    (plist-get config :advertised-tools)))
     (should (memq 'programming_plan_create
                   (plist-get config :advertised-tools)))
+    (dolist (tool chat-capability-programming-execution-tools)
+      (should-not (memq tool (plist-get config :advertised-tools))))
     (should-not (memq 'programming_plan_transition
                       (plist-get config :advertised-tools)))))
 
@@ -384,6 +388,10 @@
       (should (eq 'in-progress
                   (chat-work-plan-item-status
                    (car (chat-work-plan-items plan))))))
+    (dolist (tool chat-capability-programming-execution-tools)
+      (should (memq tool
+                    (plist-get (chat-session-tool-config execution)
+                               :advertised-tools))))
     (should-not (chat-work-plan-current ambient))))
 
 (ert-deftest chat-capability-plan-mode-create-keeps-items-pending ()
@@ -400,7 +408,28 @@
       (should (= 1 (chat-work-plan-revision plan)))
       (should (eq 'pending
                   (chat-work-plan-item-status
-                   (car (chat-work-plan-items plan))))))))
+                   (car (chat-work-plan-items plan))))))
+    (dolist (tool chat-capability-programming-execution-tools)
+      (should-not (memq tool
+                        (plist-get (chat-session-tool-config session)
+                                   :advertised-tools))))))
+
+(ert-deftest chat-capability-active-plan-advertises-execution-tools ()
+  "A restored ordinary plan exposes mutation without another activation call."
+  (chat-test-with-temp-dir
+   (let* ((session (make-chat-session :id "active-plan-execution"))
+          (profile (chat-agent-profile-resolve 'code)))
+     (chat-session-set-working-directory session temp-dir)
+     (let ((plan
+            (chat-work-plan-create
+             session "Plan"
+             '(((id . "step") (title . "Implement")
+                (acceptance . "Tests pass"))))))
+       (chat-work-plan-start-first-ready
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
+     (let ((config (chat-agent-profile--effective-tool-config session profile)))
+       (dolist (tool chat-capability-programming-execution-tools)
+         (should (memq tool (plist-get config :advertised-tools))))))))
 
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."
