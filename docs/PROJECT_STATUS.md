@@ -75,7 +75,11 @@ handle, outer terminal intent is authoritative, and final aggregation rejects
 any live result whose request count, IDs or provider/model evidence is missing
 or inconsistent. The interrupted campaign is incident evidence only and will
 not be resumed. The shared test sandbox now also isolates durable task state;
-the complete provisioned canonical suite passes 1923/1923 with no skips.
+the complete provisioned canonical suite passes 1923/1923 with no skips. A
+frozen-baseline 10-second live timeout smoke then retained three exact DeepSeek
+request IDs and usage samples while preserving the authoritative `timed-out`
+status, so fresh formal paired campaigns may start from clean revision
+`11d8a43`.
 
 The input prompt now owns one default-closed two-level work shelf. Its bounded
 TODO, changed-files, Goal and Plan providers replace the former separate

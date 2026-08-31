@@ -47,6 +47,11 @@ regardless of result status.
 - the shared temporary-state fixture now isolates the durable task directory,
   registry and scheduler guard. This removed three order-dependent background
   process failures without changing product behavior;
+- frozen-baseline live timeout smoke
+  `m19-baseline-terminal-evidence-smoke-11d8a43-r1` completed as `timed-out`
+  after the configured 10-second outer budget. It preserved three non-empty
+  request IDs, all exactly `deepseek/deepseek-v4-flash`, plus three usage
+  samples and bounded aggregate usage;
 - the invalid two-result campaign is retained as incident evidence and must
   never be resumed after the implementation revision changes.
 
@@ -57,6 +62,6 @@ an invalid acceptance environment and are not product results.
 
 ## Remaining Work
 
-Commit a clean revision and repeat the bounded live smoke. A new full baseline
-campaign may start only after a timed-out live sample demonstrates preserved
-request identity and the outer `timed-out` status.
+Start fresh full baseline and current campaigns from clean revision `11d8a43`.
+The bounded timeout smoke is diagnostic evidence only and cannot enter either
+30-by-5 formal sample matrix.

@@ -1875,3 +1875,9 @@ request ID 和 provider/model 一致性，缺失或漂移一律归为 infrastruc
 共享测试沙箱同时补齐 durable task directory、registry 与 scheduler guard 隔离，消除了三个
 依赖测试顺序的后台任务失败。带完整 Homebrew 与 Rustup PATH 的 canonical suite 为
 1923/1923；缺少这些工具链的运行只说明验收环境无效，不记为产品结论。
+
+clean revision `11d8a43` 上的 frozen-baseline timeout smoke
+`m19-baseline-terminal-evidence-smoke-11d8a43-r1` 以 10 秒外层预算得到权威
+`timed-out`，同时保留三条非空 request ID，全部精确为
+`deepseek/deepseek-v4-flash`，并保留三份 usage sample。该 smoke 只验证终止证据链，
+不进入正式 30-by-5 样本；fresh full baseline/current campaign 可以开始。
