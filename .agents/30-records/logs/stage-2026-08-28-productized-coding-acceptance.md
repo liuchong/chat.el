@@ -381,3 +381,14 @@ stable handle whose active target moves from approval to execution; late
 verdicts after cancellation cannot start a tool. Focused cancellation tests
 cover the late-verdict, post-approval tool and synchronous fast-approval
 stages. The canonical repository suite passes 1903/1903 after this repair.
+
+Revision `2795a8f` then reran the exact Kimi identity `kimi-code/k3-256k`.
+`coding/elisp-locate` passed in 25.176 seconds. The mutation changed only
+`sample.el` and was cancelled at 120.098 seconds after two generated ERT
+commands exited with code 2 and the model spent later steps trying the
+interactive `open_file` operation in batch mode. Its live trace ended at
+`agent-end` sequence 572 with no later approval, execution or tool event.
+This is positive live evidence that cancellation no longer produced a
+post-run side effect in this sample. No Guard request was pending at its exact
+cancellation instant, so the delayed-verdict race remains proven by the three
+deterministic cancellation tests rather than overstated as live coverage.

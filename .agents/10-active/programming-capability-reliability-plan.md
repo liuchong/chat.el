@@ -1749,3 +1749,10 @@ Revision `4cf9d27` 的同场景复测中，DeepSeek mutation 58.280 秒通过、
 关闭取消后副作用风险；Kimi Guard 延迟及 A/B/C 层定向优化继续保留为独立 M21 数据项，
 不得靠放宽 fail-closed 或删除 120 秒门槛掩盖。迟到 verdict、获批后切换和同步快速批准
 三种取消时序均有定向测试，规范全量入口通过 1903/1903。
+
+Revision `2795a8f` 再次使用精确模型 `kimi-code/k3-256k` 复测：locate 25.176 秒
+通过；mutation 仅修改 `sample.el`，但两次生成的 ERT 命令均 code 2，随后误用批处理环境
+中的交互式 `open_file`，最终 120.098 秒取消。live trace 在 `agent-end` seq 572 截止，
+此后没有 approval、execution 或 tool 事件，未复现取消后副作用。本轮取消瞬间没有在途
+Guard 请求，因此迟到 verdict 竞态仍以三条确定性测试作为直接证明，不把该 live 样本夸大
+为完整竞态覆盖。命令引用质量与交互工具适用性进入 Kimi 定向适配数据项。
