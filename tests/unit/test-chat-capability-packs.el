@@ -553,6 +553,54 @@
                        files_write files_replace files_patch apply_patch))
          (should-not (memq tool advertised)))))))
 
+(ert-deftest chat-capability-bounded-skip-refresh-replaces-stale-runtime-menu ()
+  "Each step replaces stale activations with the bounded-skip stage menu."
+  (chat-test-with-temp-dir
+   (let* ((state (make-chat-session :id "bounded-refresh-state"))
+          (execution (make-chat-session :id "bounded-refresh-execution"))
+          (profile (chat-agent-profile-resolve 'code))
+          (run (chat-agent--run-create
+                :session state :execution-session execution :profile profile)))
+     (chat-session-set-working-directory state temp-dir)
+     (chat-session-metadata-set state 'activeTaskId "task-1")
+     (chat-session-metadata-set state 'code-enabled t)
+     (chat-session-set-tool-config
+      execution
+      (list
+       :enabled-tools chat-capability-programming-tools
+       :advertised-tools
+       (chat-capability--ordered-tool-union
+        chat-capability-programming-base-tools
+        chat-capability-programming-plan-tools
+        chat-capability-programming-work-note-tools
+        chat-capability-programming-goal-tools)))
+     (chat-work-plan-skip
+      state 'single-bounded-action
+      :tool-name "files_replace" :task-id "task-1"
+      :action-facts '((path . "sample.c")))
+     (chat-capability-programming-refresh-tool-advertisement run)
+     (let ((advertised
+            (plist-get (chat-session-tool-config execution)
+                       :advertised-tools)))
+       (should (memq 'files_replace advertised))
+       (dolist (tool '(programming_capability_activate
+                       programming_work_note_upsert programming_goal_create
+                       programming_plan_transition files_write files_patch
+                       apply_patch programming_verification_run))
+         (should-not (memq tool advertised))))
+     (should-not
+      (chat-work-plan-check-call
+       state '(:name "files_replace" :arguments nil)))
+     (chat-capability-programming-refresh-tool-advertisement run)
+     (let ((advertised
+            (plist-get (chat-session-tool-config execution)
+                       :advertised-tools)))
+       (should-not (memq 'files_replace advertised))
+       (should (memq 'programming_plan_create advertised))
+       (should (memq 'programming_compile_task advertised))
+       (dolist (tool chat-capability-programming-verification-tools)
+         (should (memq tool advertised)))))))
+
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))

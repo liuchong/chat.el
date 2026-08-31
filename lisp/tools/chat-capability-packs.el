@@ -21,6 +21,7 @@
 (require 'subr-x)
 (require 'url)
 (require 'chat-files)
+(require 'chat-agent-types)
 (require 'chat-agent-profile)
 (require 'chat-session)
 (require 'chat-tool-forge)
@@ -255,6 +256,42 @@
 
 (add-hook 'chat-agent-profile-tool-advertisement-functions
           #'chat-capability-programming-tool-advertisement)
+
+(defun chat-capability-programming-refresh-tool-advertisement (run)
+  "Keep bounded-skip tool menus synchronized for RUN.
+
+Capability activation is intentionally cumulative during ordinary work.  A
+bounded skip is different: it is a state-machine boundary that must replace
+any previously activated menu with the exact mutation contract, then replace
+that mutation with verification and Plan-upgrade tools after consumption."
+  (let* ((state-session (chat-agent-run-state-session run))
+         (execution-session (chat-agent-run-state-execution-session run))
+         (profile (chat-agent-run-state-profile run))
+         (bounded-skip
+          (and state-session
+               (ignore-errors
+                 (chat-work-plan-bounded-skip-state state-session)))))
+    (when (and execution-session
+               profile
+               (eq (chat-agent-profile-id profile) 'code)
+               bounded-skip)
+      (let* ((config (copy-tree
+                      (chat-session-tool-config execution-session)))
+             (enabled (plist-get config :enabled-tools))
+             (disabled (plist-get config :disabled-tools))
+             (selection
+              (chat-capability-programming-tool-advertisement
+               state-session profile enabled))
+             (advertised
+              (seq-remove
+               (lambda (tool) (memq tool disabled))
+               (plist-get selection :advertised-tools))))
+        (setf (chat-session-tool-config execution-session)
+              (plist-put config :advertised-tools advertised))
+        advertised))))
+
+(add-hook 'chat-plugin-pre-step-functions
+          #'chat-capability-programming-refresh-tool-advertisement)
 
 (defun chat-capability-apply-profile (session profile)
   "Apply capability PROFILE to SESSION using session tool overlays."
