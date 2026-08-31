@@ -72,6 +72,9 @@ ordinary creation exposes every file mutation operation, including structured
 multi-file patching, and compile operations for the next model turn, while a
 restored ordinary plan exposes them when the run starts. No separate capability
 activation may expose a mutating operation before that point.
+Once a plan exists, the provider menu removes `programming_plan_create` and
+exposes the existing plan lifecycle instead. A second plan cannot be proposed
+until the current plan reaches a terminal state.
 Read-only Plan Mode never exposes those execution operations. This staged
 surface prevents a model from spending a failed tool round discovering the
 plan requirement and makes plan-before-mutation structural rather than merely

@@ -1377,6 +1377,15 @@ DeepSeek `deepseek-v4-flash` 与 Kimi Code `k3-256k` 验证不同厂商和协议
 `k3`，也禁止把两家结果合并掩盖单侧问题。完整记录见
 `.agents/30-records/logs/stage-2026-08-31-plan-gate-and-campaign-closure.md`。
 
+同日 revision `77e7777` 的 fresh DeepSeek common-path campaign 完成 30/30，
+`plan-required` 为 0，但八次 tool error 中有三次重复创建活动 Plan、两次 verification
+接收越界的 Agent 私有 `:read-set`。两项 common-layer 缺陷已修：活动 Plan 撤下 create
+operation，verification context 通过显式 allowlist 投影；Guard 对任意 Node 命令的一次
+拒绝保持不变。其余一次目录误传和一次 malformed patch 只记为 candidate evidence，
+不能由单样本形成模型特判。定向 32/32、canonical 1883/1883 通过；实现再次变化，
+该 campaign 只作诊断，完整记录见
+`.agents/30-records/logs/stage-2026-08-31-deepseek-common-path-audit.md`。
+
 #### 退出条件
 
 - 两个精确模型均完成独立、不可变、可审计的 bounded core campaign。

@@ -200,6 +200,8 @@
         (setq advertised
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-plan-tools)))
+      (when plan
+        (setq advertised (delq 'programming_plan_create advertised)))
       (when (and plan (not plan-mode)
                  (seq-some
                   (lambda (item)
@@ -265,6 +267,17 @@
       (setf (chat-session-tool-config session)
             (plist-put config :advertised-tools advertised))
       allowed)))
+
+(defun chat-capability--unadvertise-tools (tools)
+  "Remove TOOLS from the current run's provider-facing menu."
+  (when-let ((session (chat-capability--execution-session)))
+    (let* ((config (copy-tree (chat-session-tool-config session)))
+           (current (plist-get config :advertised-tools)))
+      (when current
+        (setf (chat-session-tool-config session)
+              (plist-put
+               config :advertised-tools
+               (seq-remove (lambda (tool) (memq tool tools)) current)))))))
 
 (defun chat-capability-programming-capability-activate (capability)
   "Advertise the programming tool group named CAPABILITY for this run."
@@ -413,9 +426,14 @@
 (defun chat-capability--verification-context ()
   "Return correlation fields for the current capability session."
   (let* ((session (ignore-errors (chat-capability--current-session)))
-         (context (copy-sequence
-                   (and (boundp 'chat-tool-caller-current-execution-context)
-                        chat-tool-caller-current-execution-context))))
+         (source
+          (and (boundp 'chat-tool-caller-current-execution-context)
+               chat-tool-caller-current-execution-context))
+         context)
+    (dolist (key '(:session-id :turn-id :task-id :run-id :parent-id
+                   :checkpoint-id :changed-files :preflight-fingerprints))
+      (when (plist-member source key)
+        (setq context (plist-put context key (plist-get source key)))))
     (when session
       (setq context
             (plist-put context :session-id (chat-session-id session))))
@@ -642,9 +660,10 @@
   (let* ((items (chat-capability--work-plan-items items "items"))
          (session (chat-capability--work-plan-session))
          (plan
-          (chat-work-plan-create
+         (chat-work-plan-create
            session objective items
            :mode (and mode (not (string-empty-p mode)) (intern mode)))))
+    (chat-capability--unadvertise-tools '(programming_plan_create))
     (unless (chat-plan-mode-active-p session)
       (setq plan
             (chat-work-plan-start-first-ready

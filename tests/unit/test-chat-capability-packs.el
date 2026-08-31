@@ -91,9 +91,29 @@
      "Batch edit"
      '(((id . "edit") (title . "Apply structured edits")
         (acceptance . "The intended replacements are present."))))
+    (should-not
+     (memq 'programming_plan_create
+           (plist-get (chat-session-tool-config execution)
+                      :advertised-tools)))
     (should (memq 'files_patch
                   (plist-get (chat-session-tool-config execution)
                              :advertised-tools)))))
+
+(ert-deftest chat-capability-verification-context-excludes-agent-private-state ()
+  "Verification receives correlation facts but not the Agent's read set."
+  (let* ((session (make-chat-session :id "verification-context"))
+         (chat-tool-caller-current-state-session session)
+         (chat-tool-caller-current-execution-context
+          (list :session-id "stale" :turn-id 4 :task-id "task-4"
+                :run-id "run-4" :read-set (make-hash-table :test 'equal)
+                :allowed-paths '("sample.js")))
+         (context (chat-capability--verification-context)))
+    (should (equal "verification-context" (plist-get context :session-id)))
+    (should (= 4 (plist-get context :turn-id)))
+    (should (equal "task-4" (plist-get context :task-id)))
+    (should (equal "run-4" (plist-get context :run-id)))
+    (should-not (plist-member context :read-set))
+    (should-not (plist-member context :allowed-paths))))
 
 (ert-deftest chat-capability-exploration-is-explicitly-staged ()
   "Editor-semantic and web tools stay available without taxing turn one."
@@ -437,6 +457,8 @@
        (chat-work-plan-start-first-ready
         session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
      (let ((config (chat-agent-profile--effective-tool-config session profile)))
+       (should-not (memq 'programming_plan_create
+                         (plist-get config :advertised-tools)))
        (dolist (tool chat-capability-programming-execution-tools)
          (should (memq tool (plist-get config :advertised-tools))))))))
 
