@@ -40,7 +40,7 @@
   "Read-only tool menu advertised before a programming plan exists.")
 
 (defconst chat-capability-programming-execution-tools
-  '(programming_compile_task files_write files_replace apply_patch)
+  '(programming_compile_task files_write files_replace files_patch apply_patch)
   "Mutating tools advertised only after an ordinary work plan starts.")
 
 (defconst chat-capability-programming-exploration-tools
@@ -65,10 +65,6 @@
   '(programming_context_inspect)
   "Programming tools advertised for scoped context inspection.")
 
-(defconst chat-capability-programming-batch-edit-tools
-  '(files_patch)
-  "Programming tools advertised for structured multi-replacement edits.")
-
 (defconst chat-capability-programming-goal-tools
   '(programming_goal_create programming_goal_read programming_goal_list
     programming_goal_progress programming_goal_block programming_goal_complete)
@@ -87,8 +83,7 @@
     (goal . ,chat-capability-programming-goal-tools)
     (notes . ,chat-capability-programming-work-note-tools)
     (verification . ,chat-capability-programming-verification-tools)
-    (context . ,chat-capability-programming-context-tools)
-    (batch-edit . ,chat-capability-programming-batch-edit-tools))
+    (context . ,chat-capability-programming-context-tools))
   "On-demand programming tool groups keyed by activation name.")
 
 (defconst chat-capability-programming-tools
@@ -1116,13 +1111,11 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
            "already visible and starts the first item for ordinary coding; "
            "activate plan only for read-only Plan Mode or lifecycle operations "
            "before a plan exists. Use exploration for editor semantics or web "
-           "lookup, goal only when "
-           "explicitly requested, and batch-edit only for structured "
-           "multi-replacement. Ordinary plan creation exposes apply_patch and "
-           "the other execution tools.")
+           "lookup, and goal only when explicitly requested. Ordinary plan "
+           "creation exposes all file mutation and compile tools.")
    '((:name "capability" :type "string" :required t
       :enum ("exploration" "plan" "goal" "notes" "verification"
-             "context" "batch-edit")))
+             "context")))
    #'chat-capability-programming-capability-activate 'project '(state))
   (chat-capability--register-tool
    'programming_git_status "Programming Git Status"

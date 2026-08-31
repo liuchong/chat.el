@@ -68,8 +68,10 @@ also have one dependency-ready `in-progress` item. The provider-facing
 `programming_plan_create` operation is present in the initial programming menu
 and atomically starts the earliest dependency-ready item for ordinary coding;
 the initial menu otherwise contains only inspection operations. Successful
-ordinary creation exposes file mutation and compile operations for the next
-model turn, while a restored ordinary plan exposes them when the run starts.
+ordinary creation exposes every file mutation operation, including structured
+multi-file patching, and compile operations for the next model turn, while a
+restored ordinary plan exposes them when the run starts. No separate capability
+activation may expose a mutating operation before that point.
 Read-only Plan Mode never exposes those execution operations. This staged
 surface prevents a model from spending a failed tool round discovering the
 plan requirement and makes plan-before-mutation structural rather than merely

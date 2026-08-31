@@ -1369,6 +1369,14 @@ DeepSeek `deepseek-v4-flash` 与 Kimi Code `k3-256k` 验证不同厂商和协议
 7. 将通用缺陷修在 common layer，禁止复制两个 Agent loop 或把一次随机失败硬编码成模型分支。
 8. 所有 accepted/rejected/retired 策略记录 promotion、review date、removal condition 和回滚目标。
 
+2026-08-31 的 `8ece6a5` common-path 诊断完成 30/30，但四次
+`plan-required` 全部来自 `batch-edit` 在 Plan 前公布 `files_patch`。该旁路已删除，
+`files_patch` 与其他 mutation 一样只在普通 work plan 存在 `in-progress` 项后公布；
+定向测试 31/31、完整工具链 canonical 1881/1881 通过。旧 campaign 仅保留为诊断证据，
+下一步在新 clean revision 分别运行精确 `deepseek-v4-flash` 和 `k3-256k`，禁止使用
+`k3`，也禁止把两家结果合并掩盖单侧问题。完整记录见
+`.agents/30-records/logs/stage-2026-08-31-plan-gate-and-campaign-closure.md`。
+
 #### 退出条件
 
 - 两个精确模型均完成独立、不可变、可审计的 bounded core campaign。

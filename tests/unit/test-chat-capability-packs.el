@@ -69,19 +69,28 @@
                      (append (chat-tool-caller-provider-tools) nil))))
     (should-not (chat-session-tool-config state))))
 
-(ert-deftest chat-capability-batch-edit-is-explicitly-staged ()
-  "Structured batch editing is authorized but absent until requested."
+(ert-deftest chat-capability-batch-edit-follows-the-work-plan-stage ()
+  "Structured batch editing cannot bypass the ordinary Plan gate."
   (let* ((execution (make-chat-session :id "batch-edit-execution"))
-         (chat-tool-caller-current-session execution))
+         (chat-tool-caller-current-session execution)
+         (chat-tool-caller-current-state-session execution))
     (chat-session-set-tool-config
      execution
      (list :enabled-tools chat-capability-programming-tools
            :advertised-tools chat-capability-programming-base-tools))
-    (should (memq 'files_patch chat-capability-programming-tools))
+    (should (memq 'files_patch chat-capability-programming-execution-tools))
     (should-not (memq 'files_patch
                       (plist-get (chat-session-tool-config execution)
                                  :advertised-tools)))
-    (chat-capability-programming-capability-activate "batch-edit")
+    (should-error
+     (chat-capability-programming-capability-activate "batch-edit"))
+    (should-not (memq 'files_patch
+                      (plist-get (chat-session-tool-config execution)
+                                 :advertised-tools)))
+    (chat-capability-programming-plan-create
+     "Batch edit"
+     '(((id . "edit") (title . "Apply structured edits")
+        (acceptance . "The intended replacements are present."))))
     (should (memq 'files_patch
                   (plist-get (chat-session-tool-config execution)
                              :advertised-tools)))))
