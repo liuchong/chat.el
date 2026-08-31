@@ -14,38 +14,26 @@
 
 ## Continue With
 
-- M9-M18 and deterministic M19 implementation are complete; current harness
-  revision `296d2b6` passes the canonical suite 1925/1925
+- M9-M19 are complete and revision-bound; never reuse their campaign evidence
+  for M20 product changes
 - Goal state is the completion contract; work plan/TODO is the execution path;
   Plan Mode is a permission boundary. Do not merge these concepts or stores
-- Clean runtime, quality and canonical JSON records are stored outside the
-  repository and all production provenance gates pass for `875433c`
-- Current and baseline no-network descriptors each contain 30 tasks, five
-  repetitions and 150 expected results with the same frozen manifest
-- The current harness owns both Eval result persistence and campaign
-  orchestration; the frozen checkout owns only the product behavior under test
-- A real 120-second frozen-baseline timeout retained ten exact DeepSeek request
-  identities and normalized usage without raw provider payloads
-- Two stopped formal baseline directories are incident evidence only; never
-  resume them or mix their results into a fresh matrix
-- M19 remains incomplete until fresh baseline/current live campaigns use one
-  identical concrete provider/model identity and the strict aggregate passes
-- Kimi campaigns before the immutable Run-identity correction are
-  identity-unverified; the passing `3e38e49` campaign actually used K2.7 for
-  task requests and is invalid as `k3-256k` evidence
-- Exact-model acceptance now requires one `model-request-started` record for
-  every real request; missing or mismatched provider/model identity fails closed
-- DeepSeek Flash may be used, but it requires fresh campaign identities for
-  both roles; never mix it with Kimi or historical campaign samples
-- The provider transport boundary and bounded current-file reading were already
-  complete when audited; do not reimplement them
-- Privacy-safe Markdown session export is implemented in `8c14cff` and specified
-  in `7b187fc`; use `M-x chat-export-session` or session-tree `e`
-- Export is an allowlisted public projection, not a backup: never add prompts,
-  reasoning, tool traffic, raw transport data, paths or arbitrary metadata to
-  its default contract
-- Development verification passes 1925/1925 canonical tests and 3/3 Agent
-  end-to-end tests with the complete Rust toolchain PATH
+- Delayed model switching is implemented in `48b5350`: prepared prompt model,
+  active request model and pending continuation model remain distinct
+- M20 has an independent 42-task manifest covering Zig, Clojure, Java,
+  TypeScript, C, C++ and SQL across six balanced categories
+- Campaign preflight checks manifest-declared hidden toolchain dependencies as
+  well as direct command executables before any provider request
+- Zig, Java, C, C++ and SQL pass the reusable fixture semantic verifier
+- The complete offline gate is blocked by missing `lein` and `tsc`; never turn
+  this into skipped trials or silently shrink the matrix
+- Exact toolchain paths and versions still need immutable descriptor storage
+- Project verification adapters for the seven languages remain incomplete
+- Run exact-model live work only after the offline gate: DeepSeek
+  `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
+- Never use `k3`, aliases or K2.7 evidence for Kimi qualification
+- The detailed current record is
+  `stage-2026-09-01-extended-language-corpus-foundation.md`
 
 ## Avoid
 

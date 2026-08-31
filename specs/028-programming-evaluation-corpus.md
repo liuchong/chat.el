@@ -169,6 +169,10 @@ The manifest stores argv arrays, never shell fragments. A campaign records the
 exact executable path and version discovered by preflight. Missing tools, an
 uncached dependency or an unsupported version blocks the campaign before the
 first provider request; it is never converted to a skipped or passing task.
+The manifest-level `requiredExecutables` list names every external executable
+used behind a fixture wrapper. Preflight resolves the union of that list and
+the first argv item of every command judge. A wrapper such as `sh test-one`
+must never make a missing compiler, runtime or test runner appear available.
 Every command judge start is also a terminal boundary: a process creation
 failure records the command, a `not-started` result and the underlying error.
 Any later synchronous evaluation failure records an explicit error result and
@@ -192,6 +196,7 @@ Representative manifest fragment:
 
 ```json
 {
+  "requiredExecutables": ["java", "javac"],
   "id": "java-refactor",
   "revision": 1,
   "category": "refactor",
@@ -222,7 +227,10 @@ Representative manifest fragment:
 The example uses a fixture-owned bounded wrapper because compile-and-run needs
 two processes. The wrapper contains fixed argv, writes only to its declared
 build directory and accepts only an enumerated test case. It is fixture code,
-not an Agent-generated shell command.
+not an Agent-generated shell command. The actual manifest stores
+`requiredExecutables` at its top level rather than repeating it on every task;
+it is shown beside the representative task here to keep the dependency
+contract visible.
 
 Typical project fragments remain in the fixture itself rather than being copied
 into prose. A fixture should make language semantics observable: integer
@@ -260,6 +268,13 @@ Development qualification has four gates:
    fixed provider/model/capability snapshot;
 4. **repeated live gate**: all 42 extended tasks run three times for development
    and five times for final qualification.
+
+`tests/fixtures/coding-eval/verify-extended-fixtures.sh` is the reusable offline
+gate. It copies selected fixtures into a temporary workspace, verifies that the
+known-good behavior passes, verifies that each seeded defect fails for the
+expected semantic reason, and removes the workspace on every exit. Running it
+without language arguments requires all seven toolchains; named language
+arguments support bounded local diagnosis but do not satisfy the complete gate.
 
 The final extended campaign contains 210 unique trials. It reports every
 language and category separately. Overall success must reach 90% or improve at
@@ -363,8 +378,8 @@ any repeated live task is dispatched.
 
 ## 8. Completion Checklist
 
-- [ ] Extended manifest contains 42 tasks: seven languages by six categories.
-- [ ] Combined corpus contains 72 unique task IDs and 12 languages.
+- [x] Extended manifest contains 42 tasks: seven languages by six categories.
+- [x] Combined corpus contains 72 unique task IDs and 12 languages.
 - [ ] All toolchains have bounded, offline preflight and recorded versions.
 - [ ] Every writing judge declares generated paths and passes repeated cleanup.
 - [ ] File detection, language profile and verification adapters cover all 12 languages.

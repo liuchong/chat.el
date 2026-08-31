@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  divide) test_name=sample.core-test/divide-test ;;
+  label) test_name=sample.core-test/label-test ;;
+  normalize) test_name=sample.core-test/normalize-test ;;
+  active) test_name=sample.core-test/active-test ;;
+  *) echo "unknown test" >&2; exit 2 ;;
+esac
+
+export LEIN_OFFLINE=true
+lein test :only "$test_name"

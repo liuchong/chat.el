@@ -16,6 +16,10 @@
 (defconst chat-coding-eval-test-manifest
   (expand-file-name "coding-eval/manifest.json" chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-extended-manifest
+  (expand-file-name "coding-eval/manifest-extended.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-large-repo-manifest
   (expand-file-name "coding-eval/manifest-large-repo.json"
                     chat-test-fixtures-dir))
@@ -85,7 +89,7 @@
                   core-languages))
     (should
      (seq-every-p (lambda (language)
-                    (equal "planned" (alist-get 'state language)))
+                    (equal "executable" (alist-get 'state language)))
                   extended-languages))
     (dolist (cohort cohorts)
       (let* ((id (alist-get 'id cohort))
@@ -97,6 +101,68 @@
                    (length members)))
         (should (= (alist-get 'expectedTasks cohort)
                    (* (length members) (length categories))))))))
+
+(ert-deftest chat-coding-eval-extended-manifest-is-complete-and-balanced ()
+  "The M20 corpus has one safe executable task per language and category."
+  (let* ((registry
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-language-registry))
+         (categories (alist-get 'categories registry))
+         (extended-languages
+          (mapcar
+           (lambda (language) (alist-get 'id language))
+           (seq-filter
+            (lambda (language)
+              (equal "extended" (alist-get 'cohort language)))
+            (alist-get 'languages registry))))
+         (raw-manifest
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-extended-manifest))
+         (raw-tasks (alist-get 'tasks raw-manifest))
+         (required-executables
+          (alist-get 'requiredExecutables raw-manifest))
+         (tasks (chat-coding-eval-load-suite
+                 chat-coding-eval-test-extended-manifest))
+         (coverage (chat-coding-eval-suite-coverage tasks)))
+    (should (= 42 (length tasks)))
+    (should
+     (equal '("clang" "clang++" "java" "javac" "lein" "node" "sqlite3"
+              "tsc" "zig")
+            (sort (copy-sequence required-executables) #'string<)))
+    (should (= 42 (alist-get 'taskCount coverage)))
+    (should
+     (equal (sort (copy-sequence extended-languages) #'string<)
+            (mapcar #'car (alist-get 'languages coverage))))
+    (dolist (language extended-languages)
+      (let ((language-tasks
+             (seq-filter
+              (lambda (task)
+                (equal language (chat-coding-eval-task-language task)))
+              tasks)))
+        (should (= 6 (length language-tasks)))
+        (should
+         (equal (sort (copy-sequence categories) #'string<)
+                (sort
+                 (mapcar #'chat-coding-eval-task-category language-tasks)
+                 #'string<)))
+        (should (= 1 (length
+                      (delete-dups
+                       (mapcar #'chat-coding-eval-task-fixture-id
+                               language-tasks)))))))
+    (dolist (task tasks)
+      (should (file-directory-p
+               (chat-coding-eval-task-fixture-directory task)))
+      (should
+       (stringp
+        (chat-coding-eval-fixture-digest
+         (chat-coding-eval-task-fixture-directory task))))
+      (should (> (chat-coding-eval-task-declared-indexed-file-count task)
+                 0)))
+    (dolist (task raw-tasks)
+      (when (seq-some (lambda (judge)
+                        (equal "command" (alist-get 'type judge)))
+                      (alist-get 'judges task))
+        (should (assq 'generatedPaths task))))))
 
 (ert-deftest chat-coding-eval-large-repo-manifest-is-an-exact-core-subset ()
   "The focused performance campaign cannot drift from its core task."
@@ -265,6 +331,14 @@
                        (chat-campaign-runner--validate-judge-executables
                         (list available))
                        nil nil #'equal)))
+    (should-error
+     (chat-campaign-runner--validate-judge-executables (list missing))
+     :type 'error)
+    (setf (chat-coding-eval-task-judges missing)
+          '(((type . "command") (name . "wrapper")
+             (command . ("sh" "test-one"))))
+          (chat-coding-eval-task-required-executables missing)
+          '("chat-campaign-hidden-tool-that-does-not-exist"))
     (should-error
      (chat-campaign-runner--validate-judge-executables (list missing))
      :type 'error)))

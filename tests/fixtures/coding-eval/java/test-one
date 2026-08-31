@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  divide|label|normalize|active) test_name=$1 ;;
+  *) echo "unknown test" >&2; exit 2 ;;
+esac
+
+build=.chat-eval-build/java
+rm -rf "$build"
+mkdir -p "$build"
+javac -d "$build" src/Sample.java test/SampleTest.java
+java -cp "$build" SampleTest "$test_name"

@@ -6,7 +6,25 @@
 (require 'cl-lib)
 (require 'test-helper)
 (require 'chat-code-intelligence)
+(require 'chat-code-intel)
 (require 'chat-code-lsp)
+
+(ert-deftest chat-code-intel-detects-the-complete-evaluation-language-set ()
+  "Source detection covers every core and extended qualification language."
+  (dolist (case '(("sample.el" . emacs-lisp)
+                  ("sample.py" . python)
+                  ("sample.js" . javascript)
+                  ("sample.go" . go)
+                  ("sample.rs" . rust)
+                  ("sample.zig" . zig)
+                  ("sample.clj" . clojure)
+                  ("Sample.java" . java)
+                  ("sample.ts" . typescript)
+                  ("sample.c" . c)
+                  ("sample.cpp" . cpp)
+                  ("sample.sql" . sql)))
+    (should (eq (cdr case)
+                (chat-code-intel-detect-language (car case))))))
 
 (defun chat-test-code-intelligence--await (starter &optional timeout)
   "Run STARTER with a callback and wait up to TIMEOUT seconds."

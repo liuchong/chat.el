@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  divide|label|normalize|active) test_name=$1 ;;
+  *) echo "unknown test" >&2; exit 2 ;;
+esac
+
+tsc --noEmit --target ES2022 --module nodenext --moduleResolution nodenext sample.ts
+node --test --test-name-pattern "^${test_name}$" test/sample.test.ts

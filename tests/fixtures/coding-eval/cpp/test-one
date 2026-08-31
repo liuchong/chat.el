@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  divide|label|normalize|active) test_name=$1 ;;
+  *) echo "unknown test" >&2; exit 2 ;;
+esac
+
+build=.chat-eval-build/cpp
+rm -rf "$build"
+mkdir -p "$build"
+clang++ -std=c++20 -Wall -Wextra -Werror -I. sample.cpp test_sample.cpp -o "$build/test_sample"
+"$build/test_sample" "$test_name"

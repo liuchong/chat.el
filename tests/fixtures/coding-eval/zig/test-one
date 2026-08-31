@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  divide|label|normalize|active) test_name=$1 ;;
+  *) echo "unknown test" >&2; exit 2 ;;
+esac
+
+export ZIG_GLOBAL_CACHE_DIR=.zig-cache/global
+export ZIG_LOCAL_CACHE_DIR=.zig-cache/local
+zig test sample_test.zig --test-filter "$test_name"

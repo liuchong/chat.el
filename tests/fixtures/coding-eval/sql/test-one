@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  divide)
+    result=$(sqlite3 :memory: <<'SQL'
+.read sample.sql
+INSERT INTO ratios VALUES (5, 2), (1, 0);
+SELECT printf('%.1f', result) FROM division_results ORDER BY left_value DESC;
+SQL
+)
+    [ "$result" = "2.5
+0.0" ]
+    ;;
+  label)
+    result=$(sqlite3 :memory: <<'SQL'
+.read sample.sql
+INSERT INTO items VALUES ('alpha');
+SELECT label FROM item_labels;
+SQL
+)
+    [ "$result" = "entry:alpha" ]
+    ;;
+  normalize)
+    result=$(sqlite3 :memory: <<'SQL'
+.read sample.sql
+INSERT INTO people VALUES ('  Alpha  BETA ');
+SELECT name FROM normalized_names;
+SQL
+)
+    [ "$result" = "alpha beta" ]
+    ;;
+  active)
+    result=$(sqlite3 :memory: <<'SQL'
+.read sample.sql
+INSERT INTO statuses VALUES ('active'), ('paused');
+SELECT active FROM active_statuses ORDER BY state;
+SQL
+)
+    [ "$result" = "1
+0" ]
+    ;;
+  *) echo "unknown test" >&2; exit 2 ;;
+esac

@@ -20,17 +20,25 @@ Stable entry points:
 | Manifest | Languages | Categories per language | Tasks | State |
 |---|---|---:|---:|---|
 | `manifest.json` | Emacs Lisp, Python, JavaScript, Go, Rust | 6 | 30 | executable core corpus |
-| `manifest-extended.json` | Zig, Clojure, Java, TypeScript, C, C++, SQL | 6 | 42 | required by M20 before its first campaign |
+| `manifest-extended.json` | Zig, Clojure, Java, TypeScript, C, C++, SQL | 6 | 42 | executable extended corpus |
 
 The six categories are `locate-explain`, `single-file-fix`,
 `multi-file-change`, `refactor`, `failing-test-fix` and `read-only-review`.
 The two manifests keep independent digests so the 30-task historical comparison
 cannot silently change when the extended corpus lands.
 
-The sidecar language registry may describe a `planned` cohort whose manifest is
-not present yet. Only an `executable` cohort is eligible for preflight or live
-campaign accounting. Changing a language ID, cohort or task category is a
-versioned corpus-design change and requires registry tests plus a stage record.
+`verify-extended-fixtures.sh` runs copied fixtures only. With no arguments it
+preflights all seven toolchains before execution; language arguments select a
+bounded local subset while developing. A valid baseline must compile and pass
+the normalization behavior check, while the divide, label and active checks
+must each fail for their seeded task defect. The live Agent is then responsible
+for making one selected mutation check pass inside its disposable workspace.
+
+Only an `executable` cohort is eligible for preflight or live campaign
+accounting. A missing toolchain blocks that campaign before provider use; it
+does not change committed corpus state or count as a skipped task. Changing a
+language ID, cohort or task category is a versioned corpus-design change and
+requires registry tests plus a stage record.
 
 ## Reusable Task Shape
 

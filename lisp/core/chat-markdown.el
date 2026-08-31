@@ -656,6 +656,7 @@ Code is not recursed into: a marker inside backticks is text."
     ("objc" . objc-mode)
     ("java" . java-mode)
     ("rust" . rust-mode)
+    ("zig" . zig-mode)
     ("go" . go-mode)
     ("python" . python-mode)
     ("py" . python-mode)

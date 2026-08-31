@@ -23,10 +23,12 @@ The strict immutable `acceptance/m19` result passed 53/53 checks, including
 footprint and performance limits. The replayable record is
 `stage-2026-09-01-m19-final-acceptance.md`.
 
-The next recorded expansion is M20, after the fixed M19 comparison: Zig,
-Clojure, Java, TypeScript, C, C++ and SQL each receive the same six task
-categories. The 42-task extended manifest stays separate from the immutable
-30-task core comparison and follows `specs/028-programming-evaluation-corpus.md`.
+M20 is active. Zig, Clojure, Java, TypeScript, C, C++ and SQL now each have the
+same six task categories in a separate 42-task extended manifest. Fixture
+wrappers, generated-path contracts, complete executable preflight and
+12-language detection are implemented. Zig, Java, C, C++ and SQL pass the
+reusable offline semantic gate; the complete gate is explicitly blocked by
+missing local `lein` and `tsc` executables. No M20 provider campaign has run.
 
 The transport audit found no remaining split to implement:
 `chat-model-request-events` already normalizes native streaming and the
@@ -481,14 +483,12 @@ session-export tests pass.
 
 ## Next Stage
 
-Proceed from the accepted M19 baseline without reusing its campaign evidence
-for later revisions. The immediate product slice is the delayed model-switch
-state machine: prepared prompt model, active request model and pending
-next-continuation model must be distinct, durable and observable. A switch
-command must not interrupt an active multi-step run; it becomes effective once
-at the next continuation boundary and follows the same non-selectable hint and
-independent completion contract as other slash commands. M20 language
-qualification and the remaining long-Goal roadmap follow their recorded order.
+Finish M20 without reusing M19 evidence. First persist resolved toolchain paths
+and versions in immutable campaign descriptors and complete conservative
+project-verification adapters for the seven added languages. Then provide the
+two missing deterministic toolchains, pass the complete offline gate, and run
+one exact-model mutation smoke per language. Repeated DeepSeek
+`deepseek-v4-flash` and Kimi Code `k3-256k` campaigns remain separate.
 
 ## Not Doing Now
 
@@ -502,9 +502,7 @@ qualification and the remaining long-Goal roadmap follow their recorded order.
 
 ## Immediate Next Step
 
-No deterministic implementation gap from the execution audit remains.  Run
-credential-dependent provider or live-server checks only when their
-environments are intentionally available.  If offline development continues,
-audit model-specific context-window facts before changing the 131072 fallback;
-vendor catalogs are time-sensitive and every value needs current primary-source
-evidence plus boundary tests.
+Run the repository-standard canonical suite for the extended corpus foundation,
+clean generated artifacts, commit and push the stage. Continue with descriptor
+toolchain provenance and language-aware verification adapters; do not start
+provider qualification while `lein` or `tsc` is absent.

@@ -8,9 +8,10 @@
 
 ## Goal
 
-Deliver M9-M19 as an evidence-driven improvement of coding task success,
-without replacing the completed M0-M8 runtime contracts or creating parallel
-session, task, event, checkpoint, workspace, execution, Trace or Eval stores.
+Deliver M20 as an evidence-driven expansion from the accepted M9-M19 coding
+baseline, without replacing the completed runtime contracts or creating
+parallel session, task, event, checkpoint, workspace, execution, Trace or Eval
+stores.
 
 The detailed design, construction order, test matrix and acceptance thresholds
 are in `programming-capability-reliability-plan.md`.
@@ -34,20 +35,16 @@ are in `programming-capability-reliability-plan.md`.
 8. M16: read-only Review Agent and conflict-safe coding subagents (complete)
 9. M17: durable cross-turn Goal state machine (complete)
 10. M18: read-only Plan Mode and exact-revision approval (complete)
-11. M19: rollout and performance implementation (complete; final acceptance blocked)
+11. M19: rollout and performance implementation (complete; final acceptance passed)
+12. M20: seven-language evaluation and verification expansion (active)
 
 ## Immediate Next Action
 
-Reduce the fixed resident prompt and tool-schema cost exposed by the completed
-`f0b0701` paired campaign. Preserve the current 150/150 correctness result while
-bringing median trusted input tokens to at most 110 percent of the frozen M9
-baseline. Measure first-request and final-request usage separately so startup
-context cost cannot be confused with longer successful tool loops. Define a
-valid large-repository comparison when the historical task has trusted usage
-but does not pass; do not weaken the 15 percent reduction target or rewrite the
-immutable campaign. After implementation, commit a clean revision, rebuild the
-runtime/quality/canonical records and run fresh baseline/current 30-by-5
-campaigns. Do not mark M19 complete until both token gates pass.
+Commit the balanced 42-task corpus foundation after the canonical suite passes.
+Then persist exact toolchain path/version provenance and add conservative
+language-aware project verification adapters. The complete offline gate must
+pass before exact-model mutation smokes or repeated provider campaigns begin.
+DeepSeek and Kimi results remain independent and per-language.
 
 ## Stage Gate
 

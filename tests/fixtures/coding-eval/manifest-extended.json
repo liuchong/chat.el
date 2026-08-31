@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "requiredExecutables": [
+    "zig", "lein", "java", "javac", "node", "tsc", "clang", "clang++",
+    "sqlite3"
+  ],
+  "tasks": [
+    {
+      "id": "zig-locate", "revision": 1, "category": "locate-explain", "language": "zig",
+      "description": "Locate a user lookup implementation.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "Find the function that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
+      "allowedPaths": ["sample.zig"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "findUser"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "zig-single-fix", "revision": 1, "category": "single-file-fix", "language": "zig",
+      "description": "Correct integer division behavior.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "Fix divide for positive integers so non-exact results round up. Preserve the existing zero-divisor error.",
+      "allowedPaths": ["sample.zig"], "generatedPaths": [".zig-cache", "zig-out"],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "zig-multi-file", "revision": 1, "category": "multi-file-change", "language": "zig",
+      "description": "Change a label contract and its documentation.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["sample.zig", "README.md"], "generatedPaths": [".zig-cache", "zig-out"],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "zig-refactor", "revision": 1, "category": "refactor", "language": "zig",
+      "description": "Extract normalization detail.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "Refactor normalizeName by extracting whitespace cleanup into a private helper named cleanName. Preserve behavior.",
+      "allowedPaths": ["sample.zig"], "generatedPaths": [".zig-cache", "zig-out"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.zig", "regexp": "cleanName"}]
+    },
+    {
+      "id": "zig-failing-test", "revision": 1, "category": "failing-test-fix", "language": "zig",
+      "description": "Repair an activity-state regression.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": ["sample.zig"], "generatedPaths": [".zig-cache", "zig-out"],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "zig-review", "revision": 1, "category": "read-only-review", "language": "zig",
+      "description": "Review role matching.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
+      "allowedPaths": ["sample.zig"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "isAdmin"}, {"type": "no-change", "name": "read-only"}]
+    },
+
+    {
+      "id": "clojure-locate", "revision": 1, "category": "locate-explain", "language": "clojure",
+      "description": "Locate a user lookup implementation.", "fixtureId": "clojure-sample-v1", "fixture": "clojure",
+      "prompt": "Find the function that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
+      "allowedPaths": ["src/sample/core.clj"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "find-user"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "clojure-single-fix", "revision": 1, "category": "single-file-fix", "language": "clojure",
+      "description": "Correct division behavior.", "fixtureId": "clojure-sample-v1", "fixture": "clojure",
+      "prompt": "Fix divide so it preserves ratio results and throws IllegalArgumentException when the divisor is zero.",
+      "allowedPaths": ["src/sample/core.clj"], "generatedPaths": ["target", ".lein-failures", ".cpcache"],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "clojure-multi-file", "revision": 1, "category": "multi-file-change", "language": "clojure",
+      "description": "Change a label contract and its documentation.", "fixtureId": "clojure-sample-v1", "fixture": "clojure",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["src/sample/core.clj", "README.md"], "generatedPaths": ["target", ".lein-failures", ".cpcache"],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "clojure-refactor", "revision": 1, "category": "refactor", "language": "clojure",
+      "description": "Extract normalization detail.", "fixtureId": "clojure-sample-v1", "fixture": "clojure",
+      "prompt": "Refactor normalize-name by extracting whitespace cleanup into a private helper named clean-name. Preserve behavior.",
+      "allowedPaths": ["src/sample/core.clj"], "generatedPaths": ["target", ".lein-failures", ".cpcache"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "src/sample/core.clj", "regexp": "clean-name"}]
+    },
+    {
+      "id": "clojure-failing-test", "revision": 1, "category": "failing-test-fix", "language": "clojure",
+      "description": "Repair an activity-state regression.", "fixtureId": "clojure-sample-v1", "fixture": "clojure",
+      "prompt": "The active-test test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": ["src/sample/core.clj"], "generatedPaths": ["target", ".lein-failures", ".cpcache"],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "clojure-review", "revision": 1, "category": "read-only-review", "language": "clojure",
+      "description": "Review role matching.", "fixtureId": "clojure-sample-v1", "fixture": "clojure",
+      "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
+      "allowedPaths": ["src/sample/core.clj"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "admin"}, {"type": "no-change", "name": "read-only"}]
+    },
+
+    {
+      "id": "java-locate", "revision": 1, "category": "locate-explain", "language": "java",
+      "description": "Locate a user lookup implementation.", "fixtureId": "java-sample-v1", "fixture": "java",
+      "prompt": "Find the method that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
+      "allowedPaths": ["src/Sample.java"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "findUser"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "java-single-fix", "revision": 1, "category": "single-file-fix", "language": "java",
+      "description": "Correct division behavior.", "fixtureId": "java-sample-v1", "fixture": "java",
+      "prompt": "Fix divide so it preserves fractional results and throws IllegalArgumentException when the divisor is zero.",
+      "allowedPaths": ["src/Sample.java"], "generatedPaths": [".chat-eval-build/java"],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "java-multi-file", "revision": 1, "category": "multi-file-change", "language": "java",
+      "description": "Change a label contract and its documentation.", "fixtureId": "java-sample-v1", "fixture": "java",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["src/Sample.java", "README.md"], "generatedPaths": [".chat-eval-build/java"],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "java-refactor", "revision": 1, "category": "refactor", "language": "java",
+      "description": "Extract normalization detail.", "fixtureId": "java-sample-v1", "fixture": "java",
+      "prompt": "Refactor normalizeName by extracting whitespace cleanup into a private helper named cleanName. Preserve behavior.",
+      "allowedPaths": ["src/Sample.java"], "generatedPaths": [".chat-eval-build/java"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "src/Sample.java", "regexp": "cleanName"}]
+    },
+    {
+      "id": "java-failing-test", "revision": 1, "category": "failing-test-fix", "language": "java",
+      "description": "Repair an activity-state regression.", "fixtureId": "java-sample-v1", "fixture": "java",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": ["src/Sample.java"], "generatedPaths": [".chat-eval-build/java"],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "java-review", "revision": 1, "category": "read-only-review", "language": "java",
+      "description": "Review role matching.", "fixtureId": "java-sample-v1", "fixture": "java",
+      "prompt": "Review the administrator-role check for correctness. Name the risky method and explain the defect. Do not edit files.",
+      "allowedPaths": ["src/Sample.java"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "isAdmin"}, {"type": "no-change", "name": "read-only"}]
+    },
+
+    {
+      "id": "typescript-locate", "revision": 1, "category": "locate-explain", "language": "typescript",
+      "description": "Locate a user lookup implementation.", "fixtureId": "typescript-sample-v1", "fixture": "typescript",
+      "prompt": "Find the function that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
+      "allowedPaths": ["sample.ts"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "findUser"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "typescript-single-fix", "revision": 1, "category": "single-file-fix", "language": "typescript",
+      "description": "Correct division behavior.", "fixtureId": "typescript-sample-v1", "fixture": "typescript",
+      "prompt": "Fix divide so it preserves fractional results and throws RangeError when the divisor is zero.",
+      "allowedPaths": ["sample.ts"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "typescript-multi-file", "revision": 1, "category": "multi-file-change", "language": "typescript",
+      "description": "Change a label contract and its documentation.", "fixtureId": "typescript-sample-v1", "fixture": "typescript",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["sample.ts", "README.md"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "typescript-refactor", "revision": 1, "category": "refactor", "language": "typescript",
+      "description": "Extract normalization detail.", "fixtureId": "typescript-sample-v1", "fixture": "typescript",
+      "prompt": "Refactor normalizeName by extracting whitespace cleanup into a private helper named cleanName. Preserve behavior.",
+      "allowedPaths": ["sample.ts"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.ts", "regexp": "cleanName"}]
+    },
+    {
+      "id": "typescript-failing-test", "revision": 1, "category": "failing-test-fix", "language": "typescript",
+      "description": "Repair an activity-state regression.", "fixtureId": "typescript-sample-v1", "fixture": "typescript",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": ["sample.ts"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "typescript-review", "revision": 1, "category": "read-only-review", "language": "typescript",
+      "description": "Review role matching.", "fixtureId": "typescript-sample-v1", "fixture": "typescript",
+      "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
+      "allowedPaths": ["sample.ts"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "isAdmin"}, {"type": "no-change", "name": "read-only"}]
+    },
+
+    {
+      "id": "c-locate", "revision": 1, "category": "locate-explain", "language": "c",
+      "description": "Locate a user lookup implementation.", "fixtureId": "c-sample-v1", "fixture": "c",
+      "prompt": "Find the function that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
+      "allowedPaths": ["sample.c"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "find_user"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "c-single-fix", "revision": 1, "category": "single-file-fix", "language": "c",
+      "description": "Correct integer division behavior.", "fixtureId": "c-sample-v1", "fixture": "c",
+      "prompt": "Fix divide_positive for positive integers so non-exact results round up. Preserve the existing zero-divisor return contract.",
+      "allowedPaths": ["sample.c"], "generatedPaths": [".chat-eval-build/c"],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "c-multi-file", "revision": 1, "category": "multi-file-change", "language": "c",
+      "description": "Change a label contract and its documentation.", "fixtureId": "c-sample-v1", "fixture": "c",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["sample.c", "README.md"], "generatedPaths": [".chat-eval-build/c"],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "c-refactor", "revision": 1, "category": "refactor", "language": "c",
+      "description": "Extract normalization detail.", "fixtureId": "c-sample-v1", "fixture": "c",
+      "prompt": "Refactor normalize_name by extracting whitespace cleanup into a static helper named clean_name. Preserve behavior.",
+      "allowedPaths": ["sample.c"], "generatedPaths": [".chat-eval-build/c"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.c", "regexp": "clean_name"}]
+    },
+    {
+      "id": "c-failing-test", "revision": 1, "category": "failing-test-fix", "language": "c",
+      "description": "Repair an activity-state regression.", "fixtureId": "c-sample-v1", "fixture": "c",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": ["sample.c"], "generatedPaths": [".chat-eval-build/c"],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "c-review", "revision": 1, "category": "read-only-review", "language": "c",
+      "description": "Review role matching.", "fixtureId": "c-sample-v1", "fixture": "c",
+      "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
+      "allowedPaths": ["sample.c"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "is_admin"}, {"type": "no-change", "name": "read-only"}]
+    },
+
+    {
+      "id": "cpp-locate", "revision": 1, "category": "locate-explain", "language": "cpp",
+      "description": "Locate a user lookup implementation.", "fixtureId": "cpp-sample-v1", "fixture": "cpp",
+      "prompt": "Find the function that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
+      "allowedPaths": ["sample.cpp"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "findUser"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "cpp-single-fix", "revision": 1, "category": "single-file-fix", "language": "cpp",
+      "description": "Correct integer division behavior.", "fixtureId": "cpp-sample-v1", "fixture": "cpp",
+      "prompt": "Fix dividePositive for positive integers so non-exact results round up. Preserve the existing zero-divisor exception.",
+      "allowedPaths": ["sample.cpp"], "generatedPaths": [".chat-eval-build/cpp"],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "cpp-multi-file", "revision": 1, "category": "multi-file-change", "language": "cpp",
+      "description": "Change a label contract and its documentation.", "fixtureId": "cpp-sample-v1", "fixture": "cpp",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["sample.cpp", "README.md"], "generatedPaths": [".chat-eval-build/cpp"],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "cpp-refactor", "revision": 1, "category": "refactor", "language": "cpp",
+      "description": "Extract normalization detail.", "fixtureId": "cpp-sample-v1", "fixture": "cpp",
+      "prompt": "Refactor normalizeName by extracting whitespace cleanup into an internal helper named cleanName. Preserve behavior.",
+      "allowedPaths": ["sample.cpp"], "generatedPaths": [".chat-eval-build/cpp"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.cpp", "regexp": "cleanName"}]
+    },
+    {
+      "id": "cpp-failing-test", "revision": 1, "category": "failing-test-fix", "language": "cpp",
+      "description": "Repair an activity-state regression.", "fixtureId": "cpp-sample-v1", "fixture": "cpp",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": ["sample.cpp"], "generatedPaths": [".chat-eval-build/cpp"],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "cpp-review", "revision": 1, "category": "read-only-review", "language": "cpp",
+      "description": "Review role matching.", "fixtureId": "cpp-sample-v1", "fixture": "cpp",
+      "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
+      "allowedPaths": ["sample.cpp"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "isAdmin"}, {"type": "no-change", "name": "read-only"}]
+    },
+
+    {
+      "id": "sql-locate", "revision": 1, "category": "locate-explain", "language": "sql",
+      "description": "Locate a user lookup query.", "fixtureId": "sql-sample-v1", "fixture": "sql",
+      "prompt": "Find the view that resolves users by numeric identifier and explain the missing-user result. Do not edit files.",
+      "allowedPaths": ["sample.sql"], "judges": [{"type": "answer-regexp", "name": "located-query", "regexp": "find_user"}, {"type": "no-change", "name": "read-only"}]
+    },
+    {
+      "id": "sql-single-fix", "revision": 1, "category": "single-file-fix", "language": "sql",
+      "description": "Correct division behavior.", "fixtureId": "sql-sample-v1", "fixture": "sql",
+      "prompt": "Fix division_results so non-exact division preserves a fractional result and a zero divisor remains NULL.",
+      "allowedPaths": ["sample.sql"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    },
+    {
+      "id": "sql-multi-file", "revision": 1, "category": "multi-file-change", "language": "sql",
+      "description": "Change a label contract and its documentation.", "fixtureId": "sql-sample-v1", "fixture": "sql",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["sample.sql", "README.md"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    },
+    {
+      "id": "sql-refactor", "revision": 1, "category": "refactor", "language": "sql",
+      "description": "Extract normalization detail.", "fixtureId": "sql-sample-v1", "fixture": "sql",
+      "prompt": "Refactor normalized_names by extracting whitespace cleanup into a CTE named clean_name. Preserve behavior.",
+      "allowedPaths": ["sample.sql"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.sql", "regexp": "clean_name"}]
+    },
+    {
+      "id": "sql-failing-test", "revision": 1, "category": "failing-test-fix", "language": "sql",
+      "description": "Repair an activity-state regression.", "fixtureId": "sql-sample-v1", "fixture": "sql",
+      "prompt": "The active status test fails. Fix the view, keeping the test unchanged.",
+      "allowedPaths": ["sample.sql"], "generatedPaths": [],
+      "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
+    },
+    {
+      "id": "sql-review", "revision": 1, "category": "read-only-review", "language": "sql",
+      "description": "Review role matching.", "fixtureId": "sql-sample-v1", "fixture": "sql",
+      "prompt": "Review the administrator-role query for correctness. Name the risky view and explain the defect. Do not edit files.",
+      "allowedPaths": ["sample.sql"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "administrator_roles"}, {"type": "no-change", "name": "read-only"}]
+    }
+  ]
+}

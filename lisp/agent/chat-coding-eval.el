@@ -30,7 +30,10 @@
   "Source checkout root when this module was loaded from one.")
 
 (defconst chat-coding-eval--indexed-source-pattern
-  "\\.\\(?:el\\|py\\|js\\|mjs\\|cjs\\|ts\\|tsx\\|go\\|rs\\)\\'"
+  (concat
+   "\\.\\(?:el\\|py\\|js\\|mjs\\|cjs\\|ts\\|tsx\\|mts\\|cts"
+   "\\|go\\|rs\\|zig\\|clj\\|cljc\\|cljs\\|java\\|c\\|h"
+   "\\|cc\\|cpp\\|cxx\\|hh\\|hpp\\|hxx\\|sql\\)\\'")
   "Source extensions used by the fixed coding Eval corpus.")
 
 (defcustom chat-coding-eval-workspace-directory
@@ -77,7 +80,7 @@
                (:constructor chat-coding-eval-task-create-record))
   schema-version id revision category language description fixture-id
   fixture-directory prompt allowed-paths generated-paths timeout-seconds judges tags
-  fixture-generator fixture-generator-digest)
+  required-executables fixture-generator fixture-generator-digest)
 
 (cl-defstruct (chat-coding-eval-executor-handle
                (:constructor chat-coding-eval-executor-handle-create))
@@ -283,6 +286,16 @@
   (unless (and (listp (chat-coding-eval-task-tags task))
                (seq-every-p #'stringp (chat-coding-eval-task-tags task)))
     (error "Coding evaluation task tags must be strings"))
+  (unless
+      (and
+       (listp (chat-coding-eval-task-required-executables task))
+       (seq-every-p
+        (lambda (name)
+          (and (stringp name)
+               (not (string-empty-p name))
+               (not (string-match-p "[/\\\\]" name))))
+        (chat-coding-eval-task-required-executables task)))
+    (error "Coding evaluation required executables must be command names"))
   (when (member "large-repo" (chat-coding-eval-task-tags task))
     (unless (>= (chat-coding-eval-task-declared-indexed-file-count task) 10000)
       (error "Large-repo coding evaluation fixture requires 10,000 indexed files")))
@@ -290,7 +303,8 @@
         (chat-coding-eval-task-judges task))
   task)
 
-(defun chat-coding-eval--task-from-json (data manifest-directory)
+(defun chat-coding-eval--task-from-json
+    (data manifest-directory required-executables)
   "Decode task DATA relative to MANIFEST-DIRECTORY."
   (let ((generator
          (chat-coding-eval--read-generator
@@ -317,6 +331,7 @@
                          120)
       :judges (chat-coding-eval--json-value data 'judges)
       :tags (or (chat-coding-eval--json-value data 'tags) nil)
+      :required-executables required-executables
       :fixture-generator (car generator)
       :fixture-generator-digest (cdr generator)))))
 
@@ -327,13 +342,16 @@
          (json-key-type 'symbol)
          (data (json-read-file manifest))
          (version (or (alist-get 'schemaVersion data) 0))
+         (required-executables
+          (or (alist-get 'requiredExecutables data) nil))
          (directory (file-name-directory (expand-file-name manifest)))
          tasks
          (seen (make-hash-table :test 'equal)))
     (unless (= version chat-coding-eval-schema-version)
       (error "Unsupported coding evaluation manifest schema: %s" version))
     (dolist (entry (alist-get 'tasks data))
-      (let ((task (chat-coding-eval--task-from-json entry directory)))
+      (let ((task (chat-coding-eval--task-from-json
+                   entry directory required-executables)))
         (when (gethash (chat-coding-eval-task-id task) seen)
           (error "Duplicate coding evaluation task: %s"
                  (chat-coding-eval-task-id task)))

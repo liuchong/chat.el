@@ -232,9 +232,12 @@ one is retained for investigation or a later invocation."
     content))
 
 (defun chat-campaign-runner--validate-judge-executables (tasks)
-  "Resolve every command judge executable required by TASKS or fail."
+  "Resolve every declared or command judge executable required by TASKS."
   (let (names resolved missing)
     (dolist (task tasks)
+      (setq names
+            (append (chat-coding-eval-task-required-executables task)
+                    names))
       (dolist (judge (chat-coding-eval-task-judges task))
         (when (equal "command" (alist-get 'type judge))
           (push (car (alist-get 'command judge)) names))))
