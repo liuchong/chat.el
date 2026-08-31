@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-extended-mutation-smoke-v1",
+  "description": "One failing-test mutation task per extended language for bounded exact-model smoke campaigns.",
+  "requiredExecutables": [
+    "zig",
+    "lein",
+    "java",
+    "javac",
+    "node",
+    "tsc",
+    "clang",
+    "clang++",
+    "sqlite3"
+  ],
+  "preflightChecks": [
+    {
+      "name": "extended-fixture-offline-gate",
+      "command": [
+        "sh",
+        "verify-extended-fixtures.sh"
+      ],
+      "timeoutSeconds": 240
+    }
+  ],
+  "tasks": [
+    {
+      "id": "zig-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "zig",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "zig-sample-v1",
+      "fixture": "zig",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.zig"
+      ],
+      "generatedPaths": [
+        ".zig-cache",
+        "zig-out"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    },
+    {
+      "id": "clojure-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "clojure",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "clojure-sample-v1",
+      "fixture": "clojure",
+      "prompt": "The active-test test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "src/sample/core.clj"
+      ],
+      "generatedPaths": [
+        "target",
+        ".lein-failures",
+        ".cpcache"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    },
+    {
+      "id": "java-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "java",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "java-sample-v1",
+      "fixture": "java",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "src/Sample.java"
+      ],
+      "generatedPaths": [
+        ".chat-eval-build/java"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    },
+    {
+      "id": "typescript-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "typescript",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "typescript-sample-v1",
+      "fixture": "typescript",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.ts"
+      ],
+      "generatedPaths": [],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    },
+    {
+      "id": "c-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "c",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "c-sample-v1",
+      "fixture": "c",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.c"
+      ],
+      "generatedPaths": [
+        ".chat-eval-build/c"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    },
+    {
+      "id": "cpp-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "cpp",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "cpp-sample-v1",
+      "fixture": "cpp",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.cpp"
+      ],
+      "generatedPaths": [
+        ".chat-eval-build/cpp"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    },
+    {
+      "id": "sql-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "sql",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "sql-sample-v1",
+      "fixture": "sql",
+      "prompt": "The active status test fails. Fix the view, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.sql"
+      ],
+      "generatedPaths": [],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    }
+  ]
+}

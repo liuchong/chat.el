@@ -20,6 +20,10 @@
   (expand-file-name "coding-eval/manifest-extended.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-extended-mutation-smoke-manifest
+  (expand-file-name "coding-eval/manifest-extended-mutation-smoke.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-large-repo-manifest
   (expand-file-name "coding-eval/manifest-large-repo.json"
                     chat-test-fixtures-dir))
@@ -203,6 +207,36 @@
     (should (= 1 (length tasks)))
     (should (equal core-task (car tasks)))
     (should (member "large-repo" (alist-get 'tags (car tasks))))))
+
+(ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()
+  "The focused mutation campaign cannot drift from extended task identity."
+  (let* ((extended
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-extended-manifest))
+         (smoke
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-extended-mutation-smoke-manifest))
+         (extended-tasks (alist-get 'tasks extended))
+         (smoke-tasks (alist-get 'tasks smoke))
+         (expected
+          (seq-filter
+           (lambda (task)
+             (equal "failing-test-fix" (alist-get 'category task)))
+           extended-tasks)))
+    (should (= 1 (alist-get 'schemaVersion smoke)))
+    (should (equal "coding-extended-mutation-smoke-v1"
+                   (alist-get 'corpusId smoke)))
+    (should (= 7 (length smoke-tasks)))
+    (should (equal expected smoke-tasks))
+    (should (equal (alist-get 'requiredExecutables extended)
+                   (alist-get 'requiredExecutables smoke)))
+    (should (equal (alist-get 'preflightChecks extended)
+                   (alist-get 'preflightChecks smoke)))
+    (should
+     (equal '("c" "clojure" "cpp" "java" "sql" "typescript" "zig")
+            (sort
+             (mapcar (lambda (task) (alist-get 'language task)) smoke-tasks)
+             #'string<)))))
 
 (defmacro chat-coding-eval-test-with-runtime (&rest body)
   "Run BODY with isolated evaluation records and workspaces."

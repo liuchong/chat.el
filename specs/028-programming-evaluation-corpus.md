@@ -18,13 +18,15 @@ The corpus has two independently versioned manifests:
 - the **extended language manifest** adds Zig, Clojure, Java, TypeScript, C,
   C++ and SQL, with the same six categories per language.
 
-`manifest-large-repo.json` is a measured subset, not a third behavioral corpus.
-It contains the exact `python-locate` task from the core manifest and runs it
-five times for each implementation. A unit gate requires byte-for-structure
-task equality with the core entry, while final acceptance binds both focused
-campaigns back to the core task identity, implementation revisions, provider,
-model and capability snapshot. This keeps performance sampling complete without
-rerunning 145 unrelated tasks when provider usage is missing.
+`manifest-large-repo.json` and `manifest-extended-mutation-smoke.json` are
+measured subsets, not additional behavioral corpora. The first contains the
+exact `python-locate` task from the core manifest and runs it five times for
+each implementation. The second contains exactly the seven `failing-test-fix`
+tasks from the extended manifest and runs each once per concrete model before a
+repeated campaign. Unit gates require byte-for-structure task equality with
+their source entries and equality of extended preflight/toolchain contracts.
+This keeps focused evidence reproducible without introducing a runtime task
+filter whose hidden selection could diverge from the recorded manifest digest.
 
 The combined qualification suite therefore contains 12 languages and 72 tasks.
 Keeping two manifests protects measurement identity: a result from the original
