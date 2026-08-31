@@ -492,15 +492,15 @@ strictly task-relevant. Decision 0018 supersedes decision 0017's earlier
 non-retaliatory interaction stance while retaining the separate leading
 section and its customization boundary.
 
-Latest development verification: 1817/1817 canonical tests and 7/7 focused
-session-export tests pass.
+Latest development verification: 1955/1955 canonical tests and 16/16 focused
+semantic/repo-map/acceptance tests pass.
 
 ## Next Stage
 
-Finish M20 without reusing M19 evidence. Complete conservative
-project-verification adapters for the seven added languages. Then provide the
-two missing deterministic toolchains, pass the complete offline gate, and run
-one exact-model mutation smoke per language. Repeated DeepSeek
+Finish M20 without reusing M19 evidence. Twelve-language semantic discovery,
+fallback parsing, repo-map admission and per-language quality gates are complete
+at `c6fcd0b`. Provide the two missing deterministic toolchains, pass the complete
+offline gate, and run one exact-model mutation smoke per language. Repeated DeepSeek
 `deepseek-v4-flash` and Kimi Code `k3-256k` campaigns remain separate.
 
 ## Not Doing Now
@@ -515,7 +515,7 @@ one exact-model mutation smoke per language. Repeated DeepSeek
 
 ## Immediate Next Step
 
-Run the repository-standard canonical suite for versioned toolchain provenance,
-clean generated artifacts, commit and push the stage. Continue with
-language-aware verification adapters; do not start provider qualification while
-`lein` or `tsc` is absent.
+Resolve the missing executable `lein` and `tsc` toolchains without implicit
+installation or network fetch, then pass the complete seven-language offline
+semantic, judge and cleanup gate. Do not start provider qualification while either
+toolchain remains unavailable.

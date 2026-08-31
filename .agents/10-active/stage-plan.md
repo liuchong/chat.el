@@ -40,11 +40,11 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-Close the conservative language-aware project verification adapter gate, then
-resolve the missing `lein` and `tsc` toolchains without silently shrinking the
-matrix. The complete offline gate must pass before exact-model mutation smokes
-or repeated provider campaigns begin. DeepSeek and Kimi results remain
-independent and per-language.
+Twelve-language semantic indexing and quality gates are complete. Resolve the
+missing `lein` and `tsc` toolchains without silently shrinking the matrix, then
+pass the complete seven-language offline fixture, judge and cleanup gate. That
+gate must pass before exact-model mutation smokes or repeated provider campaigns
+begin. DeepSeek and Kimi results remain independent and per-language.
 
 ## Stage Gate
 

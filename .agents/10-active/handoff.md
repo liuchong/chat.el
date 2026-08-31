@@ -24,7 +24,8 @@
   TypeScript, C, C++ and SQL across six balanced categories
 - Campaign preflight checks manifest-declared hidden toolchain dependencies as
   well as direct command executables before any provider request
-- Zig, Java, C, C++ and SQL pass the reusable fixture semantic verifier
+- All 12 qualification languages enter source discovery, fallback symbol
+  indexing, repo-map projection and independent semantic quality rows
 - The complete offline gate is blocked by missing `lein` and `tsc`; never turn
   this into skipped trials or silently shrink the matrix
 - Campaign schema v2 stores invocation paths, canonical targets and versions in
@@ -37,8 +38,8 @@
 - Run exact-model live work only after the offline gate: DeepSeek
   `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
-- The detailed current record is
-  `stage-2026-09-01-language-verification-adapters.md`
+- The latest detailed record is
+  `stage-2026-09-01-twelve-language-semantic-quality.md`
 
 ## Avoid
 

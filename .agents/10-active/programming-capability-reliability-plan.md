@@ -1352,6 +1352,12 @@ Clojure、Java、TypeScript、C、C++ 和 SQL 七种语言。每种语言都覆�
 10. 每个可重复样例、任务话术、judge、语言清单和清理声明必须进入仓库内 fixture；
     重要阶段指标与失败分类写入有 revision/campaign identity 的精简记录，禁止只留在临时会话。
 
+Revision `c6fcd0b` 已完成 12 种语言的统一源码发现、fallback 符号解析、repo map
+接入和逐语言质量记录。干净 revision 上的 12 个语言行分别报告 definition accuracy、
+reference precision/recall 和 Top-5 hit rate，四项均为 `1.0`；canonical suite 为
+1955/1955。该结果只关闭语义质量门，不替代七种扩展语言的完整离线 fixture、mutation
+smoke 或 live campaign。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。

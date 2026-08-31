@@ -423,7 +423,7 @@ any repeated live task is dispatched.
 - [ ] All toolchains have bounded, offline preflight and recorded versions.
 - [ ] Every writing judge declares generated paths and passes repeated cleanup.
 - [x] File detection, language profile and verification adapters cover all 12 languages.
-- [ ] Semantic quality fixtures report each supported language independently.
+- [x] Semantic quality fixtures report each supported language independently.
 - [ ] Focused live smoke passes once per added language.
 - [ ] Baseline and current extended campaigns each contain 210 valid trials.
 - [ ] Per-language, overall, safety and cleanup thresholds all pass.
