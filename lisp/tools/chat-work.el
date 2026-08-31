@@ -57,8 +57,8 @@
 (defconst chat-work-task-schema-version 1
   "Version of the persisted background task document.")
 
-(defcustom chat-work-task-output-max-chars 20000
-  "Maximum background task output returned from one tool call."
+(defcustom chat-work-task-output-max-bytes 20000
+  "Maximum background task log bytes returned from one tool call."
   :type 'integer
   :group 'chat-work)
 
@@ -418,27 +418,82 @@ anything."
              chat-work--tasks)
     (nreverse tasks)))
 
-(defun chat-work-task-output (id &optional max-chars)
-  "Return bounded output for task ID.
-When called by a tool, ID must belong to the current session."
+(defun chat-work--terminal-status-p (status)
+  "Return non-nil when background task STATUS is terminal."
+  (memq status '(succeeded failed cancelled interrupted)))
+
+(defun chat-work--output-end (file offset limit total)
+  "Return a UTF-8 boundary in FILE after OFFSET and at least LIMIT bytes.
+
+TOTAL is the file size.  Extending by at most three continuation bytes keeps
+the returned `nextOffset' usable without splitting a multibyte character."
+  (let* ((candidate (min total (+ offset limit)))
+         (end candidate))
+    (when (< end total)
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (insert-file-contents-literally file nil end (min total (+ end 4)))
+        (while (and (< end total)
+                    (let ((byte (char-after (1+ (- end candidate)))))
+                      (and byte (<= #x80 byte) (<= byte #xBF))))
+          (setq end (1+ end)))))
+    end))
+
+(defun chat-work--read-output-range (file offset limit)
+  "Return bounded FILE output from byte OFFSET using LIMIT bytes."
+  (let* ((total (if (file-exists-p file)
+                    (file-attribute-size (file-attributes file))
+                  0)))
+    (when (> offset total)
+      (error "Task output offset %d exceeds log size %d" offset total))
+    (let ((end (chat-work--output-end file offset limit total))
+          (text ""))
+      (when (< offset end)
+        (with-temp-buffer
+          (set-buffer-multibyte nil)
+          (insert-file-contents-literally file nil offset end)
+          (let* ((bytes (buffer-string))
+                 (coding (or (detect-coding-string bytes t) 'utf-8-unix)))
+            (setq text (decode-coding-string bytes coding t)))))
+      (list :output text :next-offset end :total total))))
+
+(defun chat-work-task-output (id &optional offset max-bytes)
+  "Return structured bounded output for task ID.
+
+OFFSET is a byte offset previously returned as `nextOffset'.  MAX-BYTES
+defaults to `chat-work-task-output-max-bytes'.  When called by a tool, ID must
+belong to the current session."
   (let* ((task (gethash id chat-work--tasks))
          (session (chat-work--current-session))
-         (limit (or max-chars chat-work-task-output-max-chars)))
+         (start (or offset 0))
+         (limit (or max-bytes chat-work-task-output-max-bytes)))
     (unless task
       (error "Task not found: %s" id))
+    (unless (and (integerp start) (>= start 0))
+      (error "Task output offset must be a non-negative integer"))
+    (unless (and (integerp limit) (> limit 0))
+      (error "Task output max bytes must be a positive integer"))
     (when (and session
                (not (equal (chat-work-task-session-id task)
                            (chat-session-id session))))
       (error "Task does not belong to the current session: %s" id))
-    (if (not (file-exists-p (chat-work-task-log-file task)))
-        ""
-      (with-temp-buffer
-        (insert-file-contents (chat-work-task-log-file task))
-        (let ((text (buffer-string)))
-          (if (> (length text) limit)
-              (concat (substring text (- (length text) limit))
-                      "\n... [earlier output omitted]")
-            text))))))
+    (let* ((status (chat-work-task-status task))
+           (range (chat-work--read-output-range
+                   (chat-work-task-log-file task) start limit))
+           (next (plist-get range :next-offset))
+           (total (plist-get range :total)))
+      `((id . ,id)
+        (status . ,(symbol-name status))
+        (terminal . ,(if (chat-work--terminal-status-p status)
+                         t :json-false))
+        (exitCode . ,(chat-work-task-exit-code task))
+        (output . ,(plist-get range :output))
+        (offset . ,start)
+        (nextOffset . ,next)
+        (totalBytes . ,total)
+        (truncated . ,(if (< next total) t :json-false))
+        (startedAt . ,(chat-work-task-started-at task))
+        (endedAt . ,(chat-work-task-ended-at task))))))
 
 (defun chat-work-task-stop (id)
   "Stop running task ID."
@@ -1004,8 +1059,12 @@ DECISION is `approve' or `reject' when the workflow awaits approval."
    nil #'chat-work-task-list '(read))
   (chat-work--register-tool
    'work_task_output "Work Task Output"
-   "Read bounded output from a background task."
-   '((:name "id" :type "string" :required t))
+   (concat "Read structured status and bounded output from a background task. "
+           "An empty output string does not mean the task is running; inspect "
+           "terminal and status. Continue from nextOffset when truncated.")
+   '((:name "id" :type "string" :required t)
+     (:name "offset" :type "integer" :required nil)
+     (:name "max_bytes" :type "integer" :required nil))
    #'chat-work-task-output '(read))
   (chat-work--register-tool
    'work_task_stop "Work Task Stop"

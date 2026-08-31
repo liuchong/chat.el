@@ -31,7 +31,14 @@
            (accept-process-output (chat-work-task-process task) 0.1))
          (should (eq (chat-work-task-status task) 'succeeded))
          (should (equal finished id))
-         (should (string= (chat-work-task-output id) "hello"))
+         (let ((output (chat-work-task-output id)))
+           (should (equal (alist-get 'status output) "succeeded"))
+           (should (eq (alist-get 'terminal output) t))
+           (should (equal (alist-get 'exitCode output) 0))
+           (should (string= (alist-get 'output output) "hello"))
+           (should (= (alist-get 'nextOffset output) 5))
+           (should (= (alist-get 'totalBytes output) 5))
+           (should (eq (alist-get 'truncated output) :json-false)))
          (let* ((records (chat-execution-list))
                 (record (car records))
                 (request (chat-execution-record-request record)))
@@ -85,14 +92,57 @@
           (owner (make-chat-session :id "owner"))
           (other (make-chat-session :id "other"))
           (task (make-chat-work-task
-                 :id "task-1" :session-id "owner" :log-file log-file)))
+                 :id "task-1" :session-id "owner" :status 'running
+                 :log-file log-file)))
      (write-region "0123456789" nil log-file nil 'silent)
      (puthash "task-1" task chat-work--tasks)
      (let ((chat-tool-caller-current-session owner))
-       (should (string-prefix-p "56789"
-                                (chat-work-task-output "task-1" 5))))
+       (let ((output (chat-work-task-output "task-1" 5 5)))
+         (should (equal (alist-get 'output output) "56789"))
+         (should (= (alist-get 'offset output) 5))
+         (should (= (alist-get 'nextOffset output) 10))))
      (let ((chat-tool-caller-current-session other))
        (should-error (chat-work-task-output "task-1") :type 'error)))))
+
+(ert-deftest chat-work-task-output-distinguishes-empty-running-and-success ()
+  "A quiet successful command is terminal, not an invitation to rerun it."
+  (chat-test-with-temp-dir
+   (let* ((log-file (expand-file-name "quiet.log" temp-dir))
+          (chat-work--tasks (make-hash-table :test 'equal))
+          (task (make-chat-work-task
+                 :id "quiet" :status 'running :log-file log-file)))
+     (with-temp-file log-file)
+     (puthash "quiet" task chat-work--tasks)
+     (let ((running (chat-work-task-output "quiet")))
+       (should (equal (alist-get 'status running) "running"))
+       (should (eq (alist-get 'terminal running) :json-false))
+       (should (equal (alist-get 'output running) "")))
+     (setf (chat-work-task-status task) 'succeeded
+           (chat-work-task-exit-code task) 0)
+     (let ((succeeded (chat-work-task-output "quiet")))
+       (should (equal (alist-get 'status succeeded) "succeeded"))
+       (should (eq (alist-get 'terminal succeeded) t))
+       (should (equal (alist-get 'exitCode succeeded) 0))
+       (should (equal (alist-get 'output succeeded) ""))))))
+
+(ert-deftest chat-work-task-output-uses-reusable-byte-offsets ()
+  "Bounded output never returns an offset inside a UTF-8 character."
+  (chat-test-with-temp-dir
+   (let* ((log-file (expand-file-name "utf8.log" temp-dir))
+          (chat-work--tasks (make-hash-table :test 'equal))
+          (task (make-chat-work-task
+                 :id "utf8" :status 'succeeded :exit-code 0
+                 :log-file log-file)))
+     (let ((coding-system-for-write 'utf-8-unix))
+       (write-region "a你b" nil log-file nil 'silent))
+     (puthash "utf8" task chat-work--tasks)
+     (let* ((first (chat-work-task-output "utf8" 0 2))
+            (next (alist-get 'nextOffset first))
+            (second (chat-work-task-output "utf8" next 2)))
+       (should (equal (alist-get 'output first) "a你"))
+       (should (eq (alist-get 'truncated first) t))
+       (should (equal (alist-get 'output second) "b"))
+       (should (eq (alist-get 'truncated second) :json-false))))))
 
 (ert-deftest chat-work-process-start-failure-closes-both-task-records ()
   "A process creation error cannot leave either task projection running."
@@ -403,8 +453,12 @@ succeeded immediately, which is the symptom this removes the cause of."
        (should-not (process-live-p (chat-work-task-process task)))
        (should (eq (chat-work-task-status task) 'succeeded))
        (let ((output (chat-work-task-output id)))
-         (should-not (string-match-p "Press RETURN" output))
-         (should (string-match-p "\\`[0-9a-f]\\{40\\}" (string-trim output))))))))
+         (should-not
+          (string-match-p "Press RETURN" (alist-get 'output output)))
+         (should
+          (string-match-p
+           "\\`[0-9a-f]\\{40\\}"
+           (string-trim (alist-get 'output output)))))))))
 
 (ert-deftest chat-work-the-task-description-lists-what-is-allowed ()
   "The description follows the variable rather than repeating it."

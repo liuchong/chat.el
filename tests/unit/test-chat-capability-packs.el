@@ -226,7 +226,15 @@
                   chat-capability-programming-tools))
     (let ((tool (chat-tool-forge-get 'programming_task_output)))
       (should tool)
-      (should (equal (chat-forged-tool-effects tool) '(read))))))
+      (should (equal (chat-forged-tool-effects tool) '(read)))
+      (should (string-match-p
+               "Empty output is not evidence"
+               (chat-forged-tool-description tool)))
+      (should
+       (equal
+        (mapcar (lambda (parameter) (plist-get parameter :name))
+                (chat-forged-tool-parameters tool))
+        '("id" "offset" "max_bytes"))))))
 
 (ert-deftest chat-capability-web-reader-renders-html-with-shr ()
   "Test the shared web tool returns rendered page text."
