@@ -89,12 +89,13 @@ configuration and deterministic detection."
      (:constructor chat-code-verify-result--create
                    (&key id profile-id project-root source revision status
                          step-results preflight-fingerprints repair-round
-                         stop-reason session-id turn-id task-id checkpoint-id
+                         stop-reason session-id turn-id task-id parent-task-id
+                         checkpoint-id
                          changed-files created-at updated-at)))
   "Overall verification conclusion and trace identifiers."
   id profile-id project-root source revision status step-results
   preflight-fingerprints repair-round stop-reason session-id turn-id task-id
-  checkpoint-id changed-files created-at updated-at)
+  parent-task-id checkpoint-id changed-files created-at updated-at)
 
 (defvar chat-code-verify--results (make-hash-table :test 'equal)
   "Process-local cache of result projections; tasks remain authoritative.")
@@ -749,6 +750,7 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
     (sessionId . ,(chat-code-verify-result-session-id result))
     (turnId . ,(chat-code-verify-result-turn-id result))
     (taskId . ,(chat-code-verify-result-task-id result))
+    (parentTaskId . ,(chat-code-verify-result-parent-task-id result))
     (repairRound . ,(or (chat-code-verify-result-repair-round result) 0))
     (stopReason . ,(chat-code-verify-result-stop-reason result))
     (checkpointId . ,(chat-code-verify-result-checkpoint-id result))
@@ -802,7 +804,8 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
    'verification-completed
    (list :session-id (chat-code-verify-result-session-id result)
          :turn-id (chat-code-verify-result-turn-id result)
-         :task-id (chat-code-verify-result-task-id result))
+         :task-id (chat-code-verify-result-task-id result)
+         :parent-id (chat-code-verify-result-parent-task-id result))
    `((verification_id . ,(chat-code-verify-result-id result))
      (status . ,(symbol-name (chat-code-verify-result-status result)))
      (step_count . ,(length (chat-code-verify-result-step-results result)))
@@ -813,18 +816,25 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
 (cl-defun chat-code-verify-run
     (profile &key session-id turn-id task-id run-id parent-id checkpoint-id
              changed-files preflight-fingerprints on-complete)
-  "Run PROFILE asynchronously and invoke ON-COMPLETE with its typed result."
+  "Run PROFILE asynchronously and invoke ON-COMPLETE with its typed result.
+
+TASK-ID identifies the calling Agent task.  Every verification run owns a
+distinct durable task whose parent is TASK-ID, or PARENT-ID when TASK-ID is
+absent."
   (chat-code-verify-validate-profile profile)
   (let* ((id (chat-code-verify--new-id "verification"))
-         (task-id (or task-id id))
+         (verification-task-id id)
+         (parent-task-id (or task-id parent-id))
          (context (list :session-id session-id :turn-id turn-id
-                        :task-id task-id :run-id run-id :parent-id parent-id
+                        :task-id verification-task-id :run-id run-id
+                        :parent-id parent-task-id
                         :project-root
                         (chat-verification-profile-project-root profile)))
          (task
-          (when (or session-id parent-id)
+          (when (or session-id parent-task-id)
             (chat-task-adopt
-             :id task-id :parent-id parent-id :kind 'verification
+             :id verification-task-id :parent-id parent-task-id
+             :kind 'verification
              :title "Project verification" :status 'queued
              :session-id session-id :source 'verification
              :resources
@@ -846,7 +856,8 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
                        'failed 'not-run)
            :step-results nil :preflight-fingerprints preflight-fingerprints
            :repair-round 0 :session-id session-id :turn-id turn-id
-           :task-id task-id :checkpoint-id checkpoint-id
+           :task-id verification-task-id :parent-task-id parent-task-id
+           :checkpoint-id checkpoint-id
            :changed-files changed-files :created-at (chat-code-verify--now-ms)))
          (steps (copy-sequence (chat-verification-profile-steps profile)))
          results
@@ -972,7 +983,9 @@ ROLLBACK-FUNCTION and make the result blocked."
        (setf (chat-code-verify-result-repair-round result) round)
        (chat-code-verify--emit
         'repair-stopped
-        (list :session-id session-id :turn-id turn-id :task-id task-id)
+        (list :session-id session-id :turn-id turn-id
+              :task-id (chat-code-verify-result-task-id result)
+              :parent-id (chat-code-verify-result-parent-task-id result))
         `((verification_id . ,(chat-code-verify-result-id result))
           (round . ,round) (reason . ,reason)
           (status . ,(symbol-name (chat-code-verify-result-status result)))))
@@ -1002,7 +1015,10 @@ ROLLBACK-FUNCTION and make the result blocked."
               (cl-incf round)
               (chat-code-verify--emit
                'repair-started
-               (list :session-id session-id :turn-id turn-id :task-id task-id)
+               (list :session-id session-id :turn-id turn-id
+                     :task-id (chat-code-verify-result-task-id result)
+                     :parent-id
+                     (chat-code-verify-result-parent-task-id result))
                `((verification_id . ,(chat-code-verify-result-id result))
                  (round . ,round)))
               (funcall
@@ -1072,6 +1088,8 @@ ROLLBACK-FUNCTION and make the result blocked."
                             (chat-task-session-id task))
             :turn-id (alist-get 'turnId data)
             :task-id (or (alist-get 'taskId data) (chat-task-id task))
+            :parent-task-id (or (alist-get 'parentTaskId data)
+                                (chat-task-parent-id task))
             :created-at 0 :updated-at 0
             :step-results
             (mapcar

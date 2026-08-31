@@ -219,15 +219,31 @@
      (should (null (chat-verification-profile-steps profile)))
      (should (eq (chat-code-verify-result-status result) 'not-run)))))
 
-(ert-deftest chat-code-verify-accepts-agent-run-correlation-context ()
-  "Agent run correlation metadata must not break asynchronous verification."
+(ert-deftest chat-code-verify-spawns-a-distinct-child-of-the-agent-task ()
+  "Verification must not replace its running Agent correlation task."
   (chat-test-with-temp-dir
-   (let* ((profile (chat-code-verify-plan temp-dir nil))
-          (handle (chat-code-verify-run
-                   profile :session-id "session" :turn-id 1
-                   :task-id "task" :run-id "run"))
-          (result (plist-get handle :result)))
-     (should (eq (chat-code-verify-result-status result) 'not-run)))))
+   (let ((chat-task-directory (expand-file-name "tasks/" chat-state-dir))
+         (chat-task--registry (make-hash-table :test 'equal))
+         (chat-task--loaded-p t))
+     (let* ((agent-task
+             (chat-task-adopt
+              :id "agent-task" :kind 'agent :title "Agent run"
+              :status 'running :session-id "session" :source 'agent))
+            (profile (chat-code-verify-plan temp-dir nil))
+            (result
+             (chat-code-verify-run-sync
+              profile '(:session-id "session" :turn-id 1
+                        :task-id "agent-task" :run-id "run")))
+            (verification-task
+             (chat-task-get (chat-code-verify-result-task-id result))))
+       (should (eq (chat-code-verify-result-status result) 'not-run))
+       (should-not (equal (chat-code-verify-result-task-id result)
+                          "agent-task"))
+       (should (equal (chat-code-verify-result-parent-task-id result)
+                      "agent-task"))
+       (should (eq (chat-task-status agent-task) 'running))
+       (should (eq (chat-task-status verification-task) 'completed))
+       (should (equal (chat-task-parent-id verification-task) "agent-task"))))))
 
 (ert-deftest chat-code-verify-runtime-evidence-correlates-task-execution-and-wire ()
   "A real check is traceable through all existing runtime authorities."
