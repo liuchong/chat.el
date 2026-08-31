@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-c-mutation-smoke-v1",
+  "description": "One bounded C repair used as a fast cross-provider mutation control.",
+  "requiredExecutables": [
+    "clang"
+  ],
+  "tasks": [
+    {
+      "id": "c-failing-test",
+      "revision": 1,
+      "category": "failing-test-fix",
+      "language": "c",
+      "description": "Repair an activity-state regression.",
+      "fixtureId": "c-sample-v1",
+      "fixture": "c",
+      "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
+      "allowedPaths": [
+        "sample.c"
+      ],
+      "generatedPaths": [
+        ".chat-eval-build/c"
+      ],
+      "judges": [
+        {
+          "type": "command",
+          "name": "active-tests",
+          "command": [
+            "sh",
+            "test-one",
+            "active"
+          ],
+          "expectedExit": 0
+        }
+      ]
+    }
+  ]
+}

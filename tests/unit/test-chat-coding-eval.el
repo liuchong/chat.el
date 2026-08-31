@@ -24,6 +24,10 @@
   (expand-file-name "coding-eval/manifest-extended-mutation-smoke.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-c-mutation-smoke-manifest
+  (expand-file-name "coding-eval/manifest-c-mutation-smoke.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-large-repo-manifest
   (expand-file-name "coding-eval/manifest-large-repo.json"
                     chat-test-fixtures-dir))
@@ -282,6 +286,25 @@
             (sort
              (mapcar (lambda (task) (alist-get 'language task)) smoke-tasks)
              #'string<)))))
+
+(ert-deftest chat-coding-eval-c-smoke-is-an-exact-mutation-subset ()
+  "The fast provider control reuses the canonical C mutation task exactly."
+  (let* ((extended-smoke
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-extended-mutation-smoke-manifest))
+         (c-smoke
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-c-mutation-smoke-manifest))
+         (canonical
+          (seq-find
+           (lambda (task) (equal "c-failing-test" (alist-get 'id task)))
+           (alist-get 'tasks extended-smoke))))
+    (should (= 1 (alist-get 'schemaVersion c-smoke)))
+    (should (equal "coding-c-mutation-smoke-v1"
+                   (alist-get 'corpusId c-smoke)))
+    (should (equal '("clang")
+                   (append (alist-get 'requiredExecutables c-smoke) nil)))
+    (should (equal (list canonical) (alist-get 'tasks c-smoke)))))
 
 (defmacro chat-coding-eval-test-with-runtime (&rest body)
   "Run BODY with isolated evaluation records and workspaces."
