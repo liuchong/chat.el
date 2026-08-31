@@ -244,7 +244,6 @@
             (setq advertised
                   (chat-capability--ordered-tool-union
                    advertised
-                   '(programming_compile_task)
                    chat-capability-programming-verification-tools)))))
       (when (and session (ignore-errors (chat-goal-current session)))
         (setq advertised

@@ -545,7 +545,7 @@
              (chat-agent-profile--effective-tool-config session profile)
              :advertised-tools)))
        (should (memq 'programming_plan_create advertised))
-       (should (memq 'programming_compile_task advertised))
+       (should-not (memq 'programming_compile_task advertised))
        (dolist (tool chat-capability-programming-verification-tools)
          (should (memq tool advertised)))
        (dolist (tool '(programming_capability_activate
@@ -597,7 +597,7 @@
                        :advertised-tools)))
        (should-not (memq 'files_replace advertised))
        (should (memq 'programming_plan_create advertised))
-       (should (memq 'programming_compile_task advertised))
+       (should-not (memq 'programming_compile_task advertised))
        (dolist (tool chat-capability-programming-verification-tools)
          (should (memq tool advertised)))))))
 
