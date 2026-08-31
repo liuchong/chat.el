@@ -1045,6 +1045,15 @@ merge gate；合并后重新运行 M12 verification。决策与验收证据见 D
 
 ### M19：产品化、性能与最终验收
 
+实施状态（2026-09-01）：完成。clean current revision `049c4ef` 的正式
+30-by-5 campaign 通过 150/150，冻结 M9 baseline 为 13/150；两侧精确 revision
+的 10,000-file focused campaign 为 0/5 对 5/5，首轮输入 token 中位数
+1,869 降至 1,275。runtime 9/9、quality 20/20、canonical 1,925/1,925 和
+request-footprint 记录全部通过。不可变 `acceptance/m19` 结果通过 53/53 checks。
+完整身份、指标、失败分类和复现经验见
+`stage-2026-09-01-m19-final-acceptance.md`。该结论只绑定已验收 revision，后续
+产品变更必须重新运行对应的定向与 canonical 验证。
+
 实施状态（2026-08-29）：runtime phase、可操作诊断、已知路径增量 repo map、
 10,000 文件基准和严格不可变验收聚合已经完成。性能门槛通过；30-by-5 live
 对比和 large-repo token usage 对照因真实模型结果缺失保持 blocked。固定
@@ -1062,7 +1071,7 @@ JSON 字符串改为原生嵌套 schema，并明确普通 TODO plan 与只读 Pl
 边界。Eval 新增不重叠的 `generatedPaths` 合同，将验证生成物与源码范围分别
 审计。真实 `rust-refactor` smoke 在 120 秒任务预算内 27 秒通过，5/5 checks
 通过，源码变更仅 `src/lib.rs`，越界文件为 0。canonical suite 1789/1789
-通过。M19 仍需在提交后的固定 revision 上重跑完整 30-by-5 baseline/current；
+通过。当时 M19 仍需在提交后的固定 revision 上重跑完整 30-by-5 baseline/current；
 历史 baseline 缺少足够 token usage，且 manifest 合同已升级，不得复用旧比较
 冒充最终通过。
 

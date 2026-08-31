@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## Summary
 
@@ -33,8 +33,8 @@ native tree/detail view. Typed image and file content now persists through a
 content-addressed attachment store, capability preflight and provider-specific
 wire adapters. Checkpoints, owned worktrees, execution backends, attributable
 memory, derived Trace reconstruction, deterministic evaluations and the optional
-versioned App Server bridge are implemented. M9-M18 of the active M9-M19
-coding-reliability roadmap are complete: isolated real-task evaluation,
+versioned App Server bridge are implemented. M9-M19 of the coding-reliability
+roadmap are complete: isolated real-task evaluation,
 versioned edits, semantic code intelligence, automatic verification and
 scoped structured work context, plus durable evidence-linked TODO plans with a
 native progress UI, capability-tested execution isolation, independent typed
@@ -47,26 +47,16 @@ are implemented. Live coding Eval now writes each run to a fresh versioned
 campaign with immutable configuration and completion records. Interrupted
 campaigns can resume only validated missing repetition/task identities; stale
 locks recover, concurrent runs and configuration drift fail closed, and terminal
-evidence requires the exact unique result matrix. The fresh DeepSeek paired
-campaign at revision `f0b0701` is complete: frozen M9 passed 17/150 and current
-passed 150/150, with every current language at 30/30, every category at 25/25,
-zero scope leaks and zero cleanup failures. Runtime, quality and canonical
-records passed 9/9, 20/20 and 1859/1859. Strict final acceptance nevertheless
-failed its token budget: current final-request input median was 12,242 versus
-baseline 9,223, and the large-repository comparison was blocked because the
-baseline task passed 0/5. M19 remains open for resident prompt and tool-schema
-cost reduction followed by fresh paired campaigns. The fixed corpus includes a
-measured 10,000-indexed-file large-repository task.
-
-The final campaign path now uses explicit Agent configuration, normalized
-request-observer and capability-projection protocol versions instead of
-revision-specific guesses. All campaigns run under an automatically isolated
-runtime HOME, and actual request identities come from transport `started`
-events. Clean preflight and one-task live smoke succeeded for both current and
-the frozen M9 checkout on harness revision `16cccd1`; every observed task
-request used exact `deepseek-v4-flash`. The frozen smoke retained its historical
-streaming-content failure as a model-ability result. Full fresh 30-by-5 paired
-campaigns and final aggregation remain open.
+evidence requires the exact unique result matrix. Final acceptance at clean
+revision `049c4ef` passed 53/53 checks. Frozen M9 passed 13/150 core trials and
+current passed 150/150, with every current language at 30/30, zero current scope
+leaks and zero cleanup failures. The revision-bound 10,000-file pair passed 0/5
+versus 5/5 while reducing median first-request input tokens by 31.8 percent.
+Runtime, quality and canonical records passed 9/9, 20/20 and 1925/1925; the
+first-request footprint is 71.7 percent of the frozen baseline and warm query
+p95 is 121.36 ms. M19 is complete. The fixed corpus and immutable evidence
+remain the qualification baseline for later changes, not reusable proof for a
+different product revision.
 
 The first full baseline attempt then exposed a terminal-evidence race: outer
 task timeout could be replaced by synchronous Agent cancellation and lose all

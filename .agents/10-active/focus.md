@@ -8,31 +8,20 @@
 
 ## Doing Now
 
-M9-M18 implementation and the deterministic part of M19 are complete. Goal is
+M9-M19 implementation and final acceptance are complete. Goal is
 the versioned completion contract; work plan/TODO is its replaceable execution
 path; Plan Mode is an independent read-only permission state. Scoped context,
 notes, evidence, restart/compaction recovery, verification, isolation, Review
 and collaboration contracts are implemented on the shared session/event/UI
 infrastructure.
 
-Earlier complete campaigns remain useful historical capability evidence, but
-cannot satisfy final acceptance after the harness contract changed. Two later
-formal baseline directories were stopped after exposing terminal-evidence and
-serializer-ownership defects; both are immutable incident evidence and cannot
-be resumed.
-
-Clean revision `296d2b6` now makes the current harness own both generic Eval
-result persistence and coding campaign orchestration while the frozen checkout
-continues to own product behavior. A real 120-second frozen-baseline timeout
-retained ten exact `deepseek/deepseek-v4-flash` request identities and bounded
-normalized usage without copying raw provider payloads. Focused tests pass
-96/96, canonical passes 1925/1925, integration and E2E pass, and both formal
-30-task by five-repetition preflights pass.
-
-M19 remains incomplete. The immediate work is to create fresh baseline and
-current 150-result campaigns on revision `296d2b6`, then rerun strict final
-aggregation and address only the measured acceptance failures. No smoke or
-historical campaign may fill the formal matrix.
+Final current revision `049c4ef` passed 150/150 live coding trials against the
+frozen M9 baseline's 13/150. The dedicated 10,000-file comparison passed 5/5
+against 0/5 and reduced median first-request input tokens from 1,869 to 1,275.
+The strict immutable `acceptance/m19` result passed 53/53 checks, including
+1,925/1,925 canonical tests, all runtime and quality gates, and the request
+footprint and performance limits. The replayable record is
+`stage-2026-09-01-m19-final-acceptance.md`.
 
 The next recorded expansion is M20, after the fixed M19 comparison: Zig,
 Clojure, Java, TypeScript, C, C++ and SQL each receive the same six task
@@ -492,12 +481,14 @@ session-export tests pass.
 
 ## Next Stage
 
-Resume M19 final acceptance when one provider/model identity has enough live
-capacity for fresh baseline and current 30-by-5 campaigns.  Until then, the
-next bounded engineering candidates are honest per-provider context-window
-facts and session-tree filtering/open/inspect actions after real-use feedback.
-Do not widen the public session export into a diagnostic archive without a new
-versioned secrets and authorization contract.
+Proceed from the accepted M19 baseline without reusing its campaign evidence
+for later revisions. The immediate product slice is the delayed model-switch
+state machine: prepared prompt model, active request model and pending
+next-continuation model must be distinct, durable and observable. A switch
+command must not interrupt an active multi-step run; it becomes effective once
+at the next continuation boundary and follows the same non-selectable hint and
+independent completion contract as other slash commands. M20 language
+qualification and the remaining long-Goal roadmap follow their recorded order.
 
 ## Not Doing Now
 
