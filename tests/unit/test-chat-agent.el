@@ -1366,18 +1366,76 @@ nothing to call."
      (should (eq (chat-agent-run-state-status run) 'completed))
      (should-not (chat-agent-run-state-reason run)))))
 
-(ert-deftest chat-agent-merges-durable-execution-session-state-back ()
-  "Transient policy Sessions do not strand durable tool state."
+(ert-deftest chat-agent-refreshes-execution-session-from-durable-state ()
+  "Transient policy Sessions cannot overwrite canonical durable state."
   (let* ((session (make-chat-session :id "canonical"))
          (execution (copy-chat-session session))
          (run (chat-agent--run-create
                :session session :execution-session execution)))
-    (chat-session-metadata-set session 'canonicalOnly "kept")
-    (chat-session-metadata-set execution 'activeWorkPlanId "plan-1")
+    (chat-session-metadata-set execution 'staleOnly "discarded")
+    (chat-session-metadata-set session 'activeWorkPlanId "plan-1")
     (chat-agent--synchronize-execution-session run)
-    (should (equal (chat-session-metadata-get session 'canonicalOnly) "kept"))
+    (should (equal (chat-session-metadata-get execution 'activeWorkPlanId)
+                   "plan-1"))
+    (should-not (chat-session-metadata-get execution 'staleOnly))
     (should (equal (chat-session-metadata-get session 'activeWorkPlanId)
                    "plan-1"))))
+
+(ert-deftest chat-agent-live-tool-path-keeps-created-plan-visible ()
+  "A stateful tool's Plan survives the real Agent tool execution path."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
+          (chat-llm-providers '((kimi :context-window 100000)))
+          (chat-approval-required-effects nil)
+          (session (chat-session-create "Plan state authority" 'kimi))
+          (execution (copy-chat-session session))
+          (events nil)
+          (calls (list nil))
+          run)
+     (setf (chat-session-tool-config execution)
+           '(:enabled-tools (create-test-plan)
+             :advertised-tools (create-test-plan)))
+     (chat-tool-forge-register
+      (make-chat-forged-tool
+       :id 'create-test-plan :name "Create test plan" :language 'elisp
+       :compiled-function
+       (lambda ()
+         (chat-work-plan-create
+          chat-tool-caller-current-state-session
+          "Finish the task"
+          '(((id . "verify") (title . "Verify")
+             (acceptance . "Focused test passes"))))
+         "created")
+       :is-active t :usage-count 0))
+     (cl-letf (((symbol-function 'chat-llm-request-async)
+                (chat-agent-test--stub-transport
+                 '((:content "" :tool-calls
+                             ((:id "plan-1" :name "create-test-plan"
+                               :arguments nil)))
+                   (:content "done"))
+                 calls)))
+       (setq run
+             (chat-agent-start
+              (list :model 'kimi :session session
+                    :execution-session execution
+                    :messages (list (chat-agent-test--user-message))
+                    :max-steps 3
+                    :on-event (lambda (event) (push event events))))))
+     (ert-info ((format "status=%S reason=%S results=%S events=%S"
+                        (chat-agent-run-state-status run)
+                        (chat-agent-run-state-reason run)
+                        (chat-agent-run-state-tool-results run) events))
+       (should (chat-work-plan-current session t))
+       (should (chat-work-plan-current execution t))
+       (should (eq (chat-agent-run-state-status run) 'stopped))
+       (should (eq (chat-agent-run-state-reason run) 'active-plan-unclosed))
+       (should
+        (seq-some
+         (lambda (event)
+           (and (eq (plist-get event :type) 'work-plan-finalization)
+                (eq (plist-get event :action) 'stopped)))
+         events))))))
 
 (ert-deftest chat-agent-reminder-does-not-persist-into-the-transcript ()
   "A reminder describes one step and must not accumulate in the run.

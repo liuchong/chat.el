@@ -152,3 +152,42 @@ Post-correction verification passed the eight focused completion-barrier,
 dynamic-contract and Session-synchronization regressions and the full canonical
 suite at 1,893/1,893, with zero skipped and zero unexpected results. No provider
 campaign result is claimed for the uncommitted tree.
+
+## Live Call-Path Failure On `5e28291`
+
+The clean follow-up revision passed all 30 DeepSeek fixtures, but the required
+structural audit invalidated the run before Kimi started.
+
+| Metric | Result |
+|---|---:|
+| Passed fixture checks | 30/30 |
+| Median duration | 40,837 ms |
+| p90 duration | 57,309 ms |
+| Maximum duration | 75,275 ms |
+| Total requests | 279 |
+| Tool errors | 7 |
+| Approval events | 107 |
+| Total tokens | 1,620,505 |
+| Sessions that created a Plan | 20 |
+| Plans that reached completed | 2 |
+| Completed runs with an open Plan | 18 |
+| Work-plan finalization events | 0 |
+
+The fixture oracle alone was therefore insufficient: repository output was
+correct while the runtime state machine lied about completion. Wire evidence
+showed that Plan tools wrote the canonical Session passed as the explicit state
+Session, then `chat-agent--synchronize-execution-session` copied stale metadata
+from the transient execution Session back over it. The Plan disappeared before
+the next request and before the completion barrier inspected it.
+
+The corrected authority model is one-way. Stateful tools mutate the canonical
+Session; successful calls refresh the execution Session from canonical state;
+Plan context and completion checks read canonical state directly. A full
+Agent-to-tool regression creates a Plan through the real asynchronous tool caller
+and proves that prose completion stops with `active-plan-unclosed`. Both provider
+campaigns must restart from zero on the resulting clean revision; no result from
+`5e28291` counts toward acceptance.
+
+Focused authority and live-tool-path regressions passed 2/2. The canonical suite
+then passed 1,894/1,894 with zero skipped and zero unexpected results while the
+Rust toolchain was explicitly available on `PATH`.

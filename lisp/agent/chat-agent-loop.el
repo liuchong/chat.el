@@ -179,7 +179,7 @@ on screen, where the marker would be noise.  It belongs on the wire only."
 
 (defun chat-agent--applicable-open-work-plan (run)
   "Return RUN's active or blocked task plan, if one is still open."
-  (when-let* ((session (chat-agent-run-execution-session run))
+  (when-let* ((session (chat-agent-run-state-session run))
               (plan (chat-work-plan-current session t))
               ((memq (chat-work-plan-status plan) '(active blocked)))
               ((or (null (chat-agent-run-state-task-id run))
@@ -303,20 +303,19 @@ on screen, where the marker would be noise.  It belongs on the wire only."
     (chat-session-id session)))
 
 (defun chat-agent--synchronize-execution-session (run)
-  "Merge durable execution metadata back into RUN's canonical Session.
+  "Refresh RUN's transient execution Session from its canonical Session.
 
-The execution Session is a transient policy copy.  Tools may legitimately
-change durable session metadata through it, so the canonical in-memory
-Session must observe those changes before transcript persistence writes its
-next snapshot."
+The canonical Session is the sole owner of durable state.  Stateful tools
+receive it explicitly, while the execution Session is only a transient copy
+for provider tool menus and approval policy.  Refreshing in the other
+direction can overwrite a Plan or Goal that the tool just committed."
   (let ((session (chat-agent-run-state-session run))
         (execution (chat-agent-run-state-execution-session run)))
     (when (and session execution (not (eq session execution)))
-      (dolist (entry (chat-session-metadata execution))
-        (chat-session-metadata-set
-         session (car entry) (copy-tree (cdr entry))))
-      (setf (chat-session-updated-at session)
-            (chat-session-updated-at execution)))))
+      (setf (chat-session-metadata execution)
+            (copy-tree (chat-session-metadata session))
+            (chat-session-updated-at execution)
+            (chat-session-updated-at session)))))
 
 (defun chat-agent--tool-event-payload (call &optional result)
   "Return bounded lifecycle facts for CALL and optional RESULT."
@@ -405,7 +404,7 @@ next snapshot."
 (defun chat-agent--context-selection (run)
   "Return RUN's request-time scoped context bundle."
   (let* ((session (chat-agent-run-state-session run))
-         (plan-session (chat-agent-run-execution-session run))
+         (plan-session session)
          (session-id (and session (chat-session-id session)))
          (task-id (chat-agent-run-state-task-id run))
          (project-root

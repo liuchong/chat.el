@@ -142,10 +142,14 @@ Session has narrowed its advertised tools.
 Both contracts are rebuilt for every request from the current execution Session.
 A tool mutation on one turn can change the next turn's menu, Plan revision and
 active item, so a system-tools message prepared before the run is only a template,
-not an immutable provider contract. The execution Session is a transient policy
-copy; successful tools merge its durable metadata into the canonical Session
-before transcript persistence can write the next snapshot. Canonical-only metadata
-is retained during that merge.
+not an immutable provider contract. The canonical Session is the sole authority
+for durable Plan, Goal, note and workflow state. Stateful tools receive that
+Session explicitly. The execution Session is a transient policy copy that owns
+only the current provider tool menu and approval policy; after every successful
+tool call its metadata is replaced from the canonical Session. Synchronization in
+the opposite direction is forbidden because a stale execution copy can erase the
+state the tool just committed. Plan context and the completion barrier always read
+the canonical Session directly.
 
 An applicable `active` or `blocked` plan is a completion barrier. Tool-free prose
 while a plan is active is progress, not a final answer. The runtime may issue a
@@ -210,8 +214,9 @@ maintaining a second plan store.
 - UI and public API always show the same revision and status;
 - textual tool guidance and native provider schemas expose the same current menu
   after every Plan transition;
-- successful execution-session metadata changes are visible in the canonical
-  Session before the next transcript save;
+- a stateful tool writes the canonical Session, the execution Session observes the
+  committed metadata before the next request, and stale execution metadata can
+  never overwrite canonical state;
 - an active or blocked plan can never produce a completed Agent run, while a
   terminal plan can complete normally;
 - 1,000 consecutive updates move neither input point nor user scroll position
@@ -225,7 +230,7 @@ maintaining a second plan store.
 - plan contract and recovery: 16 focused tests;
 - native UI stability: 3 focused tests, including 1,000 updates;
 - Agent gate and request-only projection: 2 focused tests;
-- completion barrier, dynamic tool contract and execution-session synchronization:
-  8 focused tests;
+- completion barrier, dynamic tool contract and canonical-state synchronization:
+  focused unit and full live-tool-path regressions;
 - programming profile surface: capability-pack regression coverage;
-- canonical suite: 1,893/1,893 passing after completion-barrier closeout.
+- canonical suite: 1,894/1,894 passing after the canonical-state authority fix.
