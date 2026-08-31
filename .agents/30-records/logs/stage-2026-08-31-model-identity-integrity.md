@@ -1,7 +1,7 @@
 # Model Identity Integrity
 
 - Date: 2026-08-31
-- Status: deterministic verification complete; post-fix live verification pending
+- Status: complete
 - Scope: Agent Run identity, request evidence, coding Eval validity
 
 ## Incident
@@ -71,6 +71,33 @@ scalar leaves, collection length and nesting depth independently while
 preserving container shape and identity keys. Resume, cancellation, missing
 judge executable and oversized-metadata tests cover this rule.
 
-Live results will be added after the implementation revision is clean and
-committed. The live matrix is limited to `deepseek/deepseek-v4-flash` and
-`kimi-code/k3-256k`; K2.7 and `k3` are excluded.
+## Post-Fix Live Verification
+
+Both campaigns ran from clean implementation revision
+`cccc3ec3577ee2561b0be7230e8fce666fee330b` with the same two-task manifest
+digest `37234a4667eff5b142dc2bcc973fe47a3e8ce5f4d632cd9a3d6033e8267f6be8`.
+
+| Campaign | Task | Status | Agent ms | Requests | Actual request identity |
+| --- | --- | ---: | ---: | ---: | --- |
+| `identity-deepseek-cccc3ec-20260831-r1` | `elisp-failing-test` | passed | 39703 | 11 | `deepseek/deepseek-v4-flash` |
+| `identity-deepseek-cccc3ec-20260831-r1` | `elisp-locate` | passed | 17543 | 4 | `deepseek/deepseek-v4-flash` |
+| `identity-kimi-code-cccc3ec-20260831-r1` | `elisp-failing-test` | cancelled | 120094 | 12 | `kimi-code/k3-256k` |
+| `identity-kimi-code-cccc3ec-20260831-r1` | `elisp-locate` | passed | 50422 | 3 | `kimi-code/k3-256k` |
+
+The DeepSeek campaign completed 2/2 with 15 actual request records, all exactly
+`deepseek/deepseek-v4-flash`. The Kimi campaign completed its durable 2-result
+matrix with 15 actual request records, all exactly `kimi-code/k3-256k`; the
+number of K2.7 and `k3` task requests was zero. Both completion files bind the
+expected two unique results to their frozen configuration digests.
+
+The Kimi behavior score was 1/2. `elisp-failing-test` performed 12 successful
+tool calls without a tool error, then reached the task's 120-second boundary
+and was cancelled with workspace cleanup evidence. This is a workflow
+convergence/performance finding, not an identity error. One stochastic sample
+does not justify a model-specific prompt promotion; it is retained for the
+next repeated coding-capability campaign.
+
+Verdict for model identity integrity: **PASS**. Dashboard K2.7 rows associated
+with the earlier campaign were unintended real task calls caused by provider
+default drift. Post-fix task dispatch is pinned at the Agent Run and every
+transport boundary proves the pin independently.
