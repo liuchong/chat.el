@@ -203,6 +203,12 @@ whatever these say."
 
 ;;; The policy
 
+(defconst chat-approval-guard--ordinary-project-write-rule
+  (concat "ALLOW: create or edit ordinary project files inside the project"
+          " and the configured write directories, except credentials,"
+          " version control metadata, and this approval mechanism.")
+  "Policy rule cited by the deterministic ordinary-project-write fast path.")
+
 (defconst chat-approval-guard--builtin-rules
   (list
    "ALLOW: read files and metadata inside the project."
@@ -214,9 +220,7 @@ whatever these say."
            " find in query-only form).")
    (concat "ALLOW: build, test and lint commands that write only into the"
            " project's own build output directories.")
-   (concat "ALLOW: create or edit ordinary project files inside the project"
-           " and the configured write directories, except credentials,"
-           " version control metadata, and this approval mechanism.")
+   chat-approval-guard--ordinary-project-write-rule
    (concat "DENY: writing or deleting outside the directories writes are"
            " confined to.")
    (concat "DENY: modifying version control refs, history or remotes"
@@ -559,9 +563,11 @@ because one `files_write' of a large file would otherwise be the log."
    (cons 'tool (plist-get sample :tool))
    (cons 'mode (plist-get sample :mode))
    (cons 'arguments (plist-get sample :arguments))
-   (cons 'source (if (equal (plist-get sample :model) "guard-entry")
-                     "entry"
-                   "model"))
+   (cons 'source
+         (pcase (plist-get sample :model)
+           ("guard-entry" "entry")
+           ("guard-rule" "rule")
+           (_ "model")))
    (cons 'decision (plist-get sample :decision))
    (cons 'matched_rule (plist-get sample :matched-rule))
    (cons 'reason (plist-get sample :reason))
@@ -716,6 +722,89 @@ a different command when it should retry or report the outage."
 Used only in conjunction with a network program: reading one of these is
 not by itself the thing being refused, and a rule that refused it would
 refuse looking at your own ssh config.")
+
+(defconst chat-approval-guard--version-control-components
+  '(".git" ".hg" ".svn")
+  "Path components that identify version-control metadata.")
+
+(defconst chat-approval-guard--shell-startup-files
+  '(".bash_profile" ".bashrc" ".profile" ".zprofile" ".zshenv" ".zshrc"
+    "config.fish")
+  "Shell startup files excluded from deterministic project-write approval.")
+
+(defconst chat-approval-guard--key-file-regexp
+  "\\.\\(?:jks\\|key\\|p12\\|pfx\\|pem\\)\\'"
+  "Key-like file suffixes excluded from deterministic write approval.")
+
+(defun chat-approval-guard--path-inside-directory-p (path directory)
+  "Return non-nil when resolved PATH is inside DIRECTORY."
+  (let ((root (file-name-as-directory
+               (condition-case nil
+                   (file-truename directory)
+                 (error (expand-file-name directory)))))
+        (resolved (condition-case nil
+                      (file-truename path)
+                    (error (expand-file-name path)))))
+    (or (equal resolved (directory-file-name root))
+        (string-prefix-p root resolved))))
+
+(defun chat-approval-guard--ordinary-project-path-p (path env)
+  "Return non-nil when PATH is an ordinary project file under ENV.
+
+This is deliberately narrower than the path floor.  Scratch and temporary
+directories may be writable, but only a measured project path can use the
+deterministic allow fast path.  Sensitive-looking paths fall through to the
+semantic guard rather than being guessed safe."
+  (when-let* ((project-root (plist-get env :project-root))
+              (resolved (plist-get path :resolved)))
+    (let* ((canonical-root
+            (condition-case nil
+                (file-truename project-root)
+              (error (expand-file-name project-root))))
+           (canonical-path
+            (condition-case nil
+                (file-truename resolved)
+              (error (expand-file-name resolved))))
+           (relative (file-relative-name canonical-path canonical-root))
+           (components (split-string relative "/" t))
+           (basename (file-name-nondirectory canonical-path)))
+      (and (not (equal relative "."))
+           (chat-approval-guard--path-inside-directory-p
+            canonical-path canonical-root)
+           (not (seq-some
+                 (lambda (component)
+                   (member component
+                           chat-approval-guard--version-control-components))
+                 components))
+           (not (string-match-p chat-approval-guard--credential-path-regexp
+                                canonical-path))
+           (not (member basename chat-approval-guard--shell-startup-files))
+           (not (string-match-p chat-approval-guard--key-file-regexp
+                                basename))))))
+
+(defun chat-approval-guard--ordinary-project-write-verdict (tool call env)
+  "Return a deterministic allow for an ordinary project write, or nil."
+  (let* ((tool-id (chat-forged-tool-id tool))
+         (arguments (plist-get call :arguments))
+         (paths (and (chat-approval-guard--writing-tool-p tool-id)
+                     (chat-approval-guard--target-paths
+                      tool-id arguments env))))
+    (when (and paths
+               (seq-every-p
+                (lambda (path)
+                  (chat-approval-guard--ordinary-project-path-p path env))
+                paths))
+      (chat-approval-guard-verdict-create
+       :decision 'allow
+       :matched-rule chat-approval-guard--ordinary-project-write-rule
+       :reason "all write targets are ordinary files inside the project"
+       :confidence 'high
+       :model "guard-rule"))))
+
+(defun chat-approval-guard--local-verdict (tool call env)
+  "Return a deterministic verdict for TOOL and CALL, or nil for the model."
+  (or (chat-approval-guard--entry-verdict call)
+      (chat-approval-guard--ordinary-project-write-verdict tool call env)))
 
 (defconst chat-approval-guard--network-programs
   '("curl" "wget" "nc" "ncat" "netcat" "telnet" "ssh" "scp" "sftp" "rsync"
@@ -1315,7 +1404,7 @@ will not come is a hung turn."
   (let* ((provider (chat-approval-guard--provider session))
          (env (chat-approval-guard--environment session))
          (refusal (chat-approval-guard--gate-refusal tool call))
-         (entry-verdict (chat-approval-guard--entry-verdict call))
+         (local-verdict (chat-approval-guard--local-verdict tool call env))
          (started (current-time))
          (settled nil)
          (model (format "%s%s" provider
@@ -1335,8 +1424,8 @@ will not come is a hung turn."
       (funcall finish
                (chat-approval-guard--refusal-verdict
                 "no provider is configured for it" model 0)))
-     (entry-verdict
-      (funcall finish entry-verdict))
+     (local-verdict
+      (funcall finish local-verdict))
      (t
       (condition-case err
           (progn

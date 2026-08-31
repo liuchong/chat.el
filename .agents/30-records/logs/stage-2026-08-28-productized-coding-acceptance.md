@@ -415,3 +415,37 @@ output. The complete E2E suite passes 3/3, deterministic integration passes
 3/3 with two credential-dependent provider tests skipped, and the canonical
 suite passes 1903/1903. All test processes reached terminal state and no helper
 process remained after either runner.
+
+## 2026-08-31 Exact-Model Rerun And Project-Write Fast Path
+
+Revision `abfbcfe` was rerun with one immutable two-task manifest under two new
+campaign identities. `rerun-deepseek-v4-flash-abfbcfe-20260831-r2` recorded
+provider `deepseek`, concrete model `deepseek-v4-flash`, a 52.359-second passing
+mutation and a 10.925-second passing locate task.
+`rerun-kimi-code-k3-256k-abfbcfe-20260831-r1` recorded provider `kimi-code`,
+concrete model `k3-256k`, a 19.064-second passing locate task and a mutation
+cancelled at 120.099 seconds. The qualification runner would have rejected
+`k3` before any network request.
+
+The Kimi mutation made no write and produced no late side effect. It spent
+about 113 seconds reading, activating staged capabilities and creating its
+Plan, then requested its first `files_replace`. The evaluation cancelled about
+seven seconds later; the independent Guard reached its own 20-second timeout
+after cancellation and the stable cancellation handle prevented execution.
+This is a latency failure, not a permission denial or a continuation failure.
+
+The retained live wire corpus contains 46 DeepSeek allows and five Kimi allows
+for in-project `files_replace`, plus 13 allows for the other project write
+tools; the only contrary outcome is this Kimi timeout. The common policy
+already allows ordinary project edits, so the repeated result justifies an A
+layer deterministic fast path rather than a provider-specific exception.
+Only fully resolved targets inside the measured project root qualify. Paths
+that look like credentials, keys, version-control metadata or shell startup
+files remain semantic Guard work, while all existing path and never-allow
+floors remain downstream authority.
+
+Focused safe/sensitive-path tests pass 2/2. The complete canonical suite passes
+1905/1905 with the full toolchain path. The first ad hoc focused runner lacked
+the standard execution backend and produced four unrelated failures; rerunning
+through the repository entry point proved those tests pass and prevents that
+invalid harness result from being mistaken for a product regression.

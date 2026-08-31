@@ -600,6 +600,14 @@ A 层的取舍标准是**重要性与频率**,不是"能不能枚举完":一条�
 或者出现得足够频繁(每轮都在跑),值得花确定性规则的成本;剩下的交给下面两层。
 不追求覆盖率——追求覆盖率就变成 codex,而我们不需要,因为 C 层能兜住尾部。
 
+普通项目文件写入也是 A 层快路,但按**解析后的操作边界**判断,不按工具名盲放。
+`files_write`、`files_replace`、`files_patch` 与 `apply_patch` 只有在系统能解析出全部
+目标、全部目标真实位于项目根内、且目标不属于凭据、密钥、版本控制元数据或 shell
+启动文件时才确定性放行。写到可配置的临时目录、目标不完整、路径敏感或无法证明位于
+项目内时仍进入 C 层。快路引用与 C 层相同的 ordinary-project-write ALLOW 规则,
+审计来源记为 `rule`;它不创建 grant,也不放宽路径地板。该规则来自跨 provider live
+审计中高频项目写入的一致 verdict,用于消除重复随机判决和审批延迟。
+
 **B 层:逐条枚举,写在提示词里,作为效果规则的锚点。** 这一层是本轮按要求加的,而且
 它的作用不止是"兜住重要情形"——**列出来的具体命令能反过来提升效果规则的实际效果**。
 抽象规则"让只读命令执行其他程序的选项使它不再只读"单独看是含糊的,配上
@@ -741,6 +749,10 @@ guard 模型;它的裁决不影响任何执行结果。
 - `chat-approval-guard-extra-rules`:用户补充规则,defcustom,拼在内置之后并标注来源。
 - `chat-approval-guard-allow-command-entries` /
   `chat-approval-guard-deny-command-entries`:A 层精确条目;deny 优先,整串字面匹配。
+- `chat-approval-guard--ordinary-project-write-verdict`:A 层的项目写入快路;只接受所有
+  解析目标均位于项目根内且不命中敏感路径类别的调用,否则返回 nil 交给模型。
+- `chat-approval-guard--local-verdict`:先处理精确 command entry 与参数注入标记,再处理
+  普通项目写入规则;无确定性结论才发起 guard 请求。
 - `chat-approval-guard-untrusted-instruction-markers`:参数中试图影响裁决的窄标记,命中
   后本地弃权,不把这类文本继续发给模型。
 - `chat-approval-guard-never-allow-p`:第 10 条第 3 点的确定性谓词。**不是** defcustom

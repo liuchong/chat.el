@@ -617,6 +617,69 @@ code matches against."
     (should (eq (chat-approval-guard-verdict-decision verdict) 'deny))
     (should-not (chat-approval-guard-verdict-allows-p verdict))))
 
+(ert-deftest chat-approval-guard-ordinary-project-write-spends-no-model-request ()
+  "A measured ordinary project write uses the deterministic policy fast path."
+  (chat-test-with-temp-dir
+   (let* ((project (expand-file-name "project/" temp-dir))
+          (session (make-chat-session :id "ordinary-project-write"))
+          (chat-approval-guard-provider 'test-provider)
+          (chat-files-allowed-directories (list project))
+          verdict)
+     (make-directory project t)
+     (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-tool-caller--execution-directory)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-model-request-result)
+                (lambda (&rest _)
+                  (ert-fail "an ordinary project write must not call the model"))))
+       (chat-approval-guard-request
+        (test-chat-guard-tool 'files_replace)
+        '(:name "files_replace"
+          :arguments (("path" . "sample.el")
+                      ("search" . "old")
+                      ("replace" . "new")))
+        session
+        (lambda (result) (setq verdict result))))
+     (should (chat-approval-guard-verdict-allows-p verdict))
+     (should (equal (chat-approval-guard-verdict-model verdict) "guard-rule"))
+     (should (equal (chat-approval-guard-verdict-matched-rule verdict)
+                    chat-approval-guard--ordinary-project-write-rule)))))
+
+(ert-deftest chat-approval-guard-sensitive-project-writes-still-use-the-model ()
+  "Credential, VCS, startup and key paths never take the write fast path."
+  (chat-test-with-temp-dir
+   (let* ((project (expand-file-name "project/" temp-dir))
+          (session (make-chat-session :id "sensitive-project-write"))
+          (chat-approval-guard-provider 'test-provider)
+          (chat-files-allowed-directories (list project)))
+     (make-directory project t)
+     (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-tool-caller--execution-directory)
+                (lambda (&optional _session) project)))
+       (dolist (path '(".env" ".git/config" ".zshrc" "signing.pem"))
+         (let ((requests 0)
+               verdict)
+           (cl-letf (((symbol-function 'chat-model-request-result)
+                      (lambda (_provider _messages success _error &rest _)
+                        (setq requests (1+ requests))
+                        (funcall
+                         success
+                         '(:content
+                           "{\"decision\":\"deny\",\"reason\":\"sensitive path\",\"confidence\":\"high\"}")))))
+             (chat-approval-guard-request
+              (test-chat-guard-tool 'files_replace)
+              (list :name "files_replace"
+                    :arguments `(("path" . ,path)
+                                 ("search" . "old")
+                                 ("replace" . "new")))
+              session
+              (lambda (result) (setq verdict result))))
+           (should (= requests 1))
+           (should (eq (chat-approval-guard-verdict-decision verdict) 'deny))
+           (should-not (chat-approval-guard-verdict-allows-p verdict))))))))
+
 (ert-deftest chat-approval-guard-command-entries-do-not-match-prefixes ()
   "One tuned command does not grant its unreviewed variants authority."
   (let ((chat-approval-guard-provider 'test-provider)

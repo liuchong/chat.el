@@ -1763,3 +1763,19 @@ Agent 的完整操作链。当前已在 Spec 016 加入可执行 BDD 场景；in
 caller、scheduler、execution、callback、wire 与跨 session 拒绝，E2E 贯通 Agent 的
 `work_task_start -> work_task_output -> final answer` 三步。结果为 integration 3/3、E2E
 3/3、canonical 1903/1903；两个需要真实凭据的 provider integration 按设计 skipped。
+
+Revision `abfbcfe` 使用同一份两任务 manifest 再次比较精确模型
+`deepseek/deepseek-v4-flash` 与 `kimi-code/k3-256k`。DeepSeek mutation 52.359 秒通过、
+locate 10.925 秒通过；Kimi locate 19.064 秒通过，mutation 在 120.099 秒取消。Kimi
+本轮无错误命令、无写入和无取消后副作用：它在第一次 `files_replace` 前消耗约 113 秒，
+随后项目写入 Guard 请求进入 20 秒超时，Agent 在剩余约 7 秒时先取消，迟到 verdict
+保持 fail-closed。保留的 live 审计汇总显示，同类项目内 `files_replace` 此前被 DeepSeek
+放行 46 次、Kimi 放行 5 次，另有 13 次其他项目写工具全部放行；这已达到将高频共同路径
+从随机 C 层提升到确定性 A 层的证据门槛，而不是创建模型专用分支。
+
+当前共同层新增 ordinary-project-write 快路：只有系统解析出的全部目标都真实位于项目根
+内，且不命中凭据、密钥、版本控制元数据、shell 启动文件或既有 never-allow 地板时才
+确定性放行；其余调用仍交给 Guard。macOS `/var` 与 `/private/var` 同址问题使用真实路径
+比较解决。新增安全用例 2/2 通过，完整 PATH 下 canonical 1905/1905。下一步在提交后的
+clean revision 上重跑相同双模型 manifest，验证 Kimi 是否越过写入和验证闭环；如果仍在
+120 秒截止，继续按 capability 激活轮次与模型阶段预算分类，不放宽验收门槛。
