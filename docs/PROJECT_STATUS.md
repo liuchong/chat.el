@@ -338,8 +338,8 @@ are still required at the next frozen revision.
 ### Test Status
 
 - canonical command: `emacs -Q -batch -l tests/run-tests.el`
-- 1905 regression tests discovered
-- 1905 passing
+- 1907 regression tests discovered
+- 1907 passing
 - 0 skipped in the canonical batch suite
 - 0 known failures in the current baseline
 - optional provider integration command: `emacs -Q -batch -l tests/run-integration-tests.el -f ert-run-tests-batch-and-exit`

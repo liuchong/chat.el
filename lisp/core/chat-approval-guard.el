@@ -71,6 +71,8 @@
 (declare-function chat-files--resolved-path "chat-files" (path))
 (declare-function chat-files--tool-target-paths "chat-files" (tool-id arguments))
 (declare-function chat-command-gate-explain "chat-command-gate" (refusal &optional command))
+(declare-function chat-command-gate-check "chat-command-gate"
+                  (command &key commands separators))
 (declare-function chat-command-gate-segments "chat-command-gate" (command))
 (declare-function chat-command-gate-split "chat-command-gate" (command))
 (declare-function chat-tool-caller--execution-directory "chat-tool-caller" (&optional session))
@@ -209,6 +211,11 @@ whatever these say."
           " version control metadata, and this approval mechanism.")
   "Policy rule cited by the deterministic ordinary-project-write fast path.")
 
+(defconst chat-approval-guard--project-check-rule
+  (concat "ALLOW: build, test and lint commands that write only into the"
+          " project's own build output directories.")
+  "Policy rule cited by the deterministic project-check fast path.")
+
 (defconst chat-approval-guard--builtin-rules
   (list
    "ALLOW: read files and metadata inside the project."
@@ -218,8 +225,7 @@ whatever these say."
    (concat "ALLOW: search text, list directories, and read process or"
            " environment information inside the project (rg, grep, ls, and"
            " find in query-only form).")
-   (concat "ALLOW: build, test and lint commands that write only into the"
-           " project's own build output directories.")
+   chat-approval-guard--project-check-rule
    chat-approval-guard--ordinary-project-write-rule
    (concat "DENY: writing or deleting outside the directories writes are"
            " confined to.")
@@ -801,10 +807,94 @@ semantic guard rather than being guessed safe."
        :confidence 'high
        :model "guard-rule"))))
 
+(defun chat-approval-guard--known-project-check-p (argv)
+  "Return non-nil when ARGV names a recognized build, test or lint check.
+
+Recognition is intentionally based on the executable and its check-shaped
+arguments, not on a substring anywhere in the command.  The caller separately
+proves the command is a single shell segment running inside the project under
+the compile task's enforced filesystem and network boundary."
+  (let* ((program (and argv (file-name-nondirectory (car argv))))
+         (arguments (cdr argv))
+         (subcommand (car arguments)))
+    (cond
+     ((member program '("emacs" "emacs-nox"))
+      (and (member "--batch" arguments)
+           (seq-some (lambda (argument)
+                       (string-match-p "ert-run-tests-batch" argument))
+                     arguments)))
+     ((equal program "go") (equal subcommand "test"))
+     ((equal program "cargo")
+      (member subcommand '("build" "check" "clippy" "test")))
+     ((member program '("python" "python3"))
+      (or (and (equal subcommand "-m")
+               (member (cadr arguments) '("compileall" "pytest" "unittest")))
+          (and subcommand
+               (string-match-p
+                "\\(?:^\\|/\\)test[^/]*\\.py\\'" subcommand))))
+     ((member program '("pytest" "py.test" "ctest" "javac" "tsc")) t)
+     ((equal program "node")
+      (and subcommand
+           (string-match-p
+            "\\(?:^\\|/\\)test[^/]*\\.\\(?:cjs\\|js\\|mjs\\|ts\\)\\'"
+            subcommand)))
+     ((member program '("npm" "pnpm" "yarn" "bun"))
+      (or (member subcommand '("build" "lint" "test" "typecheck"))
+          (and (equal subcommand "run")
+               (member (cadr arguments)
+                       '("build" "check" "lint" "test" "typecheck")))))
+     ((member program '("make" "gmake" "ninja"))
+      (seq-some (lambda (argument)
+                  (member argument '("all" "build" "check" "lint" "test")))
+                arguments))
+     ((equal program "cmake") (member "--build" arguments))
+     ((equal program "zig") (member subcommand '("build" "test")))
+     ((equal program "clojure")
+      (seq-some (lambda (argument)
+                  (string-match-p
+                   "\\`-M:\\(?:build\\|check\\|lint\\|test\\)\\'" argument))
+                arguments))
+     ((member program '("mvn" "mvnw"))
+      (seq-some (lambda (argument)
+                  (member argument '("compile" "package" "test" "verify")))
+                arguments))
+     ((member program '("gradle" "gradlew"))
+      (seq-some (lambda (argument)
+                  (member argument '("assemble" "build" "check" "test")))
+                arguments))
+     ((member program '("cc" "clang" "clang++" "gcc" "g++")) t))))
+
+(defun chat-approval-guard--project-check-verdict (tool call env)
+  "Return a deterministic allow for a bounded project check, or nil."
+  (let* ((tool-id (chat-forged-tool-id tool))
+         (arguments (plist-get call :arguments))
+         (command (and (eq tool-id 'programming_compile_task)
+                       (cdr (assoc "command" arguments))))
+         (given-directory (or (cdr (assoc "directory" arguments)) "."))
+         (project-root (plist-get env :project-root))
+         (directory (and project-root
+                         (chat-approval-guard--resolve given-directory env)))
+         (argv (and (stringp command)
+                    (chat-command-gate-split command))))
+    (when (and argv
+               (stringp directory)
+               (chat-approval-guard--path-inside-directory-p
+                directory project-root)
+               (null (chat-command-gate-check
+                      command :commands (list (car argv))))
+               (chat-approval-guard--known-project-check-p argv))
+      (chat-approval-guard-verdict-create
+       :decision 'allow
+       :matched-rule chat-approval-guard--project-check-rule
+       :reason "recognized project check runs inside the enforced build boundary"
+       :confidence 'high
+       :model "guard-rule"))))
+
 (defun chat-approval-guard--local-verdict (tool call env)
   "Return a deterministic verdict for TOOL and CALL, or nil for the model."
   (or (chat-approval-guard--entry-verdict call)
-      (chat-approval-guard--ordinary-project-write-verdict tool call env)))
+      (chat-approval-guard--ordinary-project-write-verdict tool call env)
+      (chat-approval-guard--project-check-verdict tool call env)))
 
 (defconst chat-approval-guard--network-programs
   '("curl" "wget" "nc" "ncat" "netcat" "telnet" "ssh" "scp" "sftp" "rsync"

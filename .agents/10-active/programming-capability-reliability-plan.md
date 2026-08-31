@@ -1779,3 +1779,18 @@ locate 10.925 秒通过；Kimi locate 19.064 秒通过，mutation 在 120.099 �
 比较解决。新增安全用例 2/2 通过，完整 PATH 下 canonical 1905/1905。下一步在提交后的
 clean revision 上重跑相同双模型 manifest，验证 Kimi 是否越过写入和验证闭环；如果仍在
 120 秒截止，继续按 capability 激活轮次与模型阶段预算分类，不放宽验收门槛。
+
+Revision `0d9ab98` 的提交后对照保持相同 manifest 与任务上限。DeepSeek
+`deepseek-v4-flash` mutation 45.193 秒通过、locate 15.968 秒通过。Kimi 精确模型
+`k3-256k` locate 25.413 秒通过，mutation 修改了 `sample.el`，但仍在 120.159 秒取消。
+本轮项目写入快路以 `source=rule` 在 0.000014 秒放行，证明上一阶段修复生效；剩余失败
+来自两次 `programming_compile_task`。第一次 Kimi 生成的 ERT 命令缺少必要引号，Guard
+以 high confidence 在 19.065 秒后放行，实际 shell 立即 code 2；第二次命令修正，但 Guard
+耗时 11.297 秒后只给 medium confidence，按 fail-closed 合同拒绝。两次语义审查共占
+30.361 秒，任务随后进入第 9 步时达到固定截止。
+
+这批证据把高频、强制隔离的项目检查提升为共同 A 层规则，而不是 Kimi 专用补丁：仅
+`programming_compile_task`、项目内目录、单 shell 段、无危险元字符并命中维护过的
+build/test/lint argv 形态才确定性放行。普通 shell、任意解释器代码、复合命令和越界目录
+仍进入模型 Guard。正反边界测试 4/4、canonical 1907/1907；下一步在包含该规则的 clean
+revision 上再次执行两个精确模型，验证 Kimi 是否完成写入、检查与最终回答闭环。

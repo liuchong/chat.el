@@ -449,3 +449,29 @@ Focused safe/sensitive-path tests pass 2/2. The complete canonical suite passes
 the standard execution backend and produced four unrelated failures; rerunning
 through the repository entry point proved those tests pass and prevents that
 invalid harness result from being mistaken for a product regression.
+
+## 2026-08-31 Exact-Model Project-Check Diagnostic
+
+The clean `0d9ab98` revision was tested with the same two-task manifest and
+new immutable campaign identities. DeepSeek `deepseek-v4-flash` passed the
+mutation in 45.193 seconds and locate in 15.968 seconds. Kimi used the exact
+`k3-256k` model, passed locate in 25.413 seconds and cancelled the mutation at
+120.159 seconds after changing only `sample.el`.
+
+The Kimi wire proves the project-write fast path worked: `files_replace` was
+allowed by `source=rule` in 0.000014 seconds. The remaining deadline was spent
+on two compile-task reviews. The first malformed ERT command was allowed at
+high confidence after 19.065 seconds and then failed with shell code 2. The
+corrected command was semantically allowed by the reviewer after 11.297
+seconds, but only at medium confidence, so the fail-closed contract correctly
+refused it. The two approval calls consumed 30.361 seconds and the fixed task
+deadline cancelled step nine before another response.
+
+This repeated provider-independent ALLOW result justifies a deterministic
+project-check path for the enforced compile-task boundary. It requires a
+project-contained execution directory, one shell segment without unsafe shell
+syntax, and a recognized build, test or lint argv shape. The same command in a
+generic shell tool, arbitrary interpreter code, compound commands and outside
+directories remain semantic-review cases. Twelve positive command families
+and five negative boundary cases pass focused tests; the complete canonical
+suite passes 1907/1907.

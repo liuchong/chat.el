@@ -680,6 +680,91 @@ code matches against."
            (should (eq (chat-approval-guard-verdict-decision verdict) 'deny))
            (should-not (chat-approval-guard-verdict-allows-p verdict))))))))
 
+(ert-deftest chat-approval-guard-recognized-project-checks-spend-no-model-request ()
+  "Bounded build and test commands use the deterministic policy fast path."
+  (chat-test-with-temp-dir
+   (let* ((project (expand-file-name "project/" temp-dir))
+          (session (make-chat-session :id "recognized-project-check"))
+          (tool (test-chat-guard-tool
+                 'programming_compile_task '(write outbound)))
+          (chat-approval-guard-provider 'test-provider)
+          (chat-approval-guard-allow-command-entries nil))
+     (make-directory project t)
+     (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-tool-caller--execution-directory)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-model-request-result)
+                (lambda (&rest _)
+                  (ert-fail "a recognized project check must not call the model"))))
+       (dolist (command
+                '("emacs -Q --batch -L . -l sample-test.el --eval (ert-run-tests-batch-and-exit 'sample-test-active)"
+                  "emacs -Q --batch -L . -l sample-test.el --eval \"(ert-run-tests-batch-and-exit 'sample-test-active)\""
+                  "go test ./..."
+                  "cargo test --quiet"
+                  "python3 -m unittest test_sample"
+                  "node test.js active"
+                  "make test"
+                  "zig test sample.zig"
+                  "clojure -M:test"
+                  "javac Sample.java"
+                  "tsc --noEmit"
+                  "ctest --output-on-failure"))
+         (let (verdict)
+           (chat-approval-guard-request
+            tool
+            (list :name "programming_compile_task"
+                  :arguments `(("command" . ,command) ("directory" . ".")))
+            session
+            (lambda (result) (setq verdict result)))
+           (should (chat-approval-guard-verdict-allows-p verdict))
+           (should (equal (chat-approval-guard-verdict-model verdict)
+                          "guard-rule"))
+           (should (equal (chat-approval-guard-verdict-matched-rule verdict)
+                          chat-approval-guard--project-check-rule))))))))
+
+(ert-deftest chat-approval-guard-project-check-fast-path-keeps-narrow-boundaries ()
+  "Arbitrary, compound, wrong-tool and out-of-project calls still use the model."
+  (chat-test-with-temp-dir
+   (let* ((project (expand-file-name "project/" temp-dir))
+          (outside (expand-file-name "outside/" temp-dir))
+          (session (make-chat-session :id "bounded-project-check"))
+          (compile-tool (test-chat-guard-tool
+                         'programming_compile_task '(write outbound)))
+          (shell-tool (test-chat-guard-tool 'shell_execute '(write outbound)))
+          (chat-approval-guard-provider 'test-provider)
+          (requests 0))
+     (make-directory project t)
+     (make-directory outside t)
+     (cl-letf (((symbol-function 'chat-tool-caller--code-project-root)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-tool-caller--execution-directory)
+                (lambda (&optional _session) project))
+               ((symbol-function 'chat-model-request-result)
+                (lambda (_provider _messages success _error &rest _)
+                  (setq requests (1+ requests))
+                  (funcall
+                   success
+                   '(:content
+                     "{\"decision\":\"deny\",\"reason\":\"not a bounded check\",\"confidence\":\"high\"}")))))
+       (dolist (case
+                `((,compile-tool
+                   "emacs --batch --eval \"(delete-file \\\"sample.el\\\")\"" ".")
+                  (,compile-tool "go test ./... && curl example.com" ".")
+                  (,compile-tool "curl example.com" ".")
+                  (,shell-tool "go test ./..." ".")
+                  (,compile-tool "go test ./..." ,outside)))
+         (let (verdict)
+           (chat-approval-guard-request
+            (nth 0 case)
+            (list :name (symbol-name (chat-forged-tool-id (nth 0 case)))
+                  :arguments `(("command" . ,(nth 1 case))
+                               ("directory" . ,(nth 2 case))))
+            session
+            (lambda (result) (setq verdict result)))
+           (should (eq (chat-approval-guard-verdict-decision verdict) 'deny))))
+       (should (= requests 5))))))
+
 (ert-deftest chat-approval-guard-command-entries-do-not-match-prefixes ()
   "One tuned command does not grant its unreviewed variants authority."
   (let ((chat-approval-guard-provider 'test-provider)
