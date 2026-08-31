@@ -31,11 +31,15 @@
                    (plist-get config :enabled-tools)))
     (dolist (tool chat-capability-programming-execution-tools)
       (should (memq tool (plist-get config :enabled-tools))))
+    (dolist (tool chat-capability-programming-verification-fallback-tools)
+      (should (memq tool (plist-get config :enabled-tools))))
     (should (equal chat-capability-programming-base-tools
                    (plist-get config :advertised-tools)))
     (should (memq 'programming_plan_create
                   (plist-get config :advertised-tools)))
     (dolist (tool chat-capability-programming-execution-tools)
+      (should-not (memq tool (plist-get config :advertised-tools))))
+    (dolist (tool chat-capability-programming-verification-fallback-tools)
       (should-not (memq tool (plist-get config :advertised-tools))))
     (should-not (memq 'programming_plan_transition
                       (plist-get config :advertised-tools)))))
@@ -424,6 +428,13 @@
       (should (memq tool
                     (plist-get (chat-session-tool-config execution)
                                :advertised-tools))))
+    (dolist (tool chat-capability-programming-verification-tools)
+      (should (memq tool
+                    (plist-get (chat-session-tool-config execution)
+                               :advertised-tools))))
+    (should-not
+     (memq 'programming_compile_task
+           (plist-get (chat-session-tool-config execution) :advertised-tools)))
     (dolist (tool chat-capability-programming-plan-tools)
       (unless (eq tool 'programming_plan_create)
         (should (memq tool
@@ -509,7 +520,76 @@
        (should (memq 'programming_plan_transition
                      (plist-get config :advertised-tools)))
        (dolist (tool chat-capability-programming-execution-tools)
-         (should (memq tool (plist-get config :advertised-tools))))))))
+         (should (memq tool (plist-get config :advertised-tools))))
+       (dolist (tool chat-capability-programming-verification-tools)
+         (should (memq tool (plist-get config :advertised-tools))))
+       (should-not (memq 'programming_compile_task
+                         (plist-get config :advertised-tools)))))))
+
+(ert-deftest chat-capability-generic-compile-requires-an-empty-verification-plan ()
+  "Generic commands are a durable fallback, never the first verification path."
+  (chat-test-with-temp-dir
+   (let* ((session (make-chat-session :id "verification-fallback"))
+          (profile (chat-agent-profile-resolve 'code))
+          (chat-tool-caller-current-session session)
+          (chat-tool-caller-current-state-session session)
+          (chat-tool-caller-current-execution-context
+           '(:task-id "agent-task")))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-session-metadata-set session 'activeTaskId "agent-task")
+     (let ((plan
+            (chat-work-plan-create
+             session "Plan"
+             '(((id . "step") (title . "Implement")
+                (acceptance . "Tests pass"))))))
+       (chat-work-plan-start-first-ready
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
+     (chat-session-set-tool-config
+      session
+      (chat-agent-profile--effective-tool-config session profile))
+     (let ((planned
+            (chat-capability-programming-verification-plan temp-dir nil)))
+       (should-not (cdr (assoc 'steps planned))))
+     (should
+      (memq 'programming_compile_task
+            (plist-get
+             (chat-agent-profile--effective-tool-config session profile)
+             :advertised-tools)))
+     (let ((chat-tool-caller-current-execution-context
+            '(:task-id "other-agent-task")))
+       (should-not
+        (memq 'programming_compile_task
+              (plist-get
+               (chat-agent-profile--effective-tool-config session profile)
+               :advertised-tools))))
+     (let ((plan (chat-work-plan-current session)))
+       (chat-work-plan-cancel
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
+     (should-not
+      (memq 'programming_compile_task
+            (plist-get
+             (chat-agent-profile--effective-tool-config session profile)
+             :advertised-tools)))
+     (let ((plan
+            (chat-work-plan-create
+             session "Replacement plan"
+             '(((id . "replacement") (title . "Implement replacement")
+                (acceptance . "Tests pass"))))))
+       (chat-work-plan-start-first-ready
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
+     (with-temp-file (expand-file-name ".chat-verification.json" temp-dir)
+       (insert
+        "{\"id\":\"fixture\",\"steps\":[{\"id\":\"test\","
+        "\"kind\":\"test\",\"argv\":[\"sh\",\"test-one\",\"active\"],"
+        "\"required\":true}]}"))
+     (let ((planned
+            (chat-capability-programming-verification-plan temp-dir nil)))
+       (should (cdr (assoc 'steps planned))))
+     (should-not
+      (memq 'programming_compile_task
+            (plist-get
+             (chat-agent-profile--effective-tool-config session profile)
+             :advertised-tools))))))
 
 (ert-deftest chat-capability-bounded-skip-transitions-its-tool-menu ()
   "A bounded skip exposes one exact edit, then verification and plan upgrade."

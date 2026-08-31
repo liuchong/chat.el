@@ -41,8 +41,12 @@
   "Read-only tool menu advertised before a programming plan exists.")
 
 (defconst chat-capability-programming-execution-tools
-  '(programming_compile_task files_write files_replace files_patch apply_patch)
+  '(files_write files_replace files_patch apply_patch)
   "Mutating tools advertised only after an ordinary work plan starts.")
+
+(defconst chat-capability-programming-verification-fallback-tools
+  '(programming_compile_task programming_task_output)
+  "Generic command tools exposed only after deterministic planning finds no check.")
 
 (defconst chat-capability-programming-exploration-tools
   '(programming_flymake_diagnostics
@@ -96,6 +100,7 @@
    (apply #'append
           (copy-sequence chat-capability-programming-base-tools)
           (copy-sequence chat-capability-programming-execution-tools)
+          (copy-sequence chat-capability-programming-verification-fallback-tools)
           (mapcar (lambda (entry) (copy-sequence (cdr entry)))
                   chat-capability-programming-tool-groups)))
   "Complete programming authority; only a stage-relevant subset is advertised.")
@@ -204,21 +209,28 @@
                  (ignore-errors
                    (chat-work-plan-bounded-skip-state session))))
            (plan-mode (and session
-                           (ignore-errors (chat-plan-mode-active-p session)))))
+                           (ignore-errors (chat-plan-mode-active-p session))))
+           (ordinary-execution
+            (and plan (not plan-mode)
+                 (eq (chat-work-plan-status plan) 'active)
+                 (seq-some
+                  (lambda (item)
+                    (eq (chat-work-plan-item-status item) 'in-progress))
+                  (chat-work-plan-items plan))))
+           (bounded-verification
+            (and bounded-skip
+                 (> (or (plist-get bounded-skip :consumed-count) 0) 0))))
       (when (or plan plan-mode)
         (setq advertised
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-plan-tools)))
       (when (and plan (eq (chat-work-plan-status plan) 'active))
         (setq advertised (delq 'programming_plan_create advertised)))
-      (when (and plan (not plan-mode)
-                 (seq-some
-                  (lambda (item)
-                    (eq (chat-work-plan-item-status item) 'in-progress))
-                  (chat-work-plan-items plan)))
+      (when ordinary-execution
         (setq advertised
               (chat-capability--ordered-tool-union
-               advertised chat-capability-programming-execution-tools)))
+               advertised chat-capability-programming-execution-tools
+               chat-capability-programming-verification-tools)))
       (when bounded-skip
         (setq advertised
               (seq-remove
@@ -245,6 +257,13 @@
                   (chat-capability--ordered-tool-union
                    advertised
                    chat-capability-programming-verification-tools)))))
+      (when (and (or ordinary-execution bounded-verification)
+                 session
+                 (chat-capability--verification-fallback-authorized-p session))
+        (setq advertised
+              (chat-capability--ordered-tool-union
+               advertised
+               chat-capability-programming-verification-fallback-tools)))
       (when (and session (ignore-errors (chat-goal-current session)))
         (setq advertised
               (chat-capability--ordered-tool-union
@@ -484,15 +503,48 @@ that mutation with verification and Plan-upgrade tools after consumption."
       (error "%s must contain at least one plan item" label))
     items))
 
+(defun chat-capability--verification-task-id (session)
+  "Return the current Agent task identity for verification in SESSION."
+  (or (and (boundp 'chat-tool-caller-current-execution-context)
+           (plist-get chat-tool-caller-current-execution-context :task-id))
+      (and session (chat-session-metadata-get session 'activeTaskId))))
+
+(defun chat-capability--verification-fallback-authorized-p (session)
+  "Return non-nil when SESSION may use generic verification commands."
+  (let ((state (and session
+                    (chat-session-metadata-get
+                     session 'programmingVerificationFallback))))
+    (and state
+         (equal (plist-get state :task-id)
+                (chat-capability--verification-task-id session)))))
+
+(defun chat-capability--set-verification-fallback (session profile)
+  "Authorize generic verification in SESSION only when PROFILE has no steps."
+  (if (chat-verification-profile-steps profile)
+      (chat-session-metadata-set session 'programmingVerificationFallback nil)
+    (chat-session-metadata-set
+     session 'programmingVerificationFallback
+     (list :task-id (chat-capability--verification-task-id session)
+           :profile-id (chat-verification-profile-id profile)))))
+
 (defun chat-capability-programming-verification-plan
     (project-root &optional changed-files-json)
   "Plan project verification without running it."
   (require 'chat-code-verify)
-  (chat-code-verify-profile-to-alist
-   (chat-code-verify-plan
-    project-root
-    (chat-capability--json-string-list changed-files-json "changed_files_json")
-    (chat-capability--verification-context))))
+  (let* ((session (chat-capability--current-session))
+         (profile
+          (chat-code-verify-plan
+           project-root
+           (chat-capability--json-string-list
+            changed-files-json "changed_files_json")
+           (chat-capability--verification-context))))
+    (chat-capability--set-verification-fallback session profile)
+    (if (chat-verification-profile-steps profile)
+        (chat-capability--unadvertise-tools
+         chat-capability-programming-verification-fallback-tools)
+      (chat-capability--advertise-tools
+       chat-capability-programming-verification-fallback-tools))
+    (chat-code-verify-profile-to-alist profile)))
 
 (defun chat-capability--verification-context ()
   "Return correlation fields for the current capability session."
@@ -744,7 +796,9 @@ that mutation with verification and Plan-upgrade tools after consumption."
             (chat-work-plan-start-first-ready
              session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
       (chat-capability--advertise-tools
-       chat-capability-programming-execution-tools))
+       (chat-capability--ordered-tool-union
+        chat-capability-programming-execution-tools
+        chat-capability-programming-verification-tools)))
     (chat-work-plan-to-alist plan)))
 
 (defun chat-capability-programming-plan-read (&optional plan-id)
