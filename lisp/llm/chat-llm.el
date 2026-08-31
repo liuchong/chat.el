@@ -652,23 +652,27 @@ Returns (BODY . STATUS-CODE) on success, or signals error on failure."
           (setq response-buffer 
                 (with-timeout (timeout-secs (error "Request timeout after %d seconds" timeout-secs))
                   (url-retrieve-synchronously url nil t timeout-secs)))
-          (when response-buffer
-            (unwind-protect
-                (with-current-buffer response-buffer
-                  (goto-char (point-min))
-                  ;; Parse HTTP status
-                  (when (looking-at "HTTP/[^ ]+ \\([0-9]+\\)")
-                    (setq status-code (string-to-number (match-string 1)))
-                    (chat-log "[LLM] HTTP status code: %d" status-code))
-                  ;; Extract body and decode UTF-8
-                  (if (re-search-forward "\n\n" nil t)
-                      (let ((raw-body (buffer-substring (point) (point-max))))
-                        ;; Decode UTF-8 response to handle Chinese characters
-                        (setq response-body (decode-coding-string raw-body 'utf-8)))
-                    (setq response-body ""))
-                  (chat-log "[LLM] Response body length: %d bytes" (length response-body))
-                  (cons response-body status-code))
-              (kill-buffer response-buffer))))
+          (unless (buffer-live-p response-buffer)
+            (error "HTTP request returned no response from %s" url))
+          (unwind-protect
+              (with-current-buffer response-buffer
+                (goto-char (point-min))
+                ;; Parse HTTP status
+                (when (looking-at "HTTP/[^ ]+ \\([0-9]+\\)")
+                  (setq status-code (string-to-number (match-string 1)))
+                  (chat-log "[LLM] HTTP status code: %d" status-code))
+                (unless (integerp status-code)
+                  (error "Malformed HTTP response from %s: missing status code"
+                         url))
+                ;; Extract body and decode UTF-8
+                (if (re-search-forward "\n\n" nil t)
+                    (let ((raw-body (buffer-substring (point) (point-max))))
+                      ;; Decode UTF-8 response to handle Chinese characters
+                      (setq response-body (decode-coding-string raw-body 'utf-8)))
+                  (setq response-body ""))
+                (chat-log "[LLM] Response body length: %d bytes" (length response-body))
+                (cons response-body status-code))
+            (kill-buffer response-buffer)))
       (error
        (when response-buffer (kill-buffer response-buffer))
        (signal (car err) (cdr err))))))
@@ -1017,11 +1021,17 @@ Returns a plist with :content, :raw-request and :raw-response."
                     (chat-llm--request-url provider options)
                     headers
                     raw-request
-                    timeout))
-           (raw-response (car result))
-           (status-code (cdr result)))
-      (chat-log "[LLM] Got response body: %s..." (substring raw-response 0 (min 100 (length raw-response))))
-      (chat-llm--decode-response config raw-request raw-response status-code))))
+                    timeout)))
+      (unless (and (consp result)
+                   (stringp (car result))
+                   (integerp (cdr result)))
+        (error "Invalid synchronous HTTP response contract"))
+      (let ((raw-response (car result))
+            (status-code (cdr result)))
+        (chat-log "[LLM] Got response body: %s..."
+                  (substring raw-response 0 (min 100 (length raw-response))))
+        (chat-llm--decode-response
+         config raw-request raw-response status-code)))))
 
 (defun chat-llm-request-async (provider messages success-callback error-callback &optional options)
   "Send an asynchronous request to PROVIDER with MESSAGES.

@@ -176,6 +176,54 @@ catalogue of everything the package was built against."
   (should (equal (chat-llm--build-request 'build-hook-test nil nil)
                  '((builder . t)))))
 
+(ert-deftest chat-llm-post-sync-rejects-a-missing-response-buffer ()
+  "A transport miss is reported directly instead of reaching response logging."
+  (cl-letf (((symbol-function 'url-retrieve-synchronously)
+             (lambda (&rest _arguments) nil)))
+    (let ((failure
+           (should-error
+            (chat-llm--post-sync
+             "https://unavailable.example.com" nil "{}" 1))))
+      (should
+       (string-match-p
+        "HTTP request returned no response"
+        (error-message-string failure))))))
+
+(ert-deftest chat-llm-post-sync-rejects-a-missing-http-status ()
+  "A malformed response cannot masquerade as an HTTP error with a nil code."
+  (let ((response (generate-new-buffer " *chat-invalid-http-response*")))
+    (with-current-buffer response
+      (insert "not an HTTP response\n\n{}"))
+    (cl-letf (((symbol-function 'url-retrieve-synchronously)
+               (lambda (&rest _arguments) response)))
+      (let ((failure
+             (should-error
+              (chat-llm--post-sync
+               "https://malformed.example.com" nil "{}" 1))))
+        (should
+         (string-match-p
+          "Malformed HTTP response.*missing status code"
+          (error-message-string failure)))
+        (should-not (buffer-live-p response))))))
+
+(ert-deftest chat-llm-request-rejects-an-invalid-sync-response-contract ()
+  "Synchronous provider adapters cannot return nil into logging or decoding."
+  (test-chat-llm--with-own-registry
+    (chat-llm-register-provider
+     'invalid-sync :base-url "https://invalid.example.com"
+     :api-key "token" :model "model")
+    (cl-letf (((symbol-function 'chat-llm--post-sync)
+               (lambda (&rest _arguments) nil)))
+      (let ((failure
+             (should-error
+              (chat-llm-request
+               'invalid-sync
+               (list (make-chat-message :role :user :content "Hello"))))))
+        (should
+         (string-match-p
+          "Invalid synchronous HTTP response contract"
+          (error-message-string failure)))))))
+
 (ert-deftest chat-llm-request-async-calls-success-callback ()
   "Test async requests pass parsed response to the success callback."
   (let (captured-result)
