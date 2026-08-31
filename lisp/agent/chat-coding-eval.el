@@ -613,65 +613,87 @@
   (let* ((buffer (generate-new-buffer " *chat-coding-eval-judge*"))
          (default-directory
           (file-name-as-directory (chat-coding-eval-run-state-workspace state)))
-         (process
-          (make-process
-           :name (format "chat-coding-eval-%s"
-                         (chat-coding-eval-task-id
-                          (chat-coding-eval-run-state-task state)))
-           :buffer buffer
-           :stderr buffer
-           :command (alist-get 'command judge)
-           :connection-type 'pipe
-           :noquery t
-           :sentinel
-           (lambda (process _event)
-             (when (memq (process-status process) '(exit signal))
-               (unless (process-get process 'chat-coding-eval-timeout)
-                 (chat-coding-eval--cancel-timer state)
-                 (let* ((output-buffer (process-buffer process))
-                        (output (if (buffer-live-p output-buffer)
-                                    (with-current-buffer output-buffer
-                                      (buffer-string))
-                                  ""))
-                        (exit-code (process-exit-status process))
-                        (expected (or (alist-get 'expectedExit judge) 0))
-                        (passed (= expected exit-code)))
-                   (when (buffer-live-p output-buffer)
-                     (kill-buffer output-buffer))
-                   (setf (chat-coding-eval-run-state-process state) nil
-                         (chat-coding-eval-run-state-checks state)
-                         (append
+         process)
+    (condition-case start-error
+        (progn
+          (setq
+           process
+           (make-process
+            :name (format "chat-coding-eval-%s"
+                          (chat-coding-eval-task-id
+                           (chat-coding-eval-run-state-task state)))
+            :buffer buffer
+            :stderr buffer
+            :command (alist-get 'command judge)
+            :connection-type 'pipe
+            :noquery t
+            :sentinel
+            (lambda (process _event)
+              (when (memq (process-status process) '(exit signal))
+                (unless (process-get process 'chat-coding-eval-timeout)
+                  (chat-coding-eval--cancel-timer state)
+                  (let* ((output-buffer (process-buffer process))
+                         (output (if (buffer-live-p output-buffer)
+                                     (with-current-buffer output-buffer
+                                       (buffer-string))
+                                   ""))
+                         (exit-code (process-exit-status process))
+                         (expected (or (alist-get 'expectedExit judge) 0))
+                         (passed (= expected exit-code)))
+                    (when (buffer-live-p output-buffer)
+                      (kill-buffer output-buffer))
+                    (setf (chat-coding-eval-run-state-process state) nil
                           (chat-coding-eval-run-state-checks state)
-                          (list
-                           (chat-eval-check
-                            (alist-get 'name judge) passed expected
-                            `((exitCode . ,exit-code)
-                              (command . ,(alist-get 'command judge))
-                              (output .
-                                      ,(chat-coding-eval--bounded-output output)))))))
-                   (chat-coding-eval--run-judges state remaining))))))))
-    (setf (chat-coding-eval-run-state-process state) process
-          (chat-coding-eval-run-state-timer state)
-          (run-at-time
-           (or (alist-get 'timeoutSeconds judge) 30) nil
-           (lambda ()
-             (unless (chat-coding-eval-run-state-done-p state)
-               (process-put process 'chat-coding-eval-timeout t)
-               (when (process-live-p process) (delete-process process))
-               (let ((output-buffer (process-buffer process)))
-                 (when (buffer-live-p output-buffer)
-                   (kill-buffer output-buffer)))
-               (setf (chat-coding-eval-run-state-process state) nil
-                     (chat-coding-eval-run-state-checks state)
-                     (append
-                      (chat-coding-eval-run-state-checks state)
-                      (list (chat-eval-check
-                             (alist-get 'name judge) nil
-                             (or (alist-get 'expectedExit judge) 0)
-                             'timed-out
-                             "Command judge timed out."))))
-               (chat-coding-eval--finish
-                state 'timed-out "Command judge timeout")))))))
+                          (append
+                           (chat-coding-eval-run-state-checks state)
+                           (list
+                            (chat-eval-check
+                             (alist-get 'name judge) passed expected
+                             `((exitCode . ,exit-code)
+                               (command . ,(alist-get 'command judge))
+                               (output .
+                                       ,(chat-coding-eval--bounded-output
+                                         output)))))))
+                    (chat-coding-eval--run-judges state remaining)))))))
+          (setf (chat-coding-eval-run-state-process state) process
+                (chat-coding-eval-run-state-timer state)
+                (run-at-time
+                 (or (alist-get 'timeoutSeconds judge) 30) nil
+                 (lambda ()
+                   (unless (chat-coding-eval-run-state-done-p state)
+                     (process-put process 'chat-coding-eval-timeout t)
+                     (when (process-live-p process) (delete-process process))
+                     (let ((output-buffer (process-buffer process)))
+                       (when (buffer-live-p output-buffer)
+                         (kill-buffer output-buffer)))
+                     (setf (chat-coding-eval-run-state-process state) nil
+                           (chat-coding-eval-run-state-checks state)
+                           (append
+                            (chat-coding-eval-run-state-checks state)
+                            (list (chat-eval-check
+                                   (alist-get 'name judge) nil
+                                   (or (alist-get 'expectedExit judge) 0)
+                                   'timed-out
+                                   "Command judge timed out."))))
+                     (chat-coding-eval--finish
+                      state 'timed-out "Command judge timeout"))))))
+      (error
+       (when (buffer-live-p buffer)
+         (kill-buffer buffer))
+       (let ((detail
+              (format "Command judge could not start: %s"
+                      (error-message-string start-error))))
+         (setf (chat-coding-eval-run-state-process state) nil
+               (chat-coding-eval-run-state-checks state)
+               (append
+                (chat-coding-eval-run-state-checks state)
+                (list (chat-eval-check
+                       (alist-get 'name judge) nil
+                       (or (alist-get 'expectedExit judge) 0)
+                       `((status . not-started)
+                         (command . ,(alist-get 'command judge)))
+                       detail))))
+         (chat-coding-eval--finish state 'error detail))))))
 
 (defun chat-coding-eval--run-judges (state judges)
   "Run JUDGES sequentially for STATE."
@@ -708,46 +730,59 @@
                     (chat-coding-eval-run-state-started-at state)
                     (or (chat-coding-eval-run-state-setup-duration-ms state)
                         0))))
-    (let* ((task (chat-coding-eval-run-state-task state))
-           (changed
-            (chat-coding-eval--changed-files
-             (chat-coding-eval-run-state-baseline state)
-             (chat-coding-eval--snapshot
-              (chat-coding-eval-run-state-workspace state))))
-           (generated
-            (seq-filter
-             (lambda (path)
-               (chat-coding-eval--allowed-path-p
-                path (chat-coding-eval-task-generated-paths task)))
-             changed))
-           (source-changed
-            (seq-remove (lambda (path) (member path generated)) changed))
+    (condition-case post-error
+        (let* ((task (chat-coding-eval-run-state-task state))
+               (changed
+                (chat-coding-eval--changed-files
+                 (chat-coding-eval-run-state-baseline state)
+                 (chat-coding-eval--snapshot
+                  (chat-coding-eval-run-state-workspace state))))
+               (generated
+                (seq-filter
+                 (lambda (path)
+                   (chat-coding-eval--allowed-path-p
+                    path (chat-coding-eval-task-generated-paths task)))
+                 changed))
+               (source-changed
+                (seq-remove (lambda (path) (member path generated)) changed))
+               (out-of-scope
+                (seq-remove
+                 (lambda (path)
+                   (chat-coding-eval--allowed-path-p
+                    path (chat-coding-eval-task-allowed-paths task)))
+                 source-changed)))
+          (setf (chat-coding-eval-run-state-changed-files state) source-changed
+                (chat-coding-eval-run-state-generated-files state) generated
+                (chat-coding-eval-run-state-out-of-scope-files state) out-of-scope
+                (chat-coding-eval-run-state-checks state)
+                (list
+                 (chat-eval-check "executor-status" (eq status 'completed)
+                                  'completed status)
+                 (chat-eval-check "allowed-paths" (null out-of-scope)
+                                  nil out-of-scope)))
+          (cond
+           ((eq status 'cancelled)
+            (chat-coding-eval--finish state 'cancelled))
+           ((not (eq status 'completed))
+            (chat-coding-eval--finish state 'error))
            (out-of-scope
-            (seq-remove
-             (lambda (path)
-               (chat-coding-eval--allowed-path-p
-                path (chat-coding-eval-task-allowed-paths task)))
-             source-changed)))
-      (setf (chat-coding-eval-run-state-changed-files state) source-changed
-            (chat-coding-eval-run-state-generated-files state) generated
-            (chat-coding-eval-run-state-out-of-scope-files state) out-of-scope
-            (chat-coding-eval-run-state-checks state)
-            (list
-             (chat-eval-check "executor-status" (eq status 'completed)
-                              'completed status)
-             (chat-eval-check "allowed-paths" (null out-of-scope)
-                              nil out-of-scope)))
-      (cond
-       ((eq status 'cancelled)
-        (chat-coding-eval--finish state 'cancelled))
-       ((not (eq status 'completed))
-        (chat-coding-eval--finish state 'error))
-       (out-of-scope
-        (chat-coding-eval--finish state 'failed
-                                  "Executor changed out-of-scope files"))
-       (t
-        (chat-coding-eval--run-judges
-         state (chat-coding-eval-task-judges task)))))))
+            (chat-coding-eval--finish state 'failed
+                                      "Executor changed out-of-scope files"))
+           (t
+            (chat-coding-eval--run-judges
+             state (chat-coding-eval-task-judges task)))))
+      (error
+       (unless (chat-coding-eval-run-state-done-p state)
+         (let ((detail
+                (format "Evaluation post-processing failed: %s"
+                        (error-message-string post-error))))
+           (setf (chat-coding-eval-run-state-checks state)
+                 (append
+                  (chat-coding-eval-run-state-checks state)
+                  (list (chat-eval-check
+                         "evaluator-post-processing" nil 'completed 'error
+                         detail))))
+           (chat-coding-eval--finish state 'error detail)))))))
 
 (defun chat-coding-eval-cancel (state)
   "Cancel coding evaluation STATE and return non-nil once."

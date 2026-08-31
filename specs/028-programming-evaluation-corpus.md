@@ -112,6 +112,11 @@ The manifest stores argv arrays, never shell fragments. A campaign records the
 exact executable path and version discovered by preflight. Missing tools, an
 uncached dependency or an unsupported version blocks the campaign before the
 first provider request; it is never converted to a skipped or passing task.
+Every command judge start is also a terminal boundary: a process creation
+failure records the command, a `not-started` result and the underlying error.
+Any later synchronous evaluation failure records an explicit error result and
+cleans the workspace. No evaluator exception may cancel the task timer and
+leave the campaign waiting without durable terminal evidence.
 
 ## 4. Fixture Contract
 

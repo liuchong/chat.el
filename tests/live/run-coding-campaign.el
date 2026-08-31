@@ -94,6 +94,22 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
       (error "Provider readiness response is empty"))
     content))
 
+(defun chat-campaign-runner--validate-judge-executables (tasks)
+  "Resolve every command judge executable required by TASKS or fail."
+  (let (names resolved missing)
+    (dolist (task tasks)
+      (dolist (judge (chat-coding-eval-task-judges task))
+        (when (equal "command" (alist-get 'type judge))
+          (push (car (alist-get 'command judge)) names))))
+    (dolist (name (sort (delete-dups names) #'string<))
+      (if-let ((path (executable-find name)))
+          (push (cons name (file-truename path)) resolved)
+        (push name missing)))
+    (when missing
+      (error "Campaign judge executables are unavailable: %s"
+             (string-join (nreverse missing) ", ")))
+    (nreverse resolved)))
+
 (defun chat-campaign-runner--descriptor-summary (descriptor)
   "Return bounded JSON summary for campaign DESCRIPTOR."
   (json-encode
@@ -158,7 +174,7 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
               "~/.chat/evaluations/coding-campaigns/"))))
        (runtime-home (getenv "CHAT_CAMPAIGN_RUNTIME_HOME"))
        (setup-file (getenv "CHAT_CAMPAIGN_SETUP_FILE"))
-       implementation-clean harness-clean suite)
+       implementation-clean harness-clean toolchain suite)
   (unless (member role '("baseline" "current"))
     (error "CHAT_CAMPAIGN_ROLE must be baseline or current"))
   (unless (file-regular-p manifest)
@@ -188,6 +204,12 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
         chat-coding-eval-campaign-directory campaign-root)
   (when-let ((config (chat-llm-get-provider-config provider)))
     (plist-put config :model model))
+  (setq toolchain
+        (chat-campaign-runner--validate-judge-executables
+         (chat-coding-eval-load-suite manifest)))
+  (princ
+   (format "CAMPAIGN_TOOLCHAIN_READY executables=%s\n"
+           (mapconcat #'car toolchain ",")))
   (if preflight
       (let* ((chat-coding-eval-campaign-directory
               (make-temp-file "chat-campaign-preflight-" t))

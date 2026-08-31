@@ -225,6 +225,30 @@
        (chat-campaign-runner--provider-readiness
         'provider-a "model-a")))))
 
+(ert-deftest chat-campaign-runner-validates-judge-executables-before-api-use ()
+  "Campaign preflight resolves tools and rejects a missing executable."
+  (let* ((fixture (expand-file-name "coding-eval/python"
+                                    chat-test-fixtures-dir))
+         (available
+          (chat-coding-eval-test--task
+           fixture
+           '(((type . "command") (name . "available")
+              (command . ("emacs" "--version"))))))
+         (missing
+          (chat-coding-eval-test--task
+           fixture
+           '(((type . "command") (name . "missing")
+              (command . ("chat-campaign-tool-that-does-not-exist")))))))
+    (should
+     (equal (file-truename (executable-find "emacs"))
+            (alist-get "emacs"
+                       (chat-campaign-runner--validate-judge-executables
+                        (list available))
+                       nil nil #'equal)))
+    (should-error
+     (chat-campaign-runner--validate-judge-executables (list missing))
+     :type 'error)))
+
 (ert-deftest chat-campaign-runner-runtime-home-keeps-an-absolute-directory ()
   "Changing HOME cannot leave subprocesses resolving an obsolete ~/ path."
   (chat-test-with-temp-dir
@@ -1022,6 +1046,76 @@
      (should (chat-coding-eval-test--wait (lambda () result)))
      (should (eq 'timed-out (chat-eval-result-status result)))
      (should-not (process-live-p process))
+     (should-not (file-exists-p
+                  (chat-coding-eval-run-state-workspace state))))))
+
+(ert-deftest chat-coding-eval-missing-command-judge-finishes-with-error ()
+  "A missing judge executable records evidence instead of hanging forever."
+  (chat-coding-eval-test-with-runtime
+   (let* ((fixture (expand-file-name "coding-eval/python"
+                                     chat-test-fixtures-dir))
+          (command '("chat-coding-eval-command-that-does-not-exist"))
+          (task
+           (chat-coding-eval-test--task
+            fixture
+            `(((type . "command") (name . "missing-command")
+               (command . ,command) (expectedExit . 0)))))
+          result state)
+     (setq state
+           (chat-coding-eval-run
+            task
+            (lambda (_task _workspace done)
+              (funcall done 'completed "done" nil))
+            :on-complete (lambda (value _state) (setq result value))))
+     (should result)
+     (should (eq 'error (chat-eval-result-status result)))
+     (let ((check
+            (seq-find
+             (lambda (item)
+               (equal "missing-command" (chat-eval-check-name item)))
+             (chat-eval-result-checks result))))
+       (should check)
+       (should (equal "not-started"
+                      (alist-get 'status (chat-eval-check-actual check))))
+       (should (equal command
+                      (alist-get 'command (chat-eval-check-actual check))))
+       (should (string-match-p "could not start"
+                               (chat-eval-check-detail check))))
+     (should-not (file-exists-p
+                  (chat-coding-eval-run-state-workspace state))))))
+
+(ert-deftest chat-coding-eval-post-processing-error-finishes-with-evidence ()
+  "A synchronous completion error cannot outlive the cancelled task timer."
+  (chat-coding-eval-test-with-runtime
+   (let* ((fixture (expand-file-name "coding-eval/python"
+                                     chat-test-fixtures-dir))
+          (task
+           (chat-coding-eval-test--task
+            fixture '(((type . "no-change") (name . "unchanged")))))
+          (original-snapshot (symbol-function 'chat-coding-eval--snapshot))
+          (snapshot-count 0)
+          result state)
+     (cl-letf (((symbol-function 'chat-coding-eval--snapshot)
+                (lambda (directory)
+                  (cl-incf snapshot-count)
+                  (if (= snapshot-count 1)
+                      (funcall original-snapshot directory)
+                    (error "synthetic snapshot failure")))))
+       (setq state
+             (chat-coding-eval-run
+              task
+              (lambda (_task _workspace done)
+                (funcall done 'completed "done" nil))
+              :on-complete (lambda (value _state) (setq result value)))))
+     (should result)
+     (should (eq 'error (chat-eval-result-status result)))
+     (should
+      (seq-find
+       (lambda (check)
+         (and (equal "evaluator-post-processing" (chat-eval-check-name check))
+              (string-match-p "synthetic snapshot failure"
+                              (chat-eval-check-detail check))))
+       (chat-eval-result-checks result)))
      (should-not (file-exists-p
                   (chat-coding-eval-run-state-workspace state))))))
 
