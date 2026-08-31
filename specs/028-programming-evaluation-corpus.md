@@ -158,7 +158,7 @@ The extended language profiles use these deterministic local toolchains:
 | Language | Project shape | Targeted judge | Generated paths |
 |---|---|---|---|
 | Zig | package-free source and tests | `zig test` with a test filter | `.zig-cache`, `zig-out` |
-| Clojure | dependency-minimal Lein project | `lein test :only` | `target`, `.lein-failures`, `.cpcache` |
+| Clojure | dependency-minimal Lein project | `lein with-profile -base test :only` | `target`, `.lein-failures`, `.cpcache` |
 | Java | source plus explicit test harness | `javac -d` then `java -cp` | `.chat-eval-build/java` |
 | TypeScript | local compiler plus dependency-free Node test | `tsc --noEmit` then `node --test` on a named test | none |
 | C | C17 source plus test harness | `clang` then a named harness case | `.chat-eval-build/c` |
@@ -169,6 +169,11 @@ The manifest stores argv arrays, never shell fragments. A campaign records the
 exact executable path and version discovered by preflight. Missing tools, an
 uncached dependency or an unsupported version blocks the campaign before the
 first provider request; it is never converted to a skipped or passing task.
+The Clojure fixture removes Leiningen's implicit `:base` profile during judging
+so offline qualification depends only on the fixture project, not unrelated
+interactive-tool dependencies. Product verification continues to execute the
+project's declared `lein test` authority and does not inherit this fixture-only
+evaluation policy.
 The manifest-level `requiredExecutables` list names every external executable
 used behind a fixture wrapper. Preflight resolves the union of that list and
 the first argv item of every command judge. A wrapper such as `sh test-one`
@@ -179,10 +184,20 @@ contains the absolute invocation path, its canonical target and bounded version
 output. The probe runs through the invocation path so multi-call binaries and
 version-manager shims preserve their command identity. Unknown
 version probes fail closed even when an executable with that name exists.
+Version evidence contains only normalized child stdout and stderr; editor
+process lifecycle messages, sentinels and buffer diagnostics are not child
+identity and must never enter the configuration digest.
 Campaign schema v2 stores this record in `campaign.json` and includes it in the
 configuration digest. Resume repeats preflight and rejects path or version
 drift before scheduling a missing trial. Earlier campaign schemas are not
 migrated or resumed.
+An optional manifest-level `preflightChecks` array declares bounded argv checks
+that run from the manifest directory after toolchain resolution and before
+provider readiness. Each check's first executable must already have versioned
+toolchain evidence. The extended corpus uses this gate to prove all seven
+fixture baselines, seeded defects, cached dependencies and cleanup behavior in
+the isolated runtime HOME. A failure or timeout blocks without creating a model
+trial.
 Every command judge start is also a terminal boundary: a process creation
 failure records the command, a `not-started` result and the underlying error.
 Any later synchronous evaluation failure records an explicit error result and

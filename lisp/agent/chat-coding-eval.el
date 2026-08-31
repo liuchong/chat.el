@@ -409,7 +409,8 @@
               (setq process
                     (make-process
                      :name (format "chat-tool-version-%s" name)
-                     :buffer buffer :stderr buffer :noquery t
+                     :buffer buffer :stderr nil :noquery t
+                     :sentinel #'ignore
                      :command (cons path arguments))))
             (let ((deadline
                    (+ (float-time)

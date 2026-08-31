@@ -15,6 +15,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'seq)
 (require 'subr-x)
 
 (defconst chat-campaign-runner--harness-root
@@ -235,6 +236,84 @@ one is retained for investigation or a later invocation."
   "Resolve versioned judge toolchain evidence required by TASKS."
   (chat-coding-eval-resolve-toolchain tasks))
 
+(defun chat-campaign-runner--manifest-preflight-checks (manifest)
+  "Load and validate versioned preflight checks from MANIFEST."
+  (let* ((json-object-type 'alist)
+         (json-array-type 'list)
+         (json-key-type 'symbol)
+         (data (json-read-file manifest))
+         (checks (or (alist-get 'preflightChecks data) nil))
+         (seen (make-hash-table :test #'equal)))
+    (unless (listp checks)
+      (error "Campaign manifest preflightChecks must be an array"))
+    (dolist (check checks)
+      (let ((name (alist-get 'name check))
+            (command (alist-get 'command check))
+            (timeout (alist-get 'timeoutSeconds check)))
+        (unless (and (stringp name) (not (string-empty-p name)))
+          (error "Campaign manifest preflight check requires a name"))
+        (when (gethash name seen)
+          (error "Duplicate campaign manifest preflight check: %s" name))
+        (puthash name t seen)
+        (unless (and (listp command) command
+                     (seq-every-p #'stringp command))
+          (error "Campaign manifest preflight check %s requires argv" name))
+        (unless (and (integerp timeout) (> timeout 0) (<= timeout 600))
+          (error "Campaign manifest preflight check %s has invalid timeout"
+                 name))))
+    checks))
+
+(defun chat-campaign-runner--run-manifest-preflight-checks
+    (manifest checks toolchain)
+  "Run MANIFEST CHECKS against versioned TOOLCHAIN before provider use."
+  (let ((tool-names (mapcar (lambda (entry) (alist-get 'name entry)) toolchain))
+        (default-directory
+         (file-name-as-directory
+          (file-name-directory (file-truename manifest))))
+        completed)
+    (cl-loop
+     for check in checks
+     for index from 1
+     do
+     (let* ((name (alist-get 'name check))
+            (command (alist-get 'command check))
+            (executable (car command))
+            (timeout (alist-get 'timeoutSeconds check))
+            (buffer (generate-new-buffer " *chat-manifest-preflight*"))
+            process)
+       (unless (member executable tool-names)
+         (kill-buffer buffer)
+         (error "Manifest preflight executable lacks toolchain evidence: %s"
+                executable))
+       (unwind-protect
+           (progn
+             (setq process
+                   (make-process
+                    :name (format "chat-manifest-preflight-%d" index)
+                    :buffer buffer :stderr nil :noquery t
+                    :connection-type 'pipe :sentinel #'ignore
+                    :command command))
+             (let ((deadline (+ (float-time) timeout)))
+               (while (and (process-live-p process)
+                           (< (float-time) deadline))
+                 (accept-process-output process 0.05))
+               (when (process-live-p process)
+                 (delete-process process)
+                 (error "Campaign manifest preflight timed out: %s" name)))
+             (unless (and (eq (process-status process) 'exit)
+                          (zerop (process-exit-status process)))
+               (error
+                "Campaign manifest preflight failed: %s: %s"
+                name
+                (chat-coding-eval--bounded-output
+                 (with-current-buffer buffer (buffer-string)))))
+             (push name completed))
+         (when (and process (process-live-p process))
+           (delete-process process))
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer)))))
+    (nreverse completed)))
+
 (defun chat-campaign-runner--descriptor-summary (descriptor)
   "Return bounded JSON summary for campaign DESCRIPTOR."
   (json-encode
@@ -301,7 +380,7 @@ one is retained for investigation or a later invocation."
               "~/.chat/evaluations/coding-campaigns/"))))
        (runtime-home (getenv "CHAT_CAMPAIGN_RUNTIME_HOME"))
        (setup-file (getenv "CHAT_CAMPAIGN_SETUP_FILE"))
-       implementation-clean harness-clean toolchain suite)
+       implementation-clean harness-clean toolchain preflight-checks suite)
   (unless (member role '("baseline" "current"))
     (error "CHAT_CAMPAIGN_ROLE must be baseline or current"))
   (chat-campaign-runner--validate-qualification-model provider model)
@@ -344,6 +423,16 @@ one is retained for investigation or a later invocation."
    (format "CAMPAIGN_TOOLCHAIN_READY executables=%s\n"
            (mapconcat (lambda (entry) (alist-get 'name entry))
                       toolchain ",")))
+  (setq preflight-checks
+        (chat-campaign-runner--manifest-preflight-checks manifest))
+  (when preflight-checks
+    (princ
+     (format
+      "CAMPAIGN_MANIFEST_READY checks=%s\n"
+      (string-join
+       (chat-campaign-runner--run-manifest-preflight-checks
+        manifest preflight-checks toolchain)
+       ","))))
   (if preflight
       (let* ((chat-coding-eval-campaign-directory
               (make-temp-file "chat-campaign-preflight-" t))

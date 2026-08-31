@@ -4,6 +4,13 @@
     "zig", "lein", "java", "javac", "node", "tsc", "clang", "clang++",
     "sqlite3"
   ],
+  "preflightChecks": [
+    {
+      "name": "extended-fixture-offline-gate",
+      "command": ["sh", "verify-extended-fixtures.sh"],
+      "timeoutSeconds": 240
+    }
+  ],
   "tasks": [
     {
       "id": "zig-locate", "revision": 1, "category": "locate-explain", "language": "zig",

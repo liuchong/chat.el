@@ -10,4 +10,4 @@ case "${1-}" in
 esac
 
 export LEIN_OFFLINE=true
-lein test :only "$test_name"
+lein with-profile -base test :only "$test_name"

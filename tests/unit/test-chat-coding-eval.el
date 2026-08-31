@@ -119,12 +119,18 @@
           (chat-coding-eval-test--read-json
            chat-coding-eval-test-extended-manifest))
          (raw-tasks (alist-get 'tasks raw-manifest))
+         (preflight-checks (alist-get 'preflightChecks raw-manifest))
          (required-executables
           (alist-get 'requiredExecutables raw-manifest))
          (tasks (chat-coding-eval-load-suite
                  chat-coding-eval-test-extended-manifest))
          (coverage (chat-coding-eval-suite-coverage tasks)))
     (should (= 42 (length tasks)))
+    (should
+     (equal '(((name . "extended-fixture-offline-gate")
+               (command "sh" "verify-extended-fixtures.sh")
+               (timeoutSeconds . 240)))
+            preflight-checks))
     (should
      (equal '("clang" "clang++" "java" "javac" "lein" "node" "sqlite3"
               "tsc" "zig")
@@ -163,6 +169,24 @@
                         (equal "command" (alist-get 'type judge)))
                       (alist-get 'judges task))
         (should (assq 'generatedPaths task))))))
+
+(ert-deftest chat-coding-eval-clojure-fixture-is-strictly-offline ()
+  "Clojure fixture judging excludes implicit interactive dependencies."
+  (let ((script
+         (expand-file-name "coding-eval/clojure/test-one"
+                           chat-test-fixtures-dir)))
+    (with-temp-buffer
+      (insert-file-contents script)
+      (let ((contents (buffer-string)))
+        (should (string-match-p
+                 "export LEIN_OFFLINE=true"
+                 contents))
+        (should (string-match-p
+                 "lein with-profile -base test :only"
+                 contents))
+        (should-not (string-match-p
+                     "\\nlein test :only"
+                     contents))))))
 
 (ert-deftest chat-coding-eval-large-repo-manifest-is-an-exact-core-subset ()
   "The focused performance campaign cannot drift from its core task."
@@ -348,6 +372,32 @@
      (chat-campaign-runner--validate-judge-executables (list missing))
      :type 'error)))
 
+(ert-deftest chat-campaign-runner-manifest-preflight-is-bounded-and-versioned ()
+  "Manifest setup is proven with its recorded toolchain before provider use."
+  (chat-test-with-temp-dir
+   (let* ((manifest (expand-file-name "manifest.json" temp-dir))
+          (default-directory temp-dir)
+          (success
+           '(((name . "success")
+              (command "sh" "-c" "printf ready")
+              (timeoutSeconds . 1))))
+          (timeout
+           '(((name . "timeout")
+              (command "sleep" "1")
+              (timeoutSeconds . 0.01)))))
+     (write-region "{}" nil manifest nil 'silent)
+     (should
+      (equal '("success")
+             (chat-campaign-runner--run-manifest-preflight-checks
+              manifest success '(((name . "sh"))))))
+     (should-error
+      (chat-campaign-runner--run-manifest-preflight-checks
+       manifest success nil))
+     (should-error
+      (chat-campaign-runner--run-manifest-preflight-checks
+       manifest timeout '(((name . "sleep")))))
+     (should-not (get-process "chat-manifest-preflight-1")))))
+
 (ert-deftest chat-coding-eval-toolchain-is-versioned-and-deterministic ()
   "Toolchain evidence includes hidden and direct dependencies in stable order."
   (let ((task
@@ -389,7 +439,9 @@
     (should (file-name-absolute-p (alist-get 'path entry)))
     (should (file-name-absolute-p (alist-get 'target entry)))
     (should (stringp (alist-get 'version entry)))
-    (should-not (string-empty-p (alist-get 'version entry)))))
+    (should (string-match-p "\\`shell=" (alist-get 'version entry)))
+    (should-not (string-match-p "\\bProcess\\b"
+                                (alist-get 'version entry)))))
 
 (ert-deftest chat-coding-eval-toolchain-rejects-unknown-and-timed-out-probes ()
   "Tool identity cannot be guessed or allowed to leave a live probe."
