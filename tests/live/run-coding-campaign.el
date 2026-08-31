@@ -47,6 +47,77 @@
              provider required model))
     model))
 
+(defun chat-campaign-runner--agent-config-v1
+    (provider _model common-config)
+  "Bind PROVIDER to COMMON-CONFIG for the frozen Agent v1 contract.
+
+The concrete model remains in `:request-options', where v1 carries it through
+every turn instead of consulting mutable provider defaults."
+  (append (list :model provider) common-config))
+
+(defun chat-campaign-runner--model-observer-v0-advice
+    (request provider messages callback &optional options)
+  "Project v0 normalized REQUEST events into the v1 observer contract."
+  (let ((observer (plist-get options :event-observer))
+        (transport-options (copy-tree options)))
+    (cl-remf transport-options :event-observer)
+    (funcall
+     request provider messages
+     (if (functionp observer)
+         (lambda (event)
+           (condition-case err
+               (funcall observer event)
+             (error
+              (chat-log "[CAMPAIGN] Model observer failed: %s"
+                        (error-message-string err))))
+           (funcall callback event))
+       callback)
+     transport-options)))
+
+(defun chat-campaign-runner--capability-snapshot-v1 (provider model)
+  "Project frozen capability schema v1 for PROVIDER and MODEL."
+  (let ((facts (chat-model-capabilities-resolve provider model)))
+    (chat-eval--sanitize-value
+     `((schemaVersion . ,(chat-model-capabilities-schema-version facts))
+       (provider . ,(symbol-name provider))
+       (model . ,model)
+       (source . ,(symbol-name (chat-model-capabilities-source facts)))
+       (stream . ,(chat-model-capabilities-stream facts))
+       (tools . ,(chat-model-capabilities-tools facts))
+       (toolChoice . ,(chat-model-capabilities-tool-choice facts))
+       (reasoning . ,(chat-model-capabilities-reasoning facts))
+       (structuredOutput .
+                         ,(chat-model-capabilities-structured-output facts))
+       (contextWindow . ,(chat-model-capabilities-context-window facts))
+       (maxOutputTokens .
+                        ,(chat-model-capabilities-max-output-tokens facts))))))
+
+(defun chat-campaign-runner--configure-implementation-contracts
+    (agent-version observer-version capability-version)
+  "Configure Eval adapters for frozen implementation protocol versions."
+  (pcase agent-version
+    (2 nil)
+    ('nil
+     (setq chat-coding-eval-agent-config-function
+           #'chat-campaign-runner--agent-config-v1))
+    (_ (error "Unsupported frozen Agent config protocol: %S" agent-version)))
+  (pcase observer-version
+    (1 nil)
+    ('nil
+     (unless (advice-member-p #'chat-campaign-runner--model-observer-v0-advice
+                              'chat-model-request-events)
+       (advice-add 'chat-model-request-events :around
+                   #'chat-campaign-runner--model-observer-v0-advice)))
+    (_ (error "Unsupported frozen model observer protocol: %S"
+              observer-version)))
+  (pcase capability-version
+    (2 nil)
+    (1
+     (setq chat-coding-eval-capability-snapshot-function
+           #'chat-campaign-runner--capability-snapshot-v1))
+    (_ (error "Unsupported frozen capability schema: %S"
+              capability-version))))
+
 (defun chat-campaign-runner--git-output (root &rest arguments)
   "Return trimmed Git output under ROOT for ARGUMENTS."
   (with-temp-buffer
@@ -92,6 +163,35 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
       ;; cannot start, even though the checkout itself still exists.
       (setq default-directory chat-campaign-runner--harness-root)
       home)))
+
+(defun chat-campaign-runner--call-with-isolated-runtime (function)
+  "Call FUNCTION with campaign state isolated from the developer HOME.
+
+The campaign evidence directory and setup file are resolved before HOME
+changes.  An implicit runtime directory is temporary; an explicitly configured
+one is retained for investigation or a later invocation."
+  (let* ((process-environment (copy-sequence process-environment))
+         (original-directory default-directory)
+         (configured-home (getenv "CHAT_CAMPAIGN_RUNTIME_HOME"))
+         (temporary-home (unless configured-home
+                           (make-temp-file "chat-campaign-runtime-" t)))
+         (runtime-home (or configured-home temporary-home))
+         (campaign-directory
+          (expand-file-name
+           (or (getenv "CHAT_CAMPAIGN_DIRECTORY")
+               "~/.chat/evaluations/coding-campaigns/")))
+         (setup-file (getenv "CHAT_CAMPAIGN_SETUP_FILE")))
+    (setenv "CHAT_CAMPAIGN_DIRECTORY" campaign-directory)
+    (setenv "CHAT_CAMPAIGN_RUNTIME_HOME" runtime-home)
+    (when setup-file
+      (setenv "CHAT_CAMPAIGN_SETUP_FILE" (expand-file-name setup-file)))
+    (unwind-protect
+        (progn
+          (chat-campaign-runner--install-runtime-home runtime-home)
+          (funcall function))
+      (setq default-directory original-directory)
+      (when (and temporary-home (file-directory-p temporary-home))
+        (delete-directory temporary-home t)))))
 
 (defun chat-campaign-runner--provider-readiness (provider model)
   "Require one minimal successful response from PROVIDER and MODEL."
@@ -149,7 +249,7 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
     (chat-coding-eval-run-live
      provider repetitions manifest model campaign-id implementation-revision role)))
 
-(defun chat-campaign-runner-main ()
+(defun chat-campaign-runner--main-in-isolated-runtime ()
   "Validate configuration, then preflight or run one live campaign."
   (let* ((preflight (equal "1" (getenv "CHAT_CAMPAIGN_PREFLIGHT")))
        (allow-dirty
@@ -199,16 +299,27 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
         (chat-campaign-runner--validate-checkout
          chat-campaign-runner--harness-root harness-revision "Harness"
          allow-dirty))
-  (setq runtime-home
-        (chat-campaign-runner--install-runtime-home runtime-home))
+  (unless runtime-home
+    (error "Campaign runtime HOME was not isolated by the runner entrypoint"))
   (load (expand-file-name "chat.el" implementation-root) nil nil t)
-  (unless (chat-campaign-runner--same-root-p
-           implementation-root chat-campaign-runner--harness-root)
-    ;; Preserve the historical Agent/runtime while sharing the frozen campaign
-    ;; and result contract with the current implementation.
-    (load (expand-file-name "lisp/agent/chat-coding-eval.el"
-                            chat-campaign-runner--harness-root)
-          nil nil t))
+  (let ((agent-version
+         (and (boundp 'chat-agent-config-protocol-version)
+              chat-agent-config-protocol-version))
+        (observer-version
+         (and (boundp 'chat-model-event-observer-protocol-version)
+              chat-model-event-observer-protocol-version))
+        (capability-version
+         (and (boundp 'chat-model-capabilities-schema-version)
+              chat-model-capabilities-schema-version)))
+    (unless (chat-campaign-runner--same-root-p
+             implementation-root chat-campaign-runner--harness-root)
+      ;; Keep implementation behavior frozen while sharing the campaign and
+      ;; result contract from the harness revision.
+      (load (expand-file-name "lisp/agent/chat-coding-eval.el"
+                              chat-campaign-runner--harness-root)
+            nil nil t))
+    (chat-campaign-runner--configure-implementation-contracts
+     agent-version observer-version capability-version))
   (setq chat-default-model provider
         chat-eval-auto-save t
         chat-coding-eval-approval-mode 'guarded
@@ -271,6 +382,11 @@ ALLOW-DIRTY is accepted only by no-network preflight runs."
             (while (and (file-exists-p lock)
                         (< (float-time) cleanup-deadline))
               (accept-process-output nil 0.1)))))))))
+
+(defun chat-campaign-runner-main ()
+  "Run one campaign inside a dedicated runtime HOME."
+  (chat-campaign-runner--call-with-isolated-runtime
+   #'chat-campaign-runner--main-in-isolated-runtime))
 
 (unless (equal "1" (getenv "CHAT_CAMPAIGN_RUNNER_LIBRARY_ONLY"))
   (chat-campaign-runner-main))

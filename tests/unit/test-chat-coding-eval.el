@@ -289,6 +289,31 @@
      (should (equal (file-truename rustup-home) (getenv "RUSTUP_HOME")))
      (should (equal harness default-directory)))))
 
+(ert-deftest chat-campaign-runner-always-isolates-and-cleans-runtime-home ()
+  "The runner never reads developer state when no runtime HOME is supplied."
+  (chat-test-with-temp-dir
+   (let* ((process-environment (copy-sequence process-environment))
+          (developer-home (expand-file-name "developer" temp-dir))
+          (harness (file-name-as-directory
+                    (expand-file-name "harness" temp-dir)))
+          (chat-campaign-runner--harness-root harness)
+          observed-home observed-campaign-root)
+     (make-directory developer-home t)
+     (make-directory harness t)
+     (setenv "HOME" developer-home)
+     (setenv "CHAT_CAMPAIGN_RUNTIME_HOME" nil)
+     (setenv "CHAT_CAMPAIGN_DIRECTORY" nil)
+     (chat-campaign-runner--call-with-isolated-runtime
+      (lambda ()
+        (setq observed-home (getenv "HOME")
+              observed-campaign-root (getenv "CHAT_CAMPAIGN_DIRECTORY"))
+        (should (file-directory-p observed-home))))
+     (should-not (file-exists-p observed-home))
+     (should
+      (equal (expand-file-name ".chat/evaluations/coding-campaigns/"
+                               developer-home)
+             observed-campaign-root)))))
+
 (ert-deftest chat-campaign-runner-starts-new-and-resumes-existing-campaigns ()
   "The batch runner resumes only an existing validated campaign directory."
   (chat-test-with-temp-dir
@@ -449,16 +474,22 @@
                   (setq status value
                         metadata details))))
      (let ((session (plist-get config :session))
-           (on-event (plist-get config :on-event)))
+           (on-event (plist-get config :on-event))
+           (model-observer
+            (plist-get (plist-get config :request-options)
+                       :event-observer)))
        (should (eq 'eval-provider (plist-get config :provider)))
        (should (equal "model" (plist-get config :model)))
+       (should (equal "model"
+                      (plist-get (plist-get config :request-options) :model)))
+       (should (functionp model-observer))
        (should (chat-code-session-p session))
        (should (equal (file-name-as-directory temp-dir)
                       (file-name-as-directory
                        (chat-code-session-project-root session))))
-       (funcall on-event
-                '(:type model-request-started :provider eval-provider
-                  :model "model" :request-id "request-1"))
+       (funcall model-observer
+                (chat-model-event-make
+                 'started 'eval-provider "model" "request-1" 1 nil))
        (funcall on-event
                 '(:type tool-event
                   :event (:type approval-guard-pending)))
@@ -470,9 +501,9 @@
        (funcall on-event
                 '(:type model-usage
                   :usage (:input-tokens 11 :output-tokens 4 :total-tokens 15)))
-       (funcall on-event
-                '(:type model-request-started :provider eval-provider
-                  :model "model" :request-id "request-2"))
+       (funcall model-observer
+                (chat-model-event-make
+                 'started 'eval-provider "model" "request-2" 1 nil))
        (funcall on-event '(:type turn-start))
        (funcall on-event
                 '(:type model-usage
@@ -512,10 +543,13 @@
                 (lambda (value _content details)
                   (setq status value
                         metadata details))))
-     (let ((on-event (plist-get config :on-event)))
-       (funcall on-event
-                '(:type model-request-started :provider eval-provider
-                  :model "other-model" :request-id "request-1"))
+     (let ((on-event (plist-get config :on-event))
+           (model-observer
+            (plist-get (plist-get config :request-options)
+                       :event-observer)))
+       (funcall model-observer
+                (chat-model-event-make
+                 'started 'eval-provider "other-model" "request-1" 1 nil))
        (funcall on-event
                 '(:type agent-end :status completed :content "done"
                   :steps 1 :tool-calls nil :tool-results nil)))
@@ -523,6 +557,84 @@
      (should (string-match-p
               "model identity drift: expected eval-provider/model"
               (alist-get 'failureReason metadata))))))
+
+(ert-deftest chat-coding-eval-agent-rejects-missing-request-identity ()
+  "Live Eval cannot pass without a normalized transport start event."
+  (chat-test-with-temp-dir
+   (let* ((task (chat-coding-eval-test--task temp-dir nil))
+          config status metadata)
+     (cl-letf (((symbol-function 'chat-agent-start)
+                (lambda (value) (setq config value) nil)))
+       (funcall (chat-coding-eval-agent-executor 'eval-provider "model")
+                task temp-dir
+                (lambda (value _content details)
+                  (setq status value metadata details))))
+     (funcall (plist-get config :on-event)
+              '(:type agent-end :status completed :content "done"
+                :steps 1 :tool-calls nil :tool-results nil))
+     (should (eq status 'error))
+     (should (string-match-p
+              "observed nil"
+              (alist-get 'failureReason metadata))))))
+
+(ert-deftest chat-campaign-runner-adapts-frozen-agent-config-contract ()
+  "The frozen Agent receives its provider and concrete model without defaults."
+  (let* ((common '(:messages nil
+                   :request-options (:model "model-v2"
+                                     :event-observer ignore)))
+         (config
+          (chat-campaign-runner--agent-config-v1
+           'provider-a "model-v2" common)))
+    (should (eq 'provider-a (plist-get config :model)))
+    (should-not (plist-member config :provider))
+    (should (equal "model-v2"
+                   (plist-get (plist-get config :request-options) :model)))
+    (should (eq 'ignore
+                (plist-get (plist-get config :request-options)
+                           :event-observer)))))
+
+(ert-deftest chat-campaign-runner-legacy-observer-is-scoped-and-stripped ()
+  "The frozen runtime adapter observes only explicitly instrumented requests."
+  (let (observed transport-options delivered)
+    (chat-campaign-runner--model-observer-v0-advice
+     (lambda (_provider _messages callback options)
+       (setq transport-options options)
+       (funcall callback
+                (chat-model-event-make
+                 'started 'provider-a "model-v2" "request-1" 1 nil)))
+     'provider-a nil
+     (lambda (event) (push event delivered))
+     (list :model "model-v2"
+           :event-observer (lambda (event) (push event observed))))
+    (should (= 1 (length observed)))
+    (should (equal observed delivered))
+    (should-not (plist-member transport-options :event-observer))))
+
+(ert-deftest chat-campaign-runner-projects-frozen-capability-schema ()
+  "The frozen capability snapshot contains only fields its runtime declares."
+  (let ((chat-llm-providers (copy-sequence chat-llm-providers)))
+    (chat-llm-register-provider
+     'frozen-capability-provider :model "model-v1"
+     :capabilities '(:stream t :tools t :reasoning t))
+    (let ((snapshot
+           (chat-campaign-runner--capability-snapshot-v1
+            'frozen-capability-provider "model-v1")))
+      (should (equal "frozen-capability-provider"
+                     (alist-get 'provider snapshot)))
+      (should (equal "model-v1" (alist-get 'model snapshot)))
+      (should-not (assq 'reasoningReplay snapshot)))))
+
+(ert-deftest chat-campaign-runner-rejects-unknown-frozen-protocols ()
+  "A frozen checkout must declare a protocol supported by the harness."
+  (should-error
+   (chat-campaign-runner--configure-implementation-contracts 3 1 2)
+   :type 'error)
+  (should-error
+   (chat-campaign-runner--configure-implementation-contracts 2 3 2)
+   :type 'error)
+  (should-error
+   (chat-campaign-runner--configure-implementation-contracts 2 1 3)
+   :type 'error))
 
 (ert-deftest chat-coding-eval-total-usage-never-fills-a-missing-counter ()
   "A partial provider usage field is omitted instead of counted as zero."

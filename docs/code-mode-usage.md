@@ -213,7 +213,9 @@ M-x chat-code-from-chat          ; 从普通聊天切换
 在 Emacs 中，`M-x chat-coding-acceptance-run-performance` 会把性能门槛写成
 不可变 Eval。最终 live 验收使用 `M-x chat-coding-eval-run-live`，固定 provider、
 具体 model、五次重复、campaign id 和角色。M9 checkout 使用 `baseline`，M19
-checkout 使用 `current`；两边必须使用同一 manifest、模型和 capability snapshot。
+checkout 使用 `current`；两边必须使用同一 manifest、模型和稳定 capability comparison
+identity。原始 snapshot 分别保留，不要求不同 schema 的序列化对象逐字相等；stream、tools、
+tool choice、reasoning、structured output 和 token/window 上限等共同模型能力仍必须一致。
 运行前 tracked worktree 必须干净，避免无法复现的本地修改冒充固定 revision。
 历史 M9 checkout 会保留当时的 2,000 文件 Eval 上限；加载当前 campaign harness
 后必须显式把 `chat-coding-eval-max-fixture-files` 设为 12,000，才能接受当前固定
@@ -238,8 +240,18 @@ CHAT_HARNESS_REVISION=<current-harness-head> \
 `CHAT_CAMPAIGN_SETUP_FILE=<trusted-local-file>`。该本地文件只负责载入凭据，不得
 提交。runner 会拒绝 revision 不匹配或不干净的 implementation/harness checkout，
 并在创建 campaign 目录前向指定 provider/model 发出一个 30 秒、512 token 的就绪
-请求。历史 baseline 应使用独立 `CHAT_CAMPAIGN_RUNTIME_HOME`，避免当前用户状态
-污染旧实现。
+请求。所有 campaign 都会在独立 runtime HOME 中运行，开发者当前 `~/.chat` 的 schema、
+provider 默认值和 session 状态不会进入验收。默认 runtime HOME 在退出时自动删除；仅在
+需要保留现场或跨进程调查时显式设置 `CHAT_CAMPAIGN_RUNTIME_HOME`，该目录不会自动删除。
+campaign evidence 目录和 trusted setup file 会在切换 HOME 前解析为绝对路径。
+
+runner 以 implementation 声明的 Agent 配置、模型事件 observer 和 capability schema
+协议版本选择执行合同。当前实现直接使用正式协议；冻结 checkout 只能通过 runner 中明确、
+受测试的评估适配器接入。未知版本直接阻止 campaign，适配器不得进入普通应用执行路径，
+也不得补造冻结实现从未声明的能力。每次真实 transport 的 normalized `started` 事件是
+provider、具体 model 和 request id 的权威来源；缺失或漂移都会让 trial 以 identity error
+失败关闭。最终比较保留两侧原始 capability snapshot，并从双方 schema 共有的稳定模型能力
+字段构造 comparison identity；serializer 版本和被测实现新增的 runtime 能力不冒充模型漂移。
 
 每次运行只写入 `~/.chat/evaluations/coding-campaigns/<campaign-id>/`。目录中的
 `campaign.json` 在开始前固定模型及其 capability snapshot、profile、transport、

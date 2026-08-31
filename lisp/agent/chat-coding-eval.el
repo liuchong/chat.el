@@ -990,8 +990,8 @@ ON-COMPLETE receives results in execution order and the suite state."
       (chat-coding-eval--suite-next state))
     t))
 
-(defun chat-coding-eval--capability-snapshot (provider &optional model)
-  "Return bounded resolved capability facts for PROVIDER and MODEL."
+(defun chat-coding-eval--capability-snapshot-v2 (provider model)
+  "Return capability schema v2 facts for PROVIDER and MODEL."
   (let ((facts (chat-model-capabilities-resolve provider model)))
     (chat-eval--sanitize-value
      `((schemaVersion . ,(chat-model-capabilities-schema-version facts))
@@ -1009,6 +1009,14 @@ ON-COMPLETE receives results in execution order and the suite state."
        (contextWindow . ,(chat-model-capabilities-context-window facts))
        (maxOutputTokens .
                         ,(chat-model-capabilities-max-output-tokens facts))))))
+
+(defvar chat-coding-eval-capability-snapshot-function
+  #'chat-coding-eval--capability-snapshot-v2
+  "Function that projects runtime capabilities into campaign evidence.")
+
+(defun chat-coding-eval--capability-snapshot (provider &optional model)
+  "Return bounded resolved capability facts for PROVIDER and MODEL."
+  (funcall chat-coding-eval-capability-snapshot-function provider model))
 
 (defun chat-coding-eval--model-name (provider requested)
   "Resolve REQUESTED model name for PROVIDER."
@@ -1533,6 +1541,18 @@ Return the unique repetition/scenario key."
          "checks are allowed.")
       "")))
 
+(defun chat-coding-eval--agent-config-v2 (provider model common-config)
+  "Bind PROVIDER and concrete MODEL to COMMON-CONFIG for Agent protocol v2."
+  (append (list :provider provider :model model) common-config))
+
+(defvar chat-coding-eval-agent-config-function
+  #'chat-coding-eval--agent-config-v2
+  "Function that binds an Eval request to an Agent configuration protocol.
+
+It receives PROVIDER, concrete MODEL and COMMON-CONFIG.  A live campaign may
+bind this to the declared protocol adapter of a frozen implementation;
+ordinary application execution always uses protocol v2.")
+
 (defun chat-coding-eval-agent-executor (provider &optional model-name)
   "Return a live Agent executor using PROVIDER and MODEL-NAME."
   (let ((resolved-model (chat-coding-eval--model-name provider model-name)))
@@ -1555,7 +1575,13 @@ Return the unique repetition/scenario key."
            final-usage
            usage-samples
            request-identities
-           (request-count 0)
+           (model-event-observer
+            (lambda (event)
+              (when (eq (chat-model-event-type event) 'started)
+                (push (list :provider (chat-model-event-provider event)
+                            :model (chat-model-event-model event)
+                            :request-id (chat-model-event-request-id event))
+                      request-identities))))
            (tool-errors 0)
            (approvals 0)
            (stale-writes 0)
@@ -1566,9 +1592,10 @@ Return the unique repetition/scenario key."
       (setq
        run
        (chat-agent-start
-        (list
-         :provider provider
-         :model resolved-model
+        (funcall
+         chat-coding-eval-agent-config-function
+         provider resolved-model
+         (list
          :messages
          (list (make-chat-message
                 :id (chat-session-new-message-id "coding-eval")
@@ -1580,15 +1607,11 @@ Return the unique repetition/scenario key."
          :task-title (chat-coding-eval-task-id task)
          :task-kind 'evaluation
          :transport 'stream
+         :request-options
+         (list :model resolved-model
+               :event-observer model-event-observer)
          :on-event
          (lambda (event)
-           (when (eq (plist-get event :type) 'model-request-started)
-             (push (list :provider (plist-get event :provider)
-                         :model (plist-get event :model)
-                         :request-id (plist-get event :request-id))
-                   request-identities))
-           (when (eq (plist-get event :type) 'turn-start)
-             (cl-incf request-count))
            (when (plist-member event :usage)
              (let ((usage (copy-tree (plist-get event :usage))))
                (unless first-usage
@@ -1650,7 +1673,7 @@ Return the unique repetition/scenario key."
                 (totalTokenUsage .
                                  ,(chat-coding-eval--sum-token-usage
                                    usage-samples))
-                (requestCount . ,request-count)
+                (requestCount . ,(length identities))
                 (usageSampleCount . ,(length usage-samples))
                 (sessionId . ,(chat-session-id session))
                 (runtimeTaskId . ,(and run
@@ -1665,7 +1688,7 @@ Return the unique repetition/scenario key."
                 (toolErrorCount . ,tool-errors)
                 (approvalCount . ,approvals)
                 (staleWriteCount . ,stale-writes)
-                (verificationRetryCount . 0)))))))))
+                (verificationRetryCount . 0))))))))))
         (lambda () (chat-agent-cancel run))))))
 
 (defconst chat-coding-eval--campaign-pause-error-pattern

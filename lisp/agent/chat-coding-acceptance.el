@@ -174,19 +174,25 @@
                              (member candidate (list name json-key)))
                    return value)))))
 
-(defun chat-coding-acceptance--capability-identity (executor)
-  "Return comparable capability identity from EXECUTOR metadata.
+(defconst chat-coding-acceptance--capability-identity-fields
+  '(stream tools toolChoice reasoning structuredOutput contextWindow
+           maxOutputTokens)
+  "Stable model capability fields shared by campaign schema versions.")
 
-The provider and model are already independent identity fields.  Remove the
-redundant snapshot model added by newer serializers so historical snapshots
-with otherwise identical capabilities remain comparable."
+(defun chat-coding-acceptance--capability-identity (executor)
+  "Return the stable comparison capability identity from EXECUTOR metadata.
+
+Raw snapshots remain immutable evidence.  Comparison selects only model-facing
+fields shared by every accepted campaign schema, excluding serializer version,
+provenance and implementation features that are part of the revision under
+test rather than the frozen provider/model identity."
   (let ((snapshot
-         (copy-tree
-          (chat-coding-acceptance--field
-           executor 'modelCapabilitySnapshot))))
+         (chat-coding-acceptance--field executor 'modelCapabilitySnapshot)))
     (when (listp snapshot)
-      (setq snapshot (assq-delete-all 'model snapshot)))
-    snapshot))
+      (mapcar
+       (lambda (field)
+         (cons field (chat-coding-acceptance--field snapshot field)))
+       chat-coding-acceptance--capability-identity-fields))))
 
 (defun chat-coding-acceptance-classify-failure (result)
   "Classify failed coding RESULT into one public failure kind."
@@ -759,7 +765,7 @@ GATE-LABEL distinguishes an independently measured campaign in the result."
         :name "live-eval-identity"
         :status (if (chat-coding-acceptance--compatible-identities-p
                      baseline current) 'passed 'failed)
-        :expected "same task revision, fixture, model, and capability snapshot"
+        :expected "same task revision, fixture, model, and stable capability identity"
         :actual "compared")
        (chat-coding-acceptance-gate-create
         :name "live-eval-success-floor"

@@ -24,6 +24,9 @@
 (require 'chat-task)
 (require 'chat-goal)
 
+(defconst chat-agent-config-protocol-version 2
+  "Version of the provider plus concrete-model Agent configuration contract.")
+
 (defun chat-agent-active-p (run)
   "Return non-nil while RUN is still in flight."
   (and (chat-agent-run-state-p run)

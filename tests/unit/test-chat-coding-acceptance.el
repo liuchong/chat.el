@@ -85,8 +85,31 @@
     (should (= 4321
                (chat-coding-acceptance--first-request-input-tokens result)))))
 
-(ert-deftest chat-coding-acceptance-normalizes-redundant-snapshot-model ()
-  "Adding the outer model to a capability snapshot does not break identity."
+(ert-deftest chat-coding-acceptance-normalizes-capability-schema-evolution ()
+  "Serializer and implementation-only capability fields do not break identity."
+  (let* ((check (chat-eval-check "judge" t t t))
+         (baseline
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((provider . "provider") (model . "model")
+             (modelCapabilitySnapshot . ((schemaVersion . 1)
+                                         (tools . t)
+                                         (reasoning . t))))))
+         (current
+          (chat-coding-acceptance-test--result
+           'passed (list check)
+           '((provider . "provider") (model . "model")
+             (modelCapabilitySnapshot . ((schemaVersion . 2)
+                                         (provider . "provider")
+                                         (model . "model")
+                                         (tools . t)
+                                         (reasoning . t)
+                                         (reasoningReplay . required)))))))
+    (should (chat-coding-acceptance--compatible-identities-p
+             (list baseline) (list current)))))
+
+(ert-deftest chat-coding-acceptance-rejects-common-capability-drift ()
+  "A real difference in the stable capability identity remains incomparable."
   (let* ((check (chat-eval-check "judge" t t t))
          (baseline
           (chat-coding-acceptance-test--result
@@ -97,9 +120,9 @@
           (chat-coding-acceptance-test--result
            'passed (list check)
            '((provider . "provider") (model . "model")
-             (modelCapabilitySnapshot . ((model . "model") (tools . t)))))))
-    (should (chat-coding-acceptance--compatible-identities-p
-             (list baseline) (list current)))))
+             (modelCapabilitySnapshot . ((tools . :json-false)))))))
+    (should-not (chat-coding-acceptance--compatible-identities-p
+                 (list baseline) (list current)))))
 
 (ert-deftest chat-coding-acceptance-never-passes-a-missing-live-comparison ()
   "Absent M9 or M19 trials produce a blocked gate, never an invented score."

@@ -81,6 +81,44 @@ footprint must remain at or below 110 percent of the frozen baseline before a
 live comparison revision is accepted. A threshold change is a design change
 that requires an updated spec and stage analysis, not a campaign workaround.
 
+### 2.2 Frozen Campaign Runtime Contract
+
+Every campaign runs under a dedicated runtime HOME. The evidence directory and
+trusted credential setup path are resolved before isolation, but provider
+defaults, sessions, caches and state from the developer HOME are never read.
+An automatically allocated runtime HOME is deleted when the runner exits. An
+explicitly configured runtime HOME is retained only as bounded investigation
+evidence and must not be committed.
+
+Historical comparison executes implementation behavior from the exact frozen
+checkout while loading the immutable campaign and result contract from the
+current harness. This boundary is governed by explicit protocol versions for:
+
+1. binding provider and concrete model to an Agent run;
+2. observing normalized request events at the model transport boundary;
+3. projecting the implementation's declared capability schema.
+
+The current implementation uses the current protocols directly. A frozen
+implementation may use only a named, tested evaluation adapter for a protocol
+version that it actually implements. Unknown versions block before campaign
+creation. An adapter cannot enter ordinary application execution, consult a
+mutable provider default, or fabricate a capability absent from the frozen
+schema. This is reproducible-evaluation infrastructure, not a product
+compatibility path.
+
+The authoritative request identity is the normalized transport `started`
+event. Its provider, concrete model and request ID are captured for every
+initial request, retry and follow-up. Agent turn counts and requested campaign
+configuration are not substitutes for observed transport identity. A missing
+event, missing identity field or any provider/model drift fails the trial closed.
+
+Each side retains its exact raw capability snapshot. Cross-revision comparison
+derives a stable capability identity from model-facing fields present in every
+accepted schema: stream, tools, tool choice, reasoning, structured output,
+context window and output-token limit. Serializer version, provenance and a
+new implementation-only runtime feature are evidence but not frozen model
+identity. Any disagreement in a stable field remains a comparison failure.
+
 ## 3. Task Matrix
 
 Every language has exactly one task in each category:

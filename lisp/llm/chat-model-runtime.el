@@ -22,6 +22,28 @@
 (require 'chat-model-capabilities)
 (require 'chat-model-event)
 
+(defconst chat-model-event-observer-protocol-version 1
+  "Version of the request-scoped normalized event observer contract.")
+
+(defun chat-model-runtime--deliver-event (observer callback event)
+  "Deliver EVENT to request OBSERVER and then application CALLBACK.
+
+An observer is diagnostic and cannot alter request delivery.  Its failures are
+logged and the application callback still receives the original event."
+  (when (functionp observer)
+    (condition-case err
+        (funcall observer event)
+      (error
+       (chat-log "[MODEL] Request event observer failed: %s"
+                 (error-message-string err)))))
+  (funcall callback event))
+
+(defun chat-model-runtime--transport-options (options)
+  "Return a copy of OPTIONS without runtime-internal controls."
+  (let ((transport-options (copy-tree options)))
+    (cl-remf transport-options :event-observer)
+    transport-options))
+
 (defun chat-model-runtime--request-id ()
   "Return a process-local model request id."
   (format "request-%x-%x" (truncate (* 1000 (float-time)))
@@ -139,13 +161,19 @@
 (defun chat-model-request-events (provider messages callback &optional options)
   "Request PROVIDER with MESSAGES and send every normalized event to CALLBACK.
 
-OPTIONS selects `:stream', model and provider request controls.  Known
+OPTIONS selects `:stream', model and provider request controls.  The internal
+`:event-observer' receives the same normalized events before CALLBACK and is
+removed before capability preparation and provider transport.  Known
 incompatible capabilities fail before a network process or buffer is made.
 Returns the low-level cancellable request handle, or nil after a preflight
 failure."
   (let* ((config (chat-llm--ensure-provider provider))
-         (model (or (plist-get options :model) (plist-get config :model)))
-         (request-id (or (plist-get options :request-id)
+         (event-observer (plist-get options :event-observer))
+         (transport-options
+          (chat-model-runtime--transport-options options))
+         (model (or (plist-get transport-options :model)
+                    (plist-get config :model)))
+         (request-id (or (plist-get transport-options :request-id)
                          (chat-model-runtime--request-id)))
          (sequence 0)
          (finished nil)
@@ -153,9 +181,10 @@ failure."
           (lambda (type &optional payload)
             (unless finished
               (setq sequence (1+ sequence))
-              (funcall callback
-                       (chat-model-event-make
-                        type provider model request-id sequence payload)))))
+              (chat-model-runtime--deliver-event
+               event-observer callback
+               (chat-model-event-make
+                type provider model request-id sequence payload)))))
          (finish
           (lambda (type payload)
             (unless finished
@@ -163,19 +192,22 @@ failure."
               ;; terminal event for the same request.
               (setq finished t
                     sequence (1+ sequence))
-              (funcall callback
-                       (chat-model-event-make
-                        type provider model request-id sequence payload)))))
+              (chat-model-runtime--deliver-event
+               event-observer callback
+               (chat-model-event-make
+                type provider model request-id sequence payload)))))
          (finish-error
           (lambda (message)
             (funcall finish 'error (list :message message))))
          prepared)
     (condition-case err
         (progn
+          (unless (or (null event-observer) (functionp event-observer))
+            (error "Model event observer must be a function"))
           (chat-model-capabilities-validate-messages provider model messages)
           (setq prepared
                 (chat-model-capabilities-prepare-options
-                 provider model (plist-put (copy-tree options)
+                 provider model (plist-put transport-options
                                            :request-id request-id))))
       (error
        (funcall finish-error (error-message-string err))))

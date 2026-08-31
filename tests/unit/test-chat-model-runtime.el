@@ -67,6 +67,57 @@
                 :content)
                "answer")))))
 
+(ert-deftest chat-model-runtime-observer-is-request-scoped-and-internal ()
+  "A request observer sees normalized events without reaching the provider."
+  (test-chat-model-runtime--isolated
+    (test-chat-model-runtime--register)
+    (let (observed delivered transport-options)
+      (cl-letf (((symbol-function 'chat-llm-request-async)
+                 (lambda (_provider _messages success _error options)
+                   (push options transport-options)
+                   (funcall success '(:content "answer"))
+                   'fixture-handle)))
+        (chat-model-request-events
+         'model-runtime-fixture nil
+         (lambda (event) (push event delivered))
+         (list :event-observer (lambda (event) (push event observed))
+               :request-id "observed-request"))
+        (chat-model-request-events
+         'model-runtime-fixture nil #'ignore
+         '(:request-id "unobserved-request")))
+      (setq observed (nreverse observed)
+            delivered (nreverse delivered))
+      (should (equal (mapcar #'chat-model-event-type observed)
+                     '(started text-delta completed)))
+      (should (equal observed delivered))
+      (should (seq-every-p
+               (lambda (event)
+                 (equal "observed-request"
+                        (chat-model-event-request-id event)))
+               observed))
+      (should (= 2 (length transport-options)))
+      (should (seq-every-p
+               (lambda (options)
+                 (not (plist-member options :event-observer)))
+               transport-options)))))
+
+(ert-deftest chat-model-runtime-observer-failure-does-not-break-delivery ()
+  "A diagnostic observer cannot interrupt the application event stream."
+  (test-chat-model-runtime--isolated
+    (test-chat-model-runtime--register)
+    (let (delivered)
+      (cl-letf (((symbol-function 'chat-llm-request-async)
+                 (lambda (_provider _messages success _error _options)
+                   (funcall success '(:content "answer"))
+                   'fixture-handle))
+                ((symbol-function 'chat-log) #'ignore))
+        (chat-model-request-events
+         'model-runtime-fixture nil
+         (lambda (event) (push event delivered))
+         (list :event-observer (lambda (_event) (error "observer failed")))))
+      (should (equal (mapcar #'chat-model-event-type (nreverse delivered))
+                     '(started text-delta completed))))))
+
 (ert-deftest chat-model-runtime-emits-one-terminal-error ()
   "Late duplicate callbacks cannot close one request twice."
   (test-chat-model-runtime--isolated

@@ -1563,7 +1563,7 @@ Trace 至少新增：
 - token 指标分别保存 first request、final request、total task 和 request count；固定开销比较 core valid trials，large-repo 门比较与 core 任务结构完全相同、分别绑定两侧 implementation revision 的 1-task x 5 focused campaigns。focused 十个 trial 必须全部有 provider 返回的可信 first-request usage；core 缺少 usage 的比例必须单独报告，超过 5% 时固定开销门状态为 blocked。有效 trial 的正确性失败不删除性能样本，基础设施无效 attempt 不得进入样本。
 - first-request footprint 使用真实 request builder 在 transport 前生成的 message content 与 provider tools JSON 字节和；必须相对仓库内冻结 M9 基线 <= 110%，且运行过程不得联网。该门槛约束固定请求开销，不替代 provider usage 的 live token 指标。
 - 性能测试必须记录机器、操作系统、Emacs 版本、冷/热缓存、fixture digest 和重复次数。最终值取至少 30 次 warm query；环境变化后不得与旧绝对值混用。
-- 最终比较前必须验证两组 task ID、task revision、fixture digest、provider/model、capability snapshot、profile 和运行参数完全一致；不一致时结果为 blocked，不得计算“提升”。
+- 最终比较前必须验证两组 task ID、task revision、fixture digest、provider/model、稳定 capability comparison identity、profile 和运行参数完全一致；两侧原始 capability snapshot 各自保留，schema、来源和被测实现新增字段不得伪造成旧字段，也不参与模型身份比较；任一共同稳定能力字段不一致时结果为 blocked，不得计算“提升”。
 - 两组结果必须分别来自唯一且角色正确的 campaign；manifest digest 必须相同，campaign/configuration digest 和 implementation revision 必须不同。`campaign.json` 与 `completion.json` 必须匹配且分别确认 30 tasks、5 repetitions、150 个唯一 repetition/task 结果和 complete。缺字段、重复结果、混合身份、复用同一 revision 或尚未补齐的中断 campaign 均不得通过。
 
 ### 13.1 正确性
@@ -1816,3 +1816,31 @@ coding Eval 保存实际 provider/model/request id。Eval 缺少该证据或发�
 closed 为 identity error，即使代码 judge 通过也不能形成有效 trial。实现通过完整 canonical
 后，只能用新 clean revision 分别重跑 `deepseek-v4-flash` 与 `k3-256k`；K2.7 与 `k3`
 都不属于本轮验收矩阵。
+
+### 2026-08-31 冻结 campaign 协议化
+
+逐层复现确认最终 baseline 阻塞不是模型能力问题，而是三项历史实现合同被当前 harness
+隐式猜测：旧 Agent 的 `:model` 表示 provider、旧 model runtime 没有 request observer
+入口、旧 capability schema 没有 `reasoningReplay`；同时历史 checkout 会读取开发者当前
+`~/.chat`，导致 schema 和 provider 默认值污染。逐个 revision 写条件分支只会形成临时补丁，
+不能作为最终验收基础。
+
+系统修复将这三项边界提升为显式版本协议。产品 Agent 声明 provider/concrete-model 配置
+协议，model runtime 提供 request-scoped normalized event observer，Eval 仅从真实 transport
+的 `started` 事件收集每次请求身份；observer 在 capability preparation 和 provider transport
+前移除，自身失败不能改变应用事件流。campaign harness 在加载冻结 implementation 后读取
+其协议版本，只允许已声明、受测试的评估适配器；未知版本立即失败，旧 schema 只投影真实
+存在的字段。适配器局限于 batch campaign runner，不进入产品执行路径。
+
+最终验收同步改为版本化 capability identity：原始 v1/v2 snapshot 都作为证据保留，比较只选择
+双方 schema 共有的 stream、tools、tool choice、reasoning、structured output、context window
+与 output-token limit。serializer 版本、来源和被测实现自身新增的 runtime 能力不是模型漂移；
+共同字段有任何差异仍立即拒绝比较。
+
+所有 baseline 与 current campaign 现在都在自动创建的独立 runtime HOME 中运行。evidence
+目录与 trusted setup file 在切换 HOME 前固定为绝对路径，临时 HOME 在退出时清理；只有
+显式配置的调查目录才保留。协议与验收定向测试 91/91、集成测试 3/3、E2E 3/3、完整
+工具链 canonical 1922/1922 通过。两侧 30-by-5 descriptor 已在同一 manifest、精确
+`deepseek/deepseek-v4-flash` 和各自 implementation revision 上预检成功；提交后还必须以
+clean harness revision 重做 descriptor 与最小 live smoke，再创建 fresh 150/150 paired
+campaign，当前 M19 仍未完成。
