@@ -1796,7 +1796,16 @@ ordinary application execution always uses protocol v2.")
       (setq
        metadata-builder
        (lambda (failure-reason steps tool-calls tool-results)
-         (let* ((identities (reverse request-identities))
+         (let* ((steps (if (null steps)
+                           (and run (chat-agent-run-state-step run))
+                         steps))
+                (tool-calls (or tool-calls
+                                (and run
+                                     (chat-agent-run-state-tool-calls run))))
+                (tool-results (or tool-results
+                                  (and run
+                                       (chat-agent-run-state-tool-results run))))
+                (identities (reverse request-identities))
                 (identity-valid
                  (and identities
                       (cl-every

@@ -41,6 +41,51 @@
           (json-key-type 'symbol))
       (json-read))))
 
+(ert-deftest chat-coding-eval-agent-snapshot-preserves-live-run-progress ()
+  "A timeout snapshot reports work accumulated before `agent-end'."
+  (chat-coding-eval-test-with-runtime
+   (let* ((task
+           (chat-coding-eval-task-create-record
+            :id "snapshot-progress"
+            :prompt "Inspect and fix the sample."
+            :allowed-paths '("sample.c")))
+          (workspace (expand-file-name "workspace/" temp-dir))
+          (chat-coding-eval-agent-config-function
+           (lambda (_provider _model config) config))
+          handle)
+     (make-directory workspace t)
+     (cl-letf (((symbol-function 'chat-code-enable) #'ignore)
+               ((symbol-function 'chat-coding-eval--capability-snapshot)
+                (lambda (_provider _model) '((schemaVersion . 2))))
+               ((symbol-function 'chat-agent-start)
+                (lambda (config)
+                  (funcall
+                   (plist-get (plist-get config :request-options)
+                              :event-observer)
+                   (chat-model-event-make
+                    'started 'deepseek "deepseek-v4-flash"
+                    "request-snapshot" 1))
+                  (chat-agent--run-create
+                   :provider 'deepseek
+                   :model "deepseek-v4-flash"
+                   :task-id "agent-task-snapshot"
+                   :step 7
+                   :tool-calls '((:id "call-1") (:id "call-2"))
+                   :tool-results '("result-1" "result-2")))))
+       (setq handle
+             (funcall
+              (chat-coding-eval-agent-executor
+               'deepseek "deepseek-v4-flash")
+              task workspace #'ignore)))
+     (let* ((snapshot
+             (funcall (chat-coding-eval-executor-handle-snapshot handle)))
+            (metadata (plist-get snapshot :metadata)))
+       (should (= 7 (alist-get 'steps metadata)))
+       (should (= 2 (alist-get 'toolCallCount metadata)))
+       (should (= 2 (alist-get 'toolResultCount metadata)))
+       (should (equal "evaluation terminated before agent-end"
+                      (alist-get 'failureReason metadata)))))))
+
 (ert-deftest chat-coding-eval-language-registry-matches-core-manifest ()
   "The reusable language inventory stays balanced and matches core tasks."
   (let* ((registry
