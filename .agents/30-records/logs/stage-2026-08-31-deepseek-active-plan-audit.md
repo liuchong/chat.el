@@ -67,3 +67,42 @@ suite, freeze the new clean revision, then repeat DeepSeek and exact Kimi Code
   `~/.cargo/bin` toolchain on `PATH`;
 - canonical suite: 1884/1884 passed, zero skipped and zero unexpected;
 - no campaign or test process remained running.
+
+## Follow-up Run On `ef24a88`
+
+The first follow-up campaign completed all 30 trials successfully, including
+the JavaScript multi-file trial that previously timed out.
+
+| Metric | Result |
+|---|---:|
+| Passed | 30/30 |
+| Median duration | 44,272 ms |
+| p90 duration | 66,788 ms |
+| Maximum duration | 82,249 ms |
+| Total requests | 288 |
+| Median requests per trial | 10 |
+| p90 requests per trial | 16 |
+| Maximum requests per trial | 18 |
+| Tool errors | 6 |
+| Approval events | 111 |
+| Total tokens | 1,733,288 |
+
+The internal task-log disclosure was fixed: every remaining log path occurred
+only in bounded runtime lifecycle events and never in a model-visible tool
+result. Three trials still attempted a second `programming_plan_create` after
+the provider menu removed it. The system prompt builder accepted a Session but
+did not bind that Session while deriving its textual tool menu. Native schemas
+therefore used the narrowed turn menu while prompt text used the global menu.
+The runtime rejection was correct, but the two model-facing contracts
+contradicted each other.
+
+The prompt now derives guidance and formatted tools from the same
+session-filtered menu as native provider schemas. This changes the
+implementation revision, so the successful `ef24a88` campaign remains
+diagnostic. Repeat both exact-model campaigns on the new clean revision before
+making provider comparisons.
+
+Post-fix canonical verification passed 1885/1885 tests with zero skipped and
+zero unexpected results. The new regression exercises a global registry that
+contains both create and transition tools while the Session advertises only
+transition, and proves that prompt guidance follows the Session menu.

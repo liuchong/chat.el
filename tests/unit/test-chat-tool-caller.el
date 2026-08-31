@@ -950,6 +950,29 @@ being a thing the reader could do when the two surfaces merged."
       (should (string-match-p "returned revision" guidance))
       (should (string-match-p "close the plan and answer" guidance)))))
 
+(ert-deftest chat-tool-caller-system-prompt-uses-the-session-tool-menu ()
+  "Prompt guidance and native schemas must describe the same turn menu."
+  (let* ((chat-tool-forge--registry (make-hash-table :test 'eq))
+         (session
+          (make-chat-session
+           :id "active-plan-menu"
+           :tool-config
+           '(:enabled-tools
+             (programming_plan_create programming_plan_transition)
+             :advertised-tools (programming_plan_transition)))))
+    (dolist (id '(programming_plan_create programming_plan_transition))
+      (chat-tool-forge-register
+       (make-chat-forged-tool
+        :id id :name (symbol-name id) :language 'elisp
+        :compiled-function #'ignore :is-active t)))
+    (let ((prompt
+           (chat-tool-caller-build-system-prompt "Base" nil session)))
+      (should (string-match-p "A durable plan already exists" prompt))
+      (should (string-match-p
+               "Do not call `programming_plan_create` again" prompt))
+      (should (string-match-p "programming_plan_transition" prompt))
+      (should-not (string-match-p "Before the first gated action" prompt)))))
+
 (ert-deftest chat-tool-caller-restores-execution-context-after-async-approval ()
   "A delayed guard verdict keeps the task correlation of the original call."
   (chat-test-with-temp-dir
