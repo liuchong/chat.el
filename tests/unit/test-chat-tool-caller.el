@@ -930,6 +930,10 @@ being a thing the reader could do when the two surfaces merged."
       (should (string-match-p "programming_plan_skip" guidance))
       (should (string-match-p "single-bounded-action" guidance))
       (should (string-match-p "one matching mutation" guidance))
+      (should (string-match-p "call that newly visible write tool immediately"
+                              guidance))
+      (should (string-match-p "do not activate unrelated capabilities"
+                              guidance))
       (should (string-match-p "only once per task" guidance))
       (should (string-match-p "create a durable TODO plan" guidance))
       (should (string-match-p "starts its first dependency-ready item atomically"

@@ -528,9 +528,12 @@
              (chat-agent-profile--effective-tool-config session profile)
              :advertised-tools)))
        (should (memq 'programming_plan_create advertised))
-       (should (memq 'programming_plan_transition advertised))
+       (should (memq 'programming_plan_read advertised))
+       (should (memq 'programming_plan_list advertised))
        (should (memq 'files_patch advertised))
-       (dolist (tool '(files_write files_replace apply_patch
+       (dolist (tool '(programming_capability_activate
+                       programming_plan_transition programming_plan_skip
+                       files_write files_replace apply_patch
                        programming_compile_task
                        programming_verification_run))
          (should-not (memq tool advertised))))
@@ -545,7 +548,9 @@
        (should (memq 'programming_compile_task advertised))
        (dolist (tool chat-capability-programming-verification-tools)
          (should (memq tool advertised)))
-       (dolist (tool '(files_write files_replace files_patch apply_patch))
+       (dolist (tool '(programming_capability_activate
+                       programming_plan_transition programming_plan_skip
+                       files_write files_replace files_patch apply_patch))
          (should-not (memq tool advertised)))))))
 
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()

@@ -1021,6 +1021,9 @@
              "only once for this task"
              (chat-coding-eval--execution-guidance task)))
     (should (string-match-p
+             "newly visible write tool immediately"
+             (chat-coding-eval--execution-guidance task)))
+    (should (string-match-p
              "create a durable TODO plan"
              (chat-coding-eval--execution-guidance task)))
     (setf (chat-coding-eval-task-allowed-paths task)

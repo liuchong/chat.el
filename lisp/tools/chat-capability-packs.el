@@ -77,6 +77,10 @@
     programming_plan_skip programming_plan_mode)
   "Programming tools advertised for TODO plans and Plan Mode.")
 
+(defconst chat-capability-programming-bounded-plan-tools
+  '(programming_plan_create programming_plan_read programming_plan_list)
+  "Plan tools retained while one bounded mutation is being resolved.")
+
 (defconst chat-capability-programming-tool-groups
   `((exploration . ,chat-capability-programming-exploration-tools)
     (plan . ,chat-capability-programming-plan-tools)
@@ -215,6 +219,18 @@
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-execution-tools)))
       (when bounded-skip
+        (setq advertised
+              (seq-remove
+               (lambda (tool)
+                 (or (eq tool 'programming_capability_activate)
+                     (and (memq tool chat-capability-programming-plan-tools)
+                          (not (memq
+                                tool
+                                chat-capability-programming-bounded-plan-tools)))))
+               advertised))
+        (setq advertised
+              (chat-capability--ordered-tool-union
+               advertised chat-capability-programming-bounded-plan-tools))
         (let ((tool-name (plist-get bounded-skip :tool-name))
               (consumed-count
                (plist-get bounded-skip :consumed-count)))
