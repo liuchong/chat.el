@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'chat-agent-types)
+(require 'chat-agent-progress)
 (require 'chat-agent-loop)
 (require 'chat-agent-profile)
 (require 'chat-llm)
@@ -188,6 +189,7 @@ Events are delivered synchronously through :on-event.  The final
               :project-root (plist-get config :project-root)
               :context-target-path (plist-get config :context-target-path)
               :context-fragments (plist-get config :context-fragments)
+              :progress-state (chat-agent-progress-state-create)
               :transport (or (plist-get config :transport) 'sync)
               :on-event
               (lambda (event)

@@ -1081,6 +1081,10 @@
        (funcall on-event
                 '(:type execution-error :step 4 :tool "shell_execute"
                   :result-summary "process failed"))
+       (funcall on-event '(:type stagnation-detected))
+       (funcall on-event '(:type stagnation-recovered))
+       (funcall on-event '(:type stagnation-detected))
+       (funcall on-event '(:type stagnation-stopped))
        (funcall on-event '(:type turn-start))
        (funcall on-event
                 (list :type 'model-usage
@@ -1149,6 +1153,9 @@
        (should (<= (length (alist-get 'summary error)) 80))
        (should-not (string-match-p "\n" (alist-get 'summary error))))
      (should (= 2 (alist-get 'approvalCount metadata)))
+     (should (= 2 (alist-get 'stagnationDetectionCount metadata)))
+     (should (= 1 (alist-get 'stagnationRecoveryCount metadata)))
+     (should (= 1 (alist-get 'stagnationStopCount metadata)))
      (should (= 11 (plist-get (alist-get 'firstRequestTokenUsage metadata)
                               :input-tokens)))
      (should-not (plist-member (alist-get 'firstRequestTokenUsage metadata)

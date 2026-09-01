@@ -17,6 +17,7 @@
 ;;   stream-reasoning  stream-result  model-tool-call-delta  model-usage
 ;;   model-retry
 ;;   tool-batch-start  tool-event  tool-batch-end
+;;   stagnation-detected  stagnation-recovered  stagnation-stopped
 ;;   message-appended  truncated  response  followup  steering
 ;;   prepared-next-turn  work-plan-finalization  error  agent-end
 ;;
@@ -57,7 +58,7 @@ reused.  Waiting is asynchronous and remains cancellable."
                (:copier nil))
   provider model messages session execution-session profile transport task-id run-id
   project-root context-target-path context-fragments last-context-bundle
-  goal-projection-revision work-plan-projection-revision
+  goal-projection-revision work-plan-projection-revision progress-state
   (work-plan-finalization-attempts 0)
   on-event should-stop-fn steering-fn
   followup-fn transform-context-fn prepare-next-turn-fn

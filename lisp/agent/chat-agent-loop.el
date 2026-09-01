@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'chat-agent-types)
+(require 'chat-agent-progress)
 (require 'chat-log)
 (require 'chat-session)
 (require 'chat-transcript)
@@ -554,7 +555,9 @@ state and are rebuilt after compaction instead of entering the transcript."
                 (list (chat-agent-budget-reminder
                        (chat-agent-run-state-max-steps run)
                        (chat-agent-run-state-step run))
-                      (chat-context-budget-reminder context)))))
+                      (chat-context-budget-reminder context)
+                      (chat-agent-progress-state-reminder
+                       (chat-agent-run-state-progress-state run))))))
     ;; Reported once per run rather than per step: it is a configuration
     ;; problem for a person to fix, and repeating it every step would bury
     ;; the run's own output.
@@ -883,6 +886,7 @@ Only asynchronous, non-conflicting calls overlap. Writes and calls that
 need approval carry exclusive accesses and therefore remain serialized."
   (let* ((count (length calls))
          (results (make-vector count nil))
+         (failures (make-vector count nil))
          (pending (cl-loop for call in calls
                            for index from 0
                            collect (cons index call)))
@@ -907,6 +911,7 @@ need approval carry exclusive accesses and therefore remain serialized."
                            :cancelled cancelled)
          (funcall callback
                   (list :results (append results nil)
+                        :failures (append failures nil)
                         :cancelled cancelled))))
      conflict-fn
      (lambda (accesses)
@@ -934,6 +939,7 @@ need approval carry exclusive accesses and therefore remain serialized."
                           (error-message-string err))))))
        (unless (aref results index)
          (aset results index result)
+         (aset failures index (and failed t))
          (remhash index running)
          (cl-incf finished)
          (unless failed
@@ -1084,6 +1090,68 @@ need approval carry exclusive accesses and therefore remain serialized."
         (funcall report-fn)
       (funcall pump-fn))))
 
+(defun chat-agent--progress-tool-kind (call failed)
+  "Return semantic progress kind for CALL and FAILED."
+  (let ((name (or (plist-get call :name) "")))
+    (cond
+     (failed 'error)
+     ((string-match-p
+       "\\`\\(?:programming_plan_\\|goal_\\|work_note_\\|todo_\\)"
+       name)
+      'neutral)
+     ((string-prefix-p "programming_verification_" name)
+      'progress)
+     ((seq-some (lambda (access)
+                  (eq (plist-get access :mode) 'write))
+                (chat-tool-caller-call-resource-accesses call))
+      'progress)
+     (t 'inspection))))
+
+(defun chat-agent--progress-inspection-key (call)
+  "Return a bounded semantic inspection key for CALL."
+  (let ((resources
+         (sort
+          (delete-dups
+           (mapcar
+            (lambda (access) (format "%s" (plist-get access :resource)))
+            (chat-tool-caller-call-resource-accesses call)))
+          #'string<)))
+    (secure-hash
+     'sha256
+     (concat (or (plist-get call :name) "unknown") "\0"
+             (string-join resources "\0")))))
+
+(defun chat-agent--tool-result-failed-p (result)
+  "Return non-nil when RESULT is an explicit failed tool observation."
+  (or (and (stringp result)
+           (string-match-p "\\`\\(?:Error\\|Denied\\)\\b" result))
+      (and (listp result)
+           (memq (plist-get result :status) '(error failed denied)))))
+
+(defun chat-agent--observe-progress (run calls results failures)
+  "Update RUN progress from ordered CALLS, RESULTS and FAILURES."
+  (let ((state (chat-agent-run-state-progress-state run)))
+    (while calls
+      (let* ((call (car calls))
+             (failed (or (car failures)
+                         (chat-agent--tool-result-failed-p (car results))))
+             (kind (chat-agent--progress-tool-kind call failed))
+             (event
+              (chat-agent-progress-observe
+               state kind
+               (and (eq kind 'inspection)
+                    (chat-agent--progress-inspection-key call)))))
+        (when event
+          (chat-agent--emit
+           run (plist-get event :event)
+           :inspection-count (plist-get event :inspection-count)
+           :repeat-count (plist-get event :repeat-count)
+           :warning-count (plist-get event :warning-count)))
+        (setq calls (cdr calls)
+              results (cdr results)
+              failures (cdr failures))))
+    state))
+
 (cl-defun chat-agent--complete-result (run result processed truncated)
   "Commit PROCESSED transport RESULT for RUN.
 TRUNCATED is non-nil when tool calls were refused for length."
@@ -1130,7 +1198,11 @@ TRUNCATED is non-nil when tool calls were refused for length."
             (and plan (eq (chat-work-plan-status plan) 'active)))))
     (plist-get result :reasoning)))
   (let ((calls (plist-get processed :tool-calls))
-        (results (plist-get processed :tool-results)))
+        (results (plist-get processed :tool-results))
+        (failures (or (plist-get processed :tool-failures)
+                      (make-list
+                       (length (plist-get processed :tool-calls)) nil))))
+    (chat-agent--observe-progress run calls results failures)
     (while (and calls results)
       (chat-agent--append-message
        run
@@ -1154,6 +1226,12 @@ TRUNCATED is non-nil when tool calls were refused for length."
   (cond
    ((chat-agent-run-state-done run)
     nil)
+   ((chat-agent-progress-state-stop-reason
+     (chat-agent-run-state-progress-state run))
+    (chat-agent--finish
+     run 'error
+     (chat-agent-progress-state-stop-reason
+      (chat-agent-run-state-progress-state run))))
    ((chat-agent--forced-stop-p run processed)
     (chat-agent--finish run 'completed nil))
    ((chat-agent-run-state-steering-queue run)
@@ -1194,6 +1272,7 @@ TRUNCATED is non-nil when tool calls were refused for length."
              :tool-results
              (mapcar (lambda (_call) chat-agent-truncated-tool-result-text)
                      calls)
+             :tool-failures (make-list (length calls) t)
              :tool-events nil
              :parse-error nil
              :truncated-tool-calls t)
@@ -1216,6 +1295,7 @@ TRUNCATED is non-nil when tool calls were refused for length."
                        (chat-tool-caller-extract-content content))
                       :tool-calls calls
                       :tool-results (plist-get execution :results)
+                      :tool-failures (plist-get execution :failures)
                       :tool-events (nreverse tool-events)
                       :parse-error nil)
                 nil)))))))

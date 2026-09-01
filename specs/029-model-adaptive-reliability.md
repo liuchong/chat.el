@@ -73,6 +73,23 @@ contract. Repeating the same request shape after a semantic failure is not a
 strategy. Transport retries may repeat the same payload only for the explicitly
 classified transient conditions covered by the transport policy.
 
+The Agent also measures semantic progress independently of model identity. A
+successful project mutation or verification resets its no-progress state.
+Coordination-only mutations such as creating a Plan do not prove task progress.
+After a tool error, six inspection calls without a successful mutation or
+verification append one request-only recovery instruction that requires a
+precise corrective action, a different tool or an explicit blocker. Twelve such
+calls terminate the Run with an explicit stagnation reason instead of consuming
+the outer timeout. Repeated reads of one semantic target receive the same warning
+without an automatic stop when no tool error preceded them, because bounded
+paging through a large source may be legitimate.
+
+Progress reminders are never persisted as conversation messages and retain no
+tool arguments or output. Detection, recovery and stop are structured Agent
+events. Evaluation records expose their counts so an apparent pass cannot hide
+an expensive inspection loop and a timeout can be distinguished from a bounded
+stagnation stop.
+
 Cross-provider correctness campaigns use one provider-neutral task timeout.
 Observed latency and request count remain model-separated performance facts.
 A timeout window that consistently terminates one exact model before mutation
@@ -160,6 +177,7 @@ For each provider/model pair, run the same immutable core manifest and report:
 - request count, latency distribution, scope and cleanup violations;
 - bounded tool-name histograms that expose successful no-progress loops without
   retaining tool arguments or results;
+- stagnation detection, recovery and stop counts;
 - malformed tool calls, repair attempts and unchanged retries;
 - which common or candidate adaptation policy was active.
 
@@ -222,6 +240,9 @@ session migration or a second Agent implementation.
 - A candidate and control campaign can be compared without changing fixtures or
   acceptance thresholds.
 - No adaptation can expand authority or convert a failed judge into success.
+- A recoverable tool error followed by inspection churn receives bounded common
+  recovery guidance and cannot run until the outer timeout without an explicit
+  stagnation outcome.
 - Language and task-category regressions remain visible independently.
 - DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` both pass readiness and a
   bounded core campaign before the first cross-provider policy is promoted.
