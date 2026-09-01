@@ -27,8 +27,8 @@
      (should-not (chat-edit-apply edit))
     (should-not (file-exists-p target)))))
 
-(ert-deftest chat-edit-refresh-keeps-modified-visiting-buffer ()
-  "Test refreshing a file buffer never discards unsaved user edits."
+(ert-deftest chat-edit-refresh-refuses-modified-visiting-buffer ()
+  "Test refreshing a file buffer rejects unsaved user edits."
   (chat-test-with-temp-dir
    (let* ((chat-files-allowed-directories (list temp-dir))
           (target (expand-file-name "keep.txt" temp-dir)))
@@ -39,11 +39,41 @@
            (progn
              (with-current-buffer buffer
                (insert "user edits"))
-             (chat-edit--refresh-file-buffer target)
+             (should-error (chat-edit--refresh-file-buffer target)
+                           :type 'chat-files-stale-file)
              (with-current-buffer buffer
                (should (buffer-modified-p))
                (should (string-match-p "user edits" (buffer-string))))))
        (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (set-buffer-modified-p nil))
+         (kill-buffer buffer))))))
+
+(ert-deftest chat-edit-apply-refuses-modified-visiting-buffer ()
+  "Applying an edit never overwrites an unsaved visiting buffer."
+  (chat-test-with-temp-dir
+   (let* ((chat-files-allowed-directories (list temp-dir))
+          (target (expand-file-name "keep.txt" temp-dir))
+          (edit (chat-edit-create-rewrite
+                 target "disk" "agent" "rewrite"))
+          buffer)
+     (with-temp-file target
+       (insert "disk"))
+     (unwind-protect
+         (progn
+           (setq buffer (find-file-noselect target))
+           (with-current-buffer buffer
+             (goto-char (point-max))
+             (insert " unsaved"))
+           (should-not (chat-edit-apply edit))
+           (should-not (chat-edit-backup-file edit))
+           (should (string= (with-temp-buffer
+                              (insert-file-contents target)
+                              (buffer-string))
+                            "disk")))
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (set-buffer-modified-p nil))
          (kill-buffer buffer))))))
 
 (ert-deftest chat-edit-refresh-reverts-clean-visiting-buffer ()

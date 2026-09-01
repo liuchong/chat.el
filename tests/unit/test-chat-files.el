@@ -809,6 +809,135 @@
            (set-buffer-modified-p nil))
          (kill-buffer buffer))))))
 
+(ert-deftest chat-files-direct-mutations-refresh-open-buffer-without-prompt ()
+  "Every direct mutation keeps an open clean buffer synchronized."
+  (chat-test-with-temp-dir
+   (let ((chat-files-allowed-directories (list temp-dir)))
+     (dolist (case
+              `(("write.txt" ,(lambda (path)
+                                (chat-files-write path "write\n"))
+                 "write\n")
+                ("replace.txt" ,(lambda (path)
+                                  (chat-files-replace path "old" "replace"))
+                 "replace\n")
+                ("insert.txt" ,(lambda (path)
+                                 (chat-files-insert-at path :end "insert\n"))
+                 "old\ninsert\n")
+                ("patch.txt" ,(lambda (path)
+                                (chat-files-patch
+                                 path
+                                 '((:search "old" :replace "patch"))))
+                 "patch\n")
+                ("apply-patch.txt"
+                 ,(lambda (_path)
+                    (let ((default-directory temp-dir))
+                      (chat-files-apply-patch
+                       (concat "*** Begin Patch\n"
+                               "*** Update File: apply-patch.txt\n"
+                               "@@\n"
+                               "-old\n"
+                               "+apply-patch\n"
+                               "*** End Patch\n"))))
+                 "apply-patch\n")))
+       (let* ((path (expand-file-name (nth 0 case) temp-dir))
+              (mutate (nth 1 case))
+              (expected (nth 2 case))
+              buffer)
+         (with-temp-file path
+           (insert "old\n"))
+         (unwind-protect
+             (progn
+               (setq buffer (find-file-noselect path))
+               (cl-letf (((symbol-function 'yes-or-no-p)
+                          (lambda (&rest _args)
+                            (ert-fail "unexpected yes-or-no prompt")))
+                         ((symbol-function 'y-or-n-p)
+                          (lambda (&rest _args)
+                            (ert-fail "unexpected y-or-n prompt")))
+                         ((symbol-function 'ask-user-about-supersession-threat)
+                          (lambda (&rest _args)
+                            (ert-fail "unexpected supersession prompt"))))
+                 (funcall mutate path)
+                 (with-current-buffer buffer
+                   (should (string= (buffer-string) expected))
+                   (should-not (buffer-modified-p))
+                   (should (verify-visited-file-modtime buffer))
+                   (goto-char (point-max))
+                   (insert "local"))))
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (set-buffer-modified-p nil))
+             (kill-buffer buffer))))))))
+
+(ert-deftest chat-files-direct-mutations-refuse-unsaved-buffer-without-read-set ()
+  "Direct mutations fail closed on unsaved buffers without read-set mode."
+  (chat-test-with-temp-dir
+   (let ((chat-files-allowed-directories (list temp-dir))
+         (index 0))
+     (dolist (mutate
+              (list (lambda (path) (chat-files-write path "agent\n"))
+                    (lambda (path)
+                      (chat-files-replace path "disk" "agent"))
+                    (lambda (path)
+                      (chat-files-insert-at path :end "agent\n"))
+                    (lambda (path)
+                      (chat-files-patch
+                       path '((:search "disk" :replace "agent"))))))
+       (let ((path (expand-file-name
+                    (format "dirty-%d.txt" (cl-incf index)) temp-dir))
+             buffer)
+         (with-temp-file path
+           (insert "disk\n"))
+         (unwind-protect
+             (progn
+               (setq buffer (find-file-noselect path))
+               (with-current-buffer buffer
+                 (goto-char (point-max))
+                 (insert "unsaved\n"))
+               (should-error (funcall mutate path)
+                             :type 'chat-files-stale-file)
+               (should (string= (with-temp-buffer
+                                  (insert-file-contents path)
+                                  (buffer-string))
+                                "disk\n")))
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (set-buffer-modified-p nil))
+             (kill-buffer buffer))))))))
+
+(ert-deftest chat-files-apply-patch-refuses-unsaved-buffer-without-read-set ()
+  "Transactional patching rejects unsaved buffers before its first write."
+  (chat-test-with-temp-dir
+   (let* ((path (expand-file-name "dirty-apply.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (default-directory temp-dir)
+          buffer)
+     (with-temp-file path
+       (insert "disk\n"))
+     (unwind-protect
+         (progn
+           (setq buffer (find-file-noselect path))
+           (with-current-buffer buffer
+             (goto-char (point-max))
+             (insert "unsaved\n"))
+           (should-error
+            (chat-files-apply-patch
+             (concat "*** Begin Patch\n"
+                     "*** Update File: dirty-apply.txt\n"
+                     "@@\n"
+                     "-disk\n"
+                     "+agent\n"
+                     "*** End Patch\n"))
+            :type 'chat-files-stale-file)
+           (should (string= (with-temp-buffer
+                              (insert-file-contents path)
+                              (buffer-string))
+                            "disk\n")))
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (set-buffer-modified-p nil))
+         (kill-buffer buffer))))))
+
 (ert-deftest chat-files-insert-at-rejects-directory-path ()
   "Test insert-at rejects directory targets with a stable error."
   (chat-test-with-temp-dir

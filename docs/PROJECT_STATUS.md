@@ -79,6 +79,19 @@ the clean 42-task preflights pass for both providers and canonical verification
 is 2010/2010. Fresh provider-separated 42-by-three development campaigns are
 next; the interrupted old campaign is not admissible model evidence.
 
+A subsequent DeepSeek development campaign passed its first 39/126 trials,
+including all C, Clojure, C++, Java, SQL and TypeScript tasks plus three Zig
+tasks. The first Zig refactor repetition then stopped on Emacs' interactive
+"changed on disk" edit prompt. The failure is classified as shared file-tool
+infrastructure: direct mutations refreshed the read set but did not synchronize
+an already open clean visiting buffer before returning. The interrupted
+campaign remains incident evidence and cannot be resumed after the runtime
+revision changes. The shared file boundary now rejects every unsaved visiting
+buffer even outside Agent read-set mode and silently synchronizes clean buffers
+after write, replace, insert, patch and transactional patch operations.
+Focused file/edit verification is 167/167 and the canonical suite is
+2014/2014 with zero skipped or unexpected results.
+
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
 scoped rule bundles, language-neutral distributed/headless session execution and

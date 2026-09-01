@@ -305,21 +305,22 @@ the runtime itself observed.  It cannot create an observation."
 
 (defun chat-files--refresh-clean-visiting-buffer (path)
   "Return PATH's visiting buffer after reconciling it with disk.
-Reject stale buffers with unsaved edits instead of entering an interactive
-revert query."
+Reject every buffer with unsaved edits instead of overwriting it or entering
+an interactive revert query."
   (when-let ((buffer (find-buffer-visiting path)))
+    (when (buffer-modified-p buffer)
+      (chat-files--signal-consistency
+       'chat-files-stale-file path
+       "stale-file (unsaved visiting buffer)"))
     (unless (verify-visited-file-modtime buffer)
-      (if (buffer-modified-p buffer)
-          (chat-files--signal-consistency
-           'chat-files-stale-file path
-           "stale-file (unsaved visiting buffer)")
-        (with-current-buffer buffer
-          (revert-buffer t t t))))
+      (with-current-buffer buffer
+        (revert-buffer t t t)))
     buffer))
 
 (defun chat-files--validate-paths (paths)
   "Validate every canonical path in PATHS before any mutation begins."
   (dolist (path (delete-dups (copy-sequence paths)))
+    (chat-files--refresh-clean-visiting-buffer path)
     (chat-files--validate-observed-version path)))
 
 ;;;###autoload
@@ -688,6 +689,7 @@ ENCODING specifies the file encoding (default utf-8)."
   (let ((safe-path (chat-files--safe-path-p path))
         (coding-system (or encoding 'utf-8)))
     (chat-files--ensure-direct-edit-path safe-path)
+    (chat-files--refresh-clean-visiting-buffer safe-path)
     (chat-files--validate-observed-version safe-path expected-version)
     (make-directory (file-name-directory safe-path) t)
     (with-temp-buffer
@@ -703,6 +705,7 @@ ENCODING specifies the file encoding (default utf-8)."
                            (eq (chat-file-observation-kind observed) 'absent)
                            'excl))))
     (let ((version (chat-files--refresh-observation safe-path)))
+      (chat-files--refresh-clean-visiting-buffer safe-path)
       (list :path safe-path
             :operation (if append 'append 'write)
             :bytes-written (length content)
@@ -970,6 +973,7 @@ When LINE-HINT is non-nil, only consider matches on that line."
       (with-temp-file safe-path
         (insert new-content))
       (let ((version (chat-files--refresh-observation safe-path)))
+        (chat-files--refresh-clean-visiting-buffer safe-path)
         (chat-files--with-diff
          safe-path
          original-content
@@ -1010,6 +1014,7 @@ POSITION can be :beginning, :end, a line number, or a character position."
         (chat-files--validate-observed-version safe-path expected-version)
         (write-region (point-min) (point-max) safe-path))
       (let ((version (chat-files--refresh-observation safe-path)))
+        (chat-files--refresh-clean-visiting-buffer safe-path)
         (list :path safe-path
               :operation 'insert
               :position position
@@ -1054,6 +1059,7 @@ All patches are applied atomically."
       (with-temp-file safe-path
         (insert content))
       (let ((version (chat-files--refresh-observation safe-path)))
+        (chat-files--refresh-clean-visiting-buffer safe-path)
         (append
          (chat-files--with-diff safe-path original-content content 'patch)
          (list :patches-applied (length patches)
@@ -1556,6 +1562,7 @@ built in implementation otherwise."
 (defun chat-files--read-edit-target-content (path)
   "Return file content for editable PATH after stable path validation."
   (chat-files--ensure-direct-edit-path path)
+  (chat-files--refresh-clean-visiting-buffer path)
   (unless (file-exists-p path)
     (error "Edit failed: file does not exist: %s" path))
   (with-temp-buffer
@@ -1718,7 +1725,8 @@ CONSISTENCY-PATHS are revalidated as one set before the first write."
          (delete-file path))))
    states)
   (maphash (lambda (path _state)
-             (chat-files--refresh-observation path))
+             (chat-files--refresh-observation path)
+             (chat-files--refresh-clean-visiting-buffer path))
            states))
 
 (defun chat-files--apply-patch-consistency-paths (operations)

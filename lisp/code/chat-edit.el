@@ -119,6 +119,8 @@ Returns t on success, nil on failure."
   
   (condition-case err
       (progn
+        (chat-files--refresh-clean-visiting-buffer
+         (chat-files--safe-path-p (chat-edit-file edit)))
         ;; Create backup
         (chat-edit--create-backup edit)
         ;; Apply the edit
@@ -144,6 +146,8 @@ Returns t on success, nil on failure."
     
     (condition-case err
         (progn
+          (chat-files--refresh-clean-visiting-buffer
+           (chat-files--safe-path-p (chat-edit-file edit)))
           ;; Restore from backup
           (copy-file backup-file (chat-edit-file edit) t)
           ;; Mark as not applied
@@ -163,7 +167,7 @@ so inline edits cannot escape the allowed directories."
          (new-content (chat-edit-new-content edit))
          (range (chat-edit-range edit))
          (type (chat-edit-type edit)))
-    
+    (chat-files--refresh-clean-visiting-buffer file)
     (pcase type
       ;; Generate: create new file
       ('generate
@@ -218,7 +222,8 @@ so inline edits cannot escape the allowed directories."
            (with-temp-file file
              (insert (mapconcat #'identity new-lines "\n"))))))
       
-      (_ (error "Unknown edit type: %s" type)))))
+      (_ (error "Unknown edit type: %s" type)))
+    (chat-files--refresh-clean-visiting-buffer file)))
 
 (defun chat-edit--read-file (file)
   "Read content of FILE."
@@ -262,13 +267,10 @@ so inline edits cannot escape the allowed directories."
 
 (defun chat-edit--refresh-file-buffer (file)
   "Refresh any buffer visiting FILE.
-Buffers with unsaved modifications are left untouched so user edits
-are never discarded."
-  (let ((buffer (find-buffer-visiting file)))
-    (when (and buffer
-               (not (buffer-modified-p buffer)))
-      (with-current-buffer buffer
-        (revert-buffer t t t)))))
+Buffers with unsaved modifications are rejected so user edits are never
+discarded or silently shadowed by a disk write."
+  (chat-files--refresh-clean-visiting-buffer
+   (chat-files--safe-path-p file)))
 
 ;; ------------------------------------------------------------------
 ;; Validation

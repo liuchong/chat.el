@@ -195,6 +195,9 @@ Session events + Trace + Eval result
 - 模型传入的 `expected_version` 只能引用运行时已经记录的版本，不能扩大权限或替代 read set。
 - 写入前再次计算当前版本；不一致时返回 `stale-file`，保持文件不变。
 - 多文件 patch 在规划完成后、第一次落盘前重新验证整个 read set；任一文件漂移则整批不提交。
+- canonical path 存在 visiting buffer 时，所有写入口在 read-set 模式之外也必须先做缓冲区一致性检查；任何未保存修改都返回 `stale-file`，不得覆盖、忽略或进入交互询问。
+- 写工具成功落盘后、返回成功结果前，必须静默刷新该路径的干净 visiting buffer，使 buffer 内容和 visited-file modtime 同时与磁盘一致；后续编辑不得触发 supersession prompt。
+- `files_write`、`files_replace`、`chat-files-insert-at`、`files_patch`、多文件 `apply_patch` 与高层 edit/undo API 必须复用同一个缓冲区一致性边界，不得各自维护旁路行为。
 
 ### 6.2 统一代码智能结果
 
@@ -643,6 +646,7 @@ provider/model/capability identity 的 live 结果集。因此“基线基础设
 - 每个 Agent run 创建独立 read set，异步审批回调恢复同一个执行上下文；普通 Lisp API 在没有 read set 时保持兼容。
 - write、replace、insert、legacy patch、multi-file patch、move 和 delete 在 Agent 路径强制校验观察版本；模型提供的 `expected_version` 只能匹配运行时已有观察。
 - multi-file patch 在规划完成后、第一次落盘前整体复检；checkpoint 与版本层共用文件 digest 实现，不复制文件正文。
+- 文件写入边界同时协调 Emacs visiting buffer：脏 buffer 在普通 Lisp 和 Agent 路径均 fail closed，成功写入在返回前静默刷新干净 buffer，连续 `open_file`/写入/本地编辑不再触发交互式 supersession prompt。
 - `file-not-read`、`stale-file` 和 `version-mismatch` 进入 tool error event，现有 Trace 继续投影该事件。
 - 15 个 read set、竞态、run 隔离和 typed error 定向测试全部通过；覆盖未读写入、外部修改、未保存 buffer、新建竞争、提交前漂移、move、delete、delete-then-add 和 move chain。
 - 文件工具回归 155/155 通过；Agent 与工具调用回归 91/91 通过；canonical suite 1590/1590 通过；integration 2/2 通过，2 个凭证依赖测试按既有条件 skip。
