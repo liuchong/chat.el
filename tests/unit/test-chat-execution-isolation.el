@@ -185,6 +185,37 @@
          (when (buffer-live-p output) (kill-buffer output))
          (when (buffer-live-p errors) (kill-buffer errors)))))))
 
+(ert-deftest chat-execution-isolation-build-runs-official-clojure-cli-offline ()
+  "A sandboxed Clojure fixture must not consult a user Maven cache."
+  (skip-unless (and (eq system-type 'darwin)
+                    (executable-find "clojure")))
+  (chat-test-with-temp-dir
+   (chat-execution-isolation-test--with-runtime
+     (let* ((clojure (executable-find "clojure"))
+            (project (expand-file-name "project/" temp-dir))
+            (fixture (expand-file-name "tests/fixtures/coding-eval/clojure/"
+                                       chat-test-root-dir))
+            (environment
+             (list
+              (concat "PATH=" (file-name-directory clojure)
+                      ":/usr/bin:/bin")))
+            (output (generate-new-buffer " *isolation-clojure-output*"))
+            (errors (generate-new-buffer " *isolation-clojure-errors*")))
+       (copy-directory fixture project nil t t)
+       (unwind-protect
+           (let ((run
+                  (chat-execution-start
+                   (chat-execution-isolation-test--request
+                    project (list "/bin/sh" "test-one" "normalize")
+                    'build environment 20)
+                   :buffer output :stderr errors)))
+             (chat-execution-isolation-test--wait run 20)
+             (ert-info ((concat (with-current-buffer output (buffer-string))
+                                (with-current-buffer errors (buffer-string))))
+               (should (eq 'completed (chat-execution-record-status run)))))
+         (when (buffer-live-p output) (kill-buffer output))
+         (when (buffer-live-p errors) (kill-buffer errors)))))))
+
 (ert-deftest chat-execution-isolation-build-runs-emacs-with-managed-home ()
   "A sandboxed Emacs must not consult the developer's AppKit state."
   (skip-unless (and (eq system-type 'darwin)

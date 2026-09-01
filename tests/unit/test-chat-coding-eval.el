@@ -249,16 +249,19 @@
         (should (assq 'generatedPaths task))))))
 
 (ert-deftest chat-coding-eval-clojure-fixture-uses-reproducible-cli-authority ()
-  "Clojure fixture judging uses only the project and root CLI dependencies."
+  "Clojure judging binds its runtime to the official CLI installation."
   (let ((script
          (expand-file-name "coding-eval/clojure/test-one"
                            chat-test-fixtures-dir)))
     (with-temp-buffer
       (insert-file-contents script)
       (let ((contents (buffer-string)))
-        (should (string-match-p
-                 "clojure -Srepro -M:test"
-                 contents))
+        (dolist (required '("clojure -Sdescribe"
+                            "clojure-tools-*.jar"
+                            "org.clojure/clojure {:local/root"
+                            "clojure -Srepro"
+                            "-M:test"))
+          (should (string-match-p (regexp-quote required) contents)))
         (should-not (string-match-p
                      "lein"
                      contents))))))

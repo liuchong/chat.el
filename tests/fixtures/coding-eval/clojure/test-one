@@ -9,4 +9,40 @@ case "${1-}" in
   *) echo "unknown test" >&2; exit 2 ;;
 esac
 
-clojure -Srepro -M:test "$test_name"
+clojure_install_dir=
+while IFS= read -r line; do
+  case "$line" in
+    ' :install-dir "'*'"')
+      clojure_install_dir=${line#*\"}
+      clojure_install_dir=${clojure_install_dir%\"*}
+      ;;
+  esac
+done <<EOF
+$(clojure -Sdescribe)
+EOF
+
+case "$clojure_install_dir" in
+  /*) ;;
+  *)
+    echo "official Clojure CLI install directory is unavailable" >&2
+    exit 2
+    ;;
+esac
+
+set -- "$clojure_install_dir"/libexec/clojure-tools-*.jar
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+  echo "official Clojure CLI tools jar is unavailable" >&2
+  exit 2
+fi
+
+clojure_tools_jar=$1
+case "$clojure_tools_jar" in
+  *\"*|*\\*)
+    echo "unsupported Clojure CLI tools jar path" >&2
+    exit 2
+    ;;
+esac
+
+clojure -Srepro \
+  -Sdeps "{:deps {org.clojure/clojure {:local/root \"$clojure_tools_jar\"}}}" \
+  -M:test "$test_name"

@@ -55,42 +55,42 @@
     },
 
     {
-      "id": "clojure-locate", "revision": 2, "category": "locate-explain", "language": "clojure",
-      "description": "Locate a user lookup implementation.", "fixtureId": "clojure-sample-v2", "fixture": "clojure",
+      "id": "clojure-locate", "revision": 3, "category": "locate-explain", "language": "clojure",
+      "description": "Locate a user lookup implementation.", "fixtureId": "clojure-sample-v3", "fixture": "clojure",
       "prompt": "Find the function that looks up a user by numeric identifier and explain its missing-user result. Do not edit files.",
       "allowedPaths": ["src/sample/core.clj"], "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "find-user"}, {"type": "no-change", "name": "read-only"}]
     },
     {
-      "id": "clojure-single-fix", "revision": 2, "category": "single-file-fix", "language": "clojure",
-      "description": "Correct division behavior.", "fixtureId": "clojure-sample-v2", "fixture": "clojure",
+      "id": "clojure-single-fix", "revision": 3, "category": "single-file-fix", "language": "clojure",
+      "description": "Correct division behavior.", "fixtureId": "clojure-sample-v3", "fixture": "clojure",
       "prompt": "Fix divide so it preserves ratio results and throws IllegalArgumentException when the divisor is zero.",
       "allowedPaths": ["src/sample/core.clj"], "generatedPaths": [".cpcache"],
       "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
     },
     {
-      "id": "clojure-multi-file", "revision": 2, "category": "multi-file-change", "language": "clojure",
-      "description": "Change a label contract and its documentation.", "fixtureId": "clojure-sample-v2", "fixture": "clojure",
+      "id": "clojure-multi-file", "revision": 3, "category": "multi-file-change", "language": "clojure",
+      "description": "Change a label contract and its documentation.", "fixtureId": "clojure-sample-v3", "fixture": "clojure",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
       "allowedPaths": ["src/sample/core.clj", "README.md"], "generatedPaths": [".cpcache"],
       "judges": [{"type": "command", "name": "label-tests", "command": ["sh", "test-one", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
-      "id": "clojure-refactor", "revision": 2, "category": "refactor", "language": "clojure",
-      "description": "Extract normalization detail.", "fixtureId": "clojure-sample-v2", "fixture": "clojure",
+      "id": "clojure-refactor", "revision": 3, "category": "refactor", "language": "clojure",
+      "description": "Extract normalization detail.", "fixtureId": "clojure-sample-v3", "fixture": "clojure",
       "prompt": "Refactor normalize-name by extracting whitespace cleanup into a private helper named clean-name. Preserve behavior.",
       "allowedPaths": ["src/sample/core.clj"], "generatedPaths": [".cpcache"],
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["sh", "test-one", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "src/sample/core.clj", "regexp": "clean-name"}]
     },
     {
-      "id": "clojure-failing-test", "revision": 2, "category": "failing-test-fix", "language": "clojure",
-      "description": "Repair an activity-state regression.", "fixtureId": "clojure-sample-v2", "fixture": "clojure",
+      "id": "clojure-failing-test", "revision": 3, "category": "failing-test-fix", "language": "clojure",
+      "description": "Repair an activity-state regression.", "fixtureId": "clojure-sample-v3", "fixture": "clojure",
       "prompt": "The active-test test fails. Fix the implementation, keeping the test unchanged.",
       "allowedPaths": ["src/sample/core.clj"], "generatedPaths": [".cpcache"],
       "judges": [{"type": "command", "name": "active-tests", "command": ["sh", "test-one", "active"], "expectedExit": 0}]
     },
     {
-      "id": "clojure-review", "revision": 2, "category": "read-only-review", "language": "clojure",
-      "description": "Review role matching.", "fixtureId": "clojure-sample-v2", "fixture": "clojure",
+      "id": "clojure-review", "revision": 3, "category": "read-only-review", "language": "clojure",
+      "description": "Review role matching.", "fixtureId": "clojure-sample-v3", "fixture": "clojure",
       "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
       "allowedPaths": ["src/sample/core.clj"], "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "admin"}, {"type": "no-change", "name": "read-only"}]
     },

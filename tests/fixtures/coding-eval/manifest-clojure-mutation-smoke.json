@@ -9,11 +9,11 @@
   "tasks": [
     {
       "id": "clojure-failing-test",
-      "revision": 2,
+      "revision": 3,
       "category": "failing-test-fix",
       "language": "clojure",
       "description": "Repair an activity-state regression.",
-      "fixtureId": "clojure-sample-v2",
+      "fixtureId": "clojure-sample-v3",
       "fixture": "clojure",
       "prompt": "The active-test test fails. Fix the implementation, keeping the test unchanged.",
       "allowedPaths": [

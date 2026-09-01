@@ -452,7 +452,7 @@ ecosystem，不能按第一个 manifest 短路；生成代码、vendor、fixture
 
 产品验证的命令权威顺序固定为 embedding profile、项目
 `.chat-verification.json`、可确定 adapter、`not-run`。Zig 只接受显式 `test` build
-step；Clojure 只接受 Lein 项目；Java 使用离线 Maven
+step；Clojure 只接受结构化声明的官方 Clojure CLI 命令；Java 使用离线 Maven
 或已提交的 Gradle wrapper；TypeScript 优先项目内 `tsc`，并避免重复 package
 `typecheck`；C、C++、SQL 只在 Make 权威中存在精确 `test:` target 时运行
 `make test`。文件扩展名、普通 build 文件或源码存在性都不能单独授权执行命令。
@@ -1481,6 +1481,13 @@ DeepSeek Clojure 在第 12 步有一次被守卫拒绝的越界 `files_list`，�
 该单次观察只进入候选经验，不据此固化语言规则。完整记录见
 `.agents/30-records/logs/stage-2026-09-01-typescript-clojure-dual-provider-qualification.md`。
 下一门禁是相同 manifest 与预算下独立、不可混合的 baseline/current 五次重复矩阵。
+
+第一次完整 development campaign 随后证明宿主机离线预检仍不足以代表真实 judge：
+`clojure-multi-file` 在 Darwin build sandbox 内无法访问开发者 Maven 缓存，也不能联网解析
+`org.clojure/clojure`。该 campaign 已中止并只保留为基础设施事故证据，不计入模型成败，
+也不得在执行合同变化后恢复。修复必须让 fixture runner 仅使用官方 CLI 自带 runtime，
+通过真实 sandbox 回归后提升 Clojure task revision 与 fixture identity，再以新 manifest 和
+新 revision 重建 focused cells 及完整 campaign。不得扩大 sandbox 到用户缓存或网络。
 
 #### 退出条件
 

@@ -192,7 +192,7 @@ The extended language profiles use these deterministic local toolchains:
 | Language | Project shape | Targeted judge | Generated paths |
 |---|---|---|---|
 | Zig | package-free source and tests | `zig test` with a test filter | `.zig-cache`, `zig-out` |
-| Clojure | dependency-free Clojure CLI project | `clojure -Srepro -M:test` with a named test | `.cpcache` |
+| Clojure | dependency-free Clojure CLI project | official CLI with its bundled runtime and a named `clojure.test` var | `.cpcache` |
 | Java | source plus explicit test harness | `javac -d` then `java -cp` | `.chat-eval-build/java` |
 | TypeScript | local compiler plus dependency-free Node test | `tsc --noEmit` then `node --test` on a named test | none |
 | C | C17 source plus test harness | `clang` then a named harness case | `.chat-eval-build/c` |
@@ -213,9 +213,13 @@ The Clojure fixture has no project dependency or downloaded test runner. Its
 `deps.edn` adds only checked-in source and test paths, while `-Srepro` excludes
 user-level aliases and dependencies. The fixture-owned runner resolves exactly
 one named `clojure.test` var, reports its assertions and returns a deterministic
-process status. Product verification does not infer test authority from an
-arbitrary `deps.edn`; a Clojure project declares its CLI command through the
-existing structured `.chat-verification.json` contract.
+process status. It obtains the install directory from the official CLI's
+`-Sdescribe` result, requires exactly one bundled `clojure-tools` jar and binds
+`org.clojure/clojure` to that local jar. The judge therefore cannot consult the
+developer's Maven cache or the network for its runtime. Product verification
+does not infer test authority from an arbitrary `deps.edn`; a Clojure project
+declares its CLI command through the existing structured
+`.chat-verification.json` contract.
 The manifest-level `requiredExecutables` list names every external executable
 used behind a fixture wrapper. Preflight resolves the union of that list and
 the first argv item of every command judge. A wrapper such as `sh test-one`
@@ -370,7 +374,8 @@ Development qualification has four gates:
 1. **contract gate**: manifest schema, task/category balance, path safety and
    fixture digests pass;
 2. **offline gate**: every fixture can setup, execute every judge and clean up
-   without a provider call;
+   without a provider call, in the same execution-isolation class used by live
+   judges when that class is available;
 3. **focused live gate**: one mutation task per added language passes with the
    fixed provider/model/capability snapshot;
 4. **repeated live gate**: all 42 extended tasks run three times for development
@@ -384,6 +389,11 @@ known-good behavior passes, verifies that each seeded defect fails for the
 expected semantic reason, and removes the workspace on every exit. Running it
 without language arguments requires all seven toolchains; named language
 arguments support bounded local diagnosis but do not satisfy the complete gate.
+Host-side executable and dependency visibility is insufficient evidence for a
+sandboxed judge. Every fixture whose runtime can resolve user caches or network
+state also needs a regression that executes its healthy judge through the real
+isolation backend. Failure there blocks live campaigns as infrastructure error,
+never as model failure.
 
 Each final extended campaign contains 210 unique trials. DeepSeek
 `deepseek-v4-flash` and Kimi Code `k3-256k` each require a separate baseline
