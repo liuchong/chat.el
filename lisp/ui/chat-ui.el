@@ -39,6 +39,7 @@
 (require 'chat-work-plan)
 (require 'chat-goal)
 (require 'chat-plan-mode)
+(require 'chat-repl)
 (require 'chat-work-shelf)
 (require 'chat-transcript)
 (require 'chat-markdown)
@@ -631,6 +632,7 @@ design was.")
     (:name "clear"    :handler chat-ui--command-clear)
     (:name "goal"     :handler chat-ui--command-goal)
     (:name "plan"     :handler chat-ui--command-plan)
+    (:name "repl"     :handler chat-ui--command-repl :while-busy t)
     (:name "wiki"     :handler chat-wiki-dispatch)
     (:name "approve"  :handler chat-ui--command-approve)
     (:name "auto"     :handler chat-ui--command-auto))
@@ -1864,7 +1866,11 @@ A claimed line names the command; an unclaimed one names the provider and
 model, because that is what it will reach.  Neither shows the other: the
 model is not what a shell line is about, and the baseline command has
 never been announced by name."
-  (let ((claimed (chat-ui-default-command-claimed-p)))
+  (let* ((claimed (chat-ui-default-command-claimed-p))
+         (command (chat-ui-default-command))
+         (repl (and (equal command "repl")
+                    chat--current-session
+                    (chat-repl-for-chat-session chat--current-session))))
     (concat
      (chat-ui--work-shelf-prompt-segment)
      (chat-ui--pending-attachments-prompt)
@@ -1872,13 +1878,17 @@ never been announced by name."
          (concat (chat-ui--prompt-model-segment)
                  (chat-ui--prompt-send-mode-segment)
                  (chat-ui--prompt-segment "> "))
-       (let ((mark (chat-mark-for-mode (chat-ui-default-command))))
+       (let ((mark (chat-mark-for-mode command)))
          (concat
           (chat-ui--prompt-mark (car mark) (cdr mark))
           (chat-ui--prompt-segment
-           (format "%s%s> "
-                   (chat-ui--display-command-name (chat-ui-default-command))
-                   (chat-ui--prompt-send-mode-text))
+           (if repl
+               (format "repl:%s#%d> "
+                       (chat-repl-session-adapter-id repl)
+                       (chat-repl-session-generation repl))
+             (format "%s%s> "
+                     (chat-ui--display-command-name command)
+                     (chat-ui--prompt-send-mode-text)))
            'face 'chat-ui-claimed-prompt)))))))
 
 (defun chat-ui--prompt-send-mode-text ()
@@ -3088,6 +3098,129 @@ is what lets the display group them instead of guessing from position."
   (if (string-empty-p arg)
       (message "%s" (chat-i18n 'shell-usage "Usage: !<command>"))
     (chat-ui--handle-shell-command arg)))
+
+(defun chat-ui--repl-status-text (session)
+  "Return a compact status report for REPL SESSION."
+  (if (not session)
+      "No REPL is selected. Use /repl start shell or /repl start clojure."
+    (format "REPL %s #%d [%s]\n%s"
+            (chat-repl-session-adapter-id session)
+            (chat-repl-session-generation session)
+            (chat-repl-session-status session)
+            (chat-repl-session-directory session))))
+
+(defun chat-ui--repl-result-observer (buffer chat-session-id)
+  "Return a bounded result observer for BUFFER and CHAT-SESSION-ID."
+  (lambda (status value transaction)
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and chat--current-session
+                   (equal (chat-session-id chat--current-session)
+                          chat-session-id))
+          (let* ((repl (chat-repl-for-chat-session chat--current-session))
+                 (adapter (and repl (chat-repl-session-adapter-id repl)))
+                 (generation (and repl (chat-repl-session-generation repl)))
+                 (text (string-trim-right (or value ""))))
+            (chat-ui--insert-system-message
+             (format "REPL %s #%s [%s] %s%s"
+                     (or adapter "closed") (or generation "-") status
+                     (chat-repl-transaction-id transaction)
+                     (if (string-empty-p text)
+                         ""
+                       (format "\n%s" (chat-ui--repl-fenced-text text)))))
+            (chat-ui--render-input-prompt)))))))
+
+(defun chat-ui--repl-fenced-text (text)
+  "Return TEXT in a Markdown fence that cannot be closed by its contents."
+  (let ((longest 0)
+        (current 0))
+    (dotimes (index (length text))
+      (if (eq (aref text index) ?`)
+          (setq current (1+ current)
+                longest (max longest current))
+        (setq current 0)))
+    (let ((fence (make-string (max 3 (1+ longest)) ?`)))
+      (format "%stext\n%s\n%s" fence text fence))))
+
+(defun chat-ui--repl-eval (code)
+  "Queue CODE in the current session's selected REPL."
+  (let ((repl (and chat--current-session
+                   (chat-repl-for-chat-session chat--current-session))))
+    (unless repl
+      (user-error "No REPL is selected; use /repl start shell or /repl start clojure"))
+    (when (string-empty-p (string-trim code))
+      (user-error "REPL input is empty"))
+    (chat-repl-eval
+     repl code
+     (chat-ui--repl-result-observer (current-buffer)
+                                    (chat-session-id chat--current-session)))
+    (message "REPL input queued: %s" (chat-repl-session-adapter-id repl))))
+
+(defun chat-ui--repl-split-request (arg)
+  "Return (ACTION . REST) parsed from REPL command ARG."
+  (let ((trimmed (string-trim (or arg ""))))
+    (if (string-empty-p trimmed)
+        (cons "" "")
+      (if (string-match "\\`\\([^[:space:]]+\\)\\(?:[[:space:]]+\\(.*\\)\\)?\\'"
+                        trimmed)
+          (cons (downcase (match-string 1 trimmed))
+                (or (match-string 2 trimmed) ""))
+        (cons trimmed "")))))
+
+(defun chat-ui--command-repl (arg)
+  "Manage or evaluate the current session's persistent REPL using ARG."
+  (if chat-ui--input-was-typed
+      (chat-ui--repl-eval arg)
+    (pcase-let* ((`(,action . ,rest) (chat-ui--repl-split-request arg))
+                 (session (and chat--current-session
+                               (chat-repl-for-chat-session
+                                chat--current-session))))
+      (pcase action
+        ("start"
+         (when session
+           (user-error "A REPL is already selected; close it before starting another"))
+         (let* ((name (if (string-empty-p rest) "shell" (string-trim rest)))
+                (adapter (intern-soft name))
+                (directory (or (chat-session-working-directory
+                                chat--current-session)
+                               default-directory)))
+           (unless (and adapter (memq adapter (chat-repl-adapter-ids)))
+             (user-error "Unavailable REPL adapter: %s" name))
+           (setq session (chat-repl-start chat--current-session adapter directory))
+           (chat-ui--set-default-command "repl")
+           (chat-ui--render-default-command)
+           (chat-ui--insert-system-message (chat-ui--repl-status-text session))))
+        ("eval" (chat-ui--repl-eval rest))
+        ("interrupt"
+         (unless session (user-error "No REPL is selected"))
+         (chat-repl-interrupt session "interrupted by developer")
+         (chat-ui--insert-system-message (chat-ui--repl-status-text session))
+         (chat-ui--render-input-prompt))
+        ("reset"
+         (unless session (user-error "No REPL is selected"))
+         (chat-repl-reset session)
+         (chat-ui--insert-system-message (chat-ui--repl-status-text session))
+         (chat-ui--render-input-prompt))
+        ("close"
+         (unless session (user-error "No REPL is selected"))
+         (chat-repl-close session)
+         (when (equal (chat-ui-default-command) "repl")
+           (chat-ui--set-default-command nil)
+           (chat-ui--render-default-command))
+         (chat-ui--insert-system-message "REPL closed."))
+        ((or "status" "")
+         (chat-ui--insert-system-message (chat-ui--repl-status-text session)))
+        ("adapters"
+         (chat-ui--insert-system-message
+          (format "REPL adapters: %s"
+                  (mapconcat #'symbol-name (chat-repl-adapter-ids) ", "))))
+        ("list"
+         (chat-ui--insert-system-message
+          (if session (chat-ui--repl-status-text session)
+            "No REPL is selected.")))
+        (_
+         (user-error
+          "Usage: /repl start ADAPTER | eval CODE | interrupt | reset | status | adapters | close"))))))
 
 ;; ------------------------------------------------------------------
 ;; Sending while something is already running

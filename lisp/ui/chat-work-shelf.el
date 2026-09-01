@@ -17,6 +17,7 @@
 (require 'chat-goal)
 (require 'chat-plan-mode)
 (require 'chat-work-plan)
+(require 'chat-repl)
 
 (defcustom chat-work-shelf-summary-width 120
   "Maximum display width of one work-shelf summary."
@@ -319,6 +320,45 @@
          (when-let ((feedback (plist-get projection :feedback)))
            (concat (propertize "Feedback: " 'face 'shadow) feedback)))))
 
+(defun chat-work-shelf--repl-summary (projection)
+  "Return one-line REPL summary for PROJECTION."
+  (let ((status (plist-get projection :status)))
+    (propertize
+     (format "REPL %s #%d [%s]"
+             (plist-get projection :adapter)
+             (plist-get projection :generation)
+             status)
+     'face (pcase status
+             ((or 'failed 'interrupted) 'warning)
+             ('busy 'font-lock-keyword-face)
+             (_ 'success)))))
+
+(defun chat-work-shelf--repl-details (projection)
+  "Return bounded REPL detail rows for PROJECTION."
+  (append
+   (list (format "Directory: %s" (plist-get projection :directory)))
+   (when-let ((active (plist-get projection :active-transaction)))
+     (list (format "Running: %s" active)))
+   (mapcar
+    (lambda (transaction)
+      (let ((output
+             (replace-regexp-in-string
+              "[[:space:]\n\r]+" " "
+              (string-trim
+               (or (chat-repl-transaction-output transaction) "")))))
+        (format "[%s] %s%s"
+                (chat-repl-transaction-status transaction)
+                (chat-repl-transaction-id transaction)
+                (if (string-empty-p output)
+                    ""
+                  (format " - %s%s"
+                          (truncate-string-to-width output 80 nil nil t)
+                          (if (chat-repl-transaction-output-truncated-p
+                               transaction)
+                              " [truncated]"
+                            ""))))))
+    (plist-get projection :transactions))))
+
 (defun chat-work-shelf-install-default-providers ()
   "Install the canonical initial work-shelf providers."
   (chat-work-shelf-register-provider
@@ -358,7 +398,17 @@
     :event-types
     '(plan-mode-entered plan-mode-submitted plan-mode-approved
       plan-mode-rejected plan-mode-exited plan-mode-refused
-      plan-mode-conflicted))))
+      plan-mode-conflicted)))
+  (chat-work-shelf-register-provider
+   (chat-work-shelf-provider-create
+    :id 'repl :priority 50
+    :project-fn #'chat-repl-ui-projection
+    :summary-fn #'chat-work-shelf--repl-summary
+    :details-fn #'chat-work-shelf--repl-details
+    :event-types
+    '(repl-created repl-started repl-eval-queued repl-eval-started repl-output
+      repl-eval-completed repl-eval-failed repl-eval-interrupted repl-reset
+      repl-process-ended repl-closed))))
 
 (chat-work-shelf-install-default-providers)
 

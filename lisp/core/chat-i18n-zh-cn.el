@@ -51,6 +51,7 @@
    ("清理" . "clear")
    ("目标" . "goal")
    ("规划" . "plan")
+   ("交互解释器" . "repl")
    ("知识库" . "wiki")
    ("审批" . "approve")
    ("自动" . "auto")))
@@ -73,6 +74,15 @@
   /cancel               - 取消当前 AI 请求
   /help [关键词]        - 本帮助，或只看含关键词的行
   /model <名称>         - 切换本会话的模型（C-c C-m，不给名称则提示选择）
+
+持久 REPL：
+  /repl start shell     - 启动隔离且持久的 shell
+  /repl start clojure   - 启动官方 Clojure CLI 适配器
+  /repl eval <代码>     - 将代码排队执行，不改变当前输入模式
+  /repl interrupt       - 中断当前输入；再次使用前必须 reset
+  /repl reset           - 启动一个干净的新进程代际
+  /repl status|adapters - 查看当前 REPL 或可用适配器
+  /repl close           - 关闭 REPL 并回收完整进程树
 
 /send 和 /quick 是两种问法，区别在于留下什么：/send 是对话本身，会写进
 记录，由一次可以读文件、可以分步推进的运行来回答。/quick 是搭在对话旁边

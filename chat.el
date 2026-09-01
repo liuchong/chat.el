@@ -108,6 +108,7 @@ Returns the list of files that were loaded."
 (require 'chat-checkpoint)
 (require 'chat-workspace)
 (require 'chat-task)
+(require 'chat-repl)
 (require 'chat-extension-trust)
 (require 'chat-runtime-hook)
 (require 'chat-session-index)
@@ -178,6 +179,7 @@ Returns the list of files that were loaded."
 (chat-load-config-files chat-root-directory)
 
 (chat-execution-initialize)
+(chat-repl-initialize)
 (chat-checkpoint-install)
 
 (chat-tool-forge-load-all)
@@ -271,6 +273,15 @@ size when the user chooses the more-sessions action."
   /cancel               - Cancel current AI request
   /help [topic]         - This help, or only the lines mentioning topic
   /model <name>         - Switch this session's model (C-c C-m, no name prompts)
+
+Persistent REPL:
+  /repl start shell     - Start an isolated persistent shell
+  /repl start clojure   - Start the official Clojure CLI adapter
+  /repl eval <code>     - Queue code without changing input mode
+  /repl interrupt       - Interrupt the active input; reset before reuse
+  /repl reset           - Start a clean process generation
+  /repl status|adapters - Inspect the selected REPL or available adapters
+  /repl close           - Close the REPL and release its process tree
 
 /send and /quick are the two ways of asking, and the difference is what
 is kept: /send is the conversation, written down and answered by a run

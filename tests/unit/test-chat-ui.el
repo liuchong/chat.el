@@ -1029,7 +1029,7 @@ gone by the next command."
   "Every command named in the help text has a handler."
   (dolist (name '("cancel" "help" "model" "send" "quick" "?" "cmd" "!"
                   "stage" "cd" "pwd" "new" "list" "save"
-                  "clear" "goal" "plan" "auto"))
+                  "clear" "goal" "plan" "repl" "auto"))
     (let ((handler (chat-ui--command-handler name)))
       (should handler)
       (should (fboundp handler)))))
@@ -1045,9 +1045,10 @@ gone by the next command."
       (should (fboundp handler)))))
 
 (ert-deftest chat-ui-control-command-limits-what-runs-during-a-response ()
-  "Only cancel and model are reachable while a response is in flight."
+  "Only explicitly independent controls run while a response is in flight."
   (should (chat-ui--control-command (chat-command-parse "/cancel")))
   (should (chat-ui--control-command (chat-command-parse "／model kimi")))
+  (should (chat-ui--control-command (chat-command-parse "/repl status")))
   (should-not (chat-ui--control-command (chat-command-parse "/cd /tmp")))
   (should-not (chat-ui--control-command (chat-command-parse "!ls")))
   (should-not (chat-ui--control-command (chat-command-parse "hello"))))
