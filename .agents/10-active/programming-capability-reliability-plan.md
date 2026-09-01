@@ -1414,6 +1414,14 @@ DeepSeek 分别用 42.391、21.224 秒，Kimi `k3-256k` 分别用 208.408、188.
 不会保存参数或原始输出。完整证据见
 `.agents/30-records/logs/stage-2026-09-01-extended-time-budget.md`。
 
+Revision `6a6319e` 的当前 Java focused manifest 在同一 digest 上完成双模型资格：DeepSeek
+`deepseek-v4-flash` 用 16.856 秒，Kimi Code `k3-256k` 用 68.758 秒；双方均为 8 次
+精确身份请求、9 次 tool call/result、0 tool error、4 次 approval，只修改
+`src/Sample.java`，三个声明的 class 产物均被清理。TypeScript 与 Clojure 的同 revision
+预检分别因缺少独立 `tsc` 与 `lein` 可执行文件，在 readiness 和模型请求前 BLOCKED；
+不得借用嵌套依赖二进制、自动安装工具链或把环境缺失计成模型失败。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-java-qualification-and-toolchain-preflight.md`。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
