@@ -33,7 +33,8 @@
   :group 'chat-execution-darwin)
 
 (defconst chat-execution-darwin--standard-read-roots
-  '("/System" "/Library/Apple" "/Library/Developer" "/Applications/Xcode.app"
+  '("/System" "/Library/Apple" "/Library/Developer"
+    "/Library/Java/JavaVirtualMachines" "/Applications/Xcode.app"
     "/bin" "/sbin" "/usr/bin" "/usr/lib" "/usr/libexec" "/usr/share"
     "/usr/local" "/opt/homebrew" "/private/etc/ssl" "/dev")
   "System locations required by ordinary compiler and test processes.")

@@ -160,6 +160,31 @@
          (when (buffer-live-p output) (kill-buffer output))
          (when (buffer-live-p errors) (kill-buffer errors))))))))
 
+(ert-deftest chat-execution-isolation-build-runs-system-java-runtime ()
+  "A sandboxed build may read the registered system Java runtime."
+  (skip-unless (and (eq system-type 'darwin)
+                    (file-executable-p "/usr/bin/java")
+                    (file-directory-p "/Library/Java/JavaVirtualMachines")))
+  (chat-test-with-temp-dir
+   (chat-execution-isolation-test--with-runtime
+     (let* ((project (expand-file-name "project/" temp-dir))
+            (output (generate-new-buffer " *isolation-java-output*"))
+            (errors (generate-new-buffer " *isolation-java-errors*")))
+       (make-directory project)
+       (unwind-protect
+           (let ((run
+                  (chat-execution-start
+                   (chat-execution-isolation-test--request
+                    project (list "/usr/bin/java" "--version")
+                    'build nil 10)
+                   :buffer output :stderr errors)))
+             (chat-execution-isolation-test--wait run 10)
+             (ert-info ((concat (with-current-buffer output (buffer-string))
+                                (with-current-buffer errors (buffer-string))))
+               (should (eq 'completed (chat-execution-record-status run)))))
+         (when (buffer-live-p output) (kill-buffer output))
+         (when (buffer-live-p errors) (kill-buffer errors)))))))
+
 (ert-deftest chat-execution-isolation-build-runs-emacs-with-managed-home ()
   "A sandboxed Emacs must not consult the developer's AppKit state."
   (skip-unless (and (eq system-type 'darwin)
