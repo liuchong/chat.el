@@ -93,9 +93,21 @@ every turn instead of consulting mutable provider defaults."
        (maxOutputTokens .
                         ,(chat-model-capabilities-max-output-tokens facts))))))
 
+(defun chat-campaign-runner--reject-supersession-prompt (&rest _arguments)
+  "Fail closed when a frozen product tries to ask about a stale buffer.
+
+Live campaigns are unattended and must never read a human answer from stdin.
+The tool call receives this error and may recover normally; the harness does
+not edit, revert or synchronize the product's visiting buffer on its behalf."
+  (error "Coding evaluation refused an interactive supersession prompt"))
+
 (defun chat-campaign-runner--configure-implementation-contracts
     (agent-version observer-version capability-version)
   "Configure Eval adapters for frozen implementation protocol versions."
+  (unless (advice-member-p #'chat-campaign-runner--reject-supersession-prompt
+                           'ask-user-about-supersession-threat)
+    (advice-add 'ask-user-about-supersession-threat :override
+                #'chat-campaign-runner--reject-supersession-prompt))
   (pcase agent-version
     (2 nil)
     ('nil

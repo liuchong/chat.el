@@ -1344,6 +1344,21 @@
    (chat-campaign-runner--configure-implementation-contracts 2 1 3)
    :type 'error))
 
+(ert-deftest chat-campaign-runner-refuses-interactive-supersession ()
+  "An unattended campaign turns a historical edit prompt into a tool error."
+  (let (asked)
+    (cl-letf (((symbol-function 'ask-user-about-supersession-threat)
+               (lambda (&rest _arguments) (setq asked t))))
+      (unwind-protect
+          (progn
+            (chat-campaign-runner--configure-implementation-contracts 2 1 2)
+            (should-error
+             (ask-user-about-supersession-threat "sample.zig")
+             :type 'error)
+            (should-not asked))
+        (advice-remove 'ask-user-about-supersession-threat
+                       #'chat-campaign-runner--reject-supersession-prompt)))))
+
 (ert-deftest chat-coding-eval-total-usage-never-fills-a-missing-counter ()
   "A partial provider usage field is omitted instead of counted as zero."
   (let ((total
