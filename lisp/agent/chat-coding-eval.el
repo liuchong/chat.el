@@ -85,6 +85,13 @@ The total error count remains exact when this limit is exceeded."
   "Maximum characters retained from one evaluation tool error summary."
   :type 'integer :group 'chat)
 
+(defcustom chat-coding-eval-max-tool-call-summary-records 20
+  "Maximum distinct tool names retained in one evaluation summary.
+
+The total call count remains exact when this limit is exceeded.  Summaries
+contain only bounded tool names and counts, never arguments or results."
+  :type 'integer :group 'chat)
+
 (defcustom chat-coding-eval-tool-version-timeout-seconds 5
   "Maximum seconds allowed for one campaign tool version probe."
   :type 'number :group 'chat)
@@ -184,6 +191,32 @@ The total error count remains exact when this limit is exceeded."
             (cons 'errorType (format "%s" error-type)))
           (and summary (not (string-empty-p summary))
                (cons 'summary summary))))))))
+
+(defun chat-coding-eval--tool-call-summary (calls)
+  "Return bounded deterministic tool-name counts for CALLS.
+
+The result is a plist with :records and :truncated, where :truncated counts
+distinct tool names omitted by `chat-coding-eval-max-tool-call-summary-records'."
+  (let ((counts (make-hash-table :test #'equal))
+        names)
+    (dolist (call calls)
+      (let* ((raw-name (plist-get call :name))
+             (name (if raw-name
+                       (truncate-string-to-width (format "%s" raw-name) 128)
+                     "<unknown>")))
+        (puthash name (1+ (gethash name counts 0)) counts)))
+    (maphash (lambda (name _count) (push name names)) counts)
+    (setq names (sort names #'string<))
+    (let* ((limit (max 0 chat-coding-eval-max-tool-call-summary-records))
+           (retained (if (> (length names) limit)
+                         (cl-subseq names 0 limit)
+                       names)))
+      (list
+       :records
+       (mapcar (lambda (name)
+                 `((tool . ,name) (count . ,(gethash name counts))))
+               retained)
+       :truncated (max 0 (- (length names) (length retained)))))))
 
 (defun chat-coding-eval--read-generator (relative manifest-directory)
   "Read and validate generator RELATIVE to MANIFEST-DIRECTORY."
@@ -1891,6 +1924,8 @@ ordinary application execution always uses protocol v2.")
                 (tool-results (or tool-results
                                   (and run
                                        (chat-agent-run-state-tool-results run))))
+                (tool-call-summary
+                 (chat-coding-eval--tool-call-summary tool-calls))
                 (identities (reverse request-identities))
                 (identity-valid
                  (and identities
@@ -1943,6 +1978,9 @@ ordinary application execution always uses protocol v2.")
               (traceId . nil)
               (steps . ,steps)
               (toolCallCount . ,(length tool-calls))
+              (toolCallSummary . ,(plist-get tool-call-summary :records))
+              (toolCallSummaryTruncated .
+                                        ,(plist-get tool-call-summary :truncated))
               (toolResultCount . ,(length tool-results))
               (toolErrorCount . ,tool-errors)
               (toolErrors . ,(reverse tool-error-records))

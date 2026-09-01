@@ -153,6 +153,14 @@ or pool their results. A passing recovery smoke proves only that the observed
 failure set closed. Full core qualification remains pending until all 30
 `coding-core-v2` tasks pass under the same manifest digest.
 
+When a recovery task times out after successful tool calls but before mutation,
+run `manifest-go-refactor-diagnostic.json` as an independent one-task campaign.
+The result must retain the exact concrete model identity, `toolCallCount`, the
+bounded `toolCallSummary`, its omitted-name count, request count, changed files
+and cleanup outcome. This diagnostic is evidence for deciding the next common
+or candidate policy; it is not a retry that can overwrite the failed recovery
+trial.
+
 `manifest-large-repo.json` must remain an exact structural copy of the core
 `python-locate` task. Its baseline and current campaigns each contain exactly
 five unique repetitions. Final acceptance verifies that both focused campaigns

@@ -11,6 +11,7 @@ Stable entry points:
   extensions and required toolchains in a machine-readable form;
 - `manifest.json` defines the executable 30-task core corpus;
 - `manifest-core-reliability-smoke.json` keeps the exact six M21 recovery tasks;
+- `manifest-go-refactor-diagnostic.json` isolates one canonical no-progress task;
 - `request-footprint-baseline.json` freezes the M9 first-request byte baseline
   and its 110 percent regression ceiling;
 - `ACCEPTANCE.md` contains the repeatable run sequence, representative smoke
@@ -22,6 +23,7 @@ Stable entry points:
 |---|---|---:|---:|---|
 | `manifest.json` | Emacs Lisp, Python, JavaScript, Go, Rust | 6 | 30 | executable core corpus |
 | `manifest-core-reliability-smoke.json` | JavaScript, Go, Rust | observed failures only | 6 | focused cross-provider recovery gate |
+| `manifest-go-refactor-diagnostic.json` | Go | refactor | 1 | successful-tool no-progress diagnosis |
 | `manifest-extended.json` | Zig, Clojure, Java, TypeScript, C, C++, SQL | 6 | 42 | executable extended corpus |
 | `manifest-extended-mutation-smoke.json` | all extended languages | 1 | 7 | combined mutation gate |
 | `manifest-<language>-mutation-smoke.json` | one extended language | 1 | 1 | independent provider control |
@@ -56,6 +58,11 @@ cross-provider evidence remains separate.
 the six core tasks that failed the first exact-identity M21 control. It is the
 bounded gate for a common-layer correction. Passing it does not replace a full
 30-task core qualification.
+
+`manifest-go-refactor-diagnostic.json` is unit-checked as an exact copy of the
+canonical core `go-refactor` task. Use it only to inspect request, tool-call and
+mutation progress for one concrete model. It cannot contribute additional core
+successes or replace the six-task recovery gate.
 
 The core, extended and focused manifests declare a shared 300-second correctness
 observation window. The value participates in the manifest digest, is inherited

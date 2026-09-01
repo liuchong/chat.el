@@ -158,6 +158,8 @@ For each provider/model pair, run the same immutable core manifest and report:
 - results per language and task category;
 - first-request, final-request and total usage with coverage;
 - request count, latency distribution, scope and cleanup violations;
+- bounded tool-name histograms that expose successful no-progress loops without
+  retaining tool arguments or results;
 - malformed tool calls, repair attempts and unchanged retries;
 - which common or candidate adaptation policy was active.
 

@@ -41,6 +41,10 @@
   (expand-file-name "coding-eval/manifest-core-reliability-smoke.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-go-refactor-diagnostic-manifest
+  (expand-file-name "coding-eval/manifest-go-refactor-diagnostic.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-language-registry
   (expand-file-name "coding-eval/language-registry.json"
                     chat-test-fixtures-dir))
@@ -290,6 +294,25 @@
     (should (equal expected (alist-get 'tasks focused)))
     (dolist (task (chat-coding-eval-load-suite
                    chat-coding-eval-test-core-reliability-smoke-manifest))
+      (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
+
+(ert-deftest chat-coding-eval-go-refactor-diagnostic-is-an-exact-subset ()
+  "The model-progress diagnostic reuses the canonical Go refactor task."
+  (let* ((core (chat-coding-eval-test--read-json
+                chat-coding-eval-test-manifest))
+         (diagnostic
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-go-refactor-diagnostic-manifest))
+         (core-task
+          (seq-find (lambda (task)
+                      (equal "go-refactor" (alist-get 'id task)))
+                    (alist-get 'tasks core))))
+    (should (equal "coding-go-refactor-diagnostic-v1"
+                   (alist-get 'corpusId diagnostic)))
+    (should (= 300 (alist-get 'taskTimeoutSeconds diagnostic)))
+    (should (equal (list core-task) (alist-get 'tasks diagnostic)))
+    (let ((task (car (chat-coding-eval-load-suite
+                      chat-coding-eval-test-go-refactor-diagnostic-manifest))))
       (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
 
 (ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()
@@ -895,6 +918,7 @@
   (chat-test-with-temp-dir
    (let* ((chat-coding-eval-max-tool-error-records 1)
           (chat-coding-eval-max-tool-error-summary-chars 80)
+          (chat-coding-eval-max-tool-call-summary-records 2)
           (task (chat-coding-eval-test--task temp-dir nil))
           config status metadata)
      (cl-letf (((symbol-function 'chat-agent-start)
@@ -952,8 +976,19 @@
                             :raw `((provider_detail . ,(make-string 5000 ?y))))))
        (funcall on-event
                 '(:type agent-end :status completed :content "done"
-                  :steps 1 :tool-calls nil :tool-results nil)))
+                  :steps 1
+                  :tool-calls ((:name "files_read")
+                               (:name "shell_execute")
+                               (:name "files_read")
+                               (:name "files_patch"))
+                  :tool-results ("read" "ran" "read" "patched"))))
      (should (eq status 'completed))
+     (should (= 4 (alist-get 'toolCallCount metadata)))
+     (should
+      (equal '(((tool . "files_patch") (count . 1))
+               ((tool . "files_read") (count . 2)))
+             (alist-get 'toolCallSummary metadata)))
+     (should (= 1 (alist-get 'toolCallSummaryTruncated metadata)))
      (should (= 2 (alist-get 'toolErrorCount metadata)))
      (let* ((errors (alist-get 'toolErrors metadata))
             (error (car errors)))

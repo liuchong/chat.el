@@ -412,6 +412,9 @@ Every significant campaign record includes:
 - per-language and per-category rates, safety violations and cleanup residue;
 - latency plus first-request, final-request and total-task token metrics when
   the provider exposes trusted usage, including request count and coverage;
+- an exact tool-call count plus a bounded, deterministic histogram containing
+  only tool names and counts; omitted distinct names are counted separately so
+  a successful no-progress loop remains diagnosable without retaining arguments;
 - an exact tool-error count plus bounded chronological records containing the
   Agent step, tool name, stable error type and a single-line summary; record
   and summary limits are explicit, and an omitted-record count preserves the
@@ -447,11 +450,15 @@ diagnostic leaf with truncation evidence, but it cannot replace the enclosing
 metadata object or erase task, campaign, provider, model or request identity.
 
 Tool diagnostics follow the same rule. They never retain tool arguments, raw
-results or exception objects. `toolErrorCount` remains exact;
+results or exception objects. `toolCallCount` remains exact;
+`toolCallSummary` contains stable tool-name counts and
+`toolCallSummaryTruncated` reports omitted distinct names. `toolErrorCount`
+remains exact;
 `toolErrors` retains only a bounded public projection and
 `toolErrorRecordsTruncated` reports records omitted by the collection limit.
-This is enough to distinguish model recovery from a hidden infrastructure or
-tool-contract failure after the disposable runtime HOME has been removed.
+Together these fields distinguish repeated successful inspection without
+mutation from model recovery, infrastructure failure or a malformed tool
+contract after the disposable runtime HOME has been removed.
 
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive

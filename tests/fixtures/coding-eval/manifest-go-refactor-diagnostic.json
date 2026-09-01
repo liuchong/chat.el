@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-go-refactor-diagnostic-v1",
+  "taskTimeoutSeconds": 300,
+  "tasks": [
+    {
+      "id": "go-refactor", "revision": 2, "category": "refactor", "language": "go",
+      "description": "Extract normalization detail.", "fixtureId": "go-sample-v1", "fixture": "go",
+      "prompt": "Refactor NormalizeName by extracting whitespace cleanup into an unexported helper named cleanName. Preserve behavior.",
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["go", "test", "-run", "^TestNormalize$", "./..."], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.go", "regexp": "cleanName"}]
+    }
+  ]
+}
