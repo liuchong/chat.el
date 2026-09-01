@@ -361,6 +361,29 @@
                       chat-coding-eval-test-javascript-refactor-diagnostic-manifest))))
       (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
 
+(ert-deftest chat-coding-eval-records-exact-verification-profile-evidence ()
+  "Eval can prove planner argv matches the trusted task contract without copying it."
+  (require 'chat-code-verify)
+  (chat-test-with-temp-dir
+   (let* ((chat-code-verify--profiles (make-hash-table :test 'equal))
+          (chat-code-verify--profile-contexts (make-hash-table :test 'equal))
+          (commands '(("node" "test.js" "normalize")))
+          (_profile
+           (chat-code-verify-plan
+            temp-dir nil
+            (list :session-id "eval-session" :task-id "agent-task"
+                  :verification-commands commands)))
+          (evidence
+           (chat-coding-eval--verification-profile-evidence
+            "eval-session" "agent-task" commands)))
+     (should (equal "runtime-contract" (alist-get 'source evidence)))
+     (should (= 1 (alist-get 'stepCount evidence)))
+     (should (= 1 (alist-get 'contractCommandCount evidence)))
+     (should (eq t (alist-get 'exactContractMatch evidence)))
+     (should (equal (alist-get 'contractDigest evidence)
+                    (alist-get 'profileDigest evidence)))
+     (should-not (assq 'argv evidence)))))
+
 (ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()
   "The focused mutation campaign cannot drift from extended task identity."
   (let* ((extended
@@ -979,10 +1002,17 @@
    (let* ((chat-coding-eval-max-tool-error-records 1)
           (chat-coding-eval-max-tool-error-summary-chars 80)
           (chat-coding-eval-max-tool-call-summary-records 2)
+          (chat-code-verify--profiles (make-hash-table :test 'equal))
+          (chat-code-verify--profile-contexts (make-hash-table :test 'equal))
           (chat-work-plan-evidence-resolver-functions
            (list (lambda (_candidate _task-id evidence-id)
                    (equal evidence-id "verification:passed"))))
-          (task (chat-coding-eval-test--task temp-dir nil))
+          (commands '(("node" "test.js" "normalize")))
+          (task
+           (chat-coding-eval-test--task
+            temp-dir
+            `(((type . "command") (name . "targeted")
+               (command . ,(car commands))))))
           config status metadata)
      (cl-letf (((symbol-function 'chat-agent-start)
                 (lambda (value) (setq config value) nil)))
@@ -1005,6 +1035,11 @@
        (should (equal (file-name-as-directory temp-dir)
                       (file-name-as-directory
                        (chat-code-session-project-root session))))
+       (chat-code-verify-plan
+        temp-dir nil
+        (list :session-id (chat-session-id session)
+              :task-id (plist-get config :task-id)
+              :verification-commands commands))
        (let ((plan
               (chat-work-plan-create
                session "Diagnose the bounded task"
@@ -1126,6 +1161,12 @@
                               :total-tokens)))
      (should (= 2 (alist-get 'requestCount metadata)))
      (should (= 2 (alist-get 'usageSampleCount metadata)))
+     (let ((profile (alist-get 'verificationProfile metadata)))
+       (should (equal "runtime-contract" (alist-get 'source profile)))
+       (should (eq t (alist-get 'exactContractMatch profile)))
+       (should (equal (alist-get 'contractDigest profile)
+                      (alist-get 'profileDigest profile)))
+       (should-not (assq 'argv profile)))
      (should
       (equal '(((provider . "eval-provider")
                 (model . "model")

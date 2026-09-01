@@ -17,6 +17,7 @@
 (require 'chat-agent)
 (require 'chat-approval-guard)
 (require 'chat-code)
+(require 'chat-code-verify)
 (require 'chat-model-capabilities)
 
 (defconst chat-coding-eval-schema-version 1)
@@ -271,6 +272,47 @@ distinct tool names omitted by `chat-coding-eval-max-tool-call-summary-records'.
                                        (chat-work-plan-item-blocker-reason
                                         item))))))
                 (chat-work-plan-items plan)))))))
+
+(defun chat-coding-eval--verification-command-digest (commands)
+  "Return a stable SHA-256 digest for argv-list COMMANDS."
+  (secure-hash
+   'sha256
+   (encode-coding-string (prin1-to-string commands) 'utf-8)))
+
+(defun chat-coding-eval--verification-profile-evidence
+    (session-id task-id contract-commands)
+  "Return bounded verification-profile evidence for SESSION-ID and TASK-ID.
+
+CONTRACT-COMMANDS is compared with the resolved profile in exact argv order.
+The projection retains counts and digests, never raw command arguments."
+  (when-let* ((profile
+               (chat-code-verify-latest-profile-for-context
+                session-id task-id)))
+    (let* ((profile-commands
+            (mapcar
+             (lambda (step)
+               (copy-sequence (chat-verification-step-argv step)))
+             (chat-verification-profile-steps profile)))
+           (source (chat-verification-profile-source profile))
+           (contract-digest
+            (chat-coding-eval--verification-command-digest
+             contract-commands))
+           (profile-digest
+            (chat-coding-eval--verification-command-digest
+             profile-commands)))
+      `((profileId . ,(chat-verification-profile-id profile))
+        (source . ,(symbol-name source))
+        (stepCount . ,(length profile-commands))
+        (contractCommandCount . ,(length contract-commands))
+        (contractDigest . ,contract-digest)
+        (profileDigest . ,profile-digest)
+        (exactContractMatch .
+                            ,(if (and contract-commands
+                                      (eq source 'runtime-contract)
+                                      (equal profile-commands
+                                             contract-commands))
+                                 t
+                               :json-false))))))
 
 (defun chat-coding-eval--read-generator (relative manifest-directory)
   "Read and validate generator RELATIVE to MANIFEST-DIRECTORY."
@@ -2038,6 +2080,11 @@ ordinary application execution always uses protocol v2.")
               (workPlanFinalState .
                                   ,(chat-coding-eval--work-plan-final-state
                                     session))
+              (verificationProfile .
+                                   ,(chat-coding-eval--verification-profile-evidence
+                                     (chat-session-id session)
+                                     runtime-task-id
+                                     verification-commands))
               (toolResultCount . ,(length tool-results))
               (toolErrorCount . ,tool-errors)
               (toolErrors . ,(reverse tool-error-records))

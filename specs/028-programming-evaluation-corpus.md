@@ -466,6 +466,14 @@ blocker reason. It excludes objectives, titles, acceptance text and model
 content. This projection distinguishes a valid execution barrier from a model
 closure mistake without turning the result record into a context transcript.
 
+`verificationProfile` proves which resolved verification policy the Agent used.
+It records the profile ID and source, exact profile/contract counts, SHA-256
+digests of both ordered argv lists, and `exactContractMatch`. The match is true
+only for a non-empty Eval contract resolved as `runtime-contract` with exact
+ordered argv equality. Raw argv is not duplicated into result metadata; the
+frozen manifest remains its authority. A missing profile or false match cannot
+close an exact-command diagnostic even when the fixture judge later passes.
+
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive
 provider traffic. Runtime result JSON is also structurally bounded: strings,
