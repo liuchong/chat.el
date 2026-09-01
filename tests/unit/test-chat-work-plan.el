@@ -119,11 +119,18 @@
                         (equal evidence-id "test:passed"))))))
      (setq plan (chat-work-plan-transition-item
                  session (chat-work-plan-id plan) 1 "first" 'in-progress))
-     (should-error
-      (chat-work-plan-transition-item
-       session (chat-work-plan-id plan) 2 "first" 'completed
-       :evidence '("unknown:evidence"))
-      :type 'chat-work-plan-invalid)
+     (let ((err
+            (should-error
+             (chat-work-plan-transition-item
+              session (chat-work-plan-id plan) 2 "first" 'completed
+              :evidence '("unknown:evidence"))
+             :type 'chat-work-plan-invalid)))
+       (should (string-match-p
+                "unknown:evidence"
+                (error-message-string err)))
+       (should (string-match-p
+                "successful tool result"
+                (error-message-string err))))
      (setq plan (chat-work-plan-transition-item
                  session (chat-work-plan-id plan) 2 "first" 'completed
                  :evidence '("test:passed")))

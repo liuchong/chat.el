@@ -144,6 +144,15 @@ runtime task filter or remove a missing tool from the combined manifest. Record
 each unavailable focused manifest as `BLOCKED`, then continue only with other
 independently identified manifests whose preflight passes.
 
+For an M21 common-layer recovery, use
+`manifest-core-reliability-smoke.json`. It contains the exact six task
+identities that failed the first DeepSeek/Kimi control and inherits the shared
+300-second correctness window. Run it independently with
+`deepseek/deepseek-v4-flash` and `kimi-code/k3-256k`; do not substitute aliases
+or pool their results. A passing recovery smoke proves only that the observed
+failure set closed. Full core qualification remains pending until all 30
+`coding-core-v2` tasks pass under the same manifest digest.
+
 `manifest-large-repo.json` must remain an exact structural copy of the core
 `python-locate` task. Its baseline and current campaigns each contain exactly
 five unique repetitions. Final acceptance verifies that both focused campaigns

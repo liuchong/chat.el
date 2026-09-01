@@ -489,13 +489,12 @@ that mutation with verification and Plan-upgrade tools after consumption."
   (chat-code-review-read-diff project-root base-revision))
 
 (defun chat-capability-programming-review-repo-map
-    (project-root query &optional changed-files-json)
+    (project-root query &optional changed-files)
   "Return bounded repo-map evidence for QUERY in PROJECT-ROOT."
   (require 'chat-code-review)
   (chat-code-review-read-repo-map
    project-root query
-   (chat-capability--json-string-list changed-files-json
-                                      "changed_files_json")))
+   (chat-capability--native-string-list changed-files "changed_files")))
 
 (defun chat-capability-programming-compile-task (command &optional directory)
   "Start compile/test COMMAND as a background task."
@@ -526,6 +525,18 @@ that mutation with verification and Plan-upgrade tools after consumption."
           ((and (stringp value) (string-empty-p value)) nil)
           ((stringp value)
            (json-parse-string value :array-type 'list))
+          ((vectorp value) (append value nil))
+          ((proper-list-p value) value)
+          (t (error "%s must be an array of strings" label)))))
+    (unless (cl-every #'stringp items)
+      (error "%s must be an array of strings" label))
+    items))
+
+(defun chat-capability--native-string-list (value label)
+  "Validate native string array VALUE named LABEL."
+  (let ((items
+         (cond
+          ((null value) nil)
           ((vectorp value) (append value nil))
           ((proper-list-p value) value)
           (t (error "%s must be an array of strings" label)))))
@@ -572,15 +583,15 @@ that mutation with verification and Plan-upgrade tools after consumption."
            :profile-id (chat-verification-profile-id profile)))))
 
 (defun chat-capability-programming-verification-plan
-    (project-root &optional changed-files-json)
+    (project-root &optional changed-files)
   "Plan project verification without running it."
   (require 'chat-code-verify)
   (let* ((session (chat-capability--current-session))
          (profile
           (chat-code-verify-plan
            project-root
-           (chat-capability--json-string-list
-            changed-files-json "changed_files_json")
+           (chat-capability--native-string-list
+            changed-files "changed_files")
            (chat-capability--verification-context))))
     (chat-capability--set-verification-fallback session profile)
     (if (chat-verification-profile-steps profile)
@@ -1358,7 +1369,9 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    "Read ranked repository-map evidence without mutating the project."
    '((:name "project_root" :type "string" :required t)
      (:name "query" :type "string" :required t)
-     (:name "changed_files_json" :type "string" :required nil))
+     (:name "changed_files" :type "array" :required nil
+      :description "Changed project-relative file paths."
+      :items ((type . "string"))))
    #'chat-capability-programming-review-repo-map 'project '(read))
   (chat-capability--register-tool
    'programming_compile_task "Programming Compile Task"
@@ -1393,11 +1406,14 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    'programming_verification_plan "Programming Verification Plan"
    (concat "Resolve deterministic, language-aware project checks without "
            "executing them. Use this after code edits before inventing a shell "
-           "command. The returned id is a verification profile id: pass it "
+           "command. Pass changed file paths as the native changed_files array. "
+           "The returned id is a verification profile id: pass it "
            "only to programming_verification_run, never to "
            "programming_verification_read_result.")
    '((:name "project_root" :type "string" :required t)
-     (:name "changed_files_json" :type "string" :required nil))
+     (:name "changed_files" :type "array" :required nil
+      :description "Changed project-relative file paths."
+      :items ((type . "string"))))
    #'chat-capability-programming-verification-plan 'project '(read))
   (chat-capability--register-tool
    'programming_verification_run "Programming Verification Run"

@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "taskTimeoutSeconds": 300,
   "tasks": [
     {
       "id": "python-locate",
@@ -13,7 +14,6 @@
       "tags": ["large-repo"],
       "prompt": "Find the function that resolves an account status by identifier and explain its missing-account result. Do not edit files.",
       "allowedPaths": ["src/account_status.py"],
-      "timeoutSeconds": 120,
       "judges": [
         {
           "type": "answer-regexp",

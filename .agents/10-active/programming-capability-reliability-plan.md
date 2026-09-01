@@ -1491,6 +1491,22 @@ Clang。参数、目录、工具、task、schema 任一变化及 never-allow 命
 模型随机性应优先由可证明的结构合同消除；剩余规划和延迟差异继续按 provider 独立采样，
 不需要为这个已关闭的问题增加模型特判。
 
+2026-09-01 在 clean revision `87e8e17` 上完成首轮精确身份 30-task control。两家均使用
+manifest digest `0164487205a6fab51be67eebdfb9d7dad48ec7c68ccadb20b513c2da5e344dcc`：
+DeepSeek 为 29 PASS / 1 ERROR，Kimi 为 25 PASS / 5 TIMEOUT。DeepSeek 的 291 次请求与
+Kimi 的 206 次请求全部保持精确 concrete model；596 次工具调用均有对应结果，所有任务
+无越界写入且 workspace 清理成功。DeepSeek 唯一失败在 `rust-multi-file`：代码和文档已
+正确修改，但 `changed_files_json` 类型错误后计划被标记 blocked。Kimi 五个失败全部命中
+120 秒上限，其中四个在写入前无工具错误，一个在未知 Evidence ID 后未能及时恢复。
+
+结论是 common layer 与 corpus 的双重问题，而非可直接晋升的模型特判。Provider-facing
+review/verification 改用原生 `changed_files` 字符串数组，Evidence 错误返回被拒绝 ID 与
+正确来源提示；核心 corpus 版本提升为 `coding-core-v2` 并与扩展语料统一使用 300 秒
+correctness window。新增六任务 exact-subset recovery smoke，仅复测观察到的失败集合；
+通过后仍需完整 30-task v2 资格，旧 120 秒结果不得与新 digest 合并。该阶段也验证了长期
+Goal 的实践原则：目标状态应保存依赖与证据身份，局部失败先形成有界恢复子集，不应重跑
+整个已通过矩阵或因单个阻塞冻结无关工作。
+
 #### 退出条件
 
 - 两个精确模型均完成独立、不可变、可审计的 bounded core campaign。

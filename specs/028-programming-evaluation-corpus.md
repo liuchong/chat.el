@@ -13,15 +13,20 @@ conversation or a one-off successful demo is not an evaluation corpus.
 
 The corpus has two independently versioned manifests:
 
-- the **core comparison manifest** keeps the established 30 tasks: Emacs Lisp,
-  Python, JavaScript, Go and Rust, with six task categories per language;
+- the **core comparison manifest** keeps 30 tasks: Emacs Lisp, Python,
+  JavaScript, Go and Rust, with six task categories per language and a shared
+  300-second correctness window;
 - the **extended language manifest** adds Zig, Clojure, Java, TypeScript, C,
   C++ and SQL, with the same six categories per language.
 
-`manifest-large-repo.json` and the mutation-smoke manifests are measured
+`manifest-large-repo.json`, `manifest-core-reliability-smoke.json` and the
+mutation-smoke manifests are measured
 subsets, not additional behavioral corpora. The first contains the exact
 `python-locate` task from the core manifest and runs it five times for each
-implementation. `manifest-extended-mutation-smoke.json` contains exactly the
+implementation. The core reliability smoke contains exactly the six task
+identities that exposed plan-contract or 120-second timeout failures in the
+first M21 cross-provider campaign. It is an exact core subset used for bounded
+recovery A/B, not a replacement pass rate. `manifest-extended-mutation-smoke.json` contains exactly the
 seven `failing-test-fix` tasks from the extended manifest and retains their
 combined offline preflight and toolchain contract. Each
 `manifest-<language>-mutation-smoke.json` contains the same canonical task for
@@ -34,10 +39,11 @@ evidence reproducible without introducing a runtime task filter whose hidden
 selection could diverge from the recorded manifest digest.
 
 The combined qualification suite therefore contains 12 languages and 72 tasks.
-Keeping two manifests protects measurement identity: a result from the original
-30-task baseline remains directly comparable, while the 42-task extension can
-evolve under its own digest and baseline. This is an evaluation boundary, not a
-runtime compatibility path.
+Every result is comparable only to a campaign with the same manifest digest.
+The historical 120-second core results remain immutable evidence at their
+recorded revisions, but they are not pooled with the `coding-core-v2`
+300-second results. This is an evaluation identity boundary, not a runtime
+compatibility path.
 
 ## 2. Durable Assets
 
@@ -88,7 +94,28 @@ footprint must remain at or below 110 percent of the frozen baseline before a
 live comparison revision is accepted. A threshold change is a design change
 that requires an updated spec and stage analysis, not a campaign workaround.
 
-### 2.2 Frozen Campaign Runtime Contract
+Provider-facing structured arguments use native JSON arrays and objects. A
+tool must not ask a model to serialize an array into a string-valued `*_json`
+argument when the tool protocol can represent the array directly. In
+particular, review and verification accept `changed_files` as an array of
+project-relative strings. Evidence completion failures name rejected IDs and
+tell the model to reuse an exact `evidenceId` from a successful tool result;
+they never weaken the evidence resolver or infer success from prose.
+
+### 2.2 Correctness Observation Window
+
+The core and extended correctness corpora use a shared 300-second task window
+for every provider. Latency remains a separately reported metric; the larger
+window does not erase slow behavior. A timeout remains a failed trial. The
+window exists to prevent a slower but valid planning and verification path from
+being misclassified as inability before it reaches a mutation or judge.
+
+Changing this value changes manifest identity. Recovery work first reruns the
+exact observed failures through the committed core reliability smoke. A full
+core campaign is still required before release qualification or model-policy
+promotion; the focused smoke cannot be reported as overall corpus success.
+
+### 2.3 Frozen Campaign Runtime Contract
 
 Every campaign runs under a dedicated runtime HOME. The evidence directory and
 trusted credential setup path are resolved before isolation, but provider
@@ -469,6 +496,7 @@ any repeated live task is dispatched.
 
 - [x] Extended manifest contains 42 tasks: seven languages by six categories.
 - [x] Combined corpus contains 72 unique task IDs and 12 languages.
+- [x] Core and extended correctness manifests use the same 300-second provider-neutral window.
 - [ ] All toolchains have bounded, offline preflight and recorded versions.
 - [ ] Every writing judge declares generated paths and passes repeated cleanup.
 - [x] File detection, language profile and verification adapters cover all 12 languages.

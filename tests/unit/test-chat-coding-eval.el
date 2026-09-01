@@ -37,6 +37,10 @@
   (expand-file-name "coding-eval/manifest-large-repo.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-core-reliability-smoke-manifest
+  (expand-file-name "coding-eval/manifest-core-reliability-smoke.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-language-registry
   (expand-file-name "coding-eval/language-registry.json"
                     chat-test-fixtures-dir))
@@ -265,6 +269,28 @@
     (should (= 1 (length tasks)))
     (should (equal core-task (car tasks)))
     (should (member "large-repo" (alist-get 'tags (car tasks))))))
+
+(ert-deftest chat-coding-eval-core-reliability-smoke-is-an-exact-subset ()
+  "The M21 recovery smoke reuses only the observed failing core tasks."
+  (let* ((core (chat-coding-eval-test--read-json
+                chat-coding-eval-test-manifest))
+         (focused (chat-coding-eval-test--read-json
+                   chat-coding-eval-test-core-reliability-smoke-manifest))
+         (ids '("javascript-single-fix" "go-refactor" "rust-single-fix"
+                "rust-multi-file" "rust-refactor" "rust-failing-test"))
+         (expected
+          (seq-filter (lambda (task)
+                        (member (alist-get 'id task) ids))
+                      (alist-get 'tasks core))))
+    (should (equal "coding-core-v2" (alist-get 'corpusId core)))
+    (should (= 300 (alist-get 'taskTimeoutSeconds core)))
+    (should (equal "coding-core-reliability-smoke-v1"
+                   (alist-get 'corpusId focused)))
+    (should (= 300 (alist-get 'taskTimeoutSeconds focused)))
+    (should (equal expected (alist-get 'tasks focused)))
+    (dolist (task (chat-coding-eval-load-suite
+                   chat-coding-eval-test-core-reliability-smoke-manifest))
+      (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
 
 (ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()
   "The focused mutation campaign cannot drift from extended task identity."
@@ -723,6 +749,8 @@
                    (mapcar #'cdr (alist-get 'languages coverage))))
     (should (equal '(("large-repo" . 1))
                    (alist-get 'tags coverage)))
+    (dolist (task tasks)
+      (should (= 300 (chat-coding-eval-task-timeout-seconds task))))
     (let ((large
            (seq-find
             (lambda (task)

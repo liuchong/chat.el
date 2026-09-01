@@ -606,16 +606,24 @@ consumed.  Callers use this projection instead of decoding plan storage."
          (setf (chat-work-plan-item-started-at item) now
                (chat-work-plan-item-blocker-reason item) nil
                (chat-work-plan-status plan) 'active))
-        ('completed
+       ('completed
          (unless (eq old 'in-progress)
            (signal 'chat-work-plan-invalid '("only active item can complete")))
-         (unless (and evidence
-                      (seq-every-p
-                       (lambda (id)
-                         (chat-work-plan-evidence-known-p
-                          session (chat-work-plan-task-id plan) id))
-                       evidence))
-           (signal 'chat-work-plan-invalid '("completion evidence unknown")))
+         (let ((unknown
+                (seq-remove
+                 (lambda (id)
+                   (chat-work-plan-evidence-known-p
+                    session (chat-work-plan-task-id plan) id))
+                 evidence)))
+           (unless (and evidence (null unknown))
+             (signal
+              'chat-work-plan-invalid
+              (list
+               (if unknown
+                   (format
+                    "completion evidence unknown: %s; use exact evidenceId from a successful tool result"
+                    (string-join (seq-take unknown 5) ", "))
+                 "completion evidence required; use exact evidenceId from a successful tool result")))))
          (setf (chat-work-plan-item-evidence item) (delete-dups evidence)
                (chat-work-plan-item-completed-at item) now
                (chat-work-plan-item-metadata item)

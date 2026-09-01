@@ -10,6 +10,7 @@ Stable entry points:
 - `language-registry.json` lists all 12 accepted languages, cohort, state,
   extensions and required toolchains in a machine-readable form;
 - `manifest.json` defines the executable 30-task core corpus;
+- `manifest-core-reliability-smoke.json` keeps the exact six M21 recovery tasks;
 - `request-footprint-baseline.json` freezes the M9 first-request byte baseline
   and its 110 percent regression ceiling;
 - `ACCEPTANCE.md` contains the repeatable run sequence, representative smoke
@@ -20,14 +21,16 @@ Stable entry points:
 | Manifest | Languages | Categories per language | Tasks | State |
 |---|---|---:|---:|---|
 | `manifest.json` | Emacs Lisp, Python, JavaScript, Go, Rust | 6 | 30 | executable core corpus |
+| `manifest-core-reliability-smoke.json` | JavaScript, Go, Rust | observed failures only | 6 | focused cross-provider recovery gate |
 | `manifest-extended.json` | Zig, Clojure, Java, TypeScript, C, C++, SQL | 6 | 42 | executable extended corpus |
 | `manifest-extended-mutation-smoke.json` | all extended languages | 1 | 7 | combined mutation gate |
 | `manifest-<language>-mutation-smoke.json` | one extended language | 1 | 1 | independent provider control |
 
 The six categories are `locate-explain`, `single-file-fix`,
 `multi-file-change`, `refactor`, `failing-test-fix` and `read-only-review`.
-The two manifests keep independent digests so the 30-task historical comparison
-cannot silently change when the extended corpus lands.
+The two full manifests keep independent digests. Campaigns are comparable only
+when their manifest digests match; historical 120-second core evidence is not
+pooled with the current 300-second `coding-core-v2` corpus.
 
 `verify-extended-fixtures.sh` runs copied fixtures only. With no arguments it
 preflights all seven toolchains before execution; language arguments select a
@@ -49,7 +52,12 @@ canonical mutation task and declares only that language's executables. Passing
 one focused campaign never changes another language's `BLOCKED` result and
 cross-provider evidence remains separate.
 
-The extended and focused manifests declare a shared 300-second correctness
+`manifest-core-reliability-smoke.json` is unit-checked as an exact subset of
+the six core tasks that failed the first exact-identity M21 control. It is the
+bounded gate for a common-layer correction. Passing it does not replace a full
+30-task core qualification.
+
+The core, extended and focused manifests declare a shared 300-second correctness
 observation window. The value participates in the manifest digest, is inherited
 by every task unless that task declares a tighter bound, and is identical across
 providers. Reports continue to preserve latency, request count and token use as

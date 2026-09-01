@@ -1,46 +1,48 @@
 {
   "schemaVersion": 1,
+  "corpusId": "coding-core-v2",
+  "taskTimeoutSeconds": 300,
   "tasks": [
     {
       "id": "elisp-locate", "revision": 1, "category": "locate-explain", "language": "elisp",
       "description": "Locate a user lookup implementation.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Find the function that looks up a user by numeric identifier and explain how it reports a missing user. Do not edit files.",
-      "allowedPaths": ["sample.el"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"],
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "sample-find-user"}, {"type": "no-change", "name": "read-only"}]
     },
     {
       "id": "elisp-single-fix", "revision": 2, "category": "single-file-fix", "language": "elisp",
       "description": "Correct division behavior.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Fix sample-divide so it preserves fractional results and signals an error when the divisor is zero.",
-      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"],
       "judges": [{"type": "command", "name": "divide-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-divide)"], "expectedExit": 0, "timeoutSeconds": 30}]
     },
     {
       "id": "elisp-multi-file", "revision": 2, "category": "multi-file-change", "language": "elisp",
       "description": "Change a label contract and its documentation.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.el", "README.md"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el", "README.md"], "generatedPaths": ["sample.elc"],
       "judges": [{"type": "command", "name": "label-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-label)"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
       "id": "elisp-refactor", "revision": 2, "category": "refactor", "language": "elisp",
       "description": "Extract normalization detail.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Refactor sample-normalize-name by extracting the whitespace cleanup into a private helper named sample--clean-name. Preserve behavior.",
-      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"],
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-normalize)"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.el", "regexp": "sample--clean-name"}]
     },
     {
       "id": "elisp-failing-test", "revision": 2, "category": "failing-test-fix", "language": "elisp",
       "description": "Repair an activity-state regression.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "The sample-test-active test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"], "generatedPaths": ["sample.elc"],
       "judges": [{"type": "command", "name": "active-tests", "command": ["emacs", "-Q", "--batch", "-L", ".", "-l", "sample-test.el", "--eval", "(ert-run-tests-batch-and-exit 'sample-test-active)"], "expectedExit": 0}]
     },
     {
       "id": "elisp-review", "revision": 1, "category": "read-only-review", "language": "elisp",
       "description": "Review role matching.", "fixtureId": "elisp-sample-v1", "fixture": "elisp",
       "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
-      "allowedPaths": ["sample.el"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.el"],
       "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "sample-admin-p"}, {"type": "no-change", "name": "read-only"}]
     },
 
@@ -50,42 +52,42 @@
       "fixtureId": "python-large-v1", "fixture": "python-large",
       "fixtureGenerator": "generators/python-large.json", "tags": ["large-repo"],
       "prompt": "Find the function that resolves an account status by identifier and explain its missing-account result. Do not edit files.",
-      "allowedPaths": ["src/account_status.py"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/account_status.py"],
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "resolve_account_status"}, {"type": "no-change", "name": "read-only"}]
     },
     {
       "id": "python-single-fix", "revision": 2, "category": "single-file-fix", "language": "python",
       "description": "Correct division behavior.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Fix divide so it preserves fractional results and raises ValueError when the divisor is zero.",
-      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"],
       "judges": [{"type": "command", "name": "divide-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_divide"], "expectedExit": 0}]
     },
     {
       "id": "python-multi-file", "revision": 2, "category": "multi-file-change", "language": "python",
       "description": "Change a label contract and its documentation.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.py", "README.md"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py", "README.md"], "generatedPaths": ["__pycache__", ".pytest_cache"],
       "judges": [{"type": "command", "name": "label-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
       "id": "python-refactor", "revision": 2, "category": "refactor", "language": "python",
       "description": "Extract normalization detail.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Refactor normalize_name by extracting whitespace cleanup into a private helper named _clean_name. Preserve behavior.",
-      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"],
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.py", "regexp": "_clean_name"}]
     },
     {
       "id": "python-failing-test", "revision": 2, "category": "failing-test-fix", "language": "python",
       "description": "Repair an activity-state regression.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "The test_active test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"], "generatedPaths": ["__pycache__", ".pytest_cache"],
       "judges": [{"type": "command", "name": "active-tests", "command": ["python3", "-m", "unittest", "test_sample.SampleTest.test_active"], "expectedExit": 0}]
     },
     {
       "id": "python-review", "revision": 1, "category": "read-only-review", "language": "python",
       "description": "Review role matching.", "fixtureId": "python-sample-v1", "fixture": "python",
       "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
-      "allowedPaths": ["sample.py"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.py"],
       "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "is_admin"}, {"type": "no-change", "name": "read-only"}]
     },
 
@@ -93,42 +95,42 @@
       "id": "javascript-locate", "revision": 1, "category": "locate-explain", "language": "javascript",
       "description": "Locate a user lookup implementation.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
       "prompt": "Find the function that looks up a user by identifier and explain its missing-user result. Do not edit files.",
-      "allowedPaths": ["sample.js"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.js"],
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "findUser"}, {"type": "no-change", "name": "read-only"}]
     },
     {
       "id": "javascript-single-fix", "revision": 1, "category": "single-file-fix", "language": "javascript",
       "description": "Correct division behavior.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
       "prompt": "Fix divide so it preserves fractional results and throws an error when the divisor is zero.",
-      "allowedPaths": ["sample.js"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.js"],
       "judges": [{"type": "command", "name": "divide-tests", "command": ["node", "test.js", "divide"], "expectedExit": 0}]
     },
     {
       "id": "javascript-multi-file", "revision": 1, "category": "multi-file-change", "language": "javascript",
       "description": "Change a label contract and its documentation.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.js", "README.md"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.js", "README.md"],
       "judges": [{"type": "command", "name": "label-tests", "command": ["node", "test.js", "label"], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
       "id": "javascript-refactor", "revision": 1, "category": "refactor", "language": "javascript",
       "description": "Extract normalization detail.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
       "prompt": "Refactor normalizeName by extracting whitespace cleanup into a helper named cleanName. Preserve behavior.",
-      "allowedPaths": ["sample.js"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.js"],
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["node", "test.js", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.js", "regexp": "cleanName"}]
     },
     {
       "id": "javascript-failing-test", "revision": 1, "category": "failing-test-fix", "language": "javascript",
       "description": "Repair an activity-state regression.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
       "prompt": "The active test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.js"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.js"],
       "judges": [{"type": "command", "name": "active-tests", "command": ["node", "test.js", "active"], "expectedExit": 0}]
     },
     {
       "id": "javascript-review", "revision": 1, "category": "read-only-review", "language": "javascript",
       "description": "Review role matching.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
       "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
-      "allowedPaths": ["sample.js"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.js"],
       "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "isAdmin"}, {"type": "no-change", "name": "read-only"}]
     },
 
@@ -136,42 +138,42 @@
       "id": "go-locate", "revision": 1, "category": "locate-explain", "language": "go",
       "description": "Locate a user lookup implementation.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Find the function that looks up a user by identifier and explain its missing-user result. Do not edit files.",
-      "allowedPaths": ["sample.go"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"],
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "FindUser"}, {"type": "no-change", "name": "read-only"}]
     },
     {
       "id": "go-single-fix", "revision": 2, "category": "single-file-fix", "language": "go",
       "description": "Correct integer division behavior.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Fix Divide for positive integers so non-exact results round up. Preserve the existing zero-divisor failure behavior.",
-      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"],
       "judges": [{"type": "command", "name": "divide-tests", "command": ["go", "test", "-run", "^TestDivide$", "./..."], "expectedExit": 0}]
     },
     {
       "id": "go-multi-file", "revision": 2, "category": "multi-file-change", "language": "go",
       "description": "Change a label contract and its documentation.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["sample.go", "README.md"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go", "README.md"], "generatedPaths": [".gocache", ".gotmp"],
       "judges": [{"type": "command", "name": "label-tests", "command": ["go", "test", "-run", "^TestLabel$", "./..."], "expectedExit": 0}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
       "id": "go-refactor", "revision": 2, "category": "refactor", "language": "go",
       "description": "Extract normalization detail.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Refactor NormalizeName by extracting whitespace cleanup into an unexported helper named cleanName. Preserve behavior.",
-      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"],
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["go", "test", "-run", "^TestNormalize$", "./..."], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.go", "regexp": "cleanName"}]
     },
     {
       "id": "go-failing-test", "revision": 2, "category": "failing-test-fix", "language": "go",
       "description": "Repair an activity-state regression.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "TestActive fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"], "generatedPaths": [".gocache", ".gotmp"],
       "judges": [{"type": "command", "name": "active-tests", "command": ["go", "test", "-run", "^TestActive$", "./..."], "expectedExit": 0}]
     },
     {
       "id": "go-review", "revision": 1, "category": "read-only-review", "language": "go",
       "description": "Review role matching.", "fixtureId": "go-sample-v1", "fixture": "go",
       "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
-      "allowedPaths": ["sample.go"], "timeoutSeconds": 120,
+      "allowedPaths": ["sample.go"],
       "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "IsAdmin"}, {"type": "no-change", "name": "read-only"}]
     },
 
@@ -179,42 +181,42 @@
       "id": "rust-locate", "revision": 1, "category": "locate-explain", "language": "rust",
       "description": "Locate a user lookup implementation.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Find the function that looks up a user by identifier and explain its missing-user result. Do not edit files.",
-      "allowedPaths": ["src/lib.rs"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"],
       "judges": [{"type": "answer-regexp", "name": "located-symbol", "regexp": "find_user"}, {"type": "no-change", "name": "read-only"}]
     },
     {
       "id": "rust-single-fix", "revision": 1, "category": "single-file-fix", "language": "rust",
       "description": "Correct integer division behavior.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Fix divide for positive integers so non-exact results round up. Preserve the existing zero-divisor panic.",
-      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"],
       "judges": [{"type": "command", "name": "divide-tests", "command": ["cargo", "test", "divide_rounds_up", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}]
     },
     {
       "id": "rust-multi-file", "revision": 1, "category": "multi-file-change", "language": "rust",
       "description": "Change a label contract and its documentation.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
-      "allowedPaths": ["src/lib.rs", "README.md"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs", "README.md"], "generatedPaths": ["Cargo.lock", "target"],
       "judges": [{"type": "command", "name": "label-tests", "command": ["cargo", "test", "label_uses_entry_prefix", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
     },
     {
       "id": "rust-refactor", "revision": 1, "category": "refactor", "language": "rust",
       "description": "Extract normalization detail.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Refactor normalize_name by extracting whitespace cleanup into a private helper named clean_name. Preserve behavior.",
-      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"],
       "judges": [{"type": "command", "name": "normalize-tests", "command": ["cargo", "test", "normalize_collapses_space", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}, {"type": "file-regexp", "name": "helper-extracted", "path": "src/lib.rs", "regexp": "clean_name"}]
     },
     {
       "id": "rust-failing-test", "revision": 1, "category": "failing-test-fix", "language": "rust",
       "description": "Repair an activity-state regression.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "The active_reads_state test fails. Fix the implementation, keeping the test unchanged.",
-      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"], "generatedPaths": ["Cargo.lock", "target"],
       "judges": [{"type": "command", "name": "active-tests", "command": ["cargo", "test", "active_reads_state", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}]
     },
     {
       "id": "rust-review", "revision": 1, "category": "read-only-review", "language": "rust",
       "description": "Review role matching.", "fixtureId": "rust-sample-v1", "fixture": "rust",
       "prompt": "Review the administrator-role check for correctness. Name the risky function and explain the defect. Do not edit files.",
-      "allowedPaths": ["src/lib.rs"], "timeoutSeconds": 120,
+      "allowedPaths": ["src/lib.rs"],
       "judges": [{"type": "answer-regexp", "name": "review-finding", "regexp": "is_admin"}, {"type": "no-change", "name": "read-only"}]
     }
   ]

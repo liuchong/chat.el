@@ -73,6 +73,12 @@ contract. Repeating the same request shape after a semantic failure is not a
 strategy. Transport retries may repeat the same payload only for the explicitly
 classified transient conditions covered by the transport policy.
 
+Cross-provider correctness campaigns use one provider-neutral task timeout.
+Observed latency and request count remain model-separated performance facts.
+A timeout window that consistently terminates one exact model before mutation
+is a corpus-design bias to correct in the common layer, not evidence for a
+provider-specific success threshold.
+
 ## 4. Adaptation Layer
 
 Adaptation is declarative data resolved after the common layer. An adaptation
@@ -154,6 +160,17 @@ For each provider/model pair, run the same immutable core manifest and report:
 - request count, latency distribution, scope and cleanup violations;
 - malformed tool calls, repair attempts and unchanged retries;
 - which common or candidate adaptation policy was active.
+
+The first exact-identity M21 control at the historical 120-second digest
+produced 29/30 for DeepSeek and 25/30 for Kimi. All requests retained the exact
+declared identity and every workspace stayed in scope and cleaned. DeepSeek's
+one failure followed a string-encoded changed-file argument and a blocked work
+plan. Four of Kimi's five failures were pure pre-mutation timeouts; the fifth
+combined an unknown Evidence ID with the same deadline. These observations
+justify two common-layer corrections: native structured tool arguments with
+recoverable Evidence errors, and a shared 300-second correctness window. They
+do not justify an active model-specific rule. The committed six-task recovery
+smoke must pass both models before a full `coding-core-v2` qualification.
 
 Cross-provider results diagnose portability. They are not pooled to hide one
 provider/model failure, and one provider's baseline cannot serve as another's.

@@ -864,6 +864,34 @@
     (should-error
      (chat-capability--string-list '((id . "not-a-string")) "evidence"))))
 
+(ert-deftest chat-capability-verification-tools-advertise-native-changed-files ()
+  "Review and verification take file paths as a native array."
+  (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
+    (chat-capability-register-tools)
+    (dolist (id '(programming_review_repo_map
+                  programming_verification_plan))
+      (let* ((tool (chat-tool-forge-get id))
+             (params (chat-forged-tool-parameters tool))
+             (changed-files
+              (seq-find (lambda (param)
+                          (equal (plist-get param :name) "changed_files"))
+                        params)))
+        (should changed-files)
+        (should (equal "array" (plist-get changed-files :type)))
+        (should (equal "string"
+                       (cdr (assoc 'type
+                                   (plist-get changed-files :items)))))
+        (should-not
+         (seq-find (lambda (param)
+                     (equal (plist-get param :name) "changed_files_json"))
+                   params))))
+    (should (equal '("src/a.c" "src/b.c")
+                   (chat-capability--native-string-list
+                    ["src/a.c" "src/b.c"] "changed_files")))
+    (should-error
+     (chat-capability--native-string-list
+      "[\"src/a.c\"]" "changed_files"))))
+
 (ert-deftest chat-capability-plan-transition-advertises-serial-revisions ()
   "Dependent plan transitions cannot safely share an observed revision."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
