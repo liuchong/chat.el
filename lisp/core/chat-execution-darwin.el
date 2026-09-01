@@ -46,15 +46,21 @@
           "\\(?:[[:space:]]\\|\\'\\)")
   "Shell command pattern for tools whose location is managed by rustup.")
 
+(defun chat-execution-darwin--source-environment (request)
+  "Return the effective source environment inherited by REQUEST."
+  (or (chat-execution-request-environment request) process-environment))
+
 (defun chat-execution-darwin--environment-value (request name)
-  "Return NAME from REQUEST's supplied environment, if present."
+  "Return nonempty NAME from REQUEST's effective environment, if present."
   (when-let* ((entry
                (seq-find
                 (lambda (value)
                   (and (stringp value)
                        (string-prefix-p (concat name "=") value)))
-                (chat-execution-request-environment request))))
-    (substring entry (1+ (length name)))))
+                (chat-execution-darwin--source-environment request)))
+              (value (substring entry (1+ (length name))))
+              ((not (string-empty-p value))))
+    value))
 
 (defun chat-execution-darwin--developer-directory (request)
   "Return REQUEST's existing Xcode developer directory, if available."
@@ -82,7 +88,8 @@
                                                            "RUSTUP_HOME")
                 (and developer-home
                      (expand-file-name ".rustup" developer-home)))))
-      (and (file-directory-p (or directory ""))
+      (and directory
+           (file-directory-p directory)
            (file-truename directory)))))
 
 (defun chat-execution-darwin--scheme-string (value)
@@ -137,8 +144,7 @@
 
 (defun chat-execution-darwin--environment (request temp-root)
   "Return REQUEST environment filtered to declared keys and TEMP-ROOT."
-  (let* ((source (or (chat-execution-request-environment request)
-                     process-environment))
+  (let* ((source (chat-execution-darwin--source-environment request))
          (allowed (chat-execution-request-environment-keys request))
          (developer-directory
           (chat-execution-darwin--developer-directory request))
@@ -235,7 +241,10 @@
                   developer-directory))))))
     (unless resolved
       (signal 'file-missing (list "Executable not found" program)))
-    (setcar argv (file-truename (or developer-tool resolved)))
+    ;; Preserve the resolved entrypoint name.  Multicall tools such as rustup
+    ;; select behavior from argv[0], so replacing a cargo shim with its target
+    ;; changes the command rather than merely canonicalizing it.
+    (setcar argv (or developer-tool resolved))
     argv))
 
 (defun chat-execution-darwin--cleanup (process &optional fallback-root)

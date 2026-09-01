@@ -182,7 +182,8 @@ cannot change or erase the evidence schema used for comparison."
            (home (file-name-as-directory (expand-file-name runtime-home))))
       (make-directory home t)
       (when (and (not (getenv "RUSTUP_HOME"))
-                 (file-directory-p (or developer-rustup-home "")))
+                 developer-rustup-home
+                 (file-directory-p developer-rustup-home))
         (setenv "RUSTUP_HOME" (file-truename developer-rustup-home)))
       (setenv "HOME" home)
       ;; `default-directory' may have been recorded as ~/... before HOME was

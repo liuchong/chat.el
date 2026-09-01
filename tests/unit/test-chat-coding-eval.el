@@ -678,6 +678,20 @@
      (should (equal (file-truename rustup-home) (getenv "RUSTUP_HOME")))
      (should (equal harness default-directory)))))
 
+(ert-deftest chat-campaign-runner-runtime-home-allows-missing-developer-home ()
+  "An isolated campaign can start without an inherited developer HOME."
+  (chat-test-with-temp-dir
+   (let* ((process-environment nil)
+          (harness (file-name-as-directory (expand-file-name "harness" temp-dir)))
+          (home (expand-file-name "home" temp-dir))
+          (chat-campaign-runner--harness-root harness)
+          (default-directory harness))
+     (make-directory harness t)
+     (should (equal (file-name-as-directory home)
+                    (chat-campaign-runner--install-runtime-home home)))
+     (should (equal (file-name-as-directory home) (getenv "HOME")))
+     (should-not (getenv "RUSTUP_HOME")))))
+
 (ert-deftest chat-campaign-runner-keeps-result-contracts-harness-owned ()
   "A frozen implementation cannot supply campaign persistence functions."
   (chat-test-with-temp-dir

@@ -286,6 +286,58 @@
         (string-match-p (regexp-quote (file-truename rustup-home))
                         ordinary-profile))))))
 
+(ert-deftest chat-execution-isolation-rustup-home-uses-effective-environment ()
+  "Rust execution resolves its managed home from the environment it inherits."
+  (chat-test-with-temp-dir
+   (let* ((process-environment nil)
+          (developer-home (expand-file-name "developer/" temp-dir))
+          (rustup-home (expand-file-name ".rustup/" developer-home))
+          (project (expand-file-name "project/" temp-dir))
+          (request
+           (chat-execution-isolation-test--request
+            project '("cargo" "test" "--quiet") 'build nil)))
+     (make-directory rustup-home t)
+     (make-directory project t)
+     (setq process-environment
+           (list (concat "HOME=" developer-home)
+                 (concat "RUSTUP_HOME=" rustup-home)
+                 "PATH=/usr/bin:/bin"))
+     (should (equal (file-truename rustup-home)
+                    (chat-execution-darwin--rustup-home request)))
+     (should
+      (string-match-p
+       (regexp-quote (file-truename rustup-home))
+       (chat-execution-darwin--profile request temp-dir))))))
+
+(ert-deftest chat-execution-isolation-rustup-home-allows-no-home ()
+  "A Rust request without HOME metadata has no implicit current-directory home."
+  (chat-test-with-temp-dir
+   (let* ((process-environment '("PATH=/usr/bin:/bin"))
+          (project (expand-file-name "project/" temp-dir))
+          (request
+           (chat-execution-isolation-test--request
+            project '("cargo" "test" "--quiet") 'build nil)))
+     (make-directory project t)
+     (should-not (chat-execution-darwin--rustup-home request))
+     (should (stringp (chat-execution-darwin--profile request temp-dir))))))
+
+(ert-deftest chat-execution-isolation-preserves-multicall-entrypoint-name ()
+  "Executable resolution must not replace a behavior-selecting symlink name."
+  (chat-test-with-temp-dir
+   (let* ((target (expand-file-name "multicall" temp-dir))
+          (entrypoint (expand-file-name "cargo" temp-dir))
+          (project (expand-file-name "project/" temp-dir)))
+     (write-region "#!/bin/sh\nexit 0\n" nil target nil 'silent)
+     (set-file-modes target #o755)
+     (make-symbolic-link target entrypoint)
+     (make-directory project t)
+     (let* ((request
+             (chat-execution-isolation-test--request
+              project (list entrypoint "test") 'build nil))
+            (program (chat-execution-darwin--program request)))
+       (should (equal entrypoint (car program)))
+       (should-not (equal (file-truename target) (car program)))))))
+
 (ert-deftest chat-execution-isolation-filters-environment-and-denies-network ()
   "Restricted execution sees declared variables only and has no network."
   (skip-unless (eq system-type 'darwin))
