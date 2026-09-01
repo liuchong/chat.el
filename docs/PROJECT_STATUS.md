@@ -58,6 +58,16 @@ p95 is 121.36 ms. M19 is complete. The fixed corpus and immutable evidence
 remain the qualification baseline for later changes, not reusable proof for a
 different product revision.
 
+M21 cross-provider qualification is now complete on the provider-neutral path.
+At clean revision `a7baa43`, exact DeepSeek `deepseek-v4-flash` and Kimi Code
+`k3-256k` campaigns independently passed the same core-v2 manifest 30/30, with
+zero scope, stale-write, unfinished-plan or cleanup failures. No model-specific
+policy was promoted because the remaining latency and tool-use differences lack
+causal A/B evidence. M20 extended-language qualification has completed dual-model
+mutation smokes for Zig, Java, C, C++ and SQL. TypeScript and Clojure remain
+blocked before provider use by missing independent `tsc` and `lein` toolchains;
+the full 42-task repeated matrix therefore remains open.
+
 The first full baseline attempt then exposed a terminal-evidence race: outer
 task timeout could be replaced by synchronous Agent cancellation and lose all
 in-flight request identities. Eval executors now return a typed snapshot/cancel

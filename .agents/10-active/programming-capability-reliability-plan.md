@@ -1426,6 +1426,22 @@ Revision `6a6319e` 的当前 Java focused manifest 在同一 digest 上完成双
 不得借用嵌套依赖二进制、自动安装工具链或把环境缺失计成模型失败。完整记录见
 `.agents/30-records/logs/stage-2026-09-01-java-qualification-and-toolchain-preflight.md`。
 
+Revision `69830a4` 关闭 Zig focused mutation qualification。离线 fixture 先证明 baseline
+与三个 seeded defect 可重复；manifest digest
+`870c4da24b6456e4e1c382a1485610cd59da55c08a4a6867cc60c997bec7d0ac` 随后在同一
+clean revision、Zig 0.16.0 和 300 秒窗口下分别运行两家精确模型。DeepSeek
+`deepseek-v4-flash` 用 21.491 秒、10 次请求、16 次工具调用通过；Kimi Code
+`k3-256k` 用 62.160 秒、7 次请求、10 次工具调用通过。双方均为 0 tool error、0 stale
+write、0 越界文件，只修改 `sample.zig`，精确 runtime verification contract 匹配，声明的
+`.zig-cache` 生成物被有界审计并在 workspace 清理时删除。
+
+同 revision 的 TypeScript 和 Clojure focused preflight 仍分别因独立 `tsc` 与 `lein`
+缺失，在 provider setup/readiness 和任何模型请求之前明确失败。不得用 `npx` 下载工具、
+借用嵌套依赖或安装环境来伪造资格。至此七种扩展语言已有 Zig、Java、C、C++、SQL 五种
+完成双模型 mutation smoke；TypeScript 与 Clojure 保持环境 BLOCKED，42-task 重复矩阵仍
+未关闭。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-zig-dual-provider-qualification.md`。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
