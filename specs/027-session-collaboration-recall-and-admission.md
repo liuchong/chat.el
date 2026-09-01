@@ -143,6 +143,28 @@ The Agent receives a bounded projection containing the active item, the count of
 pending requirements, any immediate blocker and at most the next three scheduled
 titles. Full intake history is queried on demand.
 
+### Goal Revision Awareness And Closeout
+
+Requirement admission and Goal mutation are separate operations. A captured
+follow-up receives its own intake identity; it does not implicitly replace the
+active Goal or increment its revision. Only an authoritative change to the Goal
+objective, constraints, success criteria, priority or stopping condition creates
+a new Goal revision.
+
+After such a revision, the next Agent step must re-read the authoritative Goal
+projection before performing another governed action. The runtime records a
+`goal-revision-observed` event linking the old and new revisions, affected task
+and plan identities, and the resulting decision to continue, revise the pending
+plan tail or block. Work prepared against an older revision cannot execute merely
+because it was already queued.
+
+Stage commits, evaluations, checkpoints and plan completion add evidence and
+progress to the Goal; none of them independently completes it. Goal closeout must
+reconcile every admitted requirement linked to the Goal as completed,
+superseded, cancelled, rejected with reason or explicitly retained for later
+work. Unreconciled intake prevents a successful terminal closeout but does not
+erase completed evidence or force unrelated work to restart.
+
 ## Per-Session User Input Ledger
 
 ### Purpose

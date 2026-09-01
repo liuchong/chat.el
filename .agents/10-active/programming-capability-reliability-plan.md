@@ -1507,6 +1507,24 @@ correctness window。新增六任务 exact-subset recovery smoke，仅复测观�
 Goal 的实践原则：目标状态应保存依赖与证据身份，局部失败先形成有界恢复子集，不应重跑
 整个已通过矩阵或因单个阻塞冻结无关工作。
 
+Revision `f171990` 关闭了 Rust 验证执行器中的两个 common-layer 缺陷。空 `HOME`/未显式
+设置 `RUSTUP_HOME` 时，空字符串被误判为当前目录并最终触发 `file-truename(nil)`；同时
+对 `~/.cargo/bin/cargo` 做 canonicalization 会把 multicall 入口改成 `rustup`，导致本应执行
+的 `cargo test` 被按 `rustup test` 解释。修复后受限执行器保留实际入口名，并从请求环境与
+继承环境一致地解析 Rust runtime。直接压力验证 10/10 通过，相关 Eval 单元测试 64/64
+通过。
+
+同一 revision 上使用 manifest digest
+`0cd3420a273791beab8ad974ac661c6cca1480a9bb9da3478ff233c64a9542d3` 完成 Rust 多文件
+定向对照，各模型独立重复三次。DeepSeek `deepseek-v4-flash` 为 3/3，耗时中位数
+50.457 秒、请求数中位数 16；Kimi Code `k3-256k` 为 3/3，耗时中位数 94.194 秒、请求数
+中位数 7。全部请求保持精确模型身份，六轮均只修改 `README.md` 与 `src/lib.rs`，最终
+work plan 为 completed、无越界文件且 workspace 清理成功。DeepSeek 一轮出现一次非法
+plan transition，另一轮出现两次缺少 `search` 的 malformed `files_patch`，均自行恢复；
+Kimi 三轮 tool error 为 0。现有 schema 和共同提示已明确这两项合同，当前样本不足以晋升
+provider-specific policy，先作为候选观察保留。完整证据见
+`.agents/30-records/logs/stage-2026-09-01-m21-rust-verification.md`。
+
 #### 退出条件
 
 - 两个精确模型均完成独立、不可变、可审计的 bounded core campaign。
