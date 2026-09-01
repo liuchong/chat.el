@@ -49,10 +49,15 @@
   42-task-by-five campaigns and 840 trials; never compare different providers
   as if they were implementation revisions or pool their acceptance rates
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
+- The exact Kimi development campaign `m20-dev-baseline-kimi-0393745-r1`
+  completed 123/126; all 835 requests used `kimi-code/k3-256k`, every workspace
+  cleaned, and the only availability outage was quarantined then resumed
+- Kimi's three formal failures had different fingerprints and all corresponding
+  later repetitions passed; retain them as recovery candidates, not hard rules
 - M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
   and no provider-specific policy was promoted without causal A/B evidence
 - The latest detailed record is
-  `stage-2026-09-01-clojure-sandbox-offline-repair.md`
+  `stage-2026-09-01-m20-kimi-development-campaign.md`
 - Specs 031-034 now record the deferred subscription, remote scoped-rule,
   distributed/headless runtime and collaborative-group designs. They are design
   authorities only; do not describe them as implemented or insert them into M20

@@ -96,8 +96,15 @@ DeepSeek development campaign now completes
 `deepseek-v4-flash`; all checks passed, all seven languages contributed 18
 results, and scope, work-plan, executor, provider-attempt and cleanup failures
 were zero. The original 39-result campaign remains incident evidence only.
-The independent exact-Kimi development campaign is next; final five-repetition
-baseline/current evidence is still open.
+The independent exact-Kimi development campaign has now completed 123/126 at
+revision `0393745`, with all 835 requests using exact `kimi-code/k3-256k`. C,
+Clojure, TypeScript and Zig passed 18/18; C++, Java and SQL passed 17/18. Its
+three failures had distinct fingerprints and all matching later repetitions
+passed, producing a 42/42 third round, so no provider-specific rule was
+promoted. One curl code 18 outage was quarantined as an attempt and the same
+formal identity later passed. Final scope leaks, stale writes and cleanup
+failures were zero. The four final 210-trial baseline/current campaigns remain
+open.
 
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote

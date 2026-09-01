@@ -1503,6 +1503,27 @@ plan、executor failure、provider attempt 与 workspace cleanup failure 均为 
 development 资格并验证共享文件同步修复，不替代最终五次 baseline/current 矩阵。下一步以
 相同 manifest、预算和精确身份运行独立 Kimi `k3-256k` development campaign。
 
+Revision `0393745` 的独立 Kimi development campaign
+`m20-dev-baseline-kimi-0393745-r1` 已完成 126 个唯一 task/repetition 身份，其中
+123 PASS、2 FAIL、1 ERROR。三轮分别为 40/42、41/42、42/42；C、Clojure、TypeScript
+和 Zig 均为 18/18，C++、Java 和 SQL 均为 17/18。全部 835 次 normalized request 保持
+精确 `kimi-code/k3-256k`，越界最终文件、stale write 与 workspace cleanup failure 均为
+0。一次 curl code 18 可用性故障只进入 `attempts/`，恢复后同一 `c-refactor#3` 正式身份
+通过。
+
+三个正式失败分别为 read-only review 误入 Plan Mode 后留下 active plan、mutation task
+一轮请求中未调用工具即结束，以及一次 `files_replace` 失败后未恢复写入。它们属于三种
+不同指纹，对应任务的后续 repetition 均通过，第三轮全量 42/42；因此按 Spec 028/029
+只保留为恢复策略候选，不添加 provider 或语言硬规则。Kimi 请求数中位/p95 为 7/11，
+任务耗时中位/p95 为 56.028/160.570 秒；DeepSeek development 对照为 10/17 与
+19.584/48.439 秒。跨厂商差异仅作描述，不作为 revision 因果证据。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-m20-kimi-development-campaign.md`。
+
+两家 development 门禁至此关闭。下一步固定 manifest digest
+`fecacb185cd4b2d95c30f8fd62ff1e21ecae28731628fcf0045499390c7e0de0`、相同 300 秒预算
+与各自精确模型身份，分别执行 baseline/current 五次矩阵；四个 campaign 各 210 个正式
+身份，任何 availability attempt 单独保留且不占正式身份。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。

@@ -40,10 +40,14 @@ repassed the revised focused task, the 42-task preflight passed twice and the
 clean canonical suite passed 2010/2010. The replayable record is
 `stage-2026-09-01-clojure-sandbox-offline-repair.md`.
 
-The next gate is fresh provider-separated 42-task-by-three development
-campaigns. Their failure distribution must be diagnosed before freezing one
-five-repetition baseline/current pair per provider, with 210 unique results in
-each of four final campaigns.
+Both provider-separated 42-task-by-three development campaigns are complete.
+DeepSeek passed 126/126. Kimi passed 123/126; its three failures were an
+unclosed accidental Plan in a review, a one-request mutation completion without
+tool use, and a failed replace followed by no successful mutation. Each failed
+identity passed in a later repetition, and the third repetition passed 42/42,
+so no single observation is promoted into a hard or model-specific rule. The
+next gate is to freeze and run one five-repetition baseline/current pair per
+provider, with 210 unique results in each of four final campaigns.
 
 Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
 record inside the immutable configuration digest. Version probes are fixed and

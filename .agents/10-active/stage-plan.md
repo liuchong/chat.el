@@ -48,11 +48,14 @@ Kimi models. The first partial DeepSeek campaign remains incident evidence
 only after exposing an interactive visiting-buffer supersession prompt. The
 shared no-prompt mutation repair is closed by 167/167 focused, 2014/2014
 canonical and a fresh exact-DeepSeek 126/126 live campaign at revision
-`de0f6af`. Run the independent exact-Kimi 42-task-by-three development
-campaign next. Classify and repair repeated failures before freezing a separate
-five-repetition baseline/current pair for each provider: four final campaigns
-and 210 unique results per campaign. Never skip a language, compare different
-providers as revisions, mix campaign identities or substitute model identity.
+`de0f6af`. The independent exact-Kimi campaign at revision `0393745` completed
+123/126 with three distinct, non-repeating closure failures and a perfect third
+repetition. No model-specific rule is promoted from single observations. Freeze
+the shared manifest and clean implementation/harness revisions, then run a
+separate five-repetition baseline/current pair for each provider: four final
+campaigns and 210 unique results per campaign. Never skip a language, compare
+different providers as revisions, mix campaign identities or substitute model
+identity.
 
 ## Stage Gate
 
