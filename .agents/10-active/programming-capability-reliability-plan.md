@@ -1525,6 +1525,23 @@ Kimi 三轮 tool error 为 0。现有 schema 和共同提示已明确这两项�
 provider-specific policy，先作为候选观察保留。完整证据见
 `.agents/30-records/logs/stage-2026-09-01-m21-rust-verification.md`。
 
+Revision `e1d685d` 关闭了 JavaScript refactor 诊断暴露的两个共同层问题。Agent 再次打开
+已由工具修改的干净 visiting buffer 时，文件层现在静默刷新；若 buffer 有未保存编辑则
+fail closed，不再进入 minibuffer 询问。Eval 的精确 command judge 同时成为 Guard 签发的
+runtime verification contract，优先于通用语言探测。结果元数据新增有界
+`verificationProfile` 投影，以来源、命令/步骤数量和有序 argv 双摘要证明 planner 实际采用
+任务合同，不复制原始 argv。
+
+同 revision 的 DeepSeek `deepseek-v4-flash` JavaScript 定向 campaign 为 1/1 PASS，九次
+请求身份全部精确；只修改 `sample.js`，真实调用 `open_file` 后无交互提示，精确 judge 通过，
+work plan completed，tool error、越界文件、stale write 与清理残留均为 0。
+`verificationProfile` 为 `source=runtime-contract`、1/1、双摘要相同且
+`exactContractMatch=true`。Canonical 为 1996 discovered、1994 passed、0 unexpected、
+2 个既有 Rust system-SSL 环境 skip。完整证据见
+`.agents/30-records/logs/stage-2026-09-01-m21-javascript-verification-contract.md`。
+下一步在新的 clean revision 上启动完整 30-task DeepSeek core-v2 campaign；旧 revision 的
+17 条未完成结果只保留事故证据，不得恢复或并入新矩阵。
+
 #### 退出条件
 
 - 两个精确模型均完成独立、不可变、可审计的 bounded core campaign。
