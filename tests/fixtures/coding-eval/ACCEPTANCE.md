@@ -168,6 +168,14 @@ judges. The projection must contain only plan/item identifiers, revisions,
 statuses, bounded evidence identifiers and bounded blocker text; it must not
 copy objectives, titles, acceptance text or provider content.
 
+When a task contract contains a more specific command than language detection,
+run `manifest-javascript-refactor-diagnostic.json` independently before
+restarting the full core campaign. Its verification profile must report
+`source=runtime-contract` and preserve `node test.js normalize` as argv. The run
+must finish without a minibuffer prompt even when an Agent-opened file changed
+on disk. This diagnostic closes only the exact-command and noninteractive-open
+regression; it contributes no replacement trial to the full campaign.
+
 `manifest-large-repo.json` must remain an exact structural copy of the core
 `python-locate` task. Its baseline and current campaigns each contain exactly
 five unique repetitions. Final acceptance verifies that both focused campaigns

@@ -586,13 +586,21 @@ that mutation with verification and Plan-upgrade tools after consumption."
     (project-root &optional changed-files)
   "Plan project verification without running it."
   (require 'chat-code-verify)
+  (require 'chat-approval-guard)
   (let* ((session (chat-capability--current-session))
+         (context (chat-capability--verification-context))
+         (commands
+          (chat-approval-guard-verification-commands session project-root))
+         (context
+          (if commands
+              (plist-put context :verification-commands commands)
+            context))
          (profile
           (chat-code-verify-plan
            project-root
            (chat-capability--native-string-list
             changed-files "changed_files")
-           (chat-capability--verification-context))))
+           context)))
     (chat-capability--set-verification-fallback session profile)
     (if (chat-verification-profile-steps profile)
         (progn

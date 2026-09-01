@@ -625,6 +625,13 @@ task ID、canonical project root、逐条 argv 和 canonical execution directory
 runtime 内建的 `evaluation`、`project-config` 或 `verification-adapter`;模型输出、提示词和
 工具参数不能创建或修改合同。
 
+精确验证合同也是 verification planner 的最高权威输入，不只是 Guard 的授权条目。
+planner 必须把当前 session、active task 和 canonical project root 校验通过的逐条 argv
+原样投影成 required、always-triggered 的 `runtime-contract` steps；它们优先于项目配置、
+语言探测和通用 fallback。planner 不得把 `node test.js normalize` 一类带子命令的合同
+缩短成自动探测到的 `node test.js`，也不得因已经探测到其他步骤而隐藏精确命令。
+不匹配当前 task/root、过期、越界或 malformed 的合同不进入 planner context。
+
 只有当前 `activeTaskId`、project root、directory 和完整 argv 全部逐项相等,命令只有一个
 shell segment,工具为 `programming_compile_task`,并且 never-allow 地板没有命中时才走
 确定性 allow。任务切换、session reload 后没有相同 active task、参数增删、目录变化、

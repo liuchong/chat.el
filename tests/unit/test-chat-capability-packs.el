@@ -635,6 +635,33 @@
           (chat-capability-programming-verification-read-result
            "verification-result")))))))
 
+(ert-deftest chat-capability-verification-plan-uses-active-runtime-contract ()
+  "Planning projects the active task's exact runtime command into its profile."
+  (require 'chat-code-verify)
+  (require 'chat-approval-guard)
+  (chat-test-with-temp-dir
+   (let* ((chat-code-verify--profiles (make-hash-table :test 'equal))
+          (chat-code-verify--profile-contexts (make-hash-table :test 'equal))
+          (session (make-chat-session :id "verification-contract-plan"))
+          (chat-tool-caller-current-session session)
+          (chat-tool-caller-current-state-session session)
+          (chat-tool-caller-current-execution-context
+           '(:task-id "task-contract")))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-session-metadata-set session 'activeTaskId "task-contract")
+     (with-temp-file (expand-file-name "test.js" temp-dir)
+       (insert ""))
+     (chat-approval-guard-set-verification-contract
+      session "task-contract" temp-dir
+      '(("node" "test.js" "normalize")) "evaluation")
+     (let* ((planned
+             (chat-capability-programming-verification-plan temp-dir nil))
+            (steps (cdr (assoc 'steps planned))))
+       (should (equal (cdr (assoc 'source planned)) "runtime-contract"))
+       (should (= (length steps) 1))
+       (should (equal (cdr (assoc 'argv (car steps)))
+                      '("node" "test.js" "normalize")))))))
+
 (ert-deftest chat-capability-generic-compile-requires-an-empty-verification-plan ()
   "Generic commands are a durable fallback, never the first verification path."
   (chat-test-with-temp-dir

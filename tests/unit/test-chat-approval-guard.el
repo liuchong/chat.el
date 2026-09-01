@@ -821,6 +821,31 @@ code matches against."
             (chat-approval-guard--verification-contract
              session (list :project-root temp-dir)))))))))
 
+(ert-deftest chat-approval-guard-projects-only-active-verification-commands ()
+  "The public projection is detached and preserves task and root authority."
+  (chat-test-with-temp-dir
+   (let* ((project (expand-file-name "project/" temp-dir))
+          (outside (expand-file-name "outside/" temp-dir))
+          (session (make-chat-session :id "verification-projection")))
+     (make-directory project t)
+     (make-directory outside t)
+     (chat-session-metadata-set session 'activeTaskId "task-1")
+     (chat-approval-guard-set-verification-contract
+      session "task-1" project '(("node" "test.js" "normalize"))
+      "evaluation")
+     (let ((commands
+            (chat-approval-guard-verification-commands session project)))
+       (should (equal commands '(("node" "test.js" "normalize"))))
+       (setcar (car commands) "changed")
+       (should
+        (equal (chat-approval-guard-verification-commands session project)
+               '(("node" "test.js" "normalize")))))
+     (should-not
+      (chat-approval-guard-verification-commands session outside))
+     (chat-session-metadata-set session 'activeTaskId "task-2")
+     (should-not
+      (chat-approval-guard-verification-commands session project)))))
+
 (ert-deftest chat-approval-guard-project-check-fast-path-keeps-narrow-boundaries ()
   "Arbitrary, compound, wrong-tool and out-of-project calls still use the model."
   (chat-test-with-temp-dir

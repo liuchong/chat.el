@@ -65,6 +65,39 @@
                                    (chat-verification-step-argv step)))
                        steps)))))
 
+(ert-deftest chat-code-verify-prefers-exact-runtime-contract ()
+  "A trusted task command outranks project and detected verification policy."
+  (chat-test-with-temp-dir
+   (with-temp-file (expand-file-name "test.js" temp-dir)
+     (insert ""))
+   (with-temp-file (expand-file-name ".chat-verification.json" temp-dir)
+     (insert
+      "{\"id\":\"project\",\"steps\":[{\"id\":\"generic\","
+      "\"kind\":\"test\",\"argv\":[\"node\",\"test.js\"],"
+      "\"required\":true}]}"))
+   (let* ((profile
+           (chat-code-verify-plan
+            temp-dir nil
+            '(:verification-commands (("node" "test.js" "normalize")))))
+          (steps (chat-verification-profile-steps profile))
+          (step (car steps)))
+     (should (eq (chat-verification-profile-source profile)
+                 'runtime-contract))
+     (should (= (length steps) 1))
+     (should (equal (chat-verification-step-argv step)
+                    '("node" "test.js" "normalize")))
+     (should (chat-verification-step-required-p step))
+     (should (eq (chat-verification-step-trigger step) 'always))
+     (should (equal (file-name-as-directory (file-truename temp-dir))
+                    (chat-verification-step-directory step))))))
+
+(ert-deftest chat-code-verify-rejects-malformed-runtime-contract-context ()
+  "An internal caller cannot smuggle unbounded or empty argv into a profile."
+  (chat-test-with-temp-dir
+   (should-error
+    (chat-code-verify-plan
+     temp-dir nil '(:verification-commands (("node" "")))))))
+
 (ert-deftest chat-code-verify-detects-conventional-language-tests ()
   "Conventional small projects get argv-only checks without project config."
   (dolist (case '(("test_sample.py" . ("python3" "-m" "unittest"))

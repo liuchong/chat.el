@@ -408,7 +408,7 @@ producer; model output and prompt text are not accepted as contract sources."
                  (stringp task-id)
                  (equal task-id active-task-id)
                  root environment-root (equal root environment-root)
-                 (listp commands) commands
+                 (listp commands) commands (<= (length commands) 64)
                  (seq-every-p
                   (lambda (entry)
                     (and (chat-approval-guard--verification-argv-p
@@ -418,6 +418,19 @@ producer; model output and prompt text are not accepted as contract sources."
                                  (alist-get 'directory entry)))))
                   commands))
         contract))))
+
+(defun chat-approval-guard-verification-commands (session project-root)
+  "Return exact active-task commands for SESSION at PROJECT-ROOT.
+
+The returned argv lists are detached copies.  Invalid, stale, wrong-root, and
+untrusted contracts return nil instead of becoming verification authority."
+  (when-let* ((contract
+               (chat-approval-guard--verification-contract
+                session (list :project-root project-root))))
+    (mapcar
+     (lambda (entry)
+       (copy-sequence (alist-get 'argv entry)))
+     (alist-get 'commands contract))))
 
 (defun chat-approval-guard--verification-contract-verdict
     (tool call env session)

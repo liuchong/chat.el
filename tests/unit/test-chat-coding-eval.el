@@ -45,6 +45,10 @@
   (expand-file-name "coding-eval/manifest-go-refactor-diagnostic.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-javascript-refactor-diagnostic-manifest
+  (expand-file-name "coding-eval/manifest-javascript-refactor-diagnostic.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-rust-multi-file-diagnostic-manifest
   (expand-file-name "coding-eval/manifest-rust-multi-file-diagnostic.json"
                     chat-test-fixtures-dir))
@@ -336,6 +340,25 @@
     (should (equal (list core-task) (alist-get 'tasks diagnostic)))
     (let ((task (car (chat-coding-eval-load-suite
                       chat-coding-eval-test-rust-multi-file-diagnostic-manifest))))
+      (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
+
+(ert-deftest chat-coding-eval-javascript-refactor-diagnostic-is-an-exact-subset ()
+  "The exact-command diagnostic reuses the canonical JavaScript refactor task."
+  (let* ((core (chat-coding-eval-test--read-json
+                chat-coding-eval-test-manifest))
+         (diagnostic
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-javascript-refactor-diagnostic-manifest))
+         (core-task
+          (seq-find (lambda (task)
+                      (equal "javascript-refactor" (alist-get 'id task)))
+                    (alist-get 'tasks core))))
+    (should (equal "coding-javascript-refactor-diagnostic-v1"
+                   (alist-get 'corpusId diagnostic)))
+    (should (= 300 (alist-get 'taskTimeoutSeconds diagnostic)))
+    (should (equal (list core-task) (alist-get 'tasks diagnostic)))
+    (let ((task (car (chat-coding-eval-load-suite
+                      chat-coding-eval-test-javascript-refactor-diagnostic-manifest))))
       (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
 
 (ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()

@@ -221,6 +221,33 @@ configuration and deterministic detection."
    :trigger (or trigger 'changed) :required-p required
    :approval-class 'inspect))
 
+(defun chat-code-verify--runtime-contract-profile (root commands)
+  "Build an exact verification profile for trusted COMMANDS under ROOT."
+  (when commands
+    (unless (and (listp commands) (<= (length commands) 64)
+                 (seq-every-p
+                  (lambda (argv)
+                    (and (listp argv) argv (<= (length argv) 128)
+                         (seq-every-p
+                          (lambda (argument)
+                            (and (stringp argument)
+                                 (not (string-empty-p argument))
+                                 (<= (string-bytes argument) 4096)))
+                          argv)))
+                  commands))
+      (error "Runtime verification contract requires bounded argv commands"))
+    (chat-verification-profile-create
+     :id (chat-code-verify--new-id "verification-profile")
+     :project-root root :source 'runtime-contract :revision "1"
+     :steps
+     (cl-loop for argv in commands
+              for index from 1
+              collect
+              (chat-code-verify--step
+               root (format "runtime-contract-%02d" index)
+               'test (copy-sequence argv) t 'always))
+     :repair-limit chat-code-verify-default-repair-limit)))
+
 (defun chat-code-verify--changed-with-extension (files extensions)
   "Return changed FILES whose extension occurs in EXTENSIONS."
   (seq-filter
@@ -513,7 +540,9 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
   (let* ((root (chat-code-verify--root project-root))
          (changed (sort (delete-dups (copy-sequence changed-files)) #'string<))
          (profile
-          (or (and (functionp chat-code-verify-profile-function)
+          (or (chat-code-verify--runtime-contract-profile
+               root (plist-get context :verification-commands))
+              (and (functionp chat-code-verify-profile-function)
                    (funcall chat-code-verify-profile-function root changed))
               (chat-code-verify--profile-from-file root)
               (chat-verification-profile-create

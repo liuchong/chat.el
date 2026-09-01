@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-javascript-refactor-diagnostic-v1",
+  "taskTimeoutSeconds": 300,
+  "tasks": [
+    {
+      "id": "javascript-refactor", "revision": 1, "category": "refactor", "language": "javascript",
+      "description": "Extract normalization detail.", "fixtureId": "javascript-sample-v1", "fixture": "javascript",
+      "prompt": "Refactor normalizeName by extracting whitespace cleanup into a helper named cleanName. Preserve behavior.",
+      "allowedPaths": ["sample.js"],
+      "judges": [{"type": "command", "name": "normalize-tests", "command": ["node", "test.js", "normalize"], "expectedExit": 0}, {"type": "file-regexp", "name": "helper-extracted", "path": "sample.js", "regexp": "cleanName"}]
+    }
+  ]
+}
