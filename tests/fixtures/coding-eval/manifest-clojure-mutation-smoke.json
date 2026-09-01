@@ -4,24 +4,22 @@
   "corpusId": "coding-clojure-mutation-smoke-v1",
   "description": "One bounded Clojure repair used as a fast cross-provider mutation control.",
   "requiredExecutables": [
-    "lein"
+    "clojure"
   ],
   "tasks": [
     {
       "id": "clojure-failing-test",
-      "revision": 1,
+      "revision": 2,
       "category": "failing-test-fix",
       "language": "clojure",
       "description": "Repair an activity-state regression.",
-      "fixtureId": "clojure-sample-v1",
+      "fixtureId": "clojure-sample-v2",
       "fixture": "clojure",
       "prompt": "The active-test test fails. Fix the implementation, keeping the test unchanged.",
       "allowedPaths": [
         "src/sample/core.clj"
       ],
       "generatedPaths": [
-        "target",
-        ".lein-failures",
         ".cpcache"
       ],
       "judges": [

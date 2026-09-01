@@ -146,8 +146,6 @@
        `(("build.zig"
           "pub fn build(b: *std.Build) void { _ = b.step(\"test\", \"Run\"); }"
           "zig-test" ("zig" "build" "test"))
-         ("project.clj" "(defproject sample \"0\")"
-          "clojure-test" ("lein" "test"))
          ("pom.xml" "<project/>"
           "java-maven-test" ("mvn" "-o" "test"))
          ("tsconfig.json" "{}"
@@ -207,6 +205,20 @@
           (steps (chat-verification-profile-steps profile)))
      (should (eq (chat-verification-profile-source profile) 'project-config))
      (should (equal (mapcar #'chat-verification-step-id steps) '("chosen"))))))
+
+(ert-deftest chat-code-verify-clojure-cli-requires-explicit-project-config ()
+  "A Clojure CLI test command is accepted only as explicit project authority."
+  (chat-test-with-temp-dir
+   (with-temp-file (expand-file-name "deps.edn" temp-dir)
+     (insert "{:aliases {:test {:main-opts [\"-m\" \"sample.test-runner\"]}}}"))
+   (with-temp-file (expand-file-name ".chat-verification.json" temp-dir)
+     (insert
+      "{\"id\":\"clojure\",\"steps\":[{\"id\":\"clojure-test\",\"kind\":\"test\",\"argv\":[\"clojure\",\"-Srepro\",\"-M:test\"],\"required\":true}]}"))
+   (let* ((profile (chat-code-verify-plan temp-dir nil))
+          (step (car (chat-verification-profile-steps profile))))
+     (should (eq (chat-verification-profile-source profile) 'project-config))
+     (should (equal (chat-verification-step-argv step)
+                    '("clojure" "-Srepro" "-M:test"))))))
 
 (ert-deftest chat-code-verify-does-not-duplicate-package-typecheck ()
   "A package typecheck script remains the sole TypeScript authority."

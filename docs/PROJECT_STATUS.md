@@ -64,9 +64,10 @@ At clean revision `a7baa43`, exact DeepSeek `deepseek-v4-flash` and Kimi Code
 zero scope, stale-write, unfinished-plan or cleanup failures. No model-specific
 policy was promoted because the remaining latency and tool-use differences lack
 causal A/B evidence. M20 extended-language qualification has completed dual-model
-mutation smokes for Zig, Java, C, C++ and SQL. TypeScript and Clojure remain
-blocked before provider use by missing independent `tsc` and `lein` toolchains;
-the full 42-task repeated matrix therefore remains open.
+mutation smokes for Zig, Java, C, C++ and SQL. TypeScript 7.0.2 and Clojure CLI
+1.12.5.1664 now close the seven-language versioned preflight and offline gate.
+Their focused dual-model qualifications and the full repeated 42-task matrix
+remain open.
 
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
@@ -74,8 +75,8 @@ scoped rule bundles, language-neutral distributed/headless session execution and
 dynamic collaborative session groups. They reuse the existing Session, wire,
 Task, checkpoint, requirement-admission, Goal and Plan authorities and explicitly
 do not claim implementation in the current objective. The design stage passes
-the complete canonical suite at 2008/2008 with zero skipped or unexpected
-results.
+the then-current canonical suite at 2008/2008 with zero skipped or unexpected
+results. The later toolchain closure passes 2009/2009.
 
 The first full baseline attempt then exposed a terminal-evidence race: outer
 task timeout could be replaced by synchronous Agent cancellation and lose all
@@ -557,10 +558,8 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- keep the frozen M20 fixture, judge and acceptance contract unchanged while
-  TypeScript and Clojure remain infrastructure-blocked before provider use
-- when independent `tsc` and `lein` executables are explicitly available, run
-  only their preflight and focused exact-model qualification first
+- qualify TypeScript and Clojure on both exact providers before starting the
+  complete M20 matrix
 - after all seven language cells pass independently, run the complete repeated
   42-task DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` campaigns as
   separate evidence sets; never shrink the matrix or substitute another model

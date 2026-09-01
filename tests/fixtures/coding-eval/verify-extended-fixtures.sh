@@ -12,7 +12,7 @@ fi
 required_commands() {
   case "$1" in
     zig) echo "zig" ;;
-    clojure) echo "lein" ;;
+    clojure) echo "clojure" ;;
     java) echo "java javac" ;;
     typescript) echo "node tsc" ;;
     c) echo "clang" ;;

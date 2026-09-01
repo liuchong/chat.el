@@ -26,7 +26,7 @@
 
 (defconst chat-coding-eval-test-focused-mutation-smoke-manifests
   '(("zig" "manifest-zig-mutation-smoke.json" ("zig"))
-    ("clojure" "manifest-clojure-mutation-smoke.json" ("lein"))
+    ("clojure" "manifest-clojure-mutation-smoke.json" ("clojure"))
     ("java" "manifest-java-mutation-smoke.json" ("java" "javac"))
     ("typescript" "manifest-typescript-mutation-smoke.json" ("node" "tsc"))
     ("c" "manifest-c-mutation-smoke.json" ("clang"))
@@ -208,7 +208,7 @@
                (timeoutSeconds . 240)))
             preflight-checks))
     (should
-     (equal '("clang" "clang++" "java" "javac" "lein" "node" "sqlite3"
+     (equal '("clang" "clang++" "clojure" "java" "javac" "node" "sqlite3"
               "tsc" "zig")
             (sort (copy-sequence required-executables) #'string<)))
     (should (= 42 (alist-get 'taskCount coverage)))
@@ -248,8 +248,8 @@
                       (alist-get 'judges task))
         (should (assq 'generatedPaths task))))))
 
-(ert-deftest chat-coding-eval-clojure-fixture-is-strictly-offline ()
-  "Clojure fixture judging excludes implicit interactive dependencies."
+(ert-deftest chat-coding-eval-clojure-fixture-uses-reproducible-cli-authority ()
+  "Clojure fixture judging uses only the project and root CLI dependencies."
   (let ((script
          (expand-file-name "coding-eval/clojure/test-one"
                            chat-test-fixtures-dir)))
@@ -257,13 +257,10 @@
       (insert-file-contents script)
       (let ((contents (buffer-string)))
         (should (string-match-p
-                 "export LEIN_OFFLINE=true"
-                 contents))
-        (should (string-match-p
-                 "lein with-profile -base test :only"
+                 "clojure -Srepro -M:test"
                  contents))
         (should-not (string-match-p
-                     "\\nlein test :only"
+                     "lein"
                      contents))))))
 
 (ert-deftest chat-coding-eval-large-repo-manifest-is-an-exact-core-subset ()

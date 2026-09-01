@@ -86,7 +86,7 @@
       "state": "executable",
       "fixture": "clojure",
       "sourceExtensions": [".clj", ".cljc", ".cljs"],
-      "toolchains": ["lein"]
+      "toolchains": ["clojure"]
     },
     {
       "id": "java",

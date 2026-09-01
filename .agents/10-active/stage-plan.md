@@ -41,14 +41,12 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-The complete 42-task offline fixture, judge and cleanup gate is already closed.
-Five of seven focused language qualifications now pass independently on exact
-DeepSeek and Kimi models: Zig, Java, C, C++ and SQL. TypeScript and Clojure stop
-in preflight before provider setup because independent `tsc` and `lein`
-executables are unavailable. Preserve those two cells as infrastructure
-`BLOCKED`; do not install, download, borrow a nested compiler, skip a language or
-start the repeated 42-task campaigns on a reduced matrix. Resume M20 when both
-deterministic toolchains are explicitly available.
+The complete 42-task offline fixture, judge and cleanup gate is closed with
+exact TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 evidence. Five of seven
+focused language qualifications pass independently on exact DeepSeek and Kimi
+models: Zig, Java, C, C++ and SQL. Commit the toolchain closure, qualify
+TypeScript and Clojure independently on both exact models, then start the two
+complete repeated campaigns. Never skip a language or substitute model identity.
 
 ## Stage Gate
 

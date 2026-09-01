@@ -46,7 +46,7 @@
     ("go" "version")
     ("java" "-version")
     ("javac" "-version")
-    ("lein" "version")
+    ("clojure" "--version")
     ("node" "--version")
     ("python3" "--version")
     ("sh" "-c" "printf 'shell=%s' \"${BASH_VERSION:-POSIX}\"")

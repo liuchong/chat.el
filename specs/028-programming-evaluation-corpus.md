@@ -192,7 +192,7 @@ The extended language profiles use these deterministic local toolchains:
 | Language | Project shape | Targeted judge | Generated paths |
 |---|---|---|---|
 | Zig | package-free source and tests | `zig test` with a test filter | `.zig-cache`, `zig-out` |
-| Clojure | dependency-minimal Lein project | `lein with-profile -base test :only` | `target`, `.lein-failures`, `.cpcache` |
+| Clojure | dependency-free Clojure CLI project | `clojure -Srepro -M:test` with a named test | `.cpcache` |
 | Java | source plus explicit test harness | `javac -d` then `java -cp` | `.chat-eval-build/java` |
 | TypeScript | local compiler plus dependency-free Node test | `tsc --noEmit` then `node --test` on a named test | none |
 | C | C17 source plus test harness | `clang` then a named harness case | `.chat-eval-build/c` |
@@ -209,11 +209,13 @@ gate and requires only that language's declared executables. It does not weaken
 or partially pass the combined gate: unavailable focused manifests remain
 explicitly blocked, while available manifests retain their own immutable
 campaign identity and provider-separated evidence.
-The Clojure fixture removes Leiningen's implicit `:base` profile during judging
-so offline qualification depends only on the fixture project, not unrelated
-interactive-tool dependencies. Product verification continues to execute the
-project's declared `lein test` authority and does not inherit this fixture-only
-evaluation policy.
+The Clojure fixture has no project dependency or downloaded test runner. Its
+`deps.edn` adds only checked-in source and test paths, while `-Srepro` excludes
+user-level aliases and dependencies. The fixture-owned runner resolves exactly
+one named `clojure.test` var, reports its assertions and returns a deterministic
+process status. Product verification does not infer test authority from an
+arbitrary `deps.edn`; a Clojure project declares its CLI command through the
+existing structured `.chat-verification.json` contract.
 The manifest-level `requiredExecutables` list names every external executable
 used behind a fixture wrapper. Preflight resolves the union of that list and
 the first argv item of every command judge. A wrapper such as `sh test-one`
@@ -260,7 +262,7 @@ The deterministic adapters use the following minimum evidence:
 | Ecosystem | Required authority | Generated step |
 |---|---|---|
 | Zig | `build.zig` declares a literal `test` build step | `zig build test` |
-| Clojure | `project.clj` | `lein test` |
+| Clojure | explicit `.chat-verification.json` step | declared `clojure` CLI argv |
 | Java | `pom.xml`, or a checked-in executable Gradle wrapper plus wrapper metadata | offline Maven test, or offline Gradle test |
 | TypeScript | `tsconfig.json`, unless `package.json` already declares `typecheck` | project-local `tsc` when executable, otherwise `tsc --noEmit --project tsconfig.json` |
 | C, C++, SQL | an exact top-level `test:` target in the Make authority selected by Make | `make test` |

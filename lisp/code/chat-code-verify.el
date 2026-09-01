@@ -359,12 +359,6 @@ configuration and deterministic detection."
       (list (chat-code-verify--step
              root "zig-test" 'test '("zig" "build" "test") t)))))
 
-(defun chat-code-verify--clojure-profile (root)
-  "Return a Clojure check for an explicit Lein project."
-  (when (file-readable-p (expand-file-name "project.clj" root))
-    (list (chat-code-verify--step
-           root "clojure-test" 'test '("lein" "test") t))))
-
 (defun chat-code-verify--java-profile (root)
   "Return one offline Java project test when its build authority is clear."
   (let ((gradle-wrapper (expand-file-name "gradlew" root))
@@ -423,7 +417,6 @@ ecosystems without a universal language-level test command."
   "Return conservative extended-language checks below ROOT.
 STEPS prevents a manifest-declared TypeScript check from being duplicated."
   (append (chat-code-verify--zig-profile root)
-          (chat-code-verify--clojure-profile root)
           (chat-code-verify--java-profile root)
           (chat-code-verify--typescript-profile root steps)
           (chat-code-verify--make-test-profile root)))

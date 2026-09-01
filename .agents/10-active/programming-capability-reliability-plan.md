@@ -1460,6 +1460,18 @@ write、0 越界文件，只修改 `sample.zig`，精确 runtime verification co
 未关闭。完整记录见
 `.agents/30-records/logs/stage-2026-09-01-zig-dual-provider-qualification.md`。
 
+后续权威设计已改为官方 Clojure CLI 唯一路径，不保留 Lein、双读或 fallback。Clojure
+fixture 使用无第三方依赖的 `deps.edn`、仓库内 `clojure.test` 精确测试入口和
+`clojure -Srepro -M:test NAME`；普通项目不从任意 `deps.edn` 猜测测试语义，而是通过
+结构化 `.chat-verification.json` 声明真实命令。TypeScript 7.0.2 与 Clojure CLI
+1.12.5.1664 已在隔离 HOME 的完整 campaign preflight 中写入 path、canonical target 和
+version，42-task manifest digest 为
+`1c8cf84e4faa09b074503ff61ed986f7754cecfe87ab7177c2998d86c67fe1f4`，configuration
+digest 为 `3f701fd0ae857650855a1408858f431580bff4300ad4e0404367bbdb62676243`。
+全七语言 baseline、三种 seeded defect 和清理门禁已通过；下一步先完成 TypeScript 与
+Clojure 的四个精确模型 focused cells，再开始完整重复矩阵。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-official-clojure-cli-toolchain.md`。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。

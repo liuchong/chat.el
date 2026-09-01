@@ -26,15 +26,15 @@ footprint and performance limits. The replayable record is
 M20 is active. Zig, Clojure, Java, TypeScript, C, C++ and SQL now each have the
 same six task categories in a separate 42-task extended manifest. Fixture
 wrappers, generated-path contracts, complete executable preflight and
-12-language detection are implemented. Zig, Java, C, C++ and SQL pass the
-reusable offline semantic gate; the complete gate is explicitly blocked by
-missing local `lein` and `tsc` executables. No M20 provider campaign has run.
+12-language detection are implemented. All seven languages pass the reusable
+offline semantic and cleanup gate. Zig, Java, C, C++ and SQL have independent
+exact-model focused qualifications; TypeScript and Clojure are next.
 
 Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
 record inside the immutable configuration digest. Version probes are fixed and
 bounded; resume rejects executable or version drift before trial scheduling.
-The mechanism is complete, while local environment readiness remains blocked
-by the same two missing tools.
+The exact environment now records TypeScript 7.0.2 and Clojure CLI 1.12.5.1664.
+Clojure uses one dependency-free `deps.edn` contract and no alternate toolchain.
 
 While the remaining M20 provider matrix is blocked on those local executables,
 the highest-priority Markdown/MDP gap has been closed without changing table
@@ -509,20 +509,17 @@ strictly task-relevant. Decision 0018 supersedes decision 0017's earlier
 non-retaliatory interaction stance while retaining the separate leading
 section and its customization boundary.
 
-Latest product-code canonical verification discovered 1996 tests, passed 1994,
-reported zero unexpected results and retained two known Rust system-SSL
-environment skips. The later documentation-only Zig qualification stage passed
-its deterministic fixture and 70/70 focused documentation/coding-Eval tests.
+Latest canonical verification discovered and passed 2009/2009 tests with zero
+skipped or unexpected results. The all-seven offline fixture gate and isolated
+campaign preflight also pass with exact executable and version evidence.
 
 ## Next Stage
 
 Finish M20 without reusing M19 or M21 evidence. The complete extended offline
 gate is closed and exact-model mutation qualification passes independently for
-Zig, Java, C, C++ and SQL. TypeScript and Clojure remain blocked before provider
-use by missing independent `tsc` and `lein` executables. Once both deterministic
-toolchains are explicitly available, qualify those two languages first, then run
-the complete repeated 42-task DeepSeek `deepseek-v4-flash` and Kimi Code
-`k3-256k` campaigns as separate evidence sets.
+Zig, Java, C, C++ and SQL. Qualify TypeScript and Clojure against DeepSeek
+`deepseek-v4-flash` and Kimi Code `k3-256k` first, then run the complete repeated
+42-task campaigns as separate provider evidence sets.
 
 ## Not Doing Now
 
@@ -536,8 +533,7 @@ the complete repeated 42-task DeepSeek `deepseek-v4-flash` and Kimi Code
 
 ## Immediate Next Step
 
-Wait for explicit availability of independent `lein` and `tsc` toolchains; do
-not install or fetch them implicitly. Re-run only their preflight and focused
-qualification first. Do not start a reduced repeated campaign while either cell
-is blocked, and continue only independent work that cannot alter the frozen M20
-fixture or acceptance contract.
+Commit the official Clojure CLI and TypeScript toolchain closure as one clean
+revision. Run only their focused exact-model qualifications first. Start the
+repeated all-language campaigns only when all four focused cells pass; never
+reduce the matrix or substitute another model identity.

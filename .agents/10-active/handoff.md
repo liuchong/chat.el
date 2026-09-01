@@ -29,23 +29,24 @@
   well as direct command executables before any provider request
 - All 12 qualification languages enter source discovery, fallback symbol
   indexing, repo-map projection and independent semantic quality rows
-- TypeScript and Clojure focused qualification and the complete repeated matrix
-  are blocked by missing independent `tsc` and `lein`; never turn those cells
-  into skipped trials or silently shrink the matrix
+- TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 now pass exact versioned
+  preflight; their four focused provider cells remain to be qualified before
+  the complete repeated matrix starts
 - Campaign schema v2 stores invocation paths, canonical targets and versions in
   the immutable configuration digest and rejects drift on resume
 - Project verification adapters cover the seven extended ecosystems using
   explicit project authority and fail closed on ambiguous markers
-- Zig requires a declared build test step; Clojure requires Lein; Java uses
-  offline Maven or a checked-in Gradle wrapper; TypeScript
-  avoids duplicate package typechecks; C/C++/SQL require exact `make test`
+- Zig requires a declared build test step; Clojure Eval uses dependency-free
+  Clojure CLI while product projects declare test authority explicitly; Java
+  uses offline Maven or a checked-in Gradle wrapper; TypeScript avoids duplicate
+  package typechecks; C/C++/SQL require exact `make test`
 - Run exact-model live work only after the offline gate: DeepSeek
   `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
 - M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
   and no provider-specific policy was promoted without causal A/B evidence
 - The latest detailed record is
-  `stage-2026-09-01-zig-dual-provider-qualification.md`
+  `stage-2026-09-01-official-clojure-cli-toolchain.md`
 - Specs 031-034 now record the deferred subscription, remote scoped-rule,
   distributed/headless runtime and collaborative-group designs. They are design
   authorities only; do not describe them as implemented or insert them into M20
