@@ -339,23 +339,25 @@ one is retained for investigation or a later invocation."
      (expectedResultCount . ,(alist-get 'expectedResultCount descriptor))
      (implementationRevision .
                              ,(alist-get 'implementationRevision descriptor))
+     (harnessRevision . ,(alist-get 'harnessRevision descriptor))
      (toolchain . ,(alist-get 'toolchain descriptor))
      (manifestDigest . ,(alist-get 'manifestDigest descriptor))
      (configurationDigest . ,(alist-get 'configurationDigest descriptor)))))
 
 (defun chat-campaign-runner--start-or-resume
     (campaign-directory provider repetitions manifest model campaign-id
-                        implementation-revision role toolchain)
+                        implementation-revision role toolchain harness-revision)
   "Start a new campaign or resume validated missing work in CAMPAIGN-DIRECTORY."
   (if (file-exists-p campaign-directory)
       (progn
         (unless (file-directory-p campaign-directory)
           (error "Campaign path is not a directory: %s" campaign-directory))
         (chat-coding-eval-resume-live
-         campaign-directory manifest implementation-revision toolchain))
+         campaign-directory manifest implementation-revision toolchain
+         harness-revision))
     (chat-coding-eval-run-live
      provider repetitions manifest model campaign-id implementation-revision role
-     toolchain)))
+     toolchain harness-revision)))
 
 (defun chat-campaign-runner--main-in-isolated-runtime ()
   "Validate configuration, then preflight or run one live campaign."
@@ -452,7 +454,8 @@ one is retained for investigation or a later invocation."
              (campaign
               (chat-coding-eval-prepare-campaign
                campaign-id provider model repetitions manifest
-               :implementation-revision implementation-revision :role role
+               :implementation-revision implementation-revision
+               :harness-revision harness-revision :role role
                :toolchain toolchain))
              (descriptor (plist-get campaign :descriptor)))
         (unwind-protect
@@ -478,7 +481,8 @@ one is retained for investigation or a later invocation."
             (setq suite
                   (chat-campaign-runner--start-or-resume
                    campaign-directory provider repetitions manifest model
-                   campaign-id implementation-revision role toolchain))
+                   campaign-id implementation-revision role toolchain
+                   harness-revision))
             (while (and (file-exists-p lock) (< (float-time) deadline))
               (accept-process-output nil 1))
             (cond

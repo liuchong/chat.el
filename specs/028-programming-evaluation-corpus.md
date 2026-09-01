@@ -233,10 +233,13 @@ version probes fail closed even when an executable with that name exists.
 Version evidence contains only normalized child stdout and stderr; editor
 process lifecycle messages, sentinels and buffer diagnostics are not child
 identity and must never enter the configuration digest.
-Campaign schema v2 stores this record in `campaign.json` and includes it in the
-configuration digest. Resume repeats preflight and rejects path or version
-drift before scheduling a missing trial. Earlier campaign schemas are not
-migrated or resumed.
+Campaign schema v3 stores this record in `campaign.json` and binds both the
+tested implementation revision and the executing harness revision into the
+configuration digest. The two revisions are distinct for historical baseline
+runs: the product checkout stays frozen while the current harness supplies the
+campaign protocol. Resume repeats preflight and rejects implementation,
+harness, path or version drift before scheduling a missing trial. Earlier
+campaign schemas are not migrated or resumed.
 An optional manifest-level `preflightChecks` array declares bounded argv checks
 that run from the manifest directory after toolchain resolution and before
 provider readiness. Each check's first executable must already have versioned

@@ -35,8 +35,9 @@
   or network access; Clojure tasks are revision 3 / `clojure-sample-v3`
 - The interrupted `m20-dev-baseline-deepseek-c05ed64-r3` campaign is
   infrastructure incident evidence only; never resume or pool it
-- Campaign schema v2 stores invocation paths, canonical targets and versions in
-  the immutable configuration digest and rejects drift on resume
+- Campaign schema v3 stores implementation/harness revisions, invocation paths,
+  canonical targets and versions in the immutable configuration digest and
+  rejects any identity drift on resume
 - Project verification adapters cover the seven extended ecosystems using
   explicit project authority and fail closed on ambiguous markers
 - Zig requires a declared build test step; Clojure Eval uses dependency-free

@@ -885,18 +885,20 @@
         (eq 'resumed
             (chat-campaign-runner--start-or-resume
              existing 'provider-a 5 "/manifest.json" "model-a" "campaign-a"
-             "revision-a" "current" toolchain)))
+             "revision-a" "current" toolchain "harness-a")))
        (should
-        (equal (list 'resume existing "/manifest.json" "revision-a" toolchain)
+        (equal (list 'resume existing "/manifest.json" "revision-a" toolchain
+                     "harness-a")
                (car calls)))
        (should
         (eq 'started
             (chat-campaign-runner--start-or-resume
              new 'provider-a 5 "/manifest.json" "model-a" "campaign-b"
-             "revision-a" "baseline" toolchain)))
+             "revision-a" "baseline" toolchain "harness-a")))
        (should
         (equal (list 'start 'provider-a 5 "/manifest.json" "model-a"
-                     "campaign-b" "revision-a" "baseline" toolchain)
+                     "campaign-b" "revision-a" "baseline" toolchain
+                     "harness-a")
                (car calls)))))))
 
 (ert-deftest chat-coding-eval-suite-has-fixed-balanced-coverage ()
@@ -1463,6 +1465,7 @@
             "baseline-001" 'provider-a "model-a" 5
             chat-coding-eval-test-manifest
             :implementation-revision "baseline-revision"
+            :harness-revision "harness-revision"
             :role "baseline"
             :toolchain
             '(((name . "emacs") (path . "/tools/emacs")
@@ -1475,6 +1478,8 @@
      (should (= 64 (length (alist-get 'configurationDigest descriptor))))
      (should (equal "baseline-revision"
                     (alist-get 'implementationRevision descriptor)))
+     (should (equal "harness-revision"
+                    (alist-get 'harnessRevision descriptor)))
      (should
       (equal "GNU Emacs test"
              (alist-get
@@ -1487,11 +1492,29 @@
        "baseline-001" 'provider-a "model-a" 5
        chat-coding-eval-test-manifest
        :implementation-revision "baseline-revision"
+       :harness-revision "harness-revision"
        :role "baseline"
        :toolchain
        '(((name . "emacs") (path . "/tools/emacs")
           (target . "/tools/emacs")
           (version . "GNU Emacs test"))))))))
+
+(ert-deftest chat-coding-eval-campaign-digest-binds-harness-revision ()
+  "Changing only the harness revision changes immutable campaign identity."
+  (let ((common
+         '(provider-a "model-a" ((tool-calling . supported)) auto 5 42
+           "fecacb185cd4b2d95c30f8fd62ff1e21ecae28731628fcf0045499390c7e0de0"
+           "implementation-revision"
+           (((name . "emacs") (path . "/tools/emacs")
+             (target . "/tools/emacs") (version . "GNU Emacs test"))))))
+    (should-not
+     (equal
+      (chat-coding-eval--configuration-digest
+       (apply #'chat-coding-eval--campaign-configuration
+              (append common '("harness-a"))))
+      (chat-coding-eval--configuration-digest
+       (apply #'chat-coding-eval--campaign-configuration
+              (append common '("harness-b"))))))))
 
 (ert-deftest chat-coding-eval-suite-persists-only-in-its-result-directory ()
   "Suite result routing cannot mix campaign records into the global store."
@@ -1654,6 +1677,13 @@
        '(((name . "fixture") (path . "/tools/fixture")
           (target . "/tools/fixture")
           (version . "fixture 2")))))
+     (should-error
+      (chat-coding-eval--load-open-campaign
+       directory manifest "resume-revision"
+       '(((name . "fixture") (path . "/tools/fixture")
+          (target . "/tools/fixture")
+          (version . "fixture 1")))
+       "different-harness-revision"))
      (write-region "\n" nil manifest t 'silent)
      (should-error
       (chat-coding-eval--load-open-campaign

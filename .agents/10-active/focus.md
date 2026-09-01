@@ -55,9 +55,10 @@ false stagnation event. The next gate is to freeze and run one five-repetition
 baseline/current pair per provider, with 210 unique results in each of four
 fresh final campaigns.
 
-Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
-record inside the immutable configuration digest. Version probes are fixed and
-bounded; resume rejects executable or version drift before trial scheduling.
+Campaign schema v3 now persists a sorted `name/path/target/version` toolchain
+record and distinct implementation/harness revisions inside the immutable
+configuration digest. Version probes are fixed and bounded; resume rejects
+implementation, harness, executable or version drift before trial scheduling.
 The exact environment records TypeScript 7.0.2 and Clojure CLI 1.12.5.1664.
 Clojure uses one dependency-free `deps.edn` contract, the official CLI's
 bundled runtime and no alternate toolchain.

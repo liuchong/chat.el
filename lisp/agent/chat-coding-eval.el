@@ -24,7 +24,7 @@
 
 (defconst chat-coding-eval-fixture-generator-schema-version 1)
 
-(defconst chat-coding-eval-campaign-schema-version 2)
+(defconst chat-coding-eval-campaign-schema-version 3)
 
 (defconst chat-coding-eval--source-root
   (let ((module (or load-file-name buffer-file-name)))
@@ -1495,7 +1495,8 @@ portable counters it compares and never duplicates the provider-specific
 
 (defun chat-coding-eval--campaign-configuration
     (provider model capability-snapshot approval-mode repetitions task-count
-              manifest-digest implementation-revision toolchain)
+              manifest-digest implementation-revision toolchain
+              harness-revision)
   "Return canonical campaign configuration fields."
   `((provider . ,(if (symbolp provider) (symbol-name provider) provider))
     (model . ,model)
@@ -1509,6 +1510,7 @@ portable counters it compares and never duplicates the provider-specific
     (taskCount . ,task-count)
     (manifestDigest . ,manifest-digest)
     (implementationRevision . ,implementation-revision)
+    (harnessRevision . ,harness-revision)
     (toolchain . ,toolchain)))
 
 (defun chat-coding-eval--configuration-digest (configuration)
@@ -1525,6 +1527,7 @@ portable counters it compares and never duplicates the provider-specific
     (campaignManifestDigest . ,(alist-get 'manifestDigest descriptor))
     (implementationRevision .
                             ,(alist-get 'implementationRevision descriptor))
+    (harnessRevision . ,(alist-get 'harnessRevision descriptor))
     (provider . ,(alist-get 'provider descriptor))
     (model . ,(alist-get 'model descriptor))
     (modelCapabilitySnapshot .
@@ -1588,7 +1591,8 @@ portable counters it compares and never duplicates the provider-specific
 
 (cl-defun chat-coding-eval-prepare-campaign
     (campaign-id provider model repetitions manifest
-                 &key implementation-revision (role "current") toolchain)
+                 &key implementation-revision harness-revision
+                 (role "current") toolchain)
   "Create and return an isolated live campaign descriptor.
 
 The returned plist contains :directory, :result-metadata and :descriptor."
@@ -1609,6 +1613,9 @@ The returned plist contains :directory, :result-metadata and :descriptor."
            (or toolchain (chat-coding-eval-resolve-toolchain tasks))))
          (revision
           (chat-coding-eval--implementation-revision implementation-revision))
+         (harness
+          (chat-coding-eval--implementation-revision
+           (or harness-revision revision)))
          (manifest-digest (chat-coding-eval--file-digest manifest))
          (capability-snapshot
           (chat-coding-eval--capability-snapshot provider model))
@@ -1616,7 +1623,7 @@ The returned plist contains :directory, :result-metadata and :descriptor."
           (chat-coding-eval--campaign-configuration
            provider model capability-snapshot chat-coding-eval-approval-mode
            repetitions (length tasks) manifest-digest revision
-           resolved-toolchain))
+           resolved-toolchain harness))
          (configuration-digest
           (chat-coding-eval--configuration-digest configuration))
          (directory
@@ -1658,7 +1665,8 @@ The returned plist contains :directory, :result-metadata and :descriptor."
     value))
 
 (defun chat-coding-eval--load-open-campaign
-    (directory manifest &optional implementation-revision toolchain)
+    (directory manifest &optional implementation-revision toolchain
+               harness-revision)
   "Load and validate unfinished campaign DIRECTORY against MANIFEST."
   (let* ((directory (file-name-as-directory (expand-file-name directory)))
          (directory-name (directory-file-name directory)))
@@ -1695,6 +1703,8 @@ The returned plist contains :directory, :result-metadata and :descriptor."
            (revision
             (chat-coding-eval--required-string
              descriptor 'implementationRevision))
+           (harness
+            (chat-coding-eval--required-string descriptor 'harnessRevision))
            (configuration-digest
             (chat-coding-eval--required-string
              descriptor 'configurationDigest))
@@ -1708,10 +1718,14 @@ The returned plist contains :directory, :result-metadata and :descriptor."
            (current-revision
             (chat-coding-eval--implementation-revision
              implementation-revision))
+           (current-harness
+            (chat-coding-eval--implementation-revision
+             (or harness-revision current-revision)))
            (configuration
             (chat-coding-eval--campaign-configuration
              provider-name model capability-snapshot approval-mode repetitions
-             task-count manifest-digest revision descriptor-toolchain)))
+             task-count manifest-digest revision descriptor-toolchain
+             harness)))
       (unless (= (or (alist-get 'schemaVersion descriptor) 0)
                  chat-coding-eval-campaign-schema-version)
         (error "Unsupported coding evaluation campaign schema"))
@@ -1748,6 +1762,8 @@ The returned plist contains :directory, :result-metadata and :descriptor."
         (error "Campaign manifest digest does not match"))
       (unless (equal revision current-revision)
         (error "Campaign implementation revision does not match this checkout"))
+      (unless (equal harness current-harness)
+        (error "Campaign harness revision does not match this checkout"))
       (unless (and (chat-coding-eval--digest-p configuration-digest)
                    (equal configuration-digest
                           (chat-coding-eval--configuration-digest
@@ -1820,6 +1836,7 @@ Return the unique repetition/scenario key."
            (implementationRevision .
                                    ,(alist-get 'implementationRevision
                                                descriptor))
+           (harnessRevision . ,(alist-get 'harnessRevision descriptor))
            (provider . ,(alist-get 'provider descriptor))
            (model . ,(alist-get 'model descriptor))
            (modelCapabilitySnapshot .
@@ -2280,7 +2297,8 @@ task immediately, including rate limits and exhausted usage quotas."
        (signal (car err) (cdr err))))))
 
 (defun chat-coding-eval-resume-live
-    (campaign-directory &optional manifest implementation-revision toolchain)
+    (campaign-directory &optional manifest implementation-revision toolchain
+                        harness-revision)
   "Resume missing trials in CAMPAIGN-DIRECTORY.
 
 The immutable descriptor, MANIFEST, current runtime configuration and every
@@ -2294,7 +2312,8 @@ durable result must agree before any missing trial is scheduled."
       (user-error "No coding evaluation manifest is available"))
     (let* ((campaign
             (chat-coding-eval--load-open-campaign
-             campaign-directory file implementation-revision toolchain))
+             campaign-directory file implementation-revision toolchain
+             harness-revision))
            (descriptor (plist-get campaign :descriptor)))
       (chat-coding-eval--start-campaign
        campaign
@@ -2303,7 +2322,7 @@ durable result must agree before any missing trial is scheduled."
 
 (defun chat-coding-eval-run-live
     (provider repetitions &optional manifest model-name campaign-id
-              implementation-revision role toolchain)
+              implementation-revision role toolchain harness-revision)
   "Run the coding suite with PROVIDER for REPETITIONS.
 
 MODEL-NAME defaults to PROVIDER's registered model."
@@ -2331,6 +2350,7 @@ MODEL-NAME defaults to PROVIDER's registered model."
             (or campaign-id (chat-coding-eval--campaign-id))
             provider resolved-model repetitions file
             :implementation-revision implementation-revision
+            :harness-revision harness-revision
             :role (or role "current")
             :toolchain toolchain)))
       (chat-coding-eval--start-campaign campaign provider resolved-model))))
