@@ -755,6 +755,60 @@
        (when (buffer-live-p opened-buffer)
          (kill-buffer opened-buffer))))))
 
+(ert-deftest chat-files-open-file-refreshes-stale-clean-buffer-without-prompt ()
+  "A clean visiting buffer follows disk changes without interactive input."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "stale-open.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (buffer nil))
+     (with-temp-file test-file
+       (insert "old\n"))
+     (unwind-protect
+         (progn
+           (setq buffer (find-file-noselect test-file))
+           (with-temp-file test-file
+             (insert "new\n"))
+           (set-file-times test-file (time-add (current-time) 2))
+           (cl-letf (((symbol-function 'pop-to-buffer) #'identity)
+                     ((symbol-function 'yes-or-no-p)
+                      (lambda (&rest _args) (ert-fail "unexpected prompt")))
+                     ((symbol-function 'y-or-n-p)
+                      (lambda (&rest _args) (ert-fail "unexpected prompt"))))
+             (chat-files-open-file test-file))
+           (with-current-buffer buffer
+             (should (string= (buffer-string) "new\n"))
+             (should-not (buffer-modified-p))
+             (should (verify-visited-file-modtime buffer))))
+       (when (buffer-live-p buffer)
+         (kill-buffer buffer))))))
+
+(ert-deftest chat-files-open-file-refuses-stale-buffer-with-unsaved-edits ()
+  "Opening never discards unsaved edits after the disk file changes."
+  (chat-test-with-temp-dir
+   (let* ((test-file (expand-file-name "modified-open.txt" temp-dir))
+          (chat-files-allowed-directories (list temp-dir))
+          (buffer nil))
+     (with-temp-file test-file
+       (insert "old\n"))
+     (unwind-protect
+         (progn
+           (setq buffer (find-file-noselect test-file))
+           (with-current-buffer buffer
+             (goto-char (point-max))
+             (insert "unsaved\n"))
+           (with-temp-file test-file
+             (insert "external\n"))
+           (set-file-times test-file (time-add (current-time) 2))
+           (should-error (chat-files-open-file test-file)
+                         :type 'chat-files-stale-file)
+           (with-current-buffer buffer
+             (should (string= (buffer-string) "old\nunsaved\n"))
+             (should (buffer-modified-p))))
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (set-buffer-modified-p nil))
+         (kill-buffer buffer))))))
+
 (ert-deftest chat-files-insert-at-rejects-directory-path ()
   "Test insert-at rejects directory targets with a stable error."
   (chat-test-with-temp-dir

@@ -244,6 +244,8 @@ open_file(path, line?, column?)
 - 不允许通过导航工具绕过 allowed directories
 - 不允许通过 `../`、symlink escape、绝对路径越界打开文件
 - 非法路径必须显示成工具错误
+- 已访问文件在磁盘变化且 buffer 干净时，`open_file` 必须静默同步磁盘内容，不能进入
+  minibuffer 询问；buffer 有未保存修改时必须拒绝并报告 stale-file，不能覆盖用户内容
 
 ## Implementation Phases
 
@@ -280,6 +282,7 @@ open_file(path, line?, column?)
 - code mode session reuse and focus-file update behavior
 - `open_file` obeys path safety rules
 - `open_file` opens the right buffer and moves point correctly
+- `open_file` refreshes stale clean buffers without prompting and preserves stale unsaved buffers
 - session command discoverability surfaces expected bindings or help text
 
 ### Integration Checks

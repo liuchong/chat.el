@@ -303,6 +303,20 @@ the runtime itself observed.  It cannot create an observation."
   (chat-files--record-observation
    path (chat-files--path-version path nil)))
 
+(defun chat-files--refresh-clean-visiting-buffer (path)
+  "Return PATH's visiting buffer after reconciling it with disk.
+Reject stale buffers with unsaved edits instead of entering an interactive
+revert query."
+  (when-let ((buffer (find-buffer-visiting path)))
+    (unless (verify-visited-file-modtime buffer)
+      (if (buffer-modified-p buffer)
+          (chat-files--signal-consistency
+           'chat-files-stale-file path
+           "stale-file (unsaved visiting buffer)")
+        (with-current-buffer buffer
+          (revert-buffer t t t))))
+    buffer))
+
 (defun chat-files--validate-paths (paths)
   "Validate every canonical path in PATHS before any mutation begins."
   (dolist (path (delete-dups (copy-sequence paths)))
@@ -1895,7 +1909,8 @@ Returns total size, line count, and file type distribution."
 (defun chat-files-open-file (path &optional line column)
   "Open PATH in Emacs and optionally move to LINE and COLUMN."
   (let* ((safe-path (chat-files--safe-path-p path))
-         (buffer (find-file-noselect safe-path))
+         (buffer (or (chat-files--refresh-clean-visiting-buffer safe-path)
+                     (find-file-noselect safe-path)))
          actual-line
          actual-column)
     (with-current-buffer buffer
