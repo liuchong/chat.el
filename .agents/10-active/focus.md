@@ -492,16 +492,20 @@ strictly task-relevant. Decision 0018 supersedes decision 0017's earlier
 non-retaliatory interaction stance while retaining the separate leading
 section and its customization boundary.
 
-Latest development verification: 1955/1955 canonical tests and 16/16 focused
-semantic/repo-map/acceptance tests pass.
+Latest product-code canonical verification discovered 1996 tests, passed 1994,
+reported zero unexpected results and retained two known Rust system-SSL
+environment skips. The later documentation-only Zig qualification stage passed
+its deterministic fixture and 70/70 focused documentation/coding-Eval tests.
 
 ## Next Stage
 
-Finish M20 without reusing M19 evidence. Twelve-language semantic discovery,
-fallback parsing, repo-map admission and per-language quality gates are complete
-at `c6fcd0b`. Provide the two missing deterministic toolchains, pass the complete
-offline gate, and run one exact-model mutation smoke per language. Repeated DeepSeek
-`deepseek-v4-flash` and Kimi Code `k3-256k` campaigns remain separate.
+Finish M20 without reusing M19 or M21 evidence. The complete extended offline
+gate is closed and exact-model mutation qualification passes independently for
+Zig, Java, C, C++ and SQL. TypeScript and Clojure remain blocked before provider
+use by missing independent `tsc` and `lein` executables. Once both deterministic
+toolchains are explicitly available, qualify those two languages first, then run
+the complete repeated 42-task DeepSeek `deepseek-v4-flash` and Kimi Code
+`k3-256k` campaigns as separate evidence sets.
 
 ## Not Doing Now
 
@@ -515,7 +519,8 @@ offline gate, and run one exact-model mutation smoke per language. Repeated Deep
 
 ## Immediate Next Step
 
-Resolve the missing executable `lein` and `tsc` toolchains without implicit
-installation or network fetch, then pass the complete seven-language offline
-semantic, judge and cleanup gate. Do not start provider qualification while either
-toolchain remains unavailable.
+Wait for explicit availability of independent `lein` and `tsc` toolchains; do
+not install or fetch them implicitly. Re-run only their preflight and focused
+qualification first. Do not start a reduced repeated campaign while either cell
+is blocked, and continue only independent work that cannot alter the frozen M20
+fixture or acceptance contract.

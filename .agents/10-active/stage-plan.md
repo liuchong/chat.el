@@ -37,14 +37,18 @@ are in `programming-capability-reliability-plan.md`.
 10. M18: read-only Plan Mode and exact-revision approval (complete)
 11. M19: rollout and performance implementation (complete; final acceptance passed)
 12. M20: seven-language evaluation and verification expansion (active)
+13. M21: cross-provider model-adaptive reliability (complete)
 
 ## Immediate Next Action
 
-Twelve-language semantic indexing and quality gates are complete. Resolve the
-missing `lein` and `tsc` toolchains without silently shrinking the matrix, then
-pass the complete seven-language offline fixture, judge and cleanup gate. That
-gate must pass before exact-model mutation smokes or repeated provider campaigns
-begin. DeepSeek and Kimi results remain independent and per-language.
+The complete 42-task offline fixture, judge and cleanup gate is already closed.
+Five of seven focused language qualifications now pass independently on exact
+DeepSeek and Kimi models: Zig, Java, C, C++ and SQL. TypeScript and Clojure stop
+in preflight before provider setup because independent `tsc` and `lein`
+executables are unavailable. Preserve those two cells as infrastructure
+`BLOCKED`; do not install, download, borrow a nested compiler, skip a language or
+start the repeated 42-task campaigns on a reduced matrix. Resume M20 when both
+deterministic toolchains are explicitly available.
 
 ## Stage Gate
 

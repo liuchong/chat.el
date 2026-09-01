@@ -22,12 +22,16 @@
   active request model and pending continuation model remain distinct
 - M20 has an independent 42-task manifest covering Zig, Clojure, Java,
   TypeScript, C, C++ and SQL across six balanced categories
+- The complete 42-task offline fixture, judge and cleanup gate is closed; five
+  exact-model focused qualifications pass independently for Zig, Java, C, C++
+  and SQL
 - Campaign preflight checks manifest-declared hidden toolchain dependencies as
   well as direct command executables before any provider request
 - All 12 qualification languages enter source discovery, fallback symbol
   indexing, repo-map projection and independent semantic quality rows
-- The complete offline gate is blocked by missing `lein` and `tsc`; never turn
-  this into skipped trials or silently shrink the matrix
+- TypeScript and Clojure focused qualification and the complete repeated matrix
+  are blocked by missing independent `tsc` and `lein`; never turn those cells
+  into skipped trials or silently shrink the matrix
 - Campaign schema v2 stores invocation paths, canonical targets and versions in
   the immutable configuration digest and rejects drift on resume
 - Project verification adapters cover the seven extended ecosystems using
@@ -38,8 +42,10 @@
 - Run exact-model live work only after the offline gate: DeepSeek
   `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
+- M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
+  and no provider-specific policy was promoted without causal A/B evidence
 - The latest detailed record is
-  `stage-2026-09-01-twelve-language-semantic-quality.md`
+  `stage-2026-09-01-zig-dual-provider-qualification.md`
 
 ## Avoid
 
