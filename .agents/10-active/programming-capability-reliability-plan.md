@@ -1373,6 +1373,11 @@ Clojure、Java、TypeScript、C、C++ 和 SQL 七种语言。每种语言都覆�
 10. 每个可重复样例、任务话术、judge、语言清单和清理声明必须进入仓库内 fixture；
     重要阶段指标与失败分类写入有 revision/campaign identity 的精简记录，禁止只留在临时会话。
 
+扩展语料在 manifest 顶层声明统一的 240 秒正确性观察窗口，所有 task 默认继承，只有
+任务自身合同需要更严格上限时才可显式收紧。不同 provider/model 必须使用相同预算；
+延迟、请求数和 token 另行统计，超时仍然失败。禁止用隐藏的 provider 倍率改变观察窗口，
+因为这会让同一 manifest digest 实际测量不同合同。
+
 Revision `c6fcd0b` 已完成 12 种语言的统一源码发现、fallback 符号解析、repo map
 接入和逐语言质量记录。干净 revision 上的 12 个语言行分别报告 definition accuracy、
 reference precision/recall 和 Top-5 hit rate，四项均为 `1.0`；canonical suite 为

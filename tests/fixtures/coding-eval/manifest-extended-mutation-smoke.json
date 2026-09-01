@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "taskTimeoutSeconds": 240,
   "corpusId": "coding-extended-mutation-smoke-v1",
   "description": "One failing-test mutation task per extended language for bounded exact-model smoke campaigns.",
   "requiredExecutables": [

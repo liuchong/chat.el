@@ -326,7 +326,7 @@
   task)
 
 (defun chat-coding-eval--task-from-json
-    (data manifest-directory required-executables)
+    (data manifest-directory required-executables default-timeout-seconds)
   "Decode task DATA relative to MANIFEST-DIRECTORY."
   (let ((generator
          (chat-coding-eval--read-generator
@@ -350,7 +350,7 @@
     :generated-paths (or (chat-coding-eval--json-value data 'generatedPaths)
                          nil)
     :timeout-seconds (or (chat-coding-eval--json-value data 'timeoutSeconds)
-                         120)
+                         default-timeout-seconds)
       :judges (chat-coding-eval--json-value data 'judges)
       :tags (or (chat-coding-eval--json-value data 'tags) nil)
       :required-executables required-executables
@@ -366,14 +366,20 @@
          (version (or (alist-get 'schemaVersion data) 0))
          (required-executables
           (or (alist-get 'requiredExecutables data) nil))
+         (task-timeout-seconds
+          (or (alist-get 'taskTimeoutSeconds data) 120))
          (directory (file-name-directory (expand-file-name manifest)))
          tasks
          (seen (make-hash-table :test 'equal)))
     (unless (= version chat-coding-eval-schema-version)
       (error "Unsupported coding evaluation manifest schema: %s" version))
+    (unless (and (numberp task-timeout-seconds)
+                 (> task-timeout-seconds 0))
+      (error "Coding evaluation manifest task timeout must be positive"))
     (dolist (entry (alist-get 'tasks data))
       (let ((task (chat-coding-eval--task-from-json
-                   entry directory required-executables)))
+                   entry directory required-executables
+                   task-timeout-seconds)))
         (when (gethash (chat-coding-eval-task-id task) seen)
           (error "Duplicate coding evaluation task: %s"
                  (chat-coding-eval-task-id task)))

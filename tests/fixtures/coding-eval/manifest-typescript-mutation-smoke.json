@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "taskTimeoutSeconds": 240,
   "corpusId": "coding-typescript-mutation-smoke-v1",
   "description": "One bounded TypeScript repair used as a fast cross-provider mutation control.",
   "requiredExecutables": [

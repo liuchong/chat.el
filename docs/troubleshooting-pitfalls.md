@@ -2730,4 +2730,26 @@ bounded provider/model readiness request before creating a new campaign.
 costs and evidence boundaries. Model them separately instead of sharing one
 "transient" predicate.
 
-Last updated: 2026-08-29
+### Do Not Use A Performance Cutoff As A Correctness Oracle
+
+**Problem**: one provider completed extended mutation tasks while another
+repeatedly reached the shared 120-second default before making the required
+edit. The latter looked like a language-capability failure even though other
+tasks showed correct tool use and exact model identity.
+
+**Cause**: an implicit runner default served two incompatible purposes: a
+correctness observation window and an expected latency target. The cutoff
+censored slower multi-turn behavior before the deterministic judges could
+observe its result.
+
+**Solution**: make the correctness window an explicit, versioned manifest
+field, inherit it uniformly across tasks and providers, and permit only
+task-owned tighter overrides. Keep latency, request count and token use as
+separate performance evidence. Changing the window changes the manifest digest,
+so old and new samples cannot be pooled.
+
+**General rule**: timeout policy is part of corpus identity. Never hide
+provider-specific scaling behind one manifest, and never turn a latency target
+into proof that a model cannot complete the task.
+
+Last updated: 2026-09-01

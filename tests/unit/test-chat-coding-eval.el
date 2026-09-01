@@ -177,6 +177,7 @@
           (chat-coding-eval-test--read-json
            chat-coding-eval-test-extended-manifest))
          (raw-tasks (alist-get 'tasks raw-manifest))
+         (task-timeout (alist-get 'taskTimeoutSeconds raw-manifest))
          (preflight-checks (alist-get 'preflightChecks raw-manifest))
          (required-executables
           (alist-get 'requiredExecutables raw-manifest))
@@ -184,6 +185,7 @@
                  chat-coding-eval-test-extended-manifest))
          (coverage (chat-coding-eval-suite-coverage tasks)))
     (should (= 42 (length tasks)))
+    (should (= 240 task-timeout))
     (should
      (equal '(((name . "extended-fixture-offline-gate")
                (command "sh" "verify-extended-fixtures.sh")
@@ -214,6 +216,8 @@
                        (mapcar #'chat-coding-eval-task-fixture-id
                                language-tasks)))))))
     (dolist (task tasks)
+      (should (= task-timeout
+                 (chat-coding-eval-task-timeout-seconds task)))
       (should (file-directory-p
                (chat-coding-eval-task-fixture-directory task)))
       (should
@@ -286,6 +290,8 @@
                    (alist-get 'requiredExecutables smoke)))
     (should (equal (alist-get 'preflightChecks extended)
                    (alist-get 'preflightChecks smoke)))
+    (should (= (alist-get 'taskTimeoutSeconds extended)
+               (alist-get 'taskTimeoutSeconds smoke)))
     (should
      (equal '("c" "clojure" "cpp" "java" "sql" "typescript" "zig")
             (sort
@@ -316,6 +322,13 @@
                        (alist-get 'corpusId focused)))
         (should (equal required-executables
                        (append (alist-get 'requiredExecutables focused) nil)))
+        (should (= 240 (alist-get 'taskTimeoutSeconds focused)))
+        (should (= 240
+                   (chat-coding-eval-task-timeout-seconds
+                    (car
+                     (chat-coding-eval-load-suite
+                      (expand-file-name (concat "coding-eval/" filename)
+                                        chat-test-fixtures-dir))))))
         (should-not (assq 'preflightChecks focused))
         (should (equal (list canonical) (alist-get 'tasks focused)))))))
 
@@ -728,6 +741,43 @@
                     (chat-coding-eval-task-fixture-directory task))))
         (should (= 64 (length left)))
         (should (equal left right))))))
+
+(ert-deftest chat-coding-eval-manifest-timeout-is-inherited-and-overridable ()
+  "A corpus timeout applies uniformly unless a task declares a tighter bound."
+  (chat-test-with-temp-dir
+   (let ((fixture (expand-file-name "fixture/" temp-dir))
+         (manifest (expand-file-name "manifest.json" temp-dir)))
+     (make-directory fixture t)
+     (write-region "sample\n" nil
+                   (expand-file-name "sample.txt" fixture) nil 'silent)
+     (with-temp-file manifest
+       (insert
+        (json-encode
+         '((schemaVersion . 1)
+           (taskTimeoutSeconds . 240)
+           (tasks
+            . [((id . "default") (revision . 1)
+                (category . "read-only-review") (language . "text")
+                (description . "default") (fixtureId . "fixture")
+                (fixture . "fixture") (prompt . "Inspect the fixture.")
+                (allowedPaths . ["sample.txt"])
+                (judges . [((type . "no-change") (name . "unchanged"))]))
+               ((id . "override") (revision . 1)
+                (category . "read-only-review") (language . "text")
+                (description . "override") (fixtureId . "fixture")
+                (fixture . "fixture") (prompt . "Inspect the fixture.")
+                (allowedPaths . ["sample.txt"]) (timeoutSeconds . 30)
+                (judges . [((type . "no-change")
+                             (name . "unchanged"))]))])))))
+     (let ((tasks (chat-coding-eval-load-suite manifest)))
+       (should (= 240 (chat-coding-eval-task-timeout-seconds (car tasks))))
+       (should (= 30 (chat-coding-eval-task-timeout-seconds (cadr tasks)))))
+     (with-temp-file manifest
+       (insert
+        (json-encode
+         '((schemaVersion . 1) (taskTimeoutSeconds . 0)
+           (tasks . [])))))
+     (should-error (chat-coding-eval-load-suite manifest)))))
 
 (ert-deftest chat-coding-eval-suite-declares-language-build-artifacts ()
   "Executable fixtures separate generated caches from writable source scope."

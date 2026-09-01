@@ -257,6 +257,8 @@ Each fixture is a small standalone project with:
 - one pre-existing unrelated defect only when the task explicitly tests bounded
   verification; otherwise the fixture starts from a single known task defect;
 - deterministic setup and judge commands with finite timeouts;
+- one explicit positive corpus task budget, inherited by every task unless that
+  task declares a tighter positive override;
 - explicit `allowedPaths` and non-overlapping `generatedPaths`;
 - a clean workspace after success, failure, timeout and cancellation.
 
@@ -264,6 +266,7 @@ Representative manifest fragment:
 
 ```json
 {
+  "taskTimeoutSeconds": 240,
   "requiredExecutables": ["java", "javac"],
   "id": "java-refactor",
   "revision": 1,
@@ -274,7 +277,6 @@ Representative manifest fragment:
   "prompt": "Refactor normalizeName by extracting whitespace cleanup into a private helper named cleanName. Preserve behavior.",
   "allowedPaths": ["src/Sample.java"],
   "generatedPaths": [".chat-eval-build/java"],
-  "timeoutSeconds": 120,
   "judges": [
     {
       "type": "command",
@@ -299,6 +301,14 @@ not an Agent-generated shell command. The actual manifest stores
 `requiredExecutables` at its top level rather than repeating it on every task;
 it is shown beside the representative task here to keep the dependency
 contract visible.
+
+The task budget is a correctness observation window, not a performance target.
+The extended corpus uses the same 240-second window for every provider and
+model. Reports still compare latency, request count and token use separately,
+and reaching the window remains a failed trial. A task may declare a smaller
+`timeoutSeconds` only when its own contract needs a tighter bound. Hidden
+provider-specific timeout scaling is forbidden because it changes the measured
+contract without changing the manifest identity.
 
 Typical project fragments remain in the fixture itself rather than being copied
 into prose. A fixture should make language semantics observable: integer

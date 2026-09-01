@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "taskTimeoutSeconds": 240,
   "requiredExecutables": [
     "zig", "lein", "java", "javac", "node", "tsc", "clang", "clang++",
     "sqlite3"

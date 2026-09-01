@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "taskTimeoutSeconds": 240,
   "corpusId": "coding-zig-mutation-smoke-v1",
   "description": "One bounded Zig repair used as a fast cross-provider mutation control.",
   "requiredExecutables": [
