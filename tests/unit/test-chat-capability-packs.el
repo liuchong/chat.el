@@ -457,10 +457,14 @@
       (should (memq tool
                     (plist-get (chat-session-tool-config execution)
                                :advertised-tools))))
-    (dolist (tool chat-capability-programming-verification-tools)
-      (should (memq tool
-                    (plist-get (chat-session-tool-config execution)
-                               :advertised-tools))))
+    (should (memq 'programming_verification_plan
+                  (plist-get (chat-session-tool-config execution)
+                             :advertised-tools)))
+    (dolist (tool '(programming_verification_run
+                    programming_verification_read_result))
+      (should-not (memq tool
+                        (plist-get (chat-session-tool-config execution)
+                                   :advertised-tools))))
     (should-not
      (memq 'programming_compile_task
            (plist-get (chat-session-tool-config execution) :advertised-tools)))
@@ -550,10 +554,86 @@
                      (plist-get config :advertised-tools)))
        (dolist (tool chat-capability-programming-execution-tools)
          (should (memq tool (plist-get config :advertised-tools))))
-       (dolist (tool chat-capability-programming-verification-tools)
-         (should (memq tool (plist-get config :advertised-tools))))
+       (should (memq 'programming_verification_plan
+                     (plist-get config :advertised-tools)))
+       (dolist (tool '(programming_verification_run
+                       programming_verification_read_result))
+         (should-not (memq tool (plist-get config :advertised-tools))))
        (should-not (memq 'programming_compile_task
                          (plist-get config :advertised-tools)))))))
+
+(ert-deftest chat-capability-verification-tools-follow-resource-lifecycle ()
+  "Provider menus expose plan, run and result tools only after their IDs exist."
+  (chat-test-with-temp-dir
+   (let* ((chat-code-verify--profiles (make-hash-table :test 'equal))
+          (chat-code-verify--profile-contexts (make-hash-table :test 'equal))
+          (chat-code-verify--results (make-hash-table :test 'equal))
+          (session (make-chat-session :id "verification-stage"))
+          (agent-profile (chat-agent-profile-resolve 'code))
+          (chat-tool-caller-current-session session)
+          (chat-tool-caller-current-state-session session)
+          (chat-tool-caller-current-execution-context '(:task-id "task-a")))
+     (chat-session-set-working-directory session temp-dir)
+     (chat-session-metadata-set session 'activeTaskId "task-a")
+     (let ((plan
+            (chat-work-plan-create
+             session "Plan"
+             '(((id . "step") (title . "Implement")
+                (acceptance . "Tests pass"))))))
+       (chat-work-plan-start-first-ready
+        session (chat-work-plan-id plan) (chat-work-plan-revision plan)))
+     (with-temp-file (expand-file-name ".chat-verification.json" temp-dir)
+       (insert
+        "{\"id\":\"fixture\",\"steps\":[{\"id\":\"test\","
+        "\"kind\":\"test\",\"argv\":[\"sh\",\"test-one\",\"active\"],"
+        "\"required\":true}]}"))
+     (let ((advertised
+            (plist-get
+             (chat-agent-profile--effective-tool-config session agent-profile)
+             :advertised-tools)))
+       (should (memq 'programming_verification_plan advertised))
+       (should-not (memq 'programming_verification_run advertised))
+       (should-not (memq 'programming_verification_read_result advertised)))
+     (let ((activated
+            (cdr
+             (assoc 'tools
+                    (chat-capability-programming-capability-activate
+                     "verification")))))
+       (should (equal (append activated nil)
+                      '(programming_verification_plan))))
+     (let* ((planned
+             (chat-capability-programming-verification-plan temp-dir nil))
+            (profile-id (cdr (assoc 'id planned))))
+       (let ((advertised
+              (plist-get
+               (chat-agent-profile--effective-tool-config session agent-profile)
+               :advertised-tools)))
+         (should (memq 'programming_verification_run advertised))
+         (should-not (memq 'programming_verification_read_result advertised)))
+       (let ((chat-tool-caller-current-execution-context '(:task-id "task-b")))
+         (should-not
+          (memq 'programming_verification_run
+                (plist-get
+                 (chat-agent-profile--effective-tool-config session agent-profile)
+                 :advertised-tools)))
+         (should-error
+          (chat-capability-programming-verification-run profile-id)))
+       (puthash
+        "verification-result"
+        (chat-code-verify-result-create
+         :id "verification-result" :profile-id profile-id :status 'passed
+         :session-id "verification-stage" :parent-task-id "task-a"
+         :created-at 1)
+        chat-code-verify--results)
+       (should
+        (memq 'programming_verification_read_result
+              (plist-get
+               (chat-agent-profile--effective-tool-config session agent-profile)
+               :advertised-tools)))
+       (let ((chat-tool-caller-current-execution-context '(:task-id "task-b")))
+         (should-error
+          (chat-capability-programming-verification-read-result
+           "verification-result")))))))
 
 (ert-deftest chat-capability-generic-compile-requires-an-empty-verification-plan ()
   "Generic commands are a durable fallback, never the first verification path."
@@ -581,6 +661,11 @@
        (should-not (cdr (assoc 'steps planned))))
      (should
       (memq 'programming_compile_task
+            (plist-get
+             (chat-agent-profile--effective-tool-config session profile)
+             :advertised-tools)))
+     (should-not
+      (memq 'programming_verification_run
             (plist-get
              (chat-agent-profile--effective-tool-config session profile)
              :advertised-tools)))
@@ -655,8 +740,10 @@
              :advertised-tools)))
        (should (memq 'programming_plan_create advertised))
        (should-not (memq 'programming_compile_task advertised))
-       (dolist (tool chat-capability-programming-verification-tools)
-         (should (memq tool advertised)))
+       (should (memq 'programming_verification_plan advertised))
+       (dolist (tool '(programming_verification_run
+                       programming_verification_read_result))
+         (should-not (memq tool advertised)))
        (dolist (tool '(programming_capability_activate
                        programming_plan_transition programming_plan_skip
                        files_write files_replace files_patch apply_patch))
@@ -707,8 +794,10 @@
        (should-not (memq 'files_replace advertised))
        (should (memq 'programming_plan_create advertised))
        (should-not (memq 'programming_compile_task advertised))
-       (dolist (tool chat-capability-programming-verification-tools)
-         (should (memq tool advertised)))))))
+       (should (memq 'programming_verification_plan advertised))
+       (dolist (tool '(programming_verification_run
+                       programming_verification_read_result))
+         (should-not (memq tool advertised)))))))
 
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."

@@ -257,6 +257,12 @@ score = query_match
 - `kind` 只能是 `format`、`diagnostics`、`lint`、`typecheck`、`test` 或 `build`。
 - profile 来源按用户配置、项目配置、确定性探测、保守默认的顺序解析。
 - 自动探测只读取 manifest 和既有项目命令，不安装依赖、不修改配置。
+- profile `id` 是每次规划生成的不可猜测运行句柄，不复用项目配置中的名称；句柄绑定
+  当前 session 与 Agent task，其他会话或任务不得运行或读取它产生的结果。
+- Provider 菜单按资源生命周期分段：修改完成后只显示
+  `programming_verification_plan`，取得 Profile ID 后才显示
+  `programming_verification_run`，产生 Verification ID 后才显示
+  `programming_verification_read_result`。Capability 激活不得绕过该顺序。
 - required step 未执行、超时、取消或失败时，整个验证状态不得为 passed。
 - 所有输出必须限长，完整日志使用 execution 现有持久路径保存引用。
 

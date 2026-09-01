@@ -469,5 +469,31 @@
       (should (eq (chat-code-verify-latest-for-session "session" 3) newer))
       (should-not (chat-code-verify-latest-for-session "session" 4)))))
 
+(ert-deftest chat-code-verify-plans-have-unique-scoped-runtime-identities ()
+  "Each resolved plan is an opaque handle owned by its session and Agent task."
+  (chat-test-with-temp-dir
+   (let ((chat-code-verify--profiles (make-hash-table :test 'equal))
+         (chat-code-verify--profile-contexts (make-hash-table :test 'equal)))
+     (with-temp-file (expand-file-name ".chat-verification.json" temp-dir)
+       (insert
+        "{\"id\":\"project\",\"steps\":[{\"id\":\"test\","
+        "\"kind\":\"test\",\"argv\":[\"sh\",\"test-one\",\"active\"],"
+        "\"required\":true}]}"))
+     (let ((first (chat-code-verify-plan
+                   temp-dir nil '(:session-id "session-a" :task-id "task-a")))
+           (second (chat-code-verify-plan
+                    temp-dir nil '(:session-id "session-b" :task-id "task-b"))))
+       (should-not (equal (chat-verification-profile-id first)
+                          (chat-verification-profile-id second)))
+       (should (eq first
+                   (chat-code-verify-latest-profile-for-context
+                    "session-a" "task-a")))
+       (should (eq second
+                   (chat-code-verify-latest-profile-for-context
+                    "session-b" "task-b")))
+       (should-not
+        (chat-code-verify-profile-owned-p
+         (chat-verification-profile-id first) "session-b" "task-b"))))))
+
 (provide 'test-chat-code-verify)
 ;;; test-chat-code-verify.el ends here

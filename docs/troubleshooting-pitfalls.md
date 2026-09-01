@@ -777,6 +777,14 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: apply a capability profile with `chat-capability-apply-profile`; provider tool exposure and direct execution both honor the session's `:enabled-tools` overlay.
 
+### Resource-dependent Tools Must Follow Their Handles
+
+**Problem**: the Agent calls a valid tool with an invented or stale ID, such as running verification before a profile has been planned.
+
+**Cause**: the provider menu advertises an entire tool family at once even though later operations require handles returned by earlier operations. A configured profile name reused as a runtime ID can also collide across sessions.
+
+**Solution**: keep the full family in the authority set, but stage provider visibility from the actual resource lifecycle. Generate an opaque runtime handle for every profile resolution, bind profile and result handles to the current session and Agent task, and reject direct cross-task use even when a hidden call reaches the executor.
+
 ### Mail Tools Must Stay Draft-only
 
 **Problem**: a daily task sends mail when the user expected only a prepared draft.

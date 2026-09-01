@@ -103,6 +103,9 @@ configuration and deterministic detection."
 (defvar chat-code-verify--profiles (make-hash-table :test 'equal)
   "Process-local cache of resolved, reproducible verification profiles.")
 
+(defvar chat-code-verify--profile-contexts (make-hash-table :test 'equal)
+  "Process-local ownership metadata keyed by verification profile id.")
+
 (defvar chat-code-verify--sequence 0)
 
 (defvar chat-code-verify-executor #'chat-code-verify--execute-step
@@ -518,9 +521,22 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
                :project-root root :source 'detected :revision "1"
                :steps (chat-code-verify--detected-steps root changed)
                :repair-limit chat-code-verify-default-repair-limit))))
+    ;; A project profile id names configuration, while the provider needs an
+    ;; opaque handle for this exact resolution.  Reusing the configured id here
+    ;; lets concurrent sessions overwrite each other's cached profile.
+    (setq profile (copy-chat-verification-profile profile))
+    (setf (chat-verification-profile-id profile)
+          (chat-code-verify--new-id "verification-profile"))
     (chat-code-verify-validate-profile profile)
     (puthash (chat-verification-profile-id profile)
              profile chat-code-verify--profiles)
+    (puthash
+     (chat-verification-profile-id profile)
+     (list :session-id (plist-get context :session-id)
+           :turn-id (plist-get context :turn-id)
+           :task-id (plist-get context :task-id)
+           :created-at (chat-code-verify--now-ms))
+     chat-code-verify--profile-contexts)
     (chat-code-verify--emit
      'verification-planned context
      `((profile_id . ,(chat-verification-profile-id profile))
@@ -1158,6 +1174,56 @@ through `chat-code-verify-get' and `chat-code-verify-list'."
            (lambda (left right)
              (> (chat-code-verify-result-created-at left)
                 (chat-code-verify-result-created-at right)))))))
+
+(defun chat-code-verify--context-owned-p
+    (context session-id &optional task-id)
+  "Return non-nil when CONTEXT belongs to SESSION-ID and optional TASK-ID."
+  (and context
+       (equal session-id (plist-get context :session-id))
+       (or (null task-id)
+           (equal task-id (plist-get context :task-id)))))
+
+(defun chat-code-verify-profile-owned-p (profile-id session-id &optional task-id)
+  "Return non-nil when PROFILE-ID belongs to SESSION-ID and optional TASK-ID."
+  (chat-code-verify--context-owned-p
+   (gethash profile-id chat-code-verify--profile-contexts)
+   session-id task-id))
+
+(defun chat-code-verify-latest-profile-for-context
+    (session-id &optional task-id)
+  "Return the newest live profile owned by SESSION-ID and optional TASK-ID."
+  (let (matches)
+    (maphash
+     (lambda (id context)
+       (when (chat-code-verify--context-owned-p context session-id task-id)
+         (when-let* ((profile (gethash id chat-code-verify--profiles)))
+           (push (cons profile (or (plist-get context :created-at) 0))
+                 matches))))
+     chat-code-verify--profile-contexts)
+    (caar (sort matches (lambda (left right) (> (cdr left) (cdr right)))))))
+
+(defun chat-code-verify-result-owned-p (result session-id &optional task-id)
+  "Return non-nil when RESULT belongs to SESSION-ID and optional Agent TASK-ID."
+  (and result
+       (equal session-id (chat-code-verify-result-session-id result))
+       (or (null task-id)
+           (equal task-id
+                  (chat-code-verify-result-parent-task-id result)))))
+
+(defun chat-code-verify-latest-result-for-context
+    (session-id &optional task-id)
+  "Return the newest live result owned by SESSION-ID and optional Agent TASK-ID."
+  (let (matches)
+    (maphash
+     (lambda (_id result)
+       (when (chat-code-verify-result-owned-p result session-id task-id)
+         (push result matches)))
+     chat-code-verify--results)
+    (car
+     (sort matches
+           (lambda (left right)
+             (> (or (chat-code-verify-result-created-at left) 0)
+                (or (chat-code-verify-result-created-at right) 0)))))))
 
 (defun chat-code-verify-summary (result)
   "Return final-response facts projected only from RESULT evidence."

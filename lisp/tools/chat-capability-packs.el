@@ -62,7 +62,19 @@
 (defconst chat-capability-programming-verification-tools
   '(programming_verification_plan programming_verification_run
     programming_verification_read_result)
-  "Programming tools advertised for verification work.")
+  "Complete programming authority for the verification lifecycle.")
+
+(defconst chat-capability-programming-verification-plan-tools
+  '(programming_verification_plan)
+  "Verification tools available before a profile handle exists.")
+
+(defconst chat-capability-programming-verification-run-tools
+  '(programming_verification_run)
+  "Verification tools available after planning returns a profile handle.")
+
+(defconst chat-capability-programming-verification-result-tools
+  '(programming_verification_read_result)
+  "Verification tools available after a run creates a result handle.")
 
 (defconst chat-capability-programming-work-note-tools
   '(programming_work_note_upsert programming_work_note_query
@@ -200,6 +212,25 @@
         (unless (memq tool result)
           (setq result (append result (list tool))))))))
 
+(defun chat-capability--verification-stage-tools (session)
+  "Return verification tools whose prerequisite handles exist for SESSION."
+  (let ((tools chat-capability-programming-verification-plan-tools))
+    (when (and session (require 'chat-code-verify nil t))
+      (let ((session-id (chat-session-id session))
+            (task-id (chat-capability--verification-task-id session)))
+        (when-let* ((profile
+                     (chat-code-verify-latest-profile-for-context
+                      session-id task-id))
+                    ((chat-verification-profile-steps profile)))
+          (setq tools
+                (chat-capability--ordered-tool-union
+                 tools chat-capability-programming-verification-run-tools)))
+        (when (chat-code-verify-latest-result-for-context session-id task-id)
+          (setq tools
+                (chat-capability--ordered-tool-union
+                 tools chat-capability-programming-verification-result-tools)))))
+    tools))
+
 (defun chat-capability-programming-tool-advertisement
     (session profile authorized-tools)
   "Select the stage-relevant programming tools for SESSION and PROFILE."
@@ -234,7 +265,7 @@
         (setq advertised
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-execution-tools
-               chat-capability-programming-verification-tools)))
+               (chat-capability--verification-stage-tools session))))
       (when bounded-skip
         (setq advertised
               (seq-remove
@@ -260,7 +291,7 @@
             (setq advertised
                   (chat-capability--ordered-tool-union
                    advertised
-                   chat-capability-programming-verification-tools)))))
+                   (chat-capability--verification-stage-tools session))))))
       (when (and (or ordinary-execution bounded-verification)
                  session
                  (chat-capability--verification-fallback-authorized-p session))
@@ -380,7 +411,11 @@ that mutation with verification and Plan-upgrade tools after consumption."
 (defun chat-capability-programming-capability-activate (capability)
   "Advertise the programming tool group named CAPABILITY for this run."
   (let* ((name (intern capability))
-         (tools (alist-get name chat-capability-programming-tool-groups)))
+         (tools
+          (if (eq name 'verification)
+              (chat-capability--verification-stage-tools
+               (ignore-errors (chat-capability--current-session)))
+            (alist-get name chat-capability-programming-tool-groups))))
     (unless tools
       (error "Unknown programming capability: %s" capability))
     (let ((advertised (chat-capability--advertise-tools tools)))
@@ -549,8 +584,11 @@ that mutation with verification and Plan-upgrade tools after consumption."
            (chat-capability--verification-context))))
     (chat-capability--set-verification-fallback session profile)
     (if (chat-verification-profile-steps profile)
-        (chat-capability--unadvertise-tools
-         chat-capability-programming-verification-fallback-tools)
+        (progn
+          (chat-capability--unadvertise-tools
+           chat-capability-programming-verification-fallback-tools)
+          (chat-capability--advertise-tools
+           chat-capability-programming-verification-run-tools))
       (chat-capability--advertise-tools
        chat-capability-programming-verification-fallback-tools))
     (chat-code-verify-profile-to-alist profile)))
@@ -574,11 +612,18 @@ that mutation with verification and Plan-upgrade tools after consumption."
 (defun chat-capability-programming-verification-run (profile-id)
   "Run cached verification PROFILE-ID synchronously."
   (require 'chat-code-verify)
-  (let ((profile (chat-code-verify-get-profile profile-id)))
+  (let* ((context (chat-capability--verification-context))
+         (profile (chat-code-verify-get-profile profile-id)))
     (unless profile (error "Unknown verification profile: %s" profile-id))
-    (chat-code-verify-result-data
-     (chat-code-verify-run-sync
-      profile (chat-capability--verification-context)))))
+    (unless (chat-code-verify-profile-owned-p
+             profile-id (plist-get context :session-id)
+             (plist-get context :task-id))
+      (error "Verification profile is not owned by the current session task: %s"
+             profile-id))
+    (let ((result (chat-code-verify-run-sync profile context)))
+      (chat-capability--advertise-tools
+       chat-capability-programming-verification-result-tools)
+      (chat-code-verify-result-data result))))
 
 (defun chat-capability-programming-verification-run-async
     (argv success error-callback)
@@ -592,21 +637,40 @@ that mutation with verification and Plan-upgrade tools after consumption."
           (funcall error-callback
                    (format "Unknown verification profile: %s" profile-id))
           nil)
-      (apply
-       #'chat-code-verify-run profile
-       (append
-        context
-        (list :on-complete
-              (lambda (result)
-                (funcall success
-                         (chat-code-verify-result-data result)))))))))
+      (if (not (chat-code-verify-profile-owned-p
+                profile-id (plist-get context :session-id)
+                (plist-get context :task-id)))
+          (progn
+            (funcall
+             error-callback
+             (format
+              "Verification profile is not owned by the current session task: %s"
+              profile-id))
+            nil)
+        (apply
+         #'chat-code-verify-run profile
+         (append
+          context
+          (list :on-complete
+                (lambda (result)
+                  (chat-capability--advertise-tools
+                   chat-capability-programming-verification-result-tools)
+                  (funcall success
+                           (chat-code-verify-result-data result))))))))))
 
 (defun chat-capability-programming-verification-read-result (verification-id)
   "Read typed verification result VERIFICATION-ID."
   (require 'chat-code-verify)
-  (if-let* ((result (chat-code-verify-get verification-id)))
-      (chat-code-verify-result-data result)
-    (error "Unknown verification result: %s" verification-id)))
+  (let* ((context (chat-capability--verification-context))
+         (result (chat-code-verify-get verification-id)))
+    (unless result
+      (error "Unknown verification result: %s" verification-id))
+    (unless (chat-code-verify-result-owned-p
+             result (plist-get context :session-id)
+             (plist-get context :task-id))
+      (error "Verification result is not owned by the current session task: %s"
+             verification-id))
+    (chat-code-verify-result-data result)))
 
 (defun chat-capability--work-context-identity ()
   "Return current session and task identity for work-context tools."
@@ -807,7 +871,7 @@ that mutation with verification and Plan-upgrade tools after consumption."
       (chat-capability--advertise-tools
        (chat-capability--ordered-tool-union
         chat-capability-programming-execution-tools
-        chat-capability-programming-verification-tools)))
+        chat-capability-programming-verification-plan-tools)))
     (chat-work-plan-to-alist plan)))
 
 (defun chat-capability-programming-plan-read (&optional plan-id)
