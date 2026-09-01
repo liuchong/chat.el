@@ -35,10 +35,10 @@
 
 (defconst chat-capability-programming-base-tools
   '(programming_capability_activate
-    programming_plan_create
+    programming_plan_create programming_plan_skip
     programming_git_status
     files_read files_read_lines files_list files_grep open_file)
-  "Read-only tool menu advertised before a programming plan exists.")
+  "Initial tool menu advertised before a programming plan exists.")
 
 (defconst chat-capability-programming-execution-tools
   '(files_write files_replace files_patch apply_patch)
@@ -1321,20 +1321,28 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    'programming_verification_plan "Programming Verification Plan"
    (concat "Resolve deterministic, language-aware project checks without "
            "executing them. Use this after code edits before inventing a shell "
-           "command.")
+           "command. The returned id is a verification profile id: pass it "
+           "only to programming_verification_run, never to "
+           "programming_verification_read_result.")
    '((:name "project_root" :type "string" :required t)
      (:name "changed_files_json" :type "string" :required nil))
    #'chat-capability-programming-verification-plan 'project '(read))
   (chat-capability--register-tool
    'programming_verification_run "Programming Verification Run"
    (concat "Run an existing language-aware verification plan with bounded "
-           "output, timeout, isolated caches and structured evidence.")
+           "output, timeout, isolated caches and structured evidence. Pass "
+           "the profile id returned by programming_verification_plan. The "
+           "completed run returns a distinct verification id for "
+           "programming_verification_read_result.")
    '((:name "profile_id" :type "string" :required t))
    #'chat-capability-programming-verification-run 'project '(read)
    #'chat-capability-programming-verification-run-async)
   (chat-capability--register-tool
    'programming_verification_read_result "Programming Verification Result"
-   "Read the structured evidence for a verification run."
+   (concat "Read structured evidence for a completed verification run. Pass "
+           "the verification id returned by programming_verification_run; a "
+           "verification profile id from programming_verification_plan is "
+           "invalid here.")
    '((:name "verification_id" :type "string" :required t))
    #'chat-capability-programming-verification-read-result 'project '(read))
   (chat-capability--register-tool

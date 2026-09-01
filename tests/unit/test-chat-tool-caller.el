@@ -947,6 +947,13 @@ being a thing the reader could do when the two surfaces merged."
       (should (string-match-p "Do not enter Plan Mode" guidance))
       (should (string-match-p "explicitly asks" guidance)))))
 
+(ert-deftest chat-tool-caller-describes-the-typed-verification-id-chain ()
+  "Verification guidance distinguishes profiles from completed run results."
+  (let ((guidance (chat-tool-caller--tool-usage-guidance)))
+    (should (string-match-p "Verification IDs are typed" guidance))
+    (should (string-match-p "profile ID" guidance))
+    (should (string-match-p "distinct verification ID" guidance))))
+
 (ert-deftest chat-tool-caller-keeps-guidance-after-plan-creation ()
   "An active plan keeps its transition contract without re-advertising create."
   (let ((tools

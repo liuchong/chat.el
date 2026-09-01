@@ -37,6 +37,8 @@
                    (plist-get config :advertised-tools)))
     (should (memq 'programming_plan_create
                   (plist-get config :advertised-tools)))
+    (should (memq 'programming_plan_skip
+                  (plist-get config :advertised-tools)))
     (dolist (tool chat-capability-programming-execution-tools)
       (should-not (memq tool (plist-get config :advertised-tools))))
     (dolist (tool chat-capability-programming-verification-fallback-tools)
