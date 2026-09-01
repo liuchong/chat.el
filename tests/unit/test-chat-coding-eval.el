@@ -410,7 +410,35 @@
      (should (eq t (alist-get 'exactContractMatch evidence)))
      (should (equal (alist-get 'contractDigest evidence)
                     (alist-get 'profileDigest evidence)))
-     (should-not (assq 'argv evidence)))))
+       (should-not (assq 'argv evidence)))))
+
+(ert-deftest chat-coding-eval-preserves-historical-verification-boundary ()
+  "The current harness does not inject verification APIs into old products."
+  (let (installed)
+    (cl-letf (((symbol-function
+                'chat-approval-guard-set-verification-contract)
+               nil))
+      (should-not
+       (chat-coding-eval--install-verification-contract
+        'session "task" default-directory '(("sh" "test-one" "divide")))))
+    (cl-letf (((symbol-function
+                'chat-approval-guard-set-verification-contract)
+               (lambda (&rest arguments)
+                 (setq installed arguments))))
+      (chat-coding-eval--install-verification-contract
+       'session "task" default-directory '(("sh" "test-one" "divide")))
+      (should
+       (equal (list 'session "task" default-directory
+                    '(("sh" "test-one" "divide")) "evaluation")
+              installed)))))
+
+(ert-deftest chat-coding-eval-historical-profile-evidence-is-explicitly-empty ()
+  "A baseline without context-indexed profiles yields no invented evidence."
+  (cl-letf (((symbol-function 'chat-code-verify-latest-profile-for-context)
+             nil))
+    (should-not
+     (chat-coding-eval--verification-profile-evidence
+      "session" "task" '(("sh" "test-one" "divide"))))))
 
 (ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()
   "The focused mutation campaign cannot drift from extended task identity."

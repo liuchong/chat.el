@@ -279,15 +279,29 @@ distinct tool names omitted by `chat-coding-eval-max-tool-call-summary-records'.
    'sha256
    (encode-coding-string (prin1-to-string commands) 'utf-8)))
 
+(defun chat-coding-eval--install-verification-contract
+    (session task-id project-root commands)
+  "Install COMMANDS when the evaluated implementation supports the contract.
+
+Historical implementations predate the runtime verification contract.  The
+current harness must preserve that product boundary instead of loading current
+guard behavior into a frozen baseline."
+  (when (and commands
+             (fboundp 'chat-approval-guard-set-verification-contract))
+    (chat-approval-guard-set-verification-contract
+     session task-id project-root commands "evaluation")))
+
 (defun chat-coding-eval--verification-profile-evidence
     (session-id task-id contract-commands)
   "Return bounded verification-profile evidence for SESSION-ID and TASK-ID.
 
 CONTRACT-COMMANDS is compared with the resolved profile in exact argv order.
-The projection retains counts and digests, never raw command arguments."
-  (when-let* ((profile
-               (chat-code-verify-latest-profile-for-context
-                session-id task-id)))
+The projection retains counts and digests, never raw command arguments.
+Historical implementations without context-indexed profiles return nil."
+  (when-let* ((_supported
+               (fboundp 'chat-code-verify-latest-profile-for-context))
+              (profile
+               (chat-code-verify-latest-profile-for-context session-id task-id)))
     (let* ((profile-commands
             (mapcar
              (lambda (step)
@@ -2007,9 +2021,8 @@ ordinary application execution always uses protocol v2.")
            (metadata-builder nil))
       (chat-session-set-working-directory session workspace)
       (chat-code-enable session workspace)
-      (when verification-commands
-        (chat-approval-guard-set-verification-contract
-         session runtime-task-id workspace verification-commands "evaluation"))
+      (chat-coding-eval--install-verification-contract
+       session runtime-task-id workspace verification-commands)
       (setf (chat-session-approval-mode session) chat-coding-eval-approval-mode)
       (setq
        metadata-builder
