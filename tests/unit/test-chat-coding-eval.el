@@ -53,6 +53,11 @@
   (expand-file-name "coding-eval/manifest-rust-multi-file-diagnostic.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-zig-stagnation-diagnostic-manifest
+  (expand-file-name
+   "coding-eval/manifest-zig-single-fix-stagnation-diagnostic.json"
+   chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-language-registry
   (expand-file-name "coding-eval/language-registry.json"
                     chat-test-fixtures-dir))
@@ -359,6 +364,29 @@
     (should (equal (list core-task) (alist-get 'tasks diagnostic)))
     (let ((task (car (chat-coding-eval-load-suite
                       chat-coding-eval-test-javascript-refactor-diagnostic-manifest))))
+      (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
+
+(ert-deftest chat-coding-eval-zig-stagnation-diagnostic-is-an-exact-subset ()
+  "The stagnation diagnostic reuses the canonical Zig single-file fix."
+  (let* ((extended
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-extended-manifest))
+         (diagnostic
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-zig-stagnation-diagnostic-manifest))
+         (extended-task
+          (seq-find (lambda (task)
+                      (equal "zig-single-fix" (alist-get 'id task)))
+                    (alist-get 'tasks extended))))
+    (should (equal "coding-zig-single-fix-stagnation-diagnostic-v1"
+                   (alist-get 'corpusId diagnostic)))
+    (should (= 300 (alist-get 'taskTimeoutSeconds diagnostic)))
+    (should (equal '("zig") (alist-get 'requiredExecutables diagnostic)))
+    (should (equal (list extended-task) (alist-get 'tasks diagnostic)))
+    (let ((task
+           (car
+            (chat-coding-eval-load-suite
+             chat-coding-eval-test-zig-stagnation-diagnostic-manifest))))
       (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
 
 (ert-deftest chat-coding-eval-records-exact-verification-profile-evidence ()

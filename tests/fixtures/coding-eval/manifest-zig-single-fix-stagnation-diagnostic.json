@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-zig-single-fix-stagnation-diagnostic-v1",
+  "taskTimeoutSeconds": 300,
+  "requiredExecutables": ["zig"],
+  "tasks": [
+    {
+      "id": "zig-single-fix", "revision": 1, "category": "single-file-fix", "language": "zig",
+      "description": "Correct integer division behavior.", "fixtureId": "zig-sample-v1", "fixture": "zig",
+      "prompt": "Fix divide for positive integers so non-exact results round up. Preserve the existing zero-divisor error.",
+      "allowedPaths": ["sample.zig"], "generatedPaths": [".zig-cache", "zig-out"],
+      "judges": [{"type": "command", "name": "divide-tests", "command": ["sh", "test-one", "divide"], "expectedExit": 0}]
+    }
+  ]
+}
