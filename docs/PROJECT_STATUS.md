@@ -63,11 +63,11 @@ At clean revision `a7baa43`, exact DeepSeek `deepseek-v4-flash` and Kimi Code
 `k3-256k` campaigns independently passed the same core-v2 manifest 30/30, with
 zero scope, stale-write, unfinished-plan or cleanup failures. No model-specific
 policy was promoted because the remaining latency and tool-use differences lack
-causal A/B evidence. M20 extended-language qualification has completed dual-model
-mutation smokes for Zig, Java, C, C++ and SQL. TypeScript 7.0.2 and Clojure CLI
-1.12.5.1664 now close the seven-language versioned preflight and offline gate.
-Their focused dual-model qualifications and the full repeated 42-task matrix
-remain open.
+causal A/B evidence. M20 extended-language qualification has completed
+dual-model mutation smokes for all seven languages. TypeScript 7.0.2 and
+Clojure CLI 1.12.5.1664 close the versioned preflight, offline gate and their
+four exact-model focused cells at revision `c05ed64`. The separate repeated
+42-task baseline/current matrix remains open.
 
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
@@ -558,11 +558,12 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- qualify TypeScript and Clojure on both exact providers before starting the
-  complete M20 matrix
-- after all seven language cells pass independently, run the complete repeated
-  42-task DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` campaigns as
-  separate evidence sets; never shrink the matrix or substitute another model
+- freeze comparable M20 baseline and current revisions, then run five
+  repetitions of the complete 42-task manifest for 210 unique results in each
+  campaign; keep provider/model, manifest and observation budget fixed
+- aggregate the repeated campaigns by language before applying total success,
+  per-language, scope, verification and cleanup thresholds; never shrink the
+  matrix, mix evidence sets or substitute another model
 - retain M19 and M21 evidence as revision-bound history rather than reusing it
   to qualify a changed M20 product revision
 - keep increasing focused unit coverage around new workflow modules rather than only growing end-to-end surface area

@@ -42,11 +42,11 @@ are in `programming-capability-reliability-plan.md`.
 ## Immediate Next Action
 
 The complete 42-task offline fixture, judge and cleanup gate is closed with
-exact TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 evidence. Five of seven
-focused language qualifications pass independently on exact DeepSeek and Kimi
-models: Zig, Java, C, C++ and SQL. Commit the toolchain closure, qualify
-TypeScript and Clojure independently on both exact models, then start the two
-complete repeated campaigns. Never skip a language or substitute model identity.
+exact TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 evidence. All seven focused
+language qualifications now pass independently on exact DeepSeek and Kimi
+models. Freeze comparable baseline and current revisions, then run the two
+complete five-repetition campaigns for 210 unique results each. Never skip a
+language, mix campaign identities or substitute model identity.
 
 ## Stage Gate
 

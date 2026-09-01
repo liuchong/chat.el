@@ -1472,6 +1472,15 @@ digest 为 `3f701fd0ae857650855a1408858f431580bff4300ad4e0404367bbdb62676243`。
 Clojure 的四个精确模型 focused cells，再开始完整重复矩阵。完整记录见
 `.agents/30-records/logs/stage-2026-09-01-official-clojure-cli-toolchain.md`。
 
+Revision `c05ed64` 已关闭 TypeScript 与 Clojure 的四个精确模型 focused cells，至此七种
+扩展语言全部完成双模型 mutation smoke。TypeScript 的 DeepSeek/Kimi campaign 分别为
+27.298/73.696 秒，Clojure 分别为 46.605/98.510 秒；四项均为 1/1，通过精确 judge、
+allowed-path 与 workspace cleanup，stale write、越界最终文件和残留生成物均为 0。
+DeepSeek Clojure 在第 12 步有一次被守卫拒绝的越界 `files_list`，随后自行恢复并完成；
+该单次观察只进入候选经验，不据此固化语言规则。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-typescript-clojure-dual-provider-qualification.md`。
+下一门禁是相同 manifest 与预算下独立、不可混合的 baseline/current 五次重复矩阵。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。

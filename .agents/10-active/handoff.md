@@ -22,16 +22,15 @@
   active request model and pending continuation model remain distinct
 - M20 has an independent 42-task manifest covering Zig, Clojure, Java,
   TypeScript, C, C++ and SQL across six balanced categories
-- The complete 42-task offline fixture, judge and cleanup gate is closed; five
-  exact-model focused qualifications pass independently for Zig, Java, C, C++
-  and SQL
+- The complete 42-task offline fixture, judge and cleanup gate is closed; all
+  seven exact-model focused qualifications pass independently on both required
+  providers
 - Campaign preflight checks manifest-declared hidden toolchain dependencies as
   well as direct command executables before any provider request
 - All 12 qualification languages enter source discovery, fallback symbol
   indexing, repo-map projection and independent semantic quality rows
-- TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 now pass exact versioned
-  preflight; their four focused provider cells remain to be qualified before
-  the complete repeated matrix starts
+- TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 pass exact versioned preflight
+  and their four focused provider cells passed 4/4 at revision `c05ed64`
 - Campaign schema v2 stores invocation paths, canonical targets and versions in
   the immutable configuration digest and rejects drift on resume
 - Project verification adapters cover the seven extended ecosystems using
@@ -46,7 +45,7 @@
 - M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
   and no provider-specific policy was promoted without causal A/B evidence
 - The latest detailed record is
-  `stage-2026-09-01-official-clojure-cli-toolchain.md`
+  `stage-2026-09-01-typescript-clojure-dual-provider-qualification.md`
 - Specs 031-034 now record the deferred subscription, remote scoped-rule,
   distributed/headless runtime and collaborative-group designs. They are design
   authorities only; do not describe them as implemented or insert them into M20
