@@ -447,7 +447,9 @@ eight minutes."
        (should (string-match-p "hello docs" (with-temp-buffer
                                               (insert-file-contents target-file)
                                               (buffer-string))))
-       (should (string-match-p ":path" result))
+       (should (equal (file-truename target-file)
+                      (file-truename
+                       (cdr (assoc "path" (chat-mdp-parse result))))))
        (let ((approval (seq-find (lambda (event)
                                    (eq (plist-get event :type) 'approval))
                                  events)))
@@ -468,8 +470,8 @@ eight minutes."
                     `(:name "files_read"
                       :arguments (("path" . ,source-file))))))
        (should (stringp result))
-       (should (string-match-p "hello tool" result))
-       (should (string-match-p ":content" result))))))
+       (should (equal "hello tool"
+                      (cdr (assoc "content" (chat-mdp-parse result)))))))))
 
 (ert-deftest chat-tool-caller-allows-code-project-root-for-file-tools ()
   "Test file tools can access the active code session project root."
@@ -831,7 +833,8 @@ being a thing the reader could do when the two surfaces merged."
      (let ((result
             (chat-tool-caller-execute
              (list :name "files_patch" :arguments arguments))))
-       (should (string-match-p ":status success" result))
+       (should (equal "success"
+                      (cdr (assoc "status" (chat-mdp-parse result)))))
        (should (string= (with-temp-buffer
                           (insert-file-contents path)
                           (buffer-string))
@@ -1143,6 +1146,22 @@ being a thing the reader could do when the two surfaces merged."
       (should (string-match-p "stale-file" result))
       (should (eq (plist-get (car events) :type) 'tool-error))
       (should (eq (plist-get (car events) :error-type) 'stale-file)))))
+
+(ert-deftest chat-tool-caller-structured-results-use-mdp ()
+  "Structured local results carry an explicit format instead of Lisp syntax."
+  (let ((text (chat-tool-caller--stringify-result
+               '(:status "opened" :path "demo.el" :line 3))))
+    (should (eq 'mdp (get-text-property 0 'chat-tool-result-format text)))
+    (should-not (string-match-p "(:status" text))
+    (should (equal '(("status" . "opened")
+                     ("path" . "demo.el")
+                     ("line" . 3))
+                   (chat-mdp-parse text)))))
+
+(ert-deftest chat-tool-caller-plain-results-remain-plain-text ()
+  (let ((text (chat-tool-caller--stringify-result "already readable")))
+    (should (equal "already readable" text))
+    (should-not (get-text-property 0 'chat-tool-result-format text))))
 
 (provide 'test-chat-tool-caller)
 ;;; test-chat-tool-caller.el ends here

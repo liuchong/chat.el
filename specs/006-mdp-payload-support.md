@@ -101,17 +101,24 @@ MDP 的值是单行的，多行字符串要写成带 `\n` 转义的引号串—�
 | 机器视图 | 无 | **本模块自建** | 需要解析结果，005 拿不到 |
 | MDS 校验 | 无 | **本期不做** | 规范是草案且明确可分层，推迟零代价 |
 
-## Status: Codec And Views Implemented, Prompt Flip Held
+## Status: Codec, Views, And Structured Results Implemented
 
 已落地：Requirement 1（编解码器，`lisp/core/chat-mdp.el`，含输入与深度预算）、Requirement 4
 （两个视图，机器视图与 `chat-mdp-annotate`）、Requirement 2.1 的**解析侧**
 （`chat-tool-caller-parse` 先试 MDP 再试 JSON，命中格式记在
 `chat-tool-caller-format-counts`）。2.2 守住了：修补函数没有进 MDP 路径。
 
-**未落地，且是有意的：2.1 的提示词侧与 Requirement 3。** 理由用的是这份 spec
+Requirement 3 也已落地。结构化 Elisp 工具结果先经过有深度、字符数、循环和
+重复键边界的确定性归一化，再按 canonical MDP 发射；普通字符串保持原样，无法
+安全归一化的值回退到既有可读文本。MDP 身份随工具消息元数据进入 session，重开
+后仍能投影给 transcript；provider 仍收到原生 `tool` role 的字符串 content，不改
+function-calling 外壳。展开工具结果时 UI 把同一段文本交给 spec 005 的 Markdown
+渲染器，不另写列表或表格布局。若通用结果预算必须按字符截断，截断后的文本撤销
+MDP 身份；残缺报文不得冒充完整结构。
+
+**仍有意保留的是 2.1 的双格式接收。** 理由用的是这份 spec
 自己的那条——"凭感觉收掉分支就是拿可用性赌"。同一条逻辑反过来同样成立：凭感觉
-**换掉**提示词要求的格式，也是拿可用性赌。这两件事都改变模型实际写出什么，而
-本次施工没有对真实模型的验证条件。
+收掉 JSON 分支会改变真实模型的可用性，而当前格式命中分布还不足以证明可以这样做。
 
 现在的状态恰好是取证状态：双向接受已经开了，格式命中计数已经在记。等到计数里
 有真实分布，再决定提示词要不要换、JSON 分支要不要收。
@@ -429,8 +436,8 @@ Requirement 1.4 的类型推导 MUST 只做 MDP §5 的四种线类型
 
 ### 工具结果
 
-- [ ] 结构化结果以 MDP 回灌，下一轮请求里是结构而不是待解析的文本
-- [ ] 同一段结果在缓冲区里显示为对齐的表格或列表
+- [x] 结构化结果以 MDP 回灌，下一轮请求里是结构而不是 Lisp 打印文本
+- [x] 同一段结果在缓冲区里经共享 Markdown 渲染器显示为列表或表格
 
 ### 两个视图
 

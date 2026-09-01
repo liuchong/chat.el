@@ -380,6 +380,45 @@ car collects the messages of every request."
         (should (eq (chat-message-role followup) :tool))
         (should (string-match-p "echo:hi" (chat-message-content followup)))))))
 
+(ert-deftest chat-agent-structured-tool-format-survives-evidence-and-wire ()
+  "MDP identity survives the evidence prefix, transcript and provider wire."
+  (let* ((raw (chat-tool-caller--stringify-result
+               '(:status "opened" :path "demo.el")))
+         (with-evidence
+          (chat-agent--result-with-evidence-id raw "evidence-1"))
+         (run (chat-agent--run-create :turn 1 :step 2))
+         (message
+          (chat-agent--make-tool-message
+           run '(:id "call-1" :name "open_file") with-evidence))
+         (wire (chat-llm--format-one-message message)))
+    (should (eq 'mdp
+                (get-text-property
+                 0 'chat-tool-result-format with-evidence)))
+    (should (eq 'mdp
+                (plist-get (chat-message-metadata message)
+                           :content-format)))
+    (should (equal "opened"
+                   (cdr (assoc "status"
+                               (chat-mdp-parse
+                                (chat-message-text message))))))
+    (should (equal (chat-message-text message)
+                   (alist-get 'content wire)))
+    (should (equal "call-1" (alist-get 'tool_call_id wire)))))
+
+(ert-deftest chat-agent-truncated-tool-result-drops-structured-format ()
+  "A character cut is readable evidence, not a valid MDP document."
+  (let* ((chat-tool-caller-result-max-chars 24)
+         (raw (chat-tool-caller--stringify-result
+               '(:status "opened" :path "a/very/long/path.el")))
+         (message
+          (chat-agent--make-tool-message
+           (chat-agent--run-create :turn 1 :step 1)
+           '(:id "call-1" :name "open_file") raw)))
+    (should (string-match-p (regexp-quote "[truncated,")
+                            (chat-message-text message)))
+    (should-not (plist-get (chat-message-metadata message)
+                           :content-format))))
+
 (ert-deftest chat-agent-retries-after-parse-error ()
   "Test a malformed tool call attempt triggers a parse error follow-up."
   (let ((calls (list nil))

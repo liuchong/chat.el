@@ -254,6 +254,19 @@ Without it the answer's header reads as one more detail line."
               "    echo:hi")
       (chat-ui-transcript-test--visible)))))
 
+(ert-deftest chat-ui-transcript-renders-mdp-tool-results-as-documents ()
+  "Expanded structured results use the shared Markdown document renderer."
+  (with-temp-buffer
+    (chat-ui--insert-part
+     '(:category ai-progress :work tool-result
+       :content-format mdp
+       :text "- status: opened\n- path: demo.el"))
+    (goto-char (point-min))
+    (should (search-forward "- status" nil t))
+    (should (equal "•"
+                   (get-text-property (match-beginning 0) 'display)))
+    (should (search-forward "- path" nil t))))
+
 (ert-deftest chat-ui-transcript-the-answer-is-ordinary-text ()
   "The answer carries no detail face of its own."
   (chat-ui-transcript-test--with-run ()

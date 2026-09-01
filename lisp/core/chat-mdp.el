@@ -644,6 +644,136 @@ entire point of the format."
       (number-to-string (truncate value))
     (number-to-string value)))
 
+(defun chat-mdp--tool-result-key (key)
+  "Return structured tool result KEY as an MDP object key."
+  (cond
+   ((stringp key) key)
+   ((keywordp key) (substring (symbol-name key) 1))
+   ((symbolp key) (symbol-name key))
+   (t (error "Unsupported structured tool result key: %S" key))))
+
+(defun chat-mdp--tool-result-plist-p (value)
+  "Return non-nil when VALUE is a proper keyword plist."
+  (and (consp value)
+       (proper-list-p value)
+       (cl-evenp (length value))
+       (cl-loop for tail on value by #'cddr
+                always (keywordp (car tail)))))
+
+(defun chat-mdp--tool-result-alist-p (value)
+  "Return non-nil when VALUE is an object-like alist."
+  (and (consp value)
+       (proper-list-p value)
+       (seq-every-p
+        (lambda (entry)
+          (and (consp entry)
+               (or (stringp (car entry))
+                   (symbolp (car entry)))))
+        value)))
+
+(defun chat-mdp--tool-result-object-container-p (value)
+  "Return non-nil when VALUE is a structured object container."
+  (or (hash-table-p value)
+      (chat-mdp--tool-result-plist-p value)
+      (chat-mdp--tool-result-alist-p value)))
+
+(defun chat-mdp--tool-result-unique-fields (fields)
+  "Return FIELDS unless their normalized keys repeat."
+  (when (/= (length fields)
+            (length (delete-dups (mapcar #'car fields))))
+    (error "Duplicate structured tool result key"))
+  fields)
+
+(defun chat-mdp--normalize-tool-result (value depth seen)
+  "Normalize structured tool VALUE to MDP at DEPTH, guarding with SEEN."
+  (when (> depth chat-mdp-max-depth)
+    (error "Structured tool result exceeds MDP depth"))
+  (cond
+   ((eq value t) chat-mdp-true)
+   ((memq value '(:false :json-false)) chat-mdp-false)
+   ((memq value '(:null :json-null)) chat-mdp-null)
+   ((eq value :empty-object) chat-mdp-empty-object)
+   ((null value) nil)
+   ((or (stringp value) (numberp value)) value)
+   ((symbolp value)
+    (if (keywordp value)
+        (substring (symbol-name value) 1)
+      (symbol-name value)))
+   ((or (hash-table-p value) (vectorp value) (consp value))
+    (when (gethash value seen)
+      (error "Circular structured tool result"))
+    (puthash value t seen)
+    (unwind-protect
+        (cond
+         ((hash-table-p value)
+          (let (fields)
+            (maphash
+             (lambda (key item)
+               (push (cons (chat-mdp--tool-result-key key)
+                           (chat-mdp--normalize-tool-result
+                            item (1+ depth) seen))
+                     fields))
+             value)
+            (setq fields
+                  (sort fields (lambda (left right)
+                                 (string< (car left) (car right)))))
+            (or (chat-mdp--tool-result-unique-fields fields)
+                chat-mdp-empty-object)))
+         ((vectorp value)
+          (mapcar (lambda (item)
+                    (chat-mdp--normalize-tool-result
+                     item (1+ depth) seen))
+                  (append value nil)))
+         ((chat-mdp--tool-result-plist-p value)
+          (chat-mdp--tool-result-unique-fields
+           (cl-loop for (key item) on value by #'cddr
+                    collect
+                    (cons (chat-mdp--tool-result-key key)
+                          (chat-mdp--normalize-tool-result
+                           item (1+ depth) seen)))))
+         ((and (proper-list-p value)
+               (seq-every-p #'chat-mdp--tool-result-object-container-p
+                            value))
+          (mapcar (lambda (item)
+                    (chat-mdp--normalize-tool-result
+                     item (1+ depth) seen))
+                  value))
+         ((chat-mdp--tool-result-alist-p value)
+          (chat-mdp--tool-result-unique-fields
+           (mapcar
+            (lambda (entry)
+              (cons (chat-mdp--tool-result-key (car entry))
+                    (chat-mdp--normalize-tool-result
+                     (cdr entry) (1+ depth) seen)))
+            value)))
+         ((proper-list-p value)
+          (mapcar (lambda (item)
+                    (chat-mdp--normalize-tool-result
+                     item (1+ depth) seen))
+                  value))
+         (t (error "Unsupported improper structured tool result")))
+      (remhash value seen)))
+   (t (error "Unsupported structured tool result value: %S" value))))
+
+(defun chat-mdp-encode-tool-result (value)
+  "Return structured tool VALUE as bounded canonical MDP, or nil.
+
+Plain text is deliberately excluded.  Circular, over-deep and unsupported
+values return nil so the tool layer can use its existing readable fallback."
+  (when (or (hash-table-p value) (vectorp value) (consp value))
+    (condition-case nil
+        (let* ((normalized
+                (chat-mdp--normalize-tool-result
+                 value 0 (make-hash-table :test 'eq)))
+               (document
+                (if (chat-mdp--object-p normalized)
+                    normalized
+                  (list (cons "result" normalized))))
+               (encoded (chat-mdp-encode document)))
+          (and (<= (length encoded) chat-mdp-max-input-chars)
+               encoded))
+      (error nil))))
+
 (defun chat-mdp-encode (value)
   "Return VALUE as an MDP document in the canonical form.
 

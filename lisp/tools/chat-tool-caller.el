@@ -874,7 +874,10 @@ enumerated values."
    ((stringp result) result)
    ((null result) "nil")
    (t
-    (string-trim-right (pp-to-string result)))))
+    (let ((mdp (chat-mdp-encode-tool-result result)))
+      (if mdp
+          (propertize mdp 'chat-tool-result-format 'mdp)
+        (string-trim-right (pp-to-string result)))))))
 
 (defun chat-tool-caller--compact-text (text &optional max-chars)
   "Normalize TEXT and keep at most MAX-CHARS characters."

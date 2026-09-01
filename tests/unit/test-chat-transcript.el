@@ -235,6 +235,14 @@ promoted to the reply."
       (should (equal (plist-get part :turn) 2))
       (should (equal (plist-get part :step) 4)))))
 
+(ert-deftest chat-transcript-projects-structured-tool-result-format ()
+  (let ((message (test-chat-transcript--message
+                  :tool "- status: opened\n")))
+    (setf (chat-message-metadata message) '(:content-format mdp))
+    (chat-transcript-stamp message :category 'ai-progress :work 'tool-result)
+    (let ((part (car (chat-transcript-message-parts message))))
+      (should (eq 'mdp (plist-get part :content-format))))))
+
 ;; ------------------------------------------------------------------
 ;; Turn grouping
 ;; ------------------------------------------------------------------

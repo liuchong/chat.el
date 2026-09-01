@@ -353,12 +353,20 @@ through; a reader wants to see which file."
            ;; Everything else contributes one part, typed by whatever the
            ;; producer stamped: a captured shell run, a command reply and a
            ;; bookkeeping notice are all stored, and each reads differently.
-           (list (chat-transcript--part message
-                                        (chat-transcript-category message)
-                                        (chat-transcript-work message)
-                                        (if (eq (chat-message-role message) :user)
-                                            (chat-transcript--user-text message)
-                                          (chat-message-text message))))))
+           (let* ((part
+                   (chat-transcript--part
+                    message
+                    (chat-transcript-category message)
+                    (chat-transcript-work message)
+                    (if (eq (chat-message-role message) :user)
+                        (chat-transcript--user-text message)
+                      (chat-message-text message))))
+                  (content-format
+                   (plist-get (chat-message-metadata message)
+                              :content-format)))
+             (list (if content-format
+                       (plist-put part :content-format content-format)
+                     part)))))
         (index -1))
     ;; A message can contribute several parts, so a part needs a key of its
     ;; own for fold groups to stay put while later parts stream in.

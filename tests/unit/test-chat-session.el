@@ -143,6 +143,24 @@
        (should (string= (chat-message-raw-request message) "{\"request\":true}"))
        (should (string= (chat-message-raw-response message) "{\"response\":true}"))))))
 
+(ert-deftest chat-session-preserves-structured-tool-result-format ()
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-session-create "MDP tool result" 'gpt-4o))
+          (message
+           (make-chat-message
+            :id "tool-1" :role :tool
+            :content "- status: opened\n"
+            :metadata '(:tool-call-id "call-1" :content-format mdp))))
+     (chat-session-add-message session message)
+     (chat-session-save session)
+     (let* ((loaded (chat-session-load (chat-session-id session)))
+            (restored (car (chat-session-messages loaded))))
+       (should (equal "- status: opened\n" (chat-message-text restored)))
+       (should (equal "mdp"
+                      (plist-get (chat-message-metadata restored)
+                                 :content-format)))))))
+
 (ert-deftest chat-session-a-message-keeps-its-date-through-a-reopen ()
   "A reopened session used to come back dated 1970.
 

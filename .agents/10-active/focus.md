@@ -36,6 +36,14 @@ bounded; resume rejects executable or version drift before trial scheduling.
 The mechanism is complete, while local environment readiness remains blocked
 by the same two missing tools.
 
+While the remaining M20 provider matrix is blocked on those local executables,
+the highest-priority Markdown/MDP gap has been closed without changing table
+layout. Structured tool results now use bounded canonical MDP, carry explicit
+format identity through Agent evidence, session persistence and transcript
+projection, and render through the existing Markdown document view. Plain text
+tool output remains plain text, and unsupported or circular structures fall back
+instead of stalling the Agent.
+
 Project verification now covers all seven extended ecosystems without adding
 language branches to the Agent loop. Explicit project profiles remain
 authoritative; Zig, Clojure, Java and TypeScript require ecosystem markers, and

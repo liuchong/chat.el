@@ -373,7 +373,14 @@ direction can overwrite a Plan or Goal that the tool just committed."
 
 (defun chat-agent--result-with-evidence-id (result evidence-id)
   "Prefix successful tool RESULT with its scoped EVIDENCE-ID."
-  (format "Evidence ID: %s\n%s" evidence-id (or result "")))
+  (let* ((source (or result ""))
+         (format-name
+          (and (stringp source)
+               (get-text-property 0 'chat-tool-result-format source)))
+         (text (format "Evidence ID: %s\n%s" evidence-id source)))
+    (if format-name
+        (propertize text 'chat-tool-result-format format-name)
+      text)))
 
 (defun chat-agent--prepare-next-turn (run processed)
   "Let RUN append messages before a continued turn after PROCESSED."
@@ -831,16 +838,23 @@ from roles, which cannot tell an intermediate step from a final answer."
 
 (defun chat-agent--make-tool-message (run call result-text)
   "Build a :tool transcript message for CALL and RESULT-TEXT."
-  (let ((id (chat-agent-tool-call-id call))
-        (name (plist-get call :name)))
+  (let* ((id (chat-agent-tool-call-id call))
+         (name (plist-get call :name))
+         (source (string-trim-right (or result-text "")))
+         (format-name
+          (and (stringp result-text)
+               (<= (length source) chat-tool-caller-result-max-chars)
+               (get-text-property
+                0 'chat-tool-result-format result-text))))
     (chat-transcript-stamp
      (make-chat-message
       :id (chat-session-new-message-id (format "tool-%s" id))
       :role :tool
-      :content (chat-tool-caller-truncate-result
-                (string-trim-right (or result-text "")))
+      :content (chat-tool-caller-truncate-result source)
       :timestamp (current-time)
-      :metadata (list :tool-call-id id :name name))
+      :metadata (append (list :tool-call-id id :name name)
+                        (when format-name
+                          (list :content-format format-name))))
      :turn (chat-agent--turn-number run)
      :step (chat-agent-run-state-step run)
      :category 'ai-progress

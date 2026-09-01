@@ -1290,6 +1290,18 @@ still sends the message everywhere else.")
                                       chat-ui-detail-indent line "\n")
                               'face face)))))))
 
+(defun chat-ui--insert-mdp-detail (label text face)
+  "Insert MDP TEXT as a Markdown document below detail LABEL in FACE."
+  (let ((body (string-trim-right (or text "")))
+        (title (concat chat-ui-detail-indent
+                       (or label (chat-i18n 'detail-label "Detail")))))
+    (insert (propertize (concat title "\n") 'face face))
+    (unless (string-empty-p body)
+      ;; Keep the document at column zero.  Tables use absolute display
+      ;; columns, so adding detail indentation would undo their alignment.
+      (insert (chat-markdown-render body face))
+      (insert "\n"))))
+
 (defun chat-ui--open-block ()
   "Ensure a blank line separates what follows from the detail above it.
 
@@ -1385,9 +1397,17 @@ answer for the reader's attention."
        (chat-ui--insert-formatted-response text)
        (insert "\n\n"))
       (_
-       (chat-ui--insert-detail (chat-transcript-part-label part)
-                               text
-                               (chat-transcript-part-face part))))))
+       (let ((content-format (plist-get part :content-format)))
+         (if (and (eq (plist-get part :work) 'tool-result)
+                  (or (eq content-format 'mdp)
+                      (equal content-format "mdp")))
+             (chat-ui--insert-mdp-detail
+              (chat-transcript-part-label part)
+              text
+              (chat-transcript-part-face part))
+           (chat-ui--insert-detail (chat-transcript-part-label part)
+                                   text
+                                   (chat-transcript-part-face part))))))))
 
 (defun chat-ui--prose-part-p (part)
   "Return non-nil when PART is prose rather than a labeled event.

@@ -414,6 +414,58 @@ easy to read is the entire point of the format."
   (should-error (chat-mdp-encode '(1 2 3)))
   (should-error (chat-mdp-encode "text")))
 
+(ert-deftest chat-mdp-structured-tool-results-normalize-to-canonical-mdp ()
+  "Elisp tool values become the same bounded representation models parse."
+  (let* ((encoded
+          (chat-mdp-encode-tool-result
+           '(:status opened
+             :path "src/main.el"
+             :location (:line 7 :column 3)
+             :edits ((:path "a.el" :changed t)
+                     (:path "b.el" :changed :json-false)))))
+         (parsed (chat-mdp-parse encoded)))
+    (should encoded)
+    (should
+     (equal
+      '(("status" . "opened")
+        ("path" . "src/main.el")
+        ("location" . (("line" . 7) ("column" . 3)))
+        ("edits" . ((("path" . "a.el") ("changed" . t))
+                     (("path" . "b.el") ("changed" . :false)))))
+      parsed))
+    (should (equal encoded (chat-mdp-encode parsed)))))
+
+(ert-deftest chat-mdp-structured-tool-result-rejects-duplicate-object-keys ()
+  (should-not
+   (chat-mdp-encode-tool-result
+    '(("status" . "first") ("status" . "second")))))
+
+(ert-deftest chat-mdp-structured-tool-result-keeps-symbol-lists-as-arrays ()
+  (should
+   (equal '(("result" . ("pending" "complete")))
+          (chat-mdp-parse
+           (chat-mdp-encode-tool-result '(pending complete))))))
+
+(ert-deftest chat-mdp-structured-tool-result-hash-order-is-deterministic ()
+  (let ((left (make-hash-table :test 'equal))
+        (right (make-hash-table :test 'equal)))
+    (puthash "z" 1 left)
+    (puthash "a" 2 left)
+    (puthash "a" 2 right)
+    (puthash "z" 1 right)
+    (should (equal (chat-mdp-encode-tool-result left)
+                   (chat-mdp-encode-tool-result right)))
+    (should (equal '("a" "z")
+                   (mapcar #'car
+                           (chat-mdp-parse
+                            (chat-mdp-encode-tool-result left)))))))
+
+(ert-deftest chat-mdp-tool-result-encoding-is-bounded-and-structured-only ()
+  (should-not (chat-mdp-encode-tool-result "plain text"))
+  (let ((cycle (list :status "loop")))
+    (setq cycle (nconc cycle (list :self cycle)))
+    (should-not (chat-mdp-encode-tool-result cycle))))
+
 ;; ------------------------------------------------------------------
 ;; The machine view
 ;; ------------------------------------------------------------------

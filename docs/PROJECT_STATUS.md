@@ -234,6 +234,9 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
   safe semantic HTML subset
 - independent bounded MDP codec with document/machine dual views, linear duplicate
   detection and width-limited typed record tables
+- structured tool results encoded as bounded canonical MDP, persisted with explicit
+  format identity, returned through native tool-role messages and rendered by the
+  shared Markdown document view
 
 ### LLM Providers
 
