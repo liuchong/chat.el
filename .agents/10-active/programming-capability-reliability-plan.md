@@ -371,6 +371,10 @@ selected Goal；历史 Goal 有界保留。状态转换必须满足：
   evidence、开放 blocker/risk、待接纳 requirement 摘要和下一条可执行 action；不得用一段
   自由文本把“做过”“有效”“下一步”混在一起。阶段提交、live Eval 和设计修订都更新
   checkpoint，但 campaign 结束、进程退出或模型自述不自动产生通过证据；
+- 一个 milestone 含多个并列验证分支时，checkpoint 必须分别固定实现 revision、输入合同
+  digest、执行身份、结果状态和证据位置。上下文压缩或进程恢复后只补未关闭分支，不重跑
+  已通过分支，也不把不同 revision、不同身份或不同输入合同的结果合并；只有全部 required
+  分支按各自门槛关闭后才可推进 milestone；
 - 长期 Goal 可以没有预计完成时间，也可以由持续维护型 stopping condition 明确保持
   active。它的 Roadmap、小目标、优先级和旁路探索均使用独立、有 revision 的结构记录，
   可增删和重排，但不得改写 Goal 历史、已完成 evidence 或把暂存想法冒充当前执行项；
@@ -1541,6 +1545,22 @@ work plan completed，tool error、越界文件、stale write 与清理残留均
 `.agents/30-records/logs/stage-2026-09-01-m21-javascript-verification-contract.md`。
 下一步在新的 clean revision 上启动完整 30-task DeepSeek core-v2 campaign；旧 revision 的
 17 条未完成结果只保留事故证据，不得恢复或并入新矩阵。
+
+Revision `a7baa43` 已在同一 clean implementation、manifest digest
+`c1e4044d913cd0a22ba1858667cac9eaf16db725c114534387ed71b0d8c7d9ac` 和 300 秒正确性
+窗口下完成两条独立 core-v2 campaign。DeepSeek `deepseek-v4-flash` 与 Kimi Code
+`k3-256k` 均为 30/30 PASS，五种语言各 6/6、六类任务各 5/5；420 次请求全部保持精确
+身份，越界写入、stale write、未完成计划和 workspace 清理失败均为 0。20 个 mutation
+任务在两侧都使用与 manifest 完全匹配的 runtime verification contract。
+
+DeepSeek 中位/p95 为 15.821/31.904 秒，229 次请求、299 次工具调用、5 次可恢复工具错误；
+Kimi 中位/p95 为 56.852/164.593 秒，191 次请求、199 次工具调用、0 次工具错误。Kimi
+使用更少请求、工具和 token，但耗时仍显著更高，并在五个只读任务建立了非必需但已完成的
+work plan；这些是后续候选观察，不足以证明可由某项模型定向策略稳定改善。共同层已消除
+此前正确性差异，因此本阶段不晋升 provider-specific policy。完整独立指标、错误分类、
+Goal 恢复经验和证据位置见
+`.agents/30-records/logs/stage-2026-09-01-m21-core-v2-dual-provider-acceptance.md`。
+M21 退出条件全部满足。
 
 #### 退出条件
 

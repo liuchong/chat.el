@@ -174,6 +174,22 @@ recoverable Evidence errors, and a shared 300-second correctness window. They
 do not justify an active model-specific rule. The committed six-task recovery
 smoke must pass both models before a full `coding-core-v2` qualification.
 
+The subsequent `coding-core-v2` qualification fixed both providers to clean
+revision `a7baa43`, one manifest digest and the shared 300-second correctness
+window. DeepSeek and Kimi each passed 30/30, with every language at 6/6 and
+every task category at 5/5. Exact request identity, runtime verification
+contracts, scope, stale-write, plan completion and cleanup gates all passed.
+This closes the common-path correctness qualification without an active
+adaptation.
+
+The remaining differences are descriptive candidates, not policy triggers.
+DeepSeek was faster but recovered from five tool-call or plan-sequencing errors.
+Kimi used fewer requests, tool calls and tokens with no tool errors, but had
+higher median and tail latency and created plans for five read-only tasks. The
+current evidence does not isolate a causal lever that improves either pattern;
+therefore no provider-specific rule is promoted. A future candidate still
+requires same-model A/B evidence under the promotion contract in Section 7.
+
 Cross-provider results diagnose portability. They are not pooled to hide one
 provider/model failure, and one provider's baseline cannot serve as another's.
 
