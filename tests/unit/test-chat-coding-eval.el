@@ -185,7 +185,7 @@
                  chat-coding-eval-test-extended-manifest))
          (coverage (chat-coding-eval-suite-coverage tasks)))
     (should (= 42 (length tasks)))
-    (should (= 240 task-timeout))
+    (should (= 300 task-timeout))
     (should
      (equal '(((name . "extended-fixture-offline-gate")
                (command "sh" "verify-extended-fixtures.sh")
@@ -322,8 +322,8 @@
                        (alist-get 'corpusId focused)))
         (should (equal required-executables
                        (append (alist-get 'requiredExecutables focused) nil)))
-        (should (= 240 (alist-get 'taskTimeoutSeconds focused)))
-        (should (= 240
+        (should (= 300 (alist-get 'taskTimeoutSeconds focused)))
+        (should (= 300
                    (chat-coding-eval-task-timeout-seconds
                     (car
                      (chat-coding-eval-load-suite
@@ -754,7 +754,7 @@
        (insert
         (json-encode
          '((schemaVersion . 1)
-           (taskTimeoutSeconds . 240)
+           (taskTimeoutSeconds . 300)
            (tasks
             . [((id . "default") (revision . 1)
                 (category . "read-only-review") (language . "text")
@@ -770,7 +770,7 @@
                 (judges . [((type . "no-change")
                              (name . "unchanged"))]))])))))
      (let ((tasks (chat-coding-eval-load-suite manifest)))
-       (should (= 240 (chat-coding-eval-task-timeout-seconds (car tasks))))
+       (should (= 300 (chat-coding-eval-task-timeout-seconds (car tasks))))
        (should (= 30 (chat-coding-eval-task-timeout-seconds (cadr tasks)))))
      (with-temp-file manifest
        (insert

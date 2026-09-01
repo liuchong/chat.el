@@ -30,7 +30,7 @@ SQL-specific tool-contract defect.
 ## Correction
 
 The corpus now owns an explicit `taskTimeoutSeconds` value. Extended and focused
-manifests declare 240 seconds, tasks inherit it, and an individual task may only
+manifests declare 300 seconds, tasks inherit it, and an individual task may only
 replace it with its own positive value. Every provider receives the same
 correctness observation window. Latency, request count and token use remain
 separate measurements; reaching the window still fails the trial. Hidden
@@ -38,6 +38,31 @@ provider-specific multipliers are prohibited.
 
 This is a corpus identity change. The manifest digest changes, so the diagnostic
 samples above cannot be pooled with the correction rerun.
+
+## First Correction Rerun
+
+Revision `1bda1315733d3cc8886eb50dfd60515690d9c6cf` first tried a 240-second
+window. All four exact-model trials passed their judges, scopes and cleanup:
+
+| Language | Provider/model | Seconds | Requests | Tool calls | Tool errors | Tokens |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | `deepseek/deepseek-v4-flash` | 18.765 | 10 | 17 | 0 | 84,461 |
+| C++ | `kimi-code/k3-256k` | 239.652 | 9 | 11 | 0 | 41,284 |
+| SQL | `deepseek/deepseek-v4-flash` | 15.110 | 10 | 11 | 0 | 70,290 |
+| SQL | `kimi-code/k3-256k` | 101.708 | 8 | 8 | 0 | 28,485 |
+
+Every request retained its declared provider/model identity, C++ changed only
+`sample.cpp`, SQL changed only `sample.sql`, and all tool-result counts matched
+tool-call counts. The C++ Kimi trial finished only 0.348 seconds before the
+window. That pass disproved the old 120-second classification but also showed
+that 240 seconds was not a stable correctness boundary: ordinary scheduling or
+network jitter could flip the verdict. The shared window was therefore raised
+to 300 seconds for all providers before final evidence collection. The
+`1bda131` samples remain diagnostic and cannot be pooled with the new digest.
+
+After the 300-second adjustment, the focused selector again passed 45/45 and
+the canonical suite again reported 1,978/1,980 passed, 0 unexpected and the same
+two known Rust environment skips.
 
 ## TDD Evidence
 

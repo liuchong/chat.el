@@ -266,7 +266,7 @@ Representative manifest fragment:
 
 ```json
 {
-  "taskTimeoutSeconds": 240,
+  "taskTimeoutSeconds": 300,
   "requiredExecutables": ["java", "javac"],
   "id": "java-refactor",
   "revision": 1,
@@ -303,7 +303,7 @@ it is shown beside the representative task here to keep the dependency
 contract visible.
 
 The task budget is a correctness observation window, not a performance target.
-The extended corpus uses the same 240-second window for every provider and
+The extended corpus uses the same 300-second window for every provider and
 model. Reports still compare latency, request count and token use separately,
 and reaching the window remains a failed trial. A task may declare a smaller
 `timeoutSeconds` only when its own contract needs a tighter bound. Hidden

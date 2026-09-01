@@ -49,7 +49,7 @@ canonical mutation task and declares only that language's executables. Passing
 one focused campaign never changes another language's `BLOCKED` result and
 cross-provider evidence remains separate.
 
-The extended and focused manifests declare a shared 240-second correctness
+The extended and focused manifests declare a shared 300-second correctness
 observation window. The value participates in the manifest digest, is inherited
 by every task unless that task declares a tighter bound, and is identical across
 providers. Reports continue to preserve latency, request count and token use as
