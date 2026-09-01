@@ -1524,6 +1524,20 @@ Revision `0393745` 的独立 Kimi development campaign
 与各自精确模型身份，分别执行 baseline/current 五次矩阵；四个 campaign 各 210 个正式
 身份，任何 availability attempt 单独保留且不占正式身份。
 
+首次 exploratory final-current 运行在 Kimi 第 84 个正式结果暴露了一个新的共性失败：
+`zig-single-fix#2` 的补丁精确匹配失败后，Agent 连续执行只读检查而没有成功 mutation 或
+verification，最终触发 300 秒外层超时。该失败按语义进展分类，不按 Zig、Kimi 或某条错误
+字符串特化。Revision `4169e73` 引入 run-local progress state：工具错误后连续 6 次检查时
+加入一次仅请求可见的恢复提醒，12 次检查仍无语义进展时在外层超时前明确停止；成功项目
+mutation 或 verification 重置状态，Plan/Goal/note/TODO 变更不能冒充进展。
+
+Revision `0805fb7` 把原任务逐字段固化成 extended manifest 的精确单任务子集。相同控制在
+DeepSeek `deepseek-v4-flash` 与 Kimi `k3-256k` 各执行 5 次并全部通过，零越界、零残留、零
+误报停滞。DeepSeek 一次 trial 发生工具错误后在提醒阈值前正常恢复，证明监控不干扰正常
+自愈；完整随机停滞分支由事故记录和确定性单测保留，不能把未再次抽中的现场路径描述成
+因果复现。旧 exploratory pair 不得恢复或进入最终聚合。完整记录见
+`.agents/30-records/logs/stage-2026-09-01-agent-stagnation-recovery.md`。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。

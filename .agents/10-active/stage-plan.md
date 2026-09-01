@@ -50,9 +50,13 @@ shared no-prompt mutation repair is closed by 167/167 focused, 2014/2014
 canonical and a fresh exact-DeepSeek 126/126 live campaign at revision
 `de0f6af`. The independent exact-Kimi campaign at revision `0393745` completed
 123/126 with three distinct, non-repeating closure failures and a perfect third
-repetition. No model-specific rule is promoted from single observations. Freeze
-the shared manifest and clean implementation/harness revisions, then run a
-separate five-repetition baseline/current pair for each provider: four final
+repetition. A later exploratory current campaign exposed one common inspection
+stall after a patch error. The shared bounded recovery contract is implemented,
+deterministically tested and passes the same exact Zig control 5/5 on each
+required model at revision `0805fb7`. No model-specific rule is promoted from
+single observations. Freeze the shared manifest and the new clean
+implementation/harness revision, then run a separate five-repetition
+baseline/current pair for each provider: four final
 campaigns and 210 unique results per campaign. Never skip a language, compare
 different providers as revisions, mix campaign identities or substitute model
 identity.

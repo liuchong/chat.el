@@ -46,8 +46,14 @@ unclosed accidental Plan in a review, a one-request mutation completion without
 tool use, and a failed replace followed by no successful mutation. Each failed
 identity passed in a later repetition, and the third repetition passed 42/42,
 so no single observation is promoted into a hard or model-specific rule. The
-next gate is to freeze and run one five-repetition baseline/current pair per
-provider, with 210 unique results in each of four final campaigns.
+first exploratory final pair then exposed one provider-neutral inspection stall
+after a recoverable patch error. Revision `4169e73` now warns after bounded
+inspection churn and stops explicitly before the outer timeout if no mutation
+or verification follows. The exact reusable control passes 5/5 on both
+`deepseek-v4-flash` and `k3-256k` at revision `0805fb7`; normal trials produce no
+false stagnation event. The next gate is to freeze and run one five-repetition
+baseline/current pair per provider, with 210 unique results in each of four
+fresh final campaigns.
 
 Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
 record inside the immutable configuration digest. Version probes are fixed and
@@ -56,13 +62,12 @@ The exact environment records TypeScript 7.0.2 and Clojure CLI 1.12.5.1664.
 Clojure uses one dependency-free `deps.edn` contract, the official CLI's
 bundled runtime and no alternate toolchain.
 
-While the remaining M20 provider matrix is blocked on those local executables,
-the highest-priority Markdown/MDP gap has been closed without changing table
-layout. Structured tool results now use bounded canonical MDP, carry explicit
-format identity through Agent evidence, session persistence and transcript
-projection, and render through the existing Markdown document view. Plain text
-tool output remains plain text, and unsupported or circular structures fall back
-instead of stalling the Agent.
+The previously blocked TypeScript and Clojure cells are closed with independent
+`tsc` and the official Clojure CLI. The highest-priority Markdown/MDP gap is
+also closed without changing table layout. Structured tool results use bounded
+canonical MDP, carry explicit format identity through Agent evidence, session
+persistence and transcript projection, and render through the existing
+Markdown document view.
 
 The objective's remaining design-only requirements are now frozen independently:
 Spec 031 covers event-source subscriptions, Spec 032 remote scoped rule bundles,

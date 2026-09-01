@@ -106,6 +106,17 @@ formal identity later passed. Final scope leaks, stale writes and cleanup
 failures were zero. The four final 210-trial baseline/current campaigns remain
 open.
 
+An exploratory final-current campaign later timed out one Kimi Zig fix after a
+precise patch failure was followed by repeated inspection without mutation or
+verification. The shared Agent loop now tracks semantic progress independently
+of provider and language, emits one bounded request-only recovery reminder and
+stops explicitly before the outer timeout if inspection churn continues.
+Deterministic progress tests cover the thresholds and reset rules. An exact
+extended-corpus control then passed 5/5 on `deepseek-v4-flash` and 5/5 on
+`k3-256k` at revision `0805fb7`, with zero false stagnation events, scope leaks
+or workspace residue. The exploratory pair is incident evidence only; all four
+final campaigns must be recreated on the new frozen revision.
+
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
 scoped rule bundles, language-neutral distributed/headless session execution and
@@ -595,11 +606,9 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- run the exact-Kimi M20 42-by-three development campaign; exact-DeepSeek is
-  complete at 126/126 on revision `de0f6af`; diagnose repeated failures before
-  freezing one five-repetition
-  baseline/current pair per exact provider; keep provider/model, manifest and
-  observation budget fixed within each pair
+- freeze the clean post-stagnation-recovery M20 revision and run one fresh
+  five-repetition baseline/current pair per exact provider; keep provider/model,
+  manifest and observation budget fixed within each pair
 - aggregate the repeated campaigns by language before applying total success,
   per-language, scope, verification and cleanup thresholds; never shrink the
   matrix, mix evidence sets or substitute another model

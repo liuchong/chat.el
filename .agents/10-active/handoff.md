@@ -54,10 +54,15 @@
   cleaned, and the only availability outage was quarantined then resumed
 - Kimi's three formal failures had different fingerprints and all corresponding
   later repetitions passed; retain them as recovery candidates, not hard rules
+- The exploratory final-current pair is incident evidence only and must not be
+  resumed after the shared Agent revision changed
+- Revision `4169e73` adds provider/language-neutral semantic stagnation
+  detection; revision `0805fb7` adds the exact Zig control, and both exact
+  providers pass it 5/5 without false detection
 - M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
   and no provider-specific policy was promoted without causal A/B evidence
 - The latest detailed record is
-  `stage-2026-09-01-m20-kimi-development-campaign.md`
+  `stage-2026-09-01-agent-stagnation-recovery.md`
 - Specs 031-034 now record the deferred subscription, remote scoped-rule,
   distributed/headless runtime and collaborative-group designs. They are design
   authorities only; do not describe them as implemented or insert them into M20
