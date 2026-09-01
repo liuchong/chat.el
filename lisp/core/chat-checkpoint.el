@@ -650,6 +650,45 @@ Each result is (ORIGINAL . FINAL) inside CHECKPOINT's workspace."
                 facts))))
     (nreverse facts)))
 
+(defun chat-checkpoint-tool-change-status (session turn-id call)
+  "Return the observable direct-file change status for CALL.
+The result is `changed', `unchanged', or `untracked'.  Comparison is against
+each target's state immediately before this tool, rather than the checkpoint's
+original state, so a repeated no-op write cannot masquerade as new progress."
+  (if-let* ((checkpoint (chat-checkpoint-for-turn session turn-id))
+            (tool-id (chat-checkpoint--call-tool-id call))
+            ((chat-checkpoint--write-tool-p tool-id)))
+      (let ((paths
+             (chat-files--tool-target-paths
+              tool-id (chat-checkpoint--call-arguments call)))
+            changed)
+        (unless paths
+          (error "Checkpoint could not resolve targets for %s" tool-id))
+        (dolist (path paths)
+          (let* ((relative (chat-checkpoint--relative-path checkpoint path))
+                 (entry (chat-checkpoint--find-file checkpoint relative))
+                 (state (chat-checkpoint--path-state path))
+                 (owned (and entry
+                             (eq (chat-checkpoint-file-status entry) 'owned)))
+                 (prior-kind
+                  (and entry
+                       (if owned
+                           (chat-checkpoint-file-post-kind entry)
+                         (chat-checkpoint-file-original-kind entry))))
+                 (prior-digest
+                  (and entry
+                       (if owned
+                           (chat-checkpoint-file-post-digest entry)
+                         (chat-checkpoint-file-original-digest entry)))))
+            (unless entry
+              (error "Checkpoint target was not captured before write: %s"
+                     relative))
+            (unless (and (eq prior-kind (plist-get state :kind))
+                         (equal prior-digest (plist-get state :digest)))
+              (setq changed t))))
+        (if changed 'changed 'unchanged))
+    'untracked))
+
 (defun chat-checkpoint-complete-tool (session turn-id call)
   "Mark successfully written CALL targets as owned in SESSION TURN-ID."
   (when-let* ((checkpoint (chat-checkpoint-for-turn session turn-id)))

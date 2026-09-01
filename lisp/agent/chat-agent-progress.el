@@ -18,15 +18,13 @@
   "Inspection calls without recovery before the Agent receives a reminder.")
 
 (defconst chat-agent-progress-stop-threshold 12
-  "Inspection calls after a tool error before the Agent stops as stalled.
-
-A repeated inspection loop without an earlier error is warned about but is
-not stopped, because paging through a genuinely large input can be legitimate.")
+  "Inspection calls before the Agent stops after a stagnation warning.")
 
 (cl-defstruct (chat-agent-progress-state
                (:constructor chat-agent-progress-state-create))
   (after-error-p nil)
   (inspection-after-error 0)
+  (inspection-after-warning 0)
   last-inspection-key
   (same-inspection-count 0)
   (warning-count 0)
@@ -37,6 +35,7 @@ not stopped, because paging through a genuinely large input can be legitimate.")
   "Reset transient no-progress facts on STATE."
   (setf (chat-agent-progress-state-after-error-p state) nil
         (chat-agent-progress-state-inspection-after-error state) 0
+        (chat-agent-progress-state-inspection-after-warning state) 0
         (chat-agent-progress-state-last-inspection-key state) nil
         (chat-agent-progress-state-same-inspection-count state) 0
         (chat-agent-progress-state-warning-count state) 0
@@ -78,7 +77,9 @@ inspection target without retaining tool arguments or output.  `progress'
 means a successful task mutation or verification, not bookkeeping such as
 creating a plan.  The return value is nil or describes a detected/recovered
 stagnation event."
-  (pcase kind
+  (if (chat-agent-progress-state-stop-reason state)
+      nil
+    (pcase kind
     ('error
      (setf (chat-agent-progress-state-after-error-p state) t)
      nil)
@@ -99,6 +100,9 @@ stagnation event."
      (when (chat-agent-progress-state-after-error-p state)
        (setf (chat-agent-progress-state-inspection-after-error state)
              (1+ (chat-agent-progress-state-inspection-after-error state))))
+     (when (chat-agent-progress-state-reminder state)
+       (setf (chat-agent-progress-state-inspection-after-warning state)
+             (1+ (chat-agent-progress-state-inspection-after-warning state))))
      (cond
       ((and (chat-agent-progress-state-after-error-p state)
             (>= (chat-agent-progress-state-inspection-after-error state)
@@ -111,6 +115,17 @@ stagnation event."
        (list :event 'stagnation-stopped
              :inspection-count
              (chat-agent-progress-state-inspection-after-error state)))
+      ((>= (chat-agent-progress-state-inspection-after-warning state)
+           chat-agent-progress-stop-threshold)
+       (setf (chat-agent-progress-state-stop-reason state)
+             (format
+              (concat "Agent remained stalled after recovery guidance: %d "
+                      "inspection calls completed without an observable "
+                      "mutation or verification")
+              (chat-agent-progress-state-inspection-after-warning state)))
+       (list :event 'stagnation-stopped
+             :inspection-count
+             (chat-agent-progress-state-inspection-after-warning state)))
       ((and (null (chat-agent-progress-state-reminder state))
             (or (>= (chat-agent-progress-state-inspection-after-error state)
                     chat-agent-progress-warning-threshold)
@@ -121,7 +136,7 @@ stagnation event."
         (format "the same inspection target was queried %d times"
                 (chat-agent-progress-state-same-inspection-count state))))
       (t nil)))
-    (_ (error "Unknown Agent progress action: %S" kind))))
+      (_ (error "Unknown Agent progress action: %S" kind)))))
 
 (provide 'chat-agent-progress)
 ;;; chat-agent-progress.el ends here

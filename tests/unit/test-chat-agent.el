@@ -1809,13 +1809,16 @@ per piece for that to stop being true."
   "Denied results never claim file ownership; successful results do."
   (dolist (case '(("Denied: policy refused" . 0)
                   ("written" . 1)))
-    (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
+    (let ((classify (symbol-function 'chat-agent--progress-tool-kind))
+          (chat-tool-forge--registry (make-hash-table :test 'eq))
           (session (make-chat-session :id "checkpoint-agent"
                                       :name "Checkpoint agent"
                                       :model-id 'kimi))
           (calls (list nil))
           (before-count 0)
           (complete-count 0)
+          (progress-count 0)
+          observed-status
           (tool-result (car case)))
       (chat-agent-test--register-demo-tool (list 0))
       (cl-letf (((symbol-function 'chat-llm-request-async)
@@ -1827,6 +1830,14 @@ per piece for that to stop being true."
                  (lambda (&rest _args) (cl-incf before-count)))
                 ((symbol-function 'chat-checkpoint-complete-tool)
                  (lambda (&rest _args) (cl-incf complete-count)))
+                ((symbol-function 'chat-checkpoint-tool-change-status)
+                 (lambda (&rest _args)
+                   (cl-incf progress-count)
+                   'changed))
+                ((symbol-function 'chat-agent--progress-tool-kind)
+                 (lambda (call failed status)
+                   (push status observed-status)
+                   (funcall classify call failed status)))
                 ((symbol-function 'chat-tool-caller-execute-async)
                  (lambda (_call _session _observer success _error
                           &optional _context _state-session)
@@ -1837,7 +1848,10 @@ per piece for that to stop being true."
                :session session
                :messages (list (chat-agent-test--user-message)))))
       (should (= before-count 1))
-      (should (= complete-count (cdr case))))))
+      (should (= complete-count (cdr case)))
+      (should (= progress-count (cdr case)))
+      (should (equal observed-status
+                     (list (if (zerop (cdr case)) 'untracked 'changed)))))))
 
 (ert-deftest chat-agent-plan-gate-refuses-write-before-tool-execution ()
   "A code run feeds a plan refusal back without invoking the write tool."

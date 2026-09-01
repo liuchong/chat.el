@@ -887,6 +887,7 @@ need approval carry exclusive accesses and therefore remain serialized."
   (let* ((count (length calls))
          (results (make-vector count nil))
          (failures (make-vector count nil))
+         (progresses (make-vector count 'untracked))
          (pending (cl-loop for call in calls
                            for index from 0
                            collect (cons index call)))
@@ -912,6 +913,7 @@ need approval carry exclusive accesses and therefore remain serialized."
          (funcall callback
                   (list :results (append results nil)
                         :failures (append failures nil)
+                        :progresses (append progresses nil)
                         :cancelled cancelled))))
      conflict-fn
      (lambda (accesses)
@@ -925,6 +927,19 @@ need approval carry exclusive accesses and therefore remain serialized."
          conflict))
      complete-fn
      (lambda (index call result &optional failed)
+       (unless (or failed
+                   (null (chat-agent-run-state-session run)))
+         (condition-case err
+             (aset progresses index
+                   (chat-checkpoint-tool-change-status
+                    (chat-agent-run-state-session run)
+                    (chat-agent-run-state-turn run)
+                    call))
+           (error
+            (setq failed t
+                  result
+                  (format "Tool progress observation failed: %s"
+                          (error-message-string err))))))
        (unless (or failed
                    (null (chat-agent-run-state-session run)))
          (condition-case err
@@ -1090,8 +1105,8 @@ need approval carry exclusive accesses and therefore remain serialized."
         (funcall report-fn)
       (funcall pump-fn))))
 
-(defun chat-agent--progress-tool-kind (call failed)
-  "Return semantic progress kind for CALL and FAILED."
+(defun chat-agent--progress-tool-kind (call failed change-status)
+  "Return semantic progress kind for CALL, FAILED and CHANGE-STATUS."
   (let ((name (or (plist-get call :name) "")))
     (cond
      (failed 'error)
@@ -1101,6 +1116,10 @@ need approval carry exclusive accesses and therefore remain serialized."
       'neutral)
      ((string-prefix-p "programming_verification_" name)
       'progress)
+     ((eq change-status 'changed)
+      'progress)
+     ((eq change-status 'unchanged)
+      'inspection)
      ((seq-some (lambda (access)
                   (eq (plist-get access :mode) 'write))
                 (chat-tool-caller-call-resource-accesses call))
@@ -1128,14 +1147,15 @@ need approval carry exclusive accesses and therefore remain serialized."
       (and (listp result)
            (memq (plist-get result :status) '(error failed denied)))))
 
-(defun chat-agent--observe-progress (run calls results failures)
-  "Update RUN progress from ordered CALLS, RESULTS and FAILURES."
+(defun chat-agent--observe-progress (run calls results failures progresses)
+  "Update RUN progress from ordered tool observations."
   (let ((state (chat-agent-run-state-progress-state run)))
     (while calls
       (let* ((call (car calls))
              (failed (or (car failures)
                          (chat-agent--tool-result-failed-p (car results))))
-             (kind (chat-agent--progress-tool-kind call failed))
+             (kind (chat-agent--progress-tool-kind
+                    call failed (car progresses)))
              (event
               (chat-agent-progress-observe
                state kind
@@ -1149,7 +1169,8 @@ need approval carry exclusive accesses and therefore remain serialized."
            :warning-count (plist-get event :warning-count)))
         (setq calls (cdr calls)
               results (cdr results)
-              failures (cdr failures))))
+              failures (cdr failures)
+              progresses (cdr progresses))))
     state))
 
 (cl-defun chat-agent--complete-result (run result processed truncated)
@@ -1201,8 +1222,12 @@ TRUNCATED is non-nil when tool calls were refused for length."
         (results (plist-get processed :tool-results))
         (failures (or (plist-get processed :tool-failures)
                       (make-list
-                       (length (plist-get processed :tool-calls)) nil))))
-    (chat-agent--observe-progress run calls results failures)
+                       (length (plist-get processed :tool-calls)) nil)))
+        (progresses (or (plist-get processed :tool-progresses)
+                        (make-list
+                         (length (plist-get processed :tool-calls))
+                         'untracked))))
+    (chat-agent--observe-progress run calls results failures progresses)
     (while (and calls results)
       (chat-agent--append-message
        run
@@ -1296,6 +1321,7 @@ TRUNCATED is non-nil when tool calls were refused for length."
                       :tool-calls calls
                       :tool-results (plist-get execution :results)
                       :tool-failures (plist-get execution :failures)
+                      :tool-progresses (plist-get execution :progresses)
                       :tool-events (nreverse tool-events)
                       :parse-error nil)
                 nil)))))))

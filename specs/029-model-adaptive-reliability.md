@@ -80,9 +80,17 @@ After a tool error, six inspection calls without a successful mutation or
 verification append one request-only recovery instruction that requires a
 precise corrective action, a different tool or an explicit blocker. Twelve such
 calls terminate the Run with an explicit stagnation reason instead of consuming
-the outer timeout. Repeated reads of one semantic target receive the same warning
-without an automatic stop when no tool error preceded them, because bounded
-paging through a large source may be legitimate.
+the outer timeout. Repeated reads of one semantic target receive the same
+warning even when no tool error preceded them. Once either warning has been
+issued, twelve further inspections without observable progress terminate the
+Run. Distinct inspection targets before a warning remain valid bounded research.
+
+Direct file writes count as progress only when the checkpoint observes a state
+change relative to that path's immediately preceding captured or owned state. A
+successful no-op replacement is an inspection, not progress, and cannot clear a
+stagnation warning. A later real mutation or successful verification clears the
+warning and records recovery. Opaque execution without precise path ownership
+retains its existing conservative classification.
 
 Progress reminders are never persisted as conversation messages and retain no
 tool arguments or output. Detection, recovery and stop are structured Agent
@@ -240,9 +248,11 @@ session migration or a second Agent implementation.
 - A candidate and control campaign can be compared without changing fixtures or
   acceptance thresholds.
 - No adaptation can expand authority or convert a failed judge into success.
-- A recoverable tool error followed by inspection churn receives bounded common
-  recovery guidance and cannot run until the outer timeout without an explicit
-  stagnation outcome.
+- A recoverable tool error or repeated same-target inspection followed by
+  inspection churn receives bounded common recovery guidance and cannot run
+  until the outer timeout without an explicit stagnation outcome.
+- A direct write that leaves every target unchanged cannot reset progress state;
+  a subsequent observable mutation can.
 - Language and task-category regressions remain visible independently.
 - DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` both pass readiness and a
   bounded core campaign before the first cross-provider policy is promoted.

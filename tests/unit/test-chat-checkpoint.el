@@ -83,6 +83,33 @@
                           (buffer-string))
                         "user dirty before turn")))))))
 
+(ert-deftest chat-checkpoint-observes-each-direct-write-state-transition ()
+  "A repeated no-op write is not semantic progress after an earlier mutation."
+  (chat-test-with-temp-dir
+   (chat-checkpoint-test--repository temp-dir)
+   (let* ((chat-checkpoint-directory
+           (expand-file-name "checkpoints/" chat-state-dir))
+          (chat-checkpoint--registry (make-hash-table :test 'equal))
+          (chat-files-allowed-directories (list temp-dir))
+          (default-directory temp-dir)
+          (session (chat-checkpoint-test--session temp-dir))
+          (path (expand-file-name "owned.txt" temp-dir))
+          (call `(:name "files_write" :arguments (("path" . ,path)))))
+     (chat-checkpoint-create session :turn-id 1)
+     (chat-checkpoint-before-tool session 1 call)
+     (with-temp-file path (insert "first"))
+     (should (eq (chat-checkpoint-tool-change-status session 1 call) 'changed))
+     (chat-checkpoint-complete-tool session 1 call)
+     (chat-checkpoint-before-tool session 1 call)
+     (with-temp-file path (insert "first"))
+     (should (eq (chat-checkpoint-tool-change-status session 1 call)
+                 'unchanged))
+     (chat-checkpoint-complete-tool session 1 call)
+     (chat-checkpoint-before-tool session 1 call)
+     (with-temp-file path (insert "second"))
+     (should (eq (chat-checkpoint-tool-change-status session 1 call)
+                 'changed)))))
+
 (ert-deftest chat-checkpoint-external-drift-refuses-before-overwrite ()
   "Current bytes differing from the runtime post-digest block rollback."
   (chat-test-with-temp-dir
