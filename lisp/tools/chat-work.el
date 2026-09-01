@@ -418,6 +418,18 @@ anything."
              chat-work--tasks)
     (nreverse tasks)))
 
+(defun chat-work-session-has-task-p (session)
+  "Return non-nil when SESSION owns at least one background task."
+  (let ((session-id (and session (chat-session-id session)))
+        found)
+    (when session-id
+      (maphash
+       (lambda (_id task)
+         (when (equal session-id (chat-work-task-session-id task))
+           (setq found t)))
+       chat-work--tasks))
+    found))
+
 (defun chat-work--terminal-status-p (status)
   "Return non-nil when background task STATUS is terminal."
   (memq status '(succeeded failed cancelled interrupted)))

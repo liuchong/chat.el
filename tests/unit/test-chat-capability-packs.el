@@ -43,6 +43,8 @@
       (should-not (memq tool (plist-get config :advertised-tools))))
     (dolist (tool chat-capability-programming-verification-fallback-tools)
       (should-not (memq tool (plist-get config :advertised-tools))))
+    (should-not (memq 'programming_task_output
+                      (plist-get config :advertised-tools)))
     (should-not (memq 'programming_plan_transition
                       (plist-get config :advertised-tools)))))
 
@@ -237,6 +239,23 @@
         (mapcar (lambda (parameter) (plist-get parameter :name))
                 (chat-forged-tool-parameters tool))
         '("id" "offset" "max_bytes"))))))
+
+(ert-deftest chat-capability-task-output-appears-only-after-task-creation ()
+  "The provider cannot guess an output id before a session task exists."
+  (let* ((chat-work--tasks (make-hash-table :test 'equal))
+         (session (make-chat-session :id "task-output-stage"))
+         (profile (chat-agent-profile-resolve 'code))
+         (task (make-chat-work-task :id "task-1"
+                                    :session-id "task-output-stage")))
+    (should-not
+     (memq 'programming_task_output
+           (plist-get (chat-agent-profile--effective-tool-config session profile)
+                      :advertised-tools)))
+    (puthash "task-1" task chat-work--tasks)
+    (should
+     (memq 'programming_task_output
+           (plist-get (chat-agent-profile--effective-tool-config session profile)
+                      :advertised-tools)))))
 
 (ert-deftest chat-capability-web-reader-renders-html-with-shr ()
   "Test the shared web tool returns rendered page text."

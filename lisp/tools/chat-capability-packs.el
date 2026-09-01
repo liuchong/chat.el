@@ -45,8 +45,12 @@
   "Mutating tools advertised only after an ordinary work plan starts.")
 
 (defconst chat-capability-programming-verification-fallback-tools
-  '(programming_compile_task programming_task_output)
+  '(programming_compile_task)
   "Generic command tools exposed only after deterministic planning finds no check.")
+
+(defconst chat-capability-programming-background-task-tools
+  '(programming_compile_task programming_task_output)
+  "Complete authority for starting and observing background checks.")
 
 (defconst chat-capability-programming-exploration-tools
   '(programming_flymake_diagnostics
@@ -57,7 +61,7 @@
 
 (defconst chat-capability-programming-verification-tools
   '(programming_verification_plan programming_verification_run
-    programming_verification_read_result programming_task_output)
+    programming_verification_read_result)
   "Programming tools advertised for verification work.")
 
 (defconst chat-capability-programming-work-note-tools
@@ -100,7 +104,7 @@
    (apply #'append
           (copy-sequence chat-capability-programming-base-tools)
           (copy-sequence chat-capability-programming-execution-tools)
-          (copy-sequence chat-capability-programming-verification-fallback-tools)
+          (copy-sequence chat-capability-programming-background-task-tools)
           (mapcar (lambda (entry) (copy-sequence (cdr entry)))
                   chat-capability-programming-tool-groups)))
   "Complete programming authority; only a stage-relevant subset is advertised.")
@@ -264,6 +268,10 @@
               (chat-capability--ordered-tool-union
                advertised
                chat-capability-programming-verification-fallback-tools)))
+      (when (and session (chat-work-session-has-task-p session))
+        (setq advertised
+              (chat-capability--ordered-tool-union
+               advertised '(programming_task_output))))
       (when (and session (ignore-errors (chat-goal-current session)))
         (setq advertised
               (chat-capability--ordered-tool-union
