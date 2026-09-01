@@ -1493,6 +1493,16 @@ DeepSeek Clojure 在第 12 步有一次被守卫拒绝的越界 `files_list`，�
 通过真实 sandbox 回归后提升 Clojure task revision 与 fixture identity，再以新 manifest 和
 新 revision 重建 focused cells 及完整 campaign。不得扩大 sandbox 到用户缓存或网络。
 
+Revision `de0f6af` 的 fresh DeepSeek development campaign
+`m20-dev-baseline-deepseek-de0f6af-r1` 已完成 42 tasks x 3 repetitions =
+126/126 PASS。七种语言各有 18 条结果；126 个 task/repetition 身份全部唯一，所有 normalized
+request 均为精确 `deepseek/deepseek-v4-flash`。failed check、越界最终文件、未完成 work
+plan、executor failure、provider attempt 与 workspace cleanup failure 均为 0；原事故路径
+`zig-refactor` 三轮全部通过且没有 supersession prompt。请求数中位数为 10，范围 3--19，
+合计 1,260；任务耗时中位数为 19.679 秒，范围 5.072--71.246 秒。该结果关闭 DeepSeek
+development 资格并验证共享文件同步修复，不替代最终五次 baseline/current 矩阵。下一步以
+相同 manifest、预算和精确身份运行独立 Kimi `k3-256k` development campaign。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。

@@ -62,3 +62,25 @@ Run the canonical suite on the completed implementation, commit it, and start a
 fresh 42-task-by-three campaign for each exact provider/model. Do not resume or
 pool the 39-result incident campaign. If the prompt reappears, stop immediately
 and capture the exact tool sequence before any further model sampling.
+
+## Live Regression Closure
+
+Clean revision `de0f6afbeb4d657737331b753cca6b2a601be865` completed fresh
+DeepSeek campaign `m20-dev-baseline-deepseek-de0f6af-r1` against manifest
+digest `fecacb185cd4b2d95c30f8fd62ff1e21ecae28731628fcf0045499390c7e0de0`.
+The immutable matrix contains 126 unique task/repetition identities: 42 tasks,
+three repetitions and 18 results for each of C, Clojure, C++, Java, SQL,
+TypeScript and Zig.
+
+All 126 trials passed. Every normalized model request used exact identity
+`deepseek/deepseek-v4-flash`; failed checks, out-of-scope final files,
+unfinished work plans, executor failures, provider retry attempts and unclean
+workspaces were all zero. In particular, `zig-refactor` passed in all three
+independent workspaces without a supersession prompt. The campaign completed
+without a running lock or owned process.
+
+Request count was 3--19 per task with median 10 and total 1,260. Task duration
+was 5.072--71.246 seconds with median 19.679 seconds and total 3,004.935
+seconds. These efficiency measurements are development evidence for later
+model-policy tuning; they do not weaken the common correctness contract and do
+not replace the final five-repetition baseline/current campaigns.

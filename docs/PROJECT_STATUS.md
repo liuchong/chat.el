@@ -90,7 +90,14 @@ revision changes. The shared file boundary now rejects every unsaved visiting
 buffer even outside Agent read-set mode and silently synchronizes clean buffers
 after write, replace, insert, patch and transactional patch operations.
 Focused file/edit verification is 167/167 and the canonical suite is
-2014/2014 with zero skipped or unexpected results.
+2014/2014 with zero skipped or unexpected results. A fresh clean-revision
+DeepSeek development campaign now completes
+126/126 across all 42 tasks and three repetitions. Every request used exact
+`deepseek-v4-flash`; all checks passed, all seven languages contributed 18
+results, and scope, work-plan, executor, provider-attempt and cleanup failures
+were zero. The original 39-result campaign remains incident evidence only.
+The independent exact-Kimi development campaign is next; final five-repetition
+baseline/current evidence is still open.
 
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
@@ -581,8 +588,9 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- run fresh provider-separated M20 42-by-three development campaigns and
-  diagnose repeated failures before freezing one five-repetition
+- run the exact-Kimi M20 42-by-three development campaign; exact-DeepSeek is
+  complete at 126/126 on revision `de0f6af`; diagnose repeated failures before
+  freezing one five-repetition
   baseline/current pair per exact provider; keep provider/model, manifest and
   observation budget fixed within each pair
 - aggregate the repeated campaigns by language before applying total success,

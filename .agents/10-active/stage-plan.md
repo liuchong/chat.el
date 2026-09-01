@@ -44,12 +44,12 @@ are in `programming-capability-reliability-plan.md`.
 The complete 42-task offline fixture, real-sandbox judge and cleanup gate is
 closed with exact TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 evidence. All
 seven focused language qualifications pass independently on exact DeepSeek and
-Kimi models. A DeepSeek development campaign passed its first 39 trials, then
-exposed an interactive visiting-buffer supersession prompt during the first
-Zig refactor repetition. That campaign is incident evidence only. The shared
-no-prompt mutation repair is closed by 167/167 focused and 2014/2014 canonical
-tests. Start fresh provider-separated 42-task-by-three development
-campaigns. Classify and repair repeated failures before freezing a separate
+Kimi models. The first partial DeepSeek campaign remains incident evidence
+only after exposing an interactive visiting-buffer supersession prompt. The
+shared no-prompt mutation repair is closed by 167/167 focused, 2014/2014
+canonical and a fresh exact-DeepSeek 126/126 live campaign at revision
+`de0f6af`. Run the independent exact-Kimi 42-task-by-three development
+campaign next. Classify and repair repeated failures before freezing a separate
 five-repetition baseline/current pair for each provider: four final campaigns
 and 210 unique results per campaign. Never skip a language, compare different
 providers as revisions, mix campaign identities or substitute model identity.
