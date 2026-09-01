@@ -92,6 +92,14 @@ The total call count remains exact when this limit is exceeded.  Summaries
 contain only bounded tool names and counts, never arguments or results."
   :type 'integer :group 'chat)
 
+(defcustom chat-coding-eval-max-plan-evidence-records 20
+  "Maximum evidence identifiers retained for one final work-plan item."
+  :type 'integer :group 'chat)
+
+(defcustom chat-coding-eval-max-plan-diagnostic-chars 240
+  "Maximum characters retained from one final work-plan diagnostic value."
+  :type 'integer :group 'chat)
+
 (defcustom chat-coding-eval-tool-version-timeout-seconds 5
   "Maximum seconds allowed for one campaign tool version probe."
   :type 'number :group 'chat)
@@ -217,6 +225,52 @@ distinct tool names omitted by `chat-coding-eval-max-tool-call-summary-records'.
                  `((tool . ,name) (count . ,(gethash name counts))))
                retained)
        :truncated (max 0 (- (length names) (length retained)))))))
+
+(defun chat-coding-eval--bounded-plan-diagnostic (value)
+  "Return bounded single-line diagnostic text for work-plan VALUE."
+  (when value
+    (let* ((single-line
+            (string-trim
+             (replace-regexp-in-string
+              "[[:space:]]+" " " (format "%s" value))))
+           (limit (max 0 chat-coding-eval-max-plan-diagnostic-chars)))
+      (if (> (length single-line) limit)
+          (substring single-line 0 limit)
+        single-line))))
+
+(defun chat-coding-eval--work-plan-final-state (session)
+  "Return a bounded diagnostic projection of SESSION's selected work plan."
+  (when-let* ((plan (chat-work-plan-current session t)))
+    `((id . ,(chat-work-plan-id plan))
+      (revision . ,(chat-work-plan-revision plan))
+      (status . ,(symbol-name (chat-work-plan-status plan)))
+      (itemCount . ,(length (chat-work-plan-items plan)))
+      (items .
+             ,(vconcat
+               (mapcar
+                (lambda (item)
+                  (let* ((evidence (or (chat-work-plan-item-evidence item) nil))
+                         (limit (max 0 chat-coding-eval-max-plan-evidence-records))
+                         (retained (seq-take evidence limit)))
+                    `((id . ,(chat-work-plan-item-id item))
+                      (order . ,(chat-work-plan-item-order item))
+                      (status . ,(symbol-name
+                                  (chat-work-plan-item-status item)))
+                      (evidenceCount . ,(length evidence))
+                      (evidenceIds .
+                                   ,(vconcat
+                                     (mapcar
+                                      #'chat-coding-eval--bounded-plan-diagnostic
+                                      retained)))
+                      (evidenceIdsTruncated .
+                                            ,(max 0
+                                                  (- (length evidence)
+                                                     (length retained))))
+                      (blockerReason .
+                                     ,(chat-coding-eval--bounded-plan-diagnostic
+                                       (chat-work-plan-item-blocker-reason
+                                        item))))))
+                (chat-work-plan-items plan)))))))
 
 (defun chat-coding-eval--read-generator (relative manifest-directory)
   "Read and validate generator RELATIVE to MANIFEST-DIRECTORY."
@@ -1981,6 +2035,9 @@ ordinary application execution always uses protocol v2.")
               (toolCallSummary . ,(plist-get tool-call-summary :records))
               (toolCallSummaryTruncated .
                                         ,(plist-get tool-call-summary :truncated))
+              (workPlanFinalState .
+                                  ,(chat-coding-eval--work-plan-final-state
+                                    session))
               (toolResultCount . ,(length tool-results))
               (toolErrorCount . ,tool-errors)
               (toolErrors . ,(reverse tool-error-records))

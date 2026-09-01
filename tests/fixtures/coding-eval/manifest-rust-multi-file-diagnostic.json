@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "coding-rust-multi-file-diagnostic-v1",
+  "taskTimeoutSeconds": 300,
+  "tasks": [
+    {
+      "id": "rust-multi-file", "revision": 1, "category": "multi-file-change", "language": "rust",
+      "description": "Change a label contract and its documentation.", "fixtureId": "rust-sample-v1", "fixture": "rust",
+      "prompt": "Change generated labels from the item: prefix to entry:, and update README.md to document the new prefix.",
+      "allowedPaths": ["src/lib.rs", "README.md"], "generatedPaths": ["Cargo.lock", "target"],
+      "judges": [{"type": "command", "name": "label-tests", "command": ["cargo", "test", "label_uses_entry_prefix", "--quiet"], "expectedExit": 0, "timeoutSeconds": 60}, {"type": "file-regexp", "name": "documentation", "path": "README.md", "regexp": "entry:"}]
+    }
+  ]
+}

@@ -161,6 +161,13 @@ and cleanup outcome. This diagnostic is evidence for deciding the next common
 or candidate policy; it is not a retry that can overwrite the failed recovery
 trial.
 
+When a recovery task changes all allowed files but ends with an open or blocked
+work plan, run `manifest-rust-multi-file-diagnostic.json` independently. Inspect
+`workPlanFinalState` together with the tool-call summary and deterministic
+judges. The projection must contain only plan/item identifiers, revisions,
+statuses, bounded evidence identifiers and bounded blocker text; it must not
+copy objectives, titles, acceptance text or provider content.
+
 `manifest-large-repo.json` must remain an exact structural copy of the core
 `python-locate` task. Its baseline and current campaigns each contain exactly
 five unique repetitions. Final acceptance verifies that both focused campaigns

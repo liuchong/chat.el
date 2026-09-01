@@ -460,6 +460,12 @@ Together these fields distinguish repeated successful inspection without
 mutation from model recovery, infrastructure failure or a malformed tool
 contract after the disposable runtime HOME has been removed.
 
+`workPlanFinalState` records the selected plan ID, revision and terminal status
+plus each item's ID, order, status, bounded evidence identifiers and bounded
+blocker reason. It excludes objectives, titles, acceptance text and model
+content. This projection distinguishes a valid execution barrier from a model
+closure mistake without turning the result record into a context transcript.
+
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive
 provider traffic. Runtime result JSON is also structurally bounded: strings,

@@ -45,6 +45,10 @@
   (expand-file-name "coding-eval/manifest-go-refactor-diagnostic.json"
                     chat-test-fixtures-dir))
 
+(defconst chat-coding-eval-test-rust-multi-file-diagnostic-manifest
+  (expand-file-name "coding-eval/manifest-rust-multi-file-diagnostic.json"
+                    chat-test-fixtures-dir))
+
 (defconst chat-coding-eval-test-language-registry
   (expand-file-name "coding-eval/language-registry.json"
                     chat-test-fixtures-dir))
@@ -313,6 +317,25 @@
     (should (equal (list core-task) (alist-get 'tasks diagnostic)))
     (let ((task (car (chat-coding-eval-load-suite
                       chat-coding-eval-test-go-refactor-diagnostic-manifest))))
+      (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
+
+(ert-deftest chat-coding-eval-rust-plan-diagnostic-is-an-exact-subset ()
+  "The work-plan diagnostic reuses the canonical Rust multi-file task."
+  (let* ((core (chat-coding-eval-test--read-json
+                chat-coding-eval-test-manifest))
+         (diagnostic
+          (chat-coding-eval-test--read-json
+           chat-coding-eval-test-rust-multi-file-diagnostic-manifest))
+         (core-task
+          (seq-find (lambda (task)
+                      (equal "rust-multi-file" (alist-get 'id task)))
+                    (alist-get 'tasks core))))
+    (should (equal "coding-rust-multi-file-diagnostic-v1"
+                   (alist-get 'corpusId diagnostic)))
+    (should (= 300 (alist-get 'taskTimeoutSeconds diagnostic)))
+    (should (equal (list core-task) (alist-get 'tasks diagnostic)))
+    (let ((task (car (chat-coding-eval-load-suite
+                      chat-coding-eval-test-rust-multi-file-diagnostic-manifest))))
       (should (= 300 (chat-coding-eval-task-timeout-seconds task))))))
 
 (ert-deftest chat-coding-eval-mutation-smoke-is-an-exact-extended-subset ()
@@ -919,6 +942,9 @@
    (let* ((chat-coding-eval-max-tool-error-records 1)
           (chat-coding-eval-max-tool-error-summary-chars 80)
           (chat-coding-eval-max-tool-call-summary-records 2)
+          (chat-work-plan-evidence-resolver-functions
+           (list (lambda (_candidate _task-id evidence-id)
+                   (equal evidence-id "verification:passed"))))
           (task (chat-coding-eval-test--task temp-dir nil))
           config status metadata)
      (cl-letf (((symbol-function 'chat-agent-start)
@@ -942,6 +968,30 @@
        (should (equal (file-name-as-directory temp-dir)
                       (file-name-as-directory
                        (chat-code-session-project-root session))))
+       (let ((plan
+              (chat-work-plan-create
+               session "Diagnose the bounded task"
+               '(((id . "implement") (title . "Implement")
+                  (acceptance . "Change is present"))
+                 ((id . "verify") (title . "Verify")
+                  (acceptance . "Focused check passes")
+                  (dependencies . ["implement"]))))))
+         (setq plan
+               (chat-work-plan-transition-item
+                session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+                "implement" 'in-progress))
+         (setq plan
+               (chat-work-plan-transition-item
+                session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+                "implement" 'completed :evidence '("verification:passed")))
+         (setq plan
+               (chat-work-plan-transition-item
+                session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+                "verify" 'in-progress))
+         (chat-work-plan-transition-item
+          session (chat-work-plan-id plan) (chat-work-plan-revision plan)
+          "verify" 'blocked
+          :blocker-reason "Declared verification remained unavailable"))
        (funcall model-observer
                 (chat-model-event-make
                  'started 'eval-provider "model" "request-1" 1 nil))
@@ -990,6 +1040,31 @@
              (alist-get 'toolCallSummary metadata)))
      (should (= 1 (alist-get 'toolCallSummaryTruncated metadata)))
      (should (= 2 (alist-get 'toolErrorCount metadata)))
+     (let* ((plan (alist-get 'workPlanFinalState metadata))
+            (items (append (alist-get 'items plan) nil))
+            (implemented (seq-find (lambda (item)
+                                     (equal "implement" (alist-get 'id item)))
+                                   items))
+            (blocked (seq-find (lambda (item)
+                                 (equal "verify" (alist-get 'id item)))
+                               items)))
+       (should (stringp (alist-get 'id plan)))
+       (should (= 5 (alist-get 'revision plan)))
+       (should (equal "blocked" (alist-get 'status plan)))
+       (should-not (assq 'objective plan))
+       (should (= 2 (length items)))
+       (should (seq-every-p (lambda (item)
+                              (and (not (assq 'title item))
+                                   (not (assq 'acceptance item))))
+                            items))
+       (should (equal "completed" (alist-get 'status implemented)))
+       (should
+        (equal '("verification:passed")
+               (append (alist-get 'evidenceIds implemented) nil)))
+       (should (equal "blocked" (alist-get 'status blocked)))
+       (should
+        (equal "Declared verification remained unavailable"
+               (alist-get 'blockerReason blocked))))
      (let* ((errors (alist-get 'toolErrors metadata))
             (error (car errors)))
        (should (= 1 (length errors)))
