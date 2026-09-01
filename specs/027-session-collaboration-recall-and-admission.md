@@ -479,3 +479,16 @@ event. Every list operation is paginated and stable under concurrent append.
 - replacing Goal, plans, work notes, session context or wire with one universal
   record;
 - preserving experimental pre-1.0 storage shapes.
+
+## Follow-On Design Boundaries
+
+This Spec remains the authority for local discovery, admission, recall, pair
+channels, relations, roles and topics. Later designs compose it without changing
+those contracts:
+
+- Spec 031 defines durable event-source observation and governed trigger
+  admission;
+- Spec 032 defines remotely stored scoped rule bundles;
+- Spec 033 defines language-neutral headless and distributed session placement;
+- Spec 034 defines dynamic collaborative groups over independently owned
+  sessions.

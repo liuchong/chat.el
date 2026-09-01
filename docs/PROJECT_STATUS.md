@@ -68,6 +68,15 @@ mutation smokes for Zig, Java, C, C++ and SQL. TypeScript and Clojure remain
 blocked before provider use by missing independent `tsc` and `lein` toolchains;
 the full 42-task repeated matrix therefore remains open.
 
+The design-only requirements for later long-running operation are now separated
+into four accepted Specs: governed event-source subscriptions, immutable remote
+scoped rule bundles, language-neutral distributed/headless session execution and
+dynamic collaborative session groups. They reuse the existing Session, wire,
+Task, checkpoint, requirement-admission, Goal and Plan authorities and explicitly
+do not claim implementation in the current objective. The design stage passes
+the complete canonical suite at 2008/2008 with zero skipped or unexpected
+results.
+
 The first full baseline attempt then exposed a terminal-evidence race: outer
 task timeout could be replaced by synchronous Agent cancellation and lose all
 in-flight request identities. Eval executors now return a typed snapshot/cancel
@@ -548,13 +557,15 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- freeze the updated coding manifest and implementation, then run fresh
-  baseline and current 30-by-5 campaigns with the same provider, model and
-  capability identity
-- record the immutable comparison, trusted usage sample and failure taxonomy;
-  do not mark M19 complete before every strict acceptance gate passes
-- retain the complete runtime, quality and canonical JSON records from the same
-  clean frozen revision and pass them intact to final aggregation
+- keep the frozen M20 fixture, judge and acceptance contract unchanged while
+  TypeScript and Clojure remain infrastructure-blocked before provider use
+- when independent `tsc` and `lein` executables are explicitly available, run
+  only their preflight and focused exact-model qualification first
+- after all seven language cells pass independently, run the complete repeated
+  42-task DeepSeek `deepseek-v4-flash` and Kimi Code `k3-256k` campaigns as
+  separate evidence sets; never shrink the matrix or substitute another model
+- retain M19 and M21 evidence as revision-bound history rather than reusing it
+  to qualify a changed M20 product revision
 - keep increasing focused unit coverage around new workflow modules rather than only growing end-to-end surface area
 - add live-server integration cases only for intentionally provisioned
   environments; deterministic workflow, remote-tool, and nested-agent

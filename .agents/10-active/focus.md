@@ -44,6 +44,15 @@ projection, and render through the existing Markdown document view. Plain text
 tool output remains plain text, and unsupported or circular structures fall back
 instead of stalling the Agent.
 
+The objective's remaining design-only requirements are now frozen independently:
+Spec 031 covers event-source subscriptions, Spec 032 remote scoped rule bundles,
+Spec 033 distributed/headless Session execution and Spec 034 collaborative
+Session groups. These are accepted future contracts, not current runtime claims;
+they do not alter the frozen M20 fixture, judge, toolchain preflight or campaign
+identity. Their documentation stage passes 4/4 focused documentation tests and
+the complete canonical suite at 2008/2008 with zero skipped or unexpected
+results.
+
 Project verification now covers all seven extended ecosystems without adding
 language branches to the Agent loop. Explicit project profiles remain
 authoritative; Zig, Clojure, Java and TypeScript require ecosystem markers, and

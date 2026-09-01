@@ -505,6 +505,24 @@ attachments 和 provenance 进入运行时发送队列；暂存区在该 turn �
 与多项合成、末条文本、忙时进入运行时队列、按序自动发送、checkpoint 失败保留、成功记录
 后清空、provenance 可审计、未知 schema 拒绝，以及命令表、帮助、本地化和 README 一致。
 
+### 6.12 后续长期运行与协作设计边界
+
+本目标只冻结设计、不实现四组后续能力。它们不得被压缩成一个万能状态机，也不得在当前
+M20 语言资格矩阵中插入半成品实现：
+
+- Spec 031 的订阅模式把 polling、stream 和 schedule 事件源统一为持久 observation，只有
+  通过需求准入后才生成任务；等待事件不占用模型 turn；
+- Spec 032 的远程规则把 transport、不可变 bundle、结构化 fragment、scope 和 activation
+  分离；远程字节不直接获得指令权威；
+- Spec 033 的分布式/无头运行时把 UI attachment 与 Session 执行身份分离，通过 lease
+  generation 和 fencing token 保证单写，不把断连误判为取消或完成；
+- Spec 034 的协同对话群只共享显式 channel、assignment、decision 和 evidence reference，
+  每个 Session 的 context、Goal、Plan、TODO、权限和生命周期继续独立。
+
+四份 Spec 统一复用现有 Session、wire、Task、checkpoint、requirement admission、Goal、Plan
+和 Termini 协议边界；实现顺序必须先本地确定性合同，再无头运行，最后网络传输和长期故障
+测试。任何后续实现都必须建立独立阶段、先写可执行合同，并且不得把设计记录当作已交付能力。
+
 ## 7. 施工阶段
 
 阶段编号延续已完成的 M0-M8。每个阶段必须遵循：先测试合同，再实现；阶段测试和规范测试全部通过后立即提交；未满足退出条件不得开始依赖它的下一阶段。
