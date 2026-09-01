@@ -41,6 +41,9 @@
   package typechecks; C/C++/SQL require exact `make test`
 - Run exact-model live work only after the offline gate: DeepSeek
   `deepseek-v4-flash` and Kimi Code `k3-256k` use separate campaign identities
+- Final M20 qualification uses one baseline/current pair per provider: four
+  42-task-by-five campaigns and 840 trials; never compare different providers
+  as if they were implementation revisions or pool their acceptance rates
 - Never use `k3`, aliases or K2.7 evidence for Kimi qualification
 - M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
   and no provider-specific policy was promoted without causal A/B evidence

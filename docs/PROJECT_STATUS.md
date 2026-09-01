@@ -66,8 +66,9 @@ policy was promoted because the remaining latency and tool-use differences lack
 causal A/B evidence. M20 extended-language qualification has completed
 dual-model mutation smokes for all seven languages. TypeScript 7.0.2 and
 Clojure CLI 1.12.5.1664 close the versioned preflight, offline gate and their
-four exact-model focused cells at revision `c05ed64`. The separate repeated
-42-task baseline/current matrix remains open.
+four exact-model focused cells at revision `c05ed64`. The repeated 42-task
+matrix remains open: each exact provider requires its own baseline/current
+pair, for four 210-trial campaigns and 840 final trials.
 
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
@@ -558,9 +559,10 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- freeze comparable M20 baseline and current revisions, then run five
-  repetitions of the complete 42-task manifest for 210 unique results in each
-  campaign; keep provider/model, manifest and observation budget fixed
+- freeze comparable M20 baseline and current revisions, then run one
+  five-repetition baseline/current pair per exact provider for 210 unique
+  results in each of four campaigns; keep provider/model, manifest and
+  observation budget fixed within each pair
 - aggregate the repeated campaigns by language before applying total success,
   per-language, scope, verification and cleanup thresholds; never shrink the
   matrix, mix evidence sets or substitute another model

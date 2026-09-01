@@ -66,7 +66,8 @@ latency, cost or model quality, and they do not replace the five-repetition
 
 ## Next
 
-Freeze separate baseline and current implementation revisions under the same
-extended manifest, provider/model identity and observation budget. Run five
-repetitions per task for 210 unique results in each campaign, then aggregate by
+Freeze separate baseline and current implementation revisions. For each exact
+provider, keep the extended manifest, model identity, capability identity and
+observation budget fixed across its pair. Run five repetitions per task for
+210 unique results in each of four campaigns, then aggregate by provider and
 language before applying the M20 exit thresholds.

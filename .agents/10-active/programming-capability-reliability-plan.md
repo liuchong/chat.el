@@ -1389,8 +1389,9 @@ Clojure、Java、TypeScript、C、C++ 和 SQL 七种语言。每种语言都覆�
    结束再扫描 owned process、workspace、worktree 和构建目录。
 6. 集成测试连续重复 setup、judge、cancel、timeout 和 cleanup，确认仓库磁盘占用不增长。
 7. 每种新增语言先运行一个 mutation smoke；失败先分类和修复，不机械跑完整矩阵。
-8. 使用同一 provider/model/capability snapshot 对 extended manifest 分别建立 baseline
-   和 current，开发各 task 三次，最终各 task 五次。
+8. 对 DeepSeek `deepseek-v4-flash` 与 Kimi Code `k3-256k` 分别使用同一
+   provider/model/capability snapshot 建立 baseline/current 对；开发各 task 三次，最终
+   各 task 五次。不得把两个不同 provider 当作 baseline/current，也不得跨 provider 合并统计。
 9. 只有重复证据支持的经验才进入硬规则或语言提示包，并记录前后指标和反例。
 10. 每个可重复样例、任务话术、judge、语言清单和清理声明必须进入仓库内 fixture；
     重要阶段指标与失败分类写入有 revision/campaign identity 的精简记录，禁止只留在临时会话。
@@ -1485,9 +1486,10 @@ DeepSeek Clojure 在第 12 步有一次被守卫拒绝的越界 `files_list`，�
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
 - fixture 离线 setup、judge 和清理 100% 通过；残留编译产物、进程和 worktree 为 0。
-- 最终 baseline/current 各有 210 个唯一有效 trial，任何语言不得被总平均掩盖。
-- current 总成功率达到 90% 或相对 baseline 提高至少 15 个百分点；每种语言至少 80%
-  且不低于自身 baseline。
+- 每个必选 provider 的 baseline/current 各有 210 个唯一有效 trial，最终四个 campaign
+  共 840 个 trial；任何语言或 provider 不得被总平均掩盖。
+- 每个 provider 内的 current 总成功率达到 90% 或相对自身 baseline 提高至少 15 个
+  百分点；每种语言至少 80% 且不低于该 provider 下自身 baseline。
 - 越界写入、未验证却完成、生成物漏报和清理失败均为 0。
 - 重要样例、验收话术、标准、性能指标和诊断结论按 spec 的保留规则进入仓库。
 

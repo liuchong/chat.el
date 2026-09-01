@@ -29,8 +29,8 @@ wrappers, generated-path contracts, complete executable preflight and
 12-language detection are implemented. All seven languages pass the reusable
 offline semantic and cleanup gate. All seven languages now have independent
 exact-model focused qualifications on DeepSeek `deepseek-v4-flash` and Kimi
-Code `k3-256k`; the next gate is the separate five-repetition baseline/current
-42-task matrix with 210 unique results per campaign.
+Code `k3-256k`; the next gate is one separate five-repetition baseline/current
+pair per provider, with 210 unique results in each of four campaigns.
 
 Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
 record inside the immutable configuration digest. Version probes are fixed and

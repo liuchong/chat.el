@@ -374,7 +374,9 @@ Development qualification has four gates:
 3. **focused live gate**: one mutation task per added language passes with the
    fixed provider/model/capability snapshot;
 4. **repeated live gate**: all 42 extended tasks run three times for development
-   and five times for final qualification.
+   and five times for final qualification. Each required provider/model has its
+   own baseline/current pair; a provider difference is never used as a revision
+   baseline.
 
 `tests/fixtures/coding-eval/verify-extended-fixtures.sh` is the reusable offline
 gate. It copies selected fixtures into a temporary workspace, verifies that the
@@ -383,11 +385,20 @@ expected semantic reason, and removes the workspace on every exit. Running it
 without language arguments requires all seven toolchains; named language
 arguments support bounded local diagnosis but do not satisfy the complete gate.
 
-The final extended campaign contains 210 unique trials. It reports every
-language and category separately. Overall success must reach 90% or improve at
-least 15 percentage points over the same-manifest baseline; every language must
-reach at least 80% and must not regress from its baseline. Out-of-scope writes,
-false verified completion and cleanup residue must all be zero.
+Each final extended campaign contains 210 unique trials. DeepSeek
+`deepseek-v4-flash` and Kimi Code `k3-256k` each require a separate baseline
+campaign and current campaign, for four campaigns and 840 final trials. Every
+provider pair keeps one manifest, provider/model identity, capability identity
+and observation budget while using distinct baseline/current implementation
+revisions. Results report every language and category separately. Within each
+provider pair, current overall success must reach 90% or improve at least 15
+percentage points over its same-manifest baseline; every language must reach at
+least 80% and must not regress from its own provider baseline. Out-of-scope
+writes, false verified completion and cleanup residue must all be zero.
+
+Cross-provider summaries are descriptive only. They retain both campaign
+identities and never pool trials, average away a provider-specific failure or
+claim a causal implementation improvement from comparing different models.
 
 The core 30-by-5 comparison and the extended 42-by-5 qualification remain
 separate immutable campaigns. A combined report may summarize 360 trials, but
@@ -520,11 +531,11 @@ any repeated live task is dispatched.
 - [x] Extended manifest contains 42 tasks: seven languages by six categories.
 - [x] Combined corpus contains 72 unique task IDs and 12 languages.
 - [x] Core and extended correctness manifests use the same 300-second provider-neutral window.
-- [ ] All toolchains have bounded, offline preflight and recorded versions.
-- [ ] Every writing judge declares generated paths and passes repeated cleanup.
+- [x] All toolchains have bounded, offline preflight and recorded versions.
+- [x] Every writing judge declares generated paths and passes repeated cleanup.
 - [x] File detection, language profile and verification adapters cover all 12 languages.
 - [x] Semantic quality fixtures report each supported language independently.
-- [ ] Focused live smoke passes once per added language.
-- [ ] Baseline and current extended campaigns each contain 210 valid trials.
+- [x] Focused live smoke passes once per added language and required provider.
+- [ ] Each provider's baseline and current extended campaigns contain 210 valid trials.
 - [ ] Per-language, overall, safety and cleanup thresholds all pass.
 - [ ] Significant results and accepted prompt/code changes have durable stage records.
