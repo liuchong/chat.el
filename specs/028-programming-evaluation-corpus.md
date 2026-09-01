@@ -385,6 +385,10 @@ Every significant campaign record includes:
 - per-language and per-category rates, safety violations and cleanup residue;
 - latency plus first-request, final-request and total-task token metrics when
   the provider exposes trusted usage, including request count and coverage;
+- an exact tool-error count plus bounded chronological records containing the
+  Agent step, tool name, stable error type and a single-line summary; record
+  and summary limits are explicit, and an omitted-record count preserves the
+  difference between no error and truncated diagnostics;
 - exact failed task identities, root-cause class and whether a code, prompt,
   fixture or infrastructure change followed;
 - a final `PASS`, `FAIL`, `BLOCKED` or `INVALID` verdict using the repository
@@ -414,6 +418,13 @@ and are not duplicated into task results. Result bounding applies independently
 to scalar leaves, collection length and nesting depth; it may replace a large
 diagnostic leaf with truncation evidence, but it cannot replace the enclosing
 metadata object or erase task, campaign, provider, model or request identity.
+
+Tool diagnostics follow the same rule. They never retain tool arguments, raw
+results or exception objects. `toolErrorCount` remains exact;
+`toolErrors` retains only a bounded public projection and
+`toolErrorRecordsTruncated` reports records omitted by the collection limit.
+This is enough to distinguish model recovery from a hidden infrastructure or
+tool-contract failure after the disposable runtime HOME has been removed.
 
 Large raw results remain in session evaluation storage. The committed record is
 a bounded audit index, not an unauditable claim and not a copy of sensitive

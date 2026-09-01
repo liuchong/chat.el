@@ -865,7 +865,9 @@
 (ert-deftest chat-coding-eval-agent-binds-code-root-and-counts-tool-events ()
   "Live Eval uses its workspace as project context and records real events."
   (chat-test-with-temp-dir
-   (let* ((task (chat-coding-eval-test--task temp-dir nil))
+   (let* ((chat-coding-eval-max-tool-error-records 1)
+          (chat-coding-eval-max-tool-error-summary-chars 80)
+          (task (chat-coding-eval-test--task temp-dir nil))
           config status metadata)
      (cl-letf (((symbol-function 'chat-agent-start)
                 (lambda (value) (setq config value) nil)))
@@ -897,7 +899,14 @@
        (funcall on-event
                 '(:type tool-event :event (:type approval)))
        (funcall on-event
-                '(:type tool-event :event (:type tool-error)))
+                `(:type tool-event :step 3
+                  :event (:type tool-error :index 2 :tool "files_write"
+                          :error-type file-not-read
+                          :result-summary
+                          ,(concat "file was not read\n" (make-string 200 ?x)))))
+       (funcall on-event
+                '(:type execution-error :step 4 :tool "shell_execute"
+                  :result-summary "process failed"))
        (funcall on-event '(:type turn-start))
        (funcall on-event
                 (list :type 'model-usage
@@ -917,7 +926,18 @@
                 '(:type agent-end :status completed :content "done"
                   :steps 1 :tool-calls nil :tool-results nil)))
      (should (eq status 'completed))
-     (should (= 1 (alist-get 'toolErrorCount metadata)))
+     (should (= 2 (alist-get 'toolErrorCount metadata)))
+     (let* ((errors (alist-get 'toolErrors metadata))
+            (error (car errors)))
+       (should (= 1 (length errors)))
+       (should (= 1 (alist-get 'toolErrorRecordsTruncated metadata)))
+       (should (equal "tool-error" (alist-get 'eventType error)))
+       (should (= 3 (alist-get 'step error)))
+       (should (= 2 (alist-get 'index error)))
+       (should (equal "files_write" (alist-get 'tool error)))
+       (should (equal "file-not-read" (alist-get 'errorType error)))
+       (should (<= (length (alist-get 'summary error)) 80))
+       (should-not (string-match-p "\n" (alist-get 'summary error))))
      (should (= 2 (alist-get 'approvalCount metadata)))
      (should (= 11 (plist-get (alist-get 'firstRequestTokenUsage metadata)
                               :input-tokens)))

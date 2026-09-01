@@ -2,7 +2,7 @@
 
 - Type: `logs`
 - Attention: `records`
-- Status: `active`
+- Status: `completed`
 - Date: 2026-09-01
 - Diagnostic revision: `f871308f0b9a7d534399c8560faf9eed4521c624`
 
@@ -64,6 +64,34 @@ After the 300-second adjustment, the focused selector again passed 45/45 and
 the canonical suite again reported 1,978/1,980 passed, 0 unexpected and the same
 two known Rust environment skips.
 
+## Final 300-Second Rerun
+
+The final rerun used clean revision
+`a4e4e1827b9f514c59f966bfa10a738ad85c3d2e`. C++ used manifest digest
+`0680f430312056570099cd842d7c1b4140b52544127bf6be76b4020657021da3`;
+SQL used `1494b45ffcdb6c82aeacde4827e1907abb30d0823c82619c40bc653bab7dda92`.
+
+| Language | Provider/model | Seconds | Requests | Tool calls | Tool errors | Tokens |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | `deepseek/deepseek-v4-flash` | 42.391 | 14 | 23 | 1 | 142,248 |
+| C++ | `kimi-code/k3-256k` | 208.408 | 8 | 10 | 0 | 54,632 |
+| SQL | `deepseek/deepseek-v4-flash` | 21.224 | 12 | 16 | 0 | 93,033 |
+| SQL | `kimi-code/k3-256k` | 188.539 | 11 | 11 | 0 | 45,538 |
+
+All four trials passed deterministic judges, retained exact request identities,
+changed only the declared source file and removed their declared generated
+paths. C++ produced only `.chat-eval-build/cpp/test_sample`; SQL produced no
+generated artifact. Workspace and campaign cleanup both passed.
+
+The C++ DeepSeek trial recovered from one tool error and still passed. The old
+result stored only `toolErrorCount`, while its disposable runtime HOME was
+correctly removed, so the error cannot honestly be assigned to a tool or root
+cause after the fact. This is a diagnostics-contract defect, not evidence for a
+provider prompt change. The Eval executor now retains a bounded chronological
+`toolErrors` projection with step, tool, stable error type and single-line
+summary, plus `toolErrorRecordsTruncated`. Total counts remain exact; arguments,
+raw outputs and exception objects are not persisted.
+
 ## TDD Evidence
 
 Before implementation, three focused assertions failed because the extended and
@@ -71,18 +99,24 @@ focused manifests exposed no corpus-level task budget. After adding loader
 inheritance, positive-value validation, task override coverage and the versioned
 manifest fields, all four focused tests passed.
 
-The complete coding Eval unit selector passed 45/45. The canonical suite then
-ran 1,980 tests: 1,978 passed, 0 were unexpected and the two known Rust
-environment tests were skipped. The canonical runner returned nonzero because
-its strict success predicate treats every skip as non-green; no new failure was
-introduced.
+The tool-diagnostics assertion then failed against the old executor because the
+error count had no accompanying records. After the bounded projection was
+implemented, the complete coding Eval selector passed 45/45. The test covers
+chronological structure, stable error type, whitespace normalization, summary
+length, record-count truncation and an exact total count.
 
-## Rerun Gate
+The canonical suite then ran 1,980 tests: 1,978 passed, 0 were unexpected and
+the two known Rust environment tests were skipped. The canonical runner returned
+nonzero because its strict success predicate treats every skip as non-green; no
+new failure was introduced.
 
-The record remains active until C++ and SQL are rerun for both exact models on
-one clean correction revision and one new manifest digest. The rerun must report
-correctness, scope, cleanup, latency, request count, token use and exact request
-identity independently.
+## Closeout
+
+The shared-budget correction is complete: both languages passed with both exact
+models on one clean revision, with correctness, scope, cleanup, latency,
+requests, tokens and request identity reported independently. This closes only
+the C++ and SQL focused qualification slice. It does not close the remaining
+M20 language smokes or the final repeated extended campaigns.
 
 ## Long-Goal Lesson
 
@@ -92,3 +126,11 @@ shared measurement boundary first, and improve that explicit boundary before
 adding provider prompts or provider-only exceptions. The TODO remains ordered:
 correct the versioned contract, verify it offline, commit a clean revision, then
 rerun comparable live evidence.
+
+The second lesson is that goal progress needs durable intermediate facts, not
+only a final pass/fail counter. The 240-second near-boundary pass changed the
+plan before final collection; the final recovered tool error then exposed a
+missing evidence field. A useful Goal mode must keep the active objective and
+ordered TODO stable while allowing new evidence to insert a bounded repair,
+record why the plan changed, and resume the original milestone without treating
+the repair as completion of the larger goal.

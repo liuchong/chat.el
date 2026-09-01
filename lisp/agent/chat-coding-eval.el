@@ -75,6 +75,16 @@
   "Maximum command-judge output retained in a result check."
   :type 'integer :group 'chat)
 
+(defcustom chat-coding-eval-max-tool-error-records 20
+  "Maximum structured tool error records retained by one evaluation.
+
+The total error count remains exact when this limit is exceeded."
+  :type 'integer :group 'chat)
+
+(defcustom chat-coding-eval-max-tool-error-summary-chars 240
+  "Maximum characters retained from one evaluation tool error summary."
+  :type 'integer :group 'chat)
+
 (defcustom chat-coding-eval-tool-version-timeout-seconds 5
   "Maximum seconds allowed for one campaign tool version probe."
   :type 'number :group 'chat)
@@ -135,6 +145,45 @@
        (not (string-prefix-p "~" path))
        (not (member ".." (split-string path "/" t)))
        (equal path (directory-file-name (file-name-unquote path)))))
+
+(defun chat-coding-eval--bounded-tool-error-summary (value)
+  "Return a single-line bounded diagnostic summary from VALUE."
+  (when (stringp value)
+    (let* ((single-line
+            (string-trim
+             (replace-regexp-in-string "[[:space:]]+" " " value)))
+           (limit (max 0 chat-coding-eval-max-tool-error-summary-chars)))
+      (if (> (length single-line) limit)
+          (substring single-line 0 limit)
+        single-line))))
+
+(defun chat-coding-eval--tool-error-record (event)
+  "Return a bounded public error record for Agent EVENT, or nil."
+  (let* ((nested (and (eq (plist-get event :type) 'tool-event)
+                      (plist-get event :event)))
+         (detail (or nested event))
+         (type (plist-get detail :type)))
+    (when (memq type '(tool-error execution-error))
+      (let ((summary
+             (chat-coding-eval--bounded-tool-error-summary
+              (or (plist-get detail :result-summary)
+                  (plist-get detail :reason)
+                  (plist-get detail :message)))))
+        (delq
+         nil
+         (list
+          (cons 'eventType (symbol-name type))
+          (when-let* ((step (or (plist-get event :step)
+                                (plist-get detail :step))))
+            (cons 'step step))
+          (when-let* ((index (plist-get detail :index)))
+            (cons 'index index))
+          (when-let* ((tool (plist-get detail :tool)))
+            (cons 'tool (format "%s" tool)))
+          (when-let* ((error-type (plist-get detail :error-type)))
+            (cons 'errorType (format "%s" error-type)))
+          (and summary (not (string-empty-p summary))
+               (cons 'summary summary))))))))
 
 (defun chat-coding-eval--read-generator (relative manifest-directory)
   "Read and validate generator RELATIVE to MANIFEST-DIRECTORY."
@@ -1819,6 +1868,7 @@ ordinary application execution always uses protocol v2.")
                             :request-id (chat-model-event-request-id event))
                       request-identities))))
            (tool-errors 0)
+           (tool-error-records nil)
            (approvals 0)
            (stale-writes 0)
            (run nil)
@@ -1895,6 +1945,12 @@ ordinary application execution always uses protocol v2.")
               (toolCallCount . ,(length tool-calls))
               (toolResultCount . ,(length tool-results))
               (toolErrorCount . ,tool-errors)
+              (toolErrors . ,(reverse tool-error-records))
+              (toolErrorRecordsTruncated .
+                                         ,(max 0
+                                               (- tool-errors
+                                                  (length
+                                                   tool-error-records))))
               (approvalCount . ,approvals)
               (staleWriteCount . ,stale-writes)
               (verificationRetryCount . 0))))))
@@ -1935,7 +1991,12 @@ ordinary application execution always uses protocol v2.")
                  (tool-type (and (eq (plist-get event :type) 'tool-event)
                                  (plist-get (plist-get event :event) :type))))
              (when (memq (or tool-type type) '(tool-error execution-error))
-               (cl-incf tool-errors))
+               (cl-incf tool-errors)
+               (when (< (length tool-error-records)
+                        (max 0 chat-coding-eval-max-tool-error-records))
+                 (when-let* ((record
+                              (chat-coding-eval--tool-error-record event)))
+                   (push record tool-error-records))))
              (when (memq (or tool-type type)
                          '(approval-guard-pending approval-pending approval))
                (cl-incf approvals))

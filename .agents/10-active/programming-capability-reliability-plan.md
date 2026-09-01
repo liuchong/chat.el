@@ -1405,6 +1405,15 @@ never-allow 地板。相同 C control 中，DeepSeek 以 12 步、19.610 秒通�
 请求模型 Guard verdict，且仍只读取一次结构化成功终态。该结果关闭这一条脚本授权差异，
 不把单次延迟当作 provider 性能结论，也不替代剩余语言和重复矩阵。
 
+Revision `a4e4e18` 把 extended/focused manifest 的共享正确性观察窗口固定为 300 秒，并在
+同一干净 revision 上完成 C++、SQL 的两个精确模型复跑，四项 judge、作用域与清理全部通过。
+DeepSeek 分别用 42.391、21.224 秒，Kimi `k3-256k` 分别用 208.408、188.539 秒完成；
+该差异作为按模型延迟和成本证据保留，不改变共同正确性合同。C++ DeepSeek 在恢复后通过，
+但旧 Eval 元数据只保留一次工具错误计数，临时 HOME 清理后无法再分类。由此新增有界
+`toolErrors` 结构化记录和省略计数，后续错误可以按 step、tool、error type 与有限摘要复盘，
+不会保存参数或原始输出。完整证据见
+`.agents/30-records/logs/stage-2026-09-01-extended-time-budget.md`。
+
 #### 退出条件
 
 - extended manifest 为 7 languages x 6 categories = 42 tasks，组合语料为 72 tasks。
