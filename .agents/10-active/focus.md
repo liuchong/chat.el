@@ -29,17 +29,28 @@ wrappers, generated-path contracts, complete executable preflight and
 12-language detection are implemented. All seven languages pass the reusable
 offline semantic and cleanup gate. All seven languages now have independent
 exact-model focused qualifications on DeepSeek `deepseek-v4-flash` and Kimi
-Code `k3-256k`; the next gate is one separate five-repetition baseline/current
-pair per provider, with 210 unique results in each of four campaigns.
+Code `k3-256k`.
+
+The first repeated development campaign exposed a Clojure infrastructure gap:
+host preflight could see the user Maven cache, but the real Darwin build
+sandbox could not. Revision `f3c4190` binds the fixture runtime to the official
+CLI installation without cache or network access, versions the changed task
+contract as revision 3, and adds a real sandbox regression. Both exact providers
+repassed the revised focused task, the 42-task preflight passed twice and the
+clean canonical suite passed 2010/2010. The replayable record is
+`stage-2026-09-01-clojure-sandbox-offline-repair.md`.
+
+The next gate is fresh provider-separated 42-task-by-three development
+campaigns. Their failure distribution must be diagnosed before freezing one
+five-repetition baseline/current pair per provider, with 210 unique results in
+each of four final campaigns.
 
 Campaign schema v2 now persists a sorted `name/path/target/version` toolchain
 record inside the immutable configuration digest. Version probes are fixed and
 bounded; resume rejects executable or version drift before trial scheduling.
 The exact environment records TypeScript 7.0.2 and Clojure CLI 1.12.5.1664.
-Clojure uses one dependency-free `deps.edn` contract and no alternate toolchain.
-The four newly unblocked focused cells passed 4/4 at clean revision `c05ed64`;
-the replayable record is
-`stage-2026-09-01-typescript-clojure-dual-provider-qualification.md`.
+Clojure uses one dependency-free `deps.edn` contract, the official CLI's
+bundled runtime and no alternate toolchain.
 
 While the remaining M20 provider matrix is blocked on those local executables,
 the highest-priority Markdown/MDP gap has been closed without changing table

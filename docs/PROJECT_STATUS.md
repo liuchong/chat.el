@@ -70,6 +70,15 @@ four exact-model focused cells at revision `c05ed64`. The repeated 42-task
 matrix remains open: each exact provider requires its own baseline/current
 pair, for four 210-trial campaigns and 840 final trials.
 
+The first repeated development campaign was stopped after the Clojure judge
+proved that host-side preflight had accidentally relied on the user Maven
+cache. Revision `f3c4190` now binds the fixture to the official CLI's bundled
+runtime without granting cache or network access. Clojure task revision 3
+passes the real Darwin build sandbox and both exact-model focused campaigns;
+the clean 42-task preflights pass for both providers and canonical verification
+is 2010/2010. Fresh provider-separated 42-by-three development campaigns are
+next; the interrupted old campaign is not admissible model evidence.
+
 The design-only requirements for later long-running operation are now separated
 into four accepted Specs: governed event-source subscriptions, immutable remote
 scoped rule bundles, language-neutral distributed/headless session execution and
@@ -559,9 +568,9 @@ missing or mismatched identity. Fresh post-fix `deepseek-v4-flash` and
 
 ## Recommended Next Work
 
-- freeze comparable M20 baseline and current revisions, then run one
-  five-repetition baseline/current pair per exact provider for 210 unique
-  results in each of four campaigns; keep provider/model, manifest and
+- run fresh provider-separated M20 42-by-three development campaigns and
+  diagnose repeated failures before freezing one five-repetition
+  baseline/current pair per exact provider; keep provider/model, manifest and
   observation budget fixed within each pair
 - aggregate the repeated campaigns by language before applying total success,
   per-language, scope, verification and cleanup thresholds; never shrink the

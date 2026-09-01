@@ -41,12 +41,13 @@ are in `programming-capability-reliability-plan.md`.
 
 ## Immediate Next Action
 
-The complete 42-task offline fixture, judge and cleanup gate is closed with
-exact TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 evidence. All seven focused
-language qualifications now pass independently on exact DeepSeek and Kimi
-models. Freeze comparable baseline and current revisions, then run a separate
-five-repetition baseline/current pair for each provider: four campaigns and
-210 unique results per campaign. Never skip a language, compare different
+The complete 42-task offline fixture, real-sandbox judge and cleanup gate is
+closed with exact TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 evidence. All
+seven focused language qualifications pass independently on exact DeepSeek and
+Kimi models. Run fresh provider-separated 42-task-by-three development
+campaigns, classify and repair repeated failures, then freeze a separate
+five-repetition baseline/current pair for each provider: four final campaigns
+and 210 unique results per campaign. Never skip a language, compare different
 providers as revisions, mix campaign identities or substitute model identity.
 
 ## Stage Gate

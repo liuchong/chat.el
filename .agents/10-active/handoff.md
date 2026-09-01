@@ -30,7 +30,11 @@
 - All 12 qualification languages enter source discovery, fallback symbol
   indexing, repo-map projection and independent semantic quality rows
 - TypeScript 7.0.2 and Clojure CLI 1.12.5.1664 pass exact versioned preflight
-  and their four focused provider cells passed 4/4 at revision `c05ed64`
+  and their focused provider cells pass on the current fixture contract
+- Revision `f3c4190` repairs real-sandbox Clojure execution without Maven cache
+  or network access; Clojure tasks are revision 3 / `clojure-sample-v3`
+- The interrupted `m20-dev-baseline-deepseek-c05ed64-r3` campaign is
+  infrastructure incident evidence only; never resume or pool it
 - Campaign schema v2 stores invocation paths, canonical targets and versions in
   the immutable configuration digest and rejects drift on resume
 - Project verification adapters cover the seven extended ecosystems using
@@ -48,7 +52,7 @@
 - M21 is complete: both exact providers passed the same core-v2 manifest 30/30,
   and no provider-specific policy was promoted without causal A/B evidence
 - The latest detailed record is
-  `stage-2026-09-01-typescript-clojure-dual-provider-qualification.md`
+  `stage-2026-09-01-clojure-sandbox-offline-repair.md`
 - Specs 031-034 now record the deferred subscription, remote scoped-rule,
   distributed/headless runtime and collaborative-group designs. They are design
   authorities only; do not describe them as implemented or insert them into M20
