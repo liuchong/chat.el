@@ -503,17 +503,21 @@ If OUTLINE-ONLY is t, extract only function/class signatures."
               (chat-code-context-files context)))
 
 (defun chat-context-code--truncate-file-context (file-ctx)
-  "Truncate FILE-CTX to reduce token count."
-  (let ((current-content (chat-code-file-context-content file-ctx))
-        (lines (split-string (chat-code-file-context-content file-ctx) "\n")))
-    ;; Keep first half and add ellipsis
-    (let ((new-lines (append (cl-subseq lines 0 (max 10 (/ (length lines) 2)))
-                            (list "\n;; ... [truncated] ...\n"))))
-      (setf (chat-code-file-context-content file-ctx)
-            (mapconcat #'identity new-lines "\n"))
-      (setf (chat-code-file-context-tokens file-ctx)
-            (chat-context-code--estimate-tokens
-             (chat-code-file-context-content file-ctx))))))
+  "Truncate FILE-CTX to roughly half its token count.
+
+Halves the content by characters: a file becomes truncatable at over 100
+tokens, which means over 400 characters, and character-halving always
+shrinks that.  The previous line-halving floored at ten lines, so a file
+of twenty dense lines (a log of minified JSON, say) came out of
+\"truncation\" exactly the same size and the budget loop spun on it
+forever."
+  (let* ((current (chat-code-file-context-content file-ctx))
+         (keep (max 200 (/ (length current) 2))))
+    (setf (chat-code-file-context-content file-ctx)
+          (concat (substring current 0 keep) "\n;; ... [truncated] ...\n"))
+    (setf (chat-code-file-context-tokens file-ctx)
+          (chat-context-code--estimate-tokens
+           (chat-code-file-context-content file-ctx)))))
 
 (defun chat-context-code--remove-lowest-priority (context)
   "Remove the lowest priority source from CONTEXT; return t when removed."

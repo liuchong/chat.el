@@ -380,5 +380,26 @@ outrank the cap or the declaration means nothing."
     (chat-context-code--optimize context)
     (should (= (chat-code-context-total-tokens context) 10))))
 
+(ert-deftest chat-context-code-optimize-shrinks-dense-short-files ()
+  "A file of a few dense lines must still truncate.
+Line-based halving floored at ten lines, so a short file of very long
+lines came out of truncation the same size and the budget loop spun on
+it forever."
+  (let ((context (make-chat-code-context
+                  :budget 100
+                  :sources nil
+                  :symbols nil
+                  :diagnostics nil
+                  :files (list (make-chat-code-file-context
+                                :path "dense.log"
+                                :language 'text
+                                :content (make-string 5000 ?x)
+                                :line-range nil
+                                :size 5000
+                                :tokens 1250))
+                  :total-tokens 1250)))
+    (chat-context-code--optimize context)
+    (should (<= (chat-code-context-total-tokens context) 100))))
+
 (provide 'test-chat-project)
 ;;; test-chat-project.el ends here
