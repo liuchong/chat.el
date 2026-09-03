@@ -786,6 +786,20 @@ passing badge on it."
 ;; Utility Functions
 ;; ------------------------------------------------------------------
 
+(ert-deftest chat-mode-does-not-record-undo ()
+  "The transcript is a rendering of the session record, not editable state.
+
+Streaming redraws used to record every rewrite into the undo list, which
+grew to tens of thousands of entries and then cost the next send seconds
+of garbage collection.  Nothing in a chat buffer is undoable, so the
+recording is off."
+  (with-temp-buffer
+    (chat-mode)
+    (should (eq buffer-undo-list t))
+    (insert "rendered reply text\n")
+    (delete-region (point-min) (point-max))
+    (should (eq buffer-undo-list t))))
+
 (ert-deftest chat-version-returns-string ()
   "Test that chat-version returns version string."
   (let ((version (chat-version)))

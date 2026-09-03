@@ -882,6 +882,14 @@ the header and in which commands do anything."
   :group 'chat
   (setq buffer-read-only nil)
   (setq truncate-lines nil)
+  ;; The display draws the session record and holds nothing of its own, so
+  ;; buffer text is rendering, not state -- and neither the transcript nor a
+  ;; sent message can be taken back with `undo'.  Recording it anyway made
+  ;; streaming redraws grow the undo list to tens of thousands of entries,
+  ;; and the next send paid for them in garbage collection: six to eight
+  ;; frozen seconds with ten collections where the same send cost half a
+  ;; second with a short undo list.
+  (setq-local buffer-undo-list t)
   ;; A live reply inserts above the input point.  Once that point leaves
   ;; the window, Emacs normally recenters it; the resulting jump makes a
   ;; stationary prompt appear halfway up the frame.  Values above 100

@@ -1946,6 +1946,29 @@ say the room is slow but not which piece of furniture: the marks had to
 go into the transport and the request builder themselves, which is why
 the clock lives in `chat-log` rather than in the UI that starts it.
 
+### The Undo List Recording A Rendering That Is Never Undone
+
+**Problem**: sends froze Emacs for six to eight seconds after a long
+streaming run, with ten garbage collections inside the send phase, while
+the same send cost half a second at the start of the session. Cursor
+movement felt heavy throughout the assistant's work.
+
+**Cause**: `chat-mode` left `buffer-undo-list` recording. Every streaming
+redraw and every full conversation rewrite is an edit like any other, so
+the undo list grew to tens of thousands of entries over one long reply.
+Nothing in the buffer is ever undone -- the display draws the session
+record and holds nothing of its own, and a sent message cannot be taken
+back -- so the list was recording history nobody would read, and the next
+send paid to walk it: the `[TIMING]` line names it directly, `undo 89883`
+on the slow sends against `undo 186` on the fast one.
+
+**Solution**: `(setq-local buffer-undo-list t)` in `chat-mode`, turning
+undo recording off for the chat surface. The display does not use Emacs
+undo anywhere -- edit rollback restores from backup files -- so nothing
+loses its ability to go back. The same fix makes the timing line's `undo`
+field say `off` on every future send, which is the assertion that it
+stayed off.
+
 ### Counting The Preview Instead Of The Payload
 
 **Problem**: the context budget reported 5,295 tokens for a request that
