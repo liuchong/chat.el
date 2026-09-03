@@ -41,7 +41,17 @@
   :group 'chat)
 
 (defcustom chat-stream-stall-timeout 120
-  "Seconds without a single byte before a stream is declared stalled."
+  "Seconds without a body byte, once the body has started, before a
+stream is declared stalled mid-flight."
+  :type 'number
+  :group 'chat-stream-net)
+
+(defcustom chat-stream-first-byte-timeout 300
+  "Seconds waiting for the first body byte before giving up.
+
+A reasoning model prefilling a very large context can legitimately spend
+minutes before its first event, so this is deliberately longer than the
+mid-stream stall timeout."
   :type 'number
   :group 'chat-stream-net)
 
@@ -367,6 +377,12 @@ per-chunk UTF-8 decoding in the SSE layer safe."
     ('stall
      (format "Stream from %s stalled: no data for %s seconds. The relay or upstream is unresponsive; retry with C-c C-g."
              host detail))
+    ('first-byte
+     (format "No response body from %s for %s seconds: the model is still prefilling or the upstream is wedged. Retry with C-c C-g; if it repeats, shorten the context or switch the line."
+             host detail))
+    ('no-response
+     (format "No response from %s for %s seconds. The endpoint accepted the connection but never answered; retry with C-c C-g or switch the line."
+             host detail))
     ('mid-stream-close
      (format "Connection to %s closed mid-stream%s: the relay or upstream link is unstable. Retry with C-c C-g."
              host detail))
@@ -510,18 +526,34 @@ per-chunk UTF-8 decoding in the SSE layer safe."
     (lambda (process)
       (when (and (process-live-p process)
                  (process-get process 'chat-stream-net-started-at))
-        (let ((idle (- (float-time)
-                       (or (process-get process
-                                        'chat-stream-net-last-byte)
-                           (float-time)))))
-          (when (> idle chat-stream-stall-timeout)
+        (let* ((idle (- (float-time)
+                        (or (process-get process
+                                         'chat-stream-net-last-byte)
+                            (float-time))))
+               ;; Two phases, two limits: waiting for the first body byte
+               ;; can legitimately take minutes (a reasoning model
+               ;; prefilling a large context); a stream that has started
+               ;; should not go silent for long.
+               (seen-body (> (or (process-get process
+                                              'chat-stream-net-body-bytes)
+                                 0)
+                             0))
+               (class (cond
+                       (seen-body 'stall)
+                       ((process-get process 'chat-stream-net-headers-done)
+                        'first-byte)
+                       (t 'no-response)))
+               (limit (if seen-body
+                          chat-stream-stall-timeout
+                        chat-stream-first-byte-timeout)))
+          (when (> idle limit)
             (process-put process 'chat-stream-terminal
                          (list :status 'error :class 'stall
                                :message
                                (chat-stream-net--message
-                                'stall
+                                class
                                 (process-get process 'chat-stream-net-host)
-                                (format "%d" chat-stream-stall-timeout))))
+                                (format "%s" limit))))
             (chat-stream-net-endpoint-record-failure
              (process-get process 'chat-stream-net-endpoint-key) 'stall)
             (delete-process process)

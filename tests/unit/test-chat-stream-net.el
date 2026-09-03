@@ -221,6 +221,7 @@ timeout."
      ;; Accept the request and then say nothing, ever.
      )
    (let ((chat-stream-stall-timeout 0.5)
+         (chat-stream-first-byte-timeout 0.5)
          (chat-stream-stall-check-interval 0.2)
          terminal)
      (chat-stream-net-post
@@ -230,7 +231,43 @@ timeout."
       (lambda (_proc term) (setq terminal term)))
      (should (test-chat-stream-net--await (lambda () terminal)))
      (should (eq (plist-get terminal :class) 'stall))
-     (should (string-match-p "stalled" (plist-get terminal :message))))))
+     (should (string-match-p "No response" (plist-get terminal :message))))))
+
+(ert-deftest chat-stream-net-first-byte-wait-has-its-own-limit ()
+  "Waiting for the first body byte is bounded by the longer limit.
+
+A reasoning model prefilling a large context can sit there for minutes;
+the mid-stream stall timeout must not kill that wait."
+  (test-chat-stream-net--with-server
+   (lambda (proc)
+     ;; Headers arrive, then nothing: the prefill wait.
+     (process-send-string
+      proc "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"))
+   (let ((chat-stream-stall-timeout 0.3)
+         (chat-stream-first-byte-timeout 5)
+         (chat-stream-stall-check-interval 0.2)
+         terminal)
+     (chat-stream-net-post
+      (format "http://127.0.0.1:%d/v1/chat/completions" port)
+      nil "{}"
+      #'ignore
+      (lambda (_proc term) (setq terminal term)))
+     ;; The mid-stream limit would fire at 0.3s; the first-byte limit
+     ;; keeps the request alive well past it.
+     (sleep-for 1.0)
+     (accept-process-output nil 0.1 nil t)
+     (should-not terminal)
+     (let ((chat-stream-first-byte-timeout 0.3))
+       ;; Reset via a second request governed by the short limit.
+       (chat-stream-net-post
+        (format "http://127.0.0.1:%d/v1/chat/completions" port)
+        nil "{}"
+        #'ignore
+        (lambda (_proc term) (setq terminal term)))
+       (should (test-chat-stream-net--await (lambda () terminal)))
+       (should (eq (plist-get terminal :class) 'stall))
+       (should (string-match-p "No response body"
+                               (plist-get terminal :message)))))))
 
 (ert-deftest chat-stream-net-multibyte-arrives-unsplit ()
   "A multibyte character split across chunks is delivered whole.

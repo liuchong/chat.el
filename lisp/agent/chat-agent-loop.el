@@ -684,7 +684,8 @@ single pending piece becomes the delta without being copied."
 CLASS is the transport's own classification when it has one
 \(chat-stream-net); MESSAGE matching stays for the url.el transport and
 for the historical curl exit codes in saved logs."
-  (or (memq class '(dns connect tls stall mid-stream-close http-5xx))
+  (or (memq class '(dns connect tls stall first-byte no-response
+                        mid-stream-close http-5xx))
       (and (stringp message)
            (string-match-p
             (concat
