@@ -313,7 +313,8 @@ can change mid-session, and only a full rewrite refreshes the header.
                                    (t 'inherit))))
         (cons 'approvalMode (chat-session--approval-mode-wire session))
         (cons 'toolConfig (chat-session--plist-to-alist
-                           (chat-session-tool-config session)))
+                           (chat-session--durable-tool-config
+                            (chat-session-tool-config session))))
         (cons 'parentSessionId (chat-session-parent-session-id session))
         (cons 'branchId (chat-session-branch-id session))
         (cons 'leafMessageId (chat-session-leaf-message-id session))
@@ -736,12 +737,26 @@ branch starts with no messages. SESSION is never truncated."
                             (t 'inherit))))
     (approvalMode . ,(chat-session--approval-mode-wire session))
     (toolConfig . ,(chat-session--plist-to-alist
-                    (chat-session-tool-config session)))
+                    (chat-session--durable-tool-config
+                     (chat-session-tool-config session))))
     (parentSessionId . ,(chat-session-parent-session-id session))
     (branchId . ,(chat-session-branch-id session))
     (leafMessageId . ,(chat-session-leaf-message-id session))
     (summaries . ,(or (chat-session-summaries session) nil))
     (metadata . ,(or (chat-session-metadata session) nil))))
+
+(defun chat-session--durable-tool-config (config)
+  "Return CONFIG without its transient provider tool menu.
+
+The advertised menu is rebuilt for every request from the execution
+Session's durable contract, so it is never session state (Spec 022);
+persisting it froze one run's narrowing into the session forever, and
+the next run could not see the tools that narrowing hid."
+  (let (durable)
+    (cl-loop for (key value) on config by #'cddr
+             unless (eq key :advertised-tools)
+             do (setq durable (append durable (list key value))))
+    durable))
 
 (defun chat-session--plist-to-alist (plist)
   "Convert keyword PLIST to a JSON-friendly alist."
@@ -952,8 +967,12 @@ what that session may do."
                                name))
             :messages (mapcar #'chat-message--deserialize
                               (chat-session--alist-get data 'messages))
-            :tool-config (chat-session--alist-to-plist
-                          (chat-session--alist-get data 'toolConfig))
+            ;; A session file written before the advertised menu stopped
+            ;; being persisted may still carry one; dropping it on load is
+            ;; how a frozen menu stops haunting a reopened session.
+            :tool-config (chat-session--durable-tool-config
+                          (chat-session--alist-to-plist
+                           (chat-session--alist-get data 'toolConfig)))
             :parent-session-id (chat-session--alist-get data 'parentSessionId)
             :branch-id (or (chat-session--alist-get data 'branchId)
                            (chat-session--alist-get data 'id))

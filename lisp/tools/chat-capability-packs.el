@@ -378,24 +378,34 @@ that mutation with verification and Plan-upgrade tools after consumption."
       (and (boundp 'chat--current-session) chat--current-session)))
 
 (defun chat-capability--advertise-tools (tools)
-  "Advertise authorized TOOLS for the remainder of the current agent run."
+  "Advertise authorized TOOLS for the remainder of the current agent run.
+
+Staging only narrows a menu a session already owns.  A session with no
+`:enabled-tools' and no `:advertised-tools' shows every registered tool,
+so creating a menu here would not stage anything -- it would hide every
+tool the stage did not name, and `chat-tool-caller' refuses what a menu
+does not list.  That is how a plan-create call once left a session that
+could manage plans but neither read code nor run a shell."
   (when-let ((session (chat-capability--execution-session)))
-    (let* ((config (copy-tree (chat-session-tool-config session)))
-           (enabled (plist-get config :enabled-tools))
-           (disabled (plist-get config :disabled-tools))
-           (current (if (plist-member config :advertised-tools)
-                        (plist-get config :advertised-tools)
-                      enabled))
-           (allowed (seq-filter
-                     (lambda (tool)
-                       (and (or (not (plist-member config :enabled-tools))
-                                (memq tool enabled))
-                            (not (memq tool disabled))))
-                     tools))
-           (advertised (chat-capability--ordered-tool-union current allowed)))
-      (setf (chat-session-tool-config session)
-            (plist-put config :advertised-tools advertised))
-      allowed)))
+    (let ((config (copy-tree (chat-session-tool-config session))))
+      (when (or (plist-member config :advertised-tools)
+                (plist-member config :enabled-tools))
+        (let* ((enabled (plist-get config :enabled-tools))
+               (disabled (plist-get config :disabled-tools))
+               (current (if (plist-member config :advertised-tools)
+                            (plist-get config :advertised-tools)
+                          enabled))
+               (allowed (seq-filter
+                         (lambda (tool)
+                           (and (or (not (plist-member config :enabled-tools))
+                                    (memq tool enabled))
+                                (not (memq tool disabled))))
+                         tools))
+               (advertised (chat-capability--ordered-tool-union
+                            current allowed)))
+          (setf (chat-session-tool-config session)
+                (plist-put config :advertised-tools advertised))
+          allowed)))))
 
 (defun chat-capability--unadvertise-tools (tools)
   "Remove TOOLS from the current run's provider-facing menu."

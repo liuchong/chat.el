@@ -440,6 +440,13 @@
   "Async tool state belongs to its explicit session, not the ambient buffer."
   (let ((ambient (make-chat-session :id "ambient"))
         (execution (make-chat-session :id "execution")))
+    ;; A real execution session carries the code profile's tool contract, so
+    ;; the plan-create narrowing below has a menu to narrow.  A session with
+    ;; no contract is never narrowed at all.
+    (chat-session-set-tool-config
+     execution
+     (chat-agent-profile--effective-tool-config
+      execution (chat-agent-profile-resolve 'code)))
     (let ((chat--current-session ambient)
           (chat-tool-caller-current-session execution)
           (chat-tool-caller-current-state-session execution))
@@ -575,6 +582,11 @@
           (chat-tool-caller-current-execution-context '(:task-id "task-a")))
      (chat-session-set-working-directory session temp-dir)
      (chat-session-metadata-set session 'activeTaskId "task-a")
+     ;; A real execution session carries the code profile's tool contract, so
+     ;; the verification staging below has a menu to narrow.
+     (chat-session-set-tool-config
+      session
+      (chat-agent-profile--effective-tool-config session agent-profile))
      (let ((plan
             (chat-work-plan-create
              session "Plan"
@@ -1025,6 +1037,34 @@
     ;; Changing enforcement can weaken the task contract and stays gated.
     (should (chat-approval-tool-required-p
              (chat-tool-forge-get 'programming_plan_mode)))))
+
+(ert-deftest chat-capability-activation-leaves-a-menu-less-session-alone ()
+  "Staging narrows a menu; it never invents one for a session without a contract.
+
+A session with no `:enabled-tools' and no `:advertised-tools' shows every
+registered tool.  Creating a menu there would hide every tool the stage
+did not name -- the caller refuses what a menu does not list -- and that
+is how one plan-create call left a session that could manage plans but
+neither read code nor run a shell, looping on plan bookkeeping instead of
+doing the work."
+  (let ((chat-tool-caller-current-session
+         (make-chat-session :id "no-menu-contract"))
+        (chat-tool-caller-current-state-session nil))
+    (chat-capability--advertise-tools '(files_write files_replace))
+    (should-not (plist-member
+                 (chat-session-tool-config chat-tool-caller-current-session)
+                 :advertised-tools)))
+  ;; With a contract present, narrowing still happens.
+  (let ((session (make-chat-session
+                  :id "menu-contract"
+                  :tool-config '(:enabled-tools (files_read files_write)
+                                 :advertised-tools (files_read)))))
+    (let ((chat-tool-caller-current-session session)
+          (chat-tool-caller-current-state-session nil))
+      (chat-capability--advertise-tools '(files_write))
+      (should (equal (plist-get (chat-session-tool-config session)
+                                :advertised-tools)
+                     '(files_read files_write))))))
 
 (provide 'test-chat-capability-packs)
 ;;; test-chat-capability-packs.el ends here

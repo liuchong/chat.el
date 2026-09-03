@@ -264,6 +264,30 @@ then the wrong date was written back over the right one."
                   :id "no-tools" :tool-config '(:enabled-tools nil))))
     (should-not (chat-session-tool-enabled-p session 'anything))))
 
+(ert-deftest chat-session-advertised-tool-menu-is-never-persisted ()
+  "The provider tool menu is transient policy, not session state.
+
+A run once froze its narrowed menu into the session file, and every later
+run read it back and could not reach the tools it hid -- the model spent
+its turns managing the plan instead of doing the work.  The menu is
+rebuilt per request, so it is dropped on save and on load."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently
+                    (chat-session-create "Transient Menu" 'kimi)))
+          (session-id (chat-session-id session)))
+     (chat-session-set-tool-config
+      session
+      '(:enabled-tools (files_read files_write shell_execute)
+        :advertised-tools (files_write)))
+     (chat-session-save session)
+     (let ((loaded (chat-session-load session-id)))
+       (should-not (plist-member (chat-session-tool-config loaded)
+                                 :advertised-tools))
+       (should (equal (plist-get (chat-session-tool-config loaded)
+                                 :enabled-tools)
+                      '(files_read files_write shell_execute)))))))
+
 (ert-deftest chat-session-save-and-load-preserves-tree-and-summary-data ()
   "Test session tree metadata, message branch fields, and summaries persist."
   (chat-test-with-temp-dir

@@ -578,6 +578,31 @@ Do not persist tools that only have an in memory compiled function and no source
 
 **Solution**: check `chat-session-tool-config` in both paths. Provider tool lists and `chat-tool-caller-execute` must use the same enabled/disabled overlay.
 
+### A Narrowed Tool Menu Must Never Become Session State
+
+**Problem**: a coding session that once ran fine suddenly loses `files_read`,
+`shell_execute` and every read tool mid-run. The model can only manage the
+work plan, so it loops on plan transitions for dozens of turns and reports
+"Tool ... is unavailable for this turn" on every real action. Restarting
+Emacs does not help.
+
+**Cause**: the provider tool menu is a transient per-request narrowing
+(Spec 022), but two defects made it durable. `chat-capability--advertise-tools`
+created a menu for a session that had no tool contract (no `:enabled-tools`,
+no `:advertised-tools`) -- a session that should see every registered tool.
+A menu that lists only the tools one stage added hides everything else, and
+`chat-tool-caller` refuses what a menu does not list. Then session saving
+persisted the menu into `toolConfig`, so every reopened session read the
+frozen narrowing back and lost the tools again.
+
+**Solution**: three cuts, all tested. Advertise and unadvertise are no-ops
+for a session without a tool contract: staging narrows a menu a session
+already owns, it never invents one. Session serialization and loading strip
+`:advertised-tools` from the tool config, so the menu is rebuilt per request
+and a polluted session file heals on reload. The menu stays transient policy;
+only the durable contract (`:enabled-tools`, `:disabled-tools`, `:profile`)
+is persisted.
+
 ### Permission Metadata Must Enforce Approval
 
 **Problem**: a newly registered write, outbound, personal, or network tool executes without prompting even though its event displays sensitivity and effects.
