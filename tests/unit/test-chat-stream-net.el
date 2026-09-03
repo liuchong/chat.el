@@ -151,6 +151,44 @@ arrived (headers plus Content-Length body bytes)."
      (should (eq (plist-get terminal :class) 'http))
      (should (equal (plist-get terminal :message) "slow down")))))
 
+(ert-deftest chat-stream-net-connect-failure-classifies-by-event ()
+  "A refused or unresolvable connection classifies from the sentinel event."
+  (dolist (case '(("failed with code 61\n" . connect)
+                  ("failed to resolve name\n" . dns)))
+    (let ((pipe (make-pipe-process :name "stream-net-fail-stub" :noquery t))
+          terminal)
+      (unwind-protect
+          (cl-letf (((symbol-function 'open-network-stream)
+                     (lambda (&rest _) pipe)))
+            (chat-stream-net-endpoint-health-clear)
+            (chat-stream-net-post "http://192.0.2.1:81/v1/x" nil "{}"
+                                  #'ignore
+                                  (lambda (_proc term) (setq terminal term)))
+            ;; The connection never opens; the OS refusal arrives instead.
+            (chat-stream-net--sentinel pipe (car case))
+            (should terminal)
+            (should (eq (plist-get terminal :class) (cdr case)))
+            (should (eq (plist-get terminal :status) 'error)))
+        (chat-stream-net-endpoint-health-clear)
+        (when (process-live-p pipe)
+          (delete-process pipe))))))
+
+(ert-deftest chat-stream-net-eof-before-headers-is-a-transport-failure ()
+  "A server that closes without answering is not an empty success."
+  (test-chat-stream-net--with-server
+   (lambda (proc)
+     ;; Answer nothing; just hang up.
+     (delete-process proc))
+   (let (terminal)
+     (chat-stream-net-post
+      (format "http://127.0.0.1:%d/v1/chat/completions" port)
+      nil "{}"
+      #'ignore
+      (lambda (_proc term) (setq terminal term)))
+     (should (test-chat-stream-net--await (lambda () terminal)))
+     (should (eq (plist-get terminal :status) 'error))
+     (should (memq (plist-get terminal :class) '(connect mid-stream-close))))))
+
 (ert-deftest chat-stream-net-connect-timeout-hands-the-process-to-its-timer ()
   "The connect timer's callback receives the process it guards.
 The lambda declared the argument and never got it, so the timeout path

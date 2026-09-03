@@ -41,6 +41,15 @@
   (let ((chat-language 'en))
     (should (eq (chat-i18n-language) 'en))))
 
+(ert-deftest chat-i18n-an-explicit-language-is-alias-normalized ()
+  "A user who writes 'zh-cn or \"zh_CN\" means the zh-CN catalog.
+The catalogs are keyed zh-CN; the setting is not the place to learn that
+casing."
+  (let ((chat-language 'zh-cn))
+    (should (eq (chat-i18n-language) 'zh-CN)))
+  (let ((chat-language "zh_CN.UTF-8"))
+    (should (eq (chat-i18n-language) 'zh-CN))))
+
 (ert-deftest chat-i18n-auto-reads-the-environment ()
   "`auto' takes what the user already set for everything else."
   (let ((chat-language 'auto)

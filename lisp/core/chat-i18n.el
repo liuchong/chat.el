@@ -123,10 +123,18 @@ to explain the result."
      names)))
 
 (defun chat-i18n-language ()
-  "Return the language catalog to read from."
+  "Return the language catalog to read from.
+
+An explicit `chat-language' goes through the same alias table as the
+environment: the catalogs are keyed `zh-CN', and a user writing 'zh-cn
+or \"zh_CN\" has no reason to learn that casing."
   (or (if (eq chat-language 'auto)
           (chat-i18n--from-environment)
-        chat-language)
+        (cdr (seq-find
+              (lambda (alias)
+                (string-prefix-p (car alias)
+                                 (downcase (format "%s" chat-language))))
+              chat-i18n--language-aliases)))
       chat-i18n-fallback-language))
 
 (defun chat-i18n-catalog (language)
