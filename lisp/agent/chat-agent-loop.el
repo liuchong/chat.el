@@ -1044,7 +1044,7 @@ need approval carry exclusive accesses and therefore remain serialized."
               (blocked (chat-agent--hook-until
                         'chat-plugin-before-tool-call-functions
                         run call))
-              plan-mode-refusal plan-refusal)
+              plan-mode-refusal)
          (puthash index (list :call call :accesses accesses :handle nil)
                   running)
          (cond
@@ -1062,10 +1062,6 @@ need approval carry exclusive accesses and therefore remain serialized."
                  (chat-plan-mode-check-call
                   (chat-agent-run-state-session run) call))
            (funcall complete-fn index call plan-mode-refusal t))
-          ((setq plan-refusal
-                 (chat-work-plan-check-call
-                  (chat-agent-run-state-session run) call))
-           (funcall complete-fn index call plan-refusal t))
           (t
            (condition-case err
                (progn

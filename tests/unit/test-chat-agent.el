@@ -1949,46 +1949,6 @@ per piece for that to stop being true."
       (should (equal observed-status
                      (list (if (zerop (cdr case)) 'untracked 'changed)))))))
 
-(ert-deftest chat-agent-plan-gate-refuses-write-before-tool-execution ()
-  "A code run feeds a plan refusal back without invoking the write tool."
-  (chat-test-with-temp-dir
-   (let ((chat-tool-forge--registry (make-hash-table :test 'eq))
-         (chat-llm-providers
-          '((kimi :model "test-model" :context-window 100000)))
-         (chat-approval-required-effects nil)
-         (session (chat-session-create "Plan gate" 'kimi))
-         (calls (list nil))
-         (executions 0)
-         run)
-     (chat-session-metadata-set session 'code-enabled t)
-     (chat-tool-forge-register
-      (make-chat-forged-tool
-       :id 'mutating-demo :name "Mutating Demo" :language 'elisp
-       :effects '(write)
-       :compiled-function (lambda () (cl-incf executions) "changed")
-       :is-active t :usage-count 0))
-     (cl-letf (((symbol-function 'chat-llm-request-async)
-                (chat-agent-test--stub-transport
-                 '((:content "" :tool-calls
-                             ((:id "write-1" :name "mutating-demo"
-                               :arguments nil)))
-                   (:content "I need a plan first."))
-                 calls)))
-       (setq run
-             (chat-agent-start
-              (list :provider 'kimi :session session
-                    :messages (list (chat-agent-test--user-message))))))
-     (ert-info ((format "calls=%S results=%S status=%S reason=%S"
-                        (car calls) (chat-agent-run-state-tool-results run)
-                        (chat-agent-run-state-status run)
-                        (chat-agent-run-state-reason run)))
-       (should (= executions 0))
-       (should (= 2 (length (car calls)))))
-     (let ((tool-result (car (last (cadr (car calls))))))
-       (should (eq :tool (chat-message-role tool-result)))
-       (should (string-match-p "Plan required"
-                               (chat-message-content tool-result)))))))
-
 (ert-deftest chat-agent-plan-mode-refuses-write-before-plan-and-checkpoint-gates ()
   "Plan Mode is an execution boundary even when a work-plan item is active."
   (chat-test-with-temp-dir

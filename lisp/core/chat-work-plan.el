@@ -42,11 +42,6 @@
   "Durable plans for substantial Agent work."
   :group 'chat)
 
-(defcustom chat-work-plan-default-mode 'auto
-  "Default plan enforcement mode for code-capable sessions."
-  :type '(choice (const auto) (const required) (const off))
-  :group 'chat-work-plan)
-
 (defcustom chat-work-plan-max-plans 32
   "Maximum retained plans in one session."
   :type 'integer :group 'chat-work-plan)
@@ -67,25 +62,12 @@
 (defconst chat-work-plan-statuses '(active completed blocked cancelled))
 (defconst chat-work-plan-item-statuses
   '(pending in-progress completed blocked skipped))
-(defconst chat-work-plan-modes '(auto required off))
-(defconst chat-work-plan-skip-reasons
-  '(answer-only read-only single-bounded-action))
-(defconst chat-work-plan--internal-tool-prefixes
-  '("programming_goal_" "programming_plan_" "programming_work_note_"
-    "programming_context_"))
-(defconst chat-work-plan--governed-tools
-  '("programming_verification_run" "work_task_start" "work_workflow_start"
-    "agent_spawn" "child_agent_start"))
-(defconst chat-work-plan--single-bounded-tools
-  '("files_write" "files_replace" "files_patch")
-  "Tools eligible for a single-bounded-action skip.")
-(defconst chat-work-plan--single-bounded-followup-tools
-  '("programming_compile_task" "programming_verification_run")
-  "Verification tools allowed after a bounded mutation consumes its skip.")
+(defconst chat-work-plan-modes '(auto required off)
+  "Accepted `mode' values on a plan record (schema compatibility only;
+plan-mode enforcement itself was removed).")
 
 (define-error 'chat-work-plan-invalid "Invalid work plan")
 (define-error 'chat-work-plan-stale-revision "Stale work plan revision")
-(define-error 'chat-work-plan-required "A durable work plan is required")
 
 (cl-defstruct
     (chat-work-plan-item
@@ -374,7 +356,10 @@
 
 (cl-defun chat-work-plan-create
     (session objective items &key mode task-id metadata)
-  "Create and persist a plan for SESSION."
+  "Create and persist a plan for SESSION.
+
+MODE is retained on the record for schema compatibility only; plan-mode
+enforcement was removed and records are created with `off'."
   (let* ((now (chat-work-plan--now))
          (plan
           (chat-work-plan-create-record
@@ -382,7 +367,7 @@
            :session-id (chat-session-id session)
            :task-id (or task-id (chat-work-plan--active-task-id session))
            :objective objective
-           :mode (or mode (chat-work-plan-enforcement-mode session))
+           :mode (or mode 'off)
            :status 'active :items (chat-work-plan--make-items items)
            :created-at now :updated-at now
            :metadata (cons (cons 'runtimeId chat-work-plan--runtime-id)
@@ -408,34 +393,6 @@
 (defun chat-work-plan--same-task-p (left right)
   "Return non-nil when task identifiers LEFT and RIGHT have the same scope."
   (equal left right))
-
-(defun chat-work-plan--bounded-skip-p (plan)
-  "Return non-nil when PLAN records a single bounded mutation skip."
-  (let ((skip (chat-work-plan-skip plan)))
-    (and skip
-         (equal (chat-work-plan--get skip 'reason)
-                "single-bounded-action"))))
-
-(defun chat-work-plan--task-has-bounded-skip-p (session task-id)
-  "Return non-nil when SESSION already records a bounded skip for TASK-ID."
-  (seq-some
-   (lambda (plan)
-     (and (chat-work-plan--same-task-p
-           task-id (chat-work-plan-task-id plan))
-          (chat-work-plan--bounded-skip-p plan)))
-   (chat-work-plan--session-plans session)))
-
-(defun chat-work-plan-bounded-skip-state (session)
-  "Return the current bounded skip state for SESSION, or nil.
-The result contains the exact declared tool and whether its mutation was
-consumed.  Callers use this projection instead of decoding plan storage."
-  (when-let ((plan (chat-work-plan-current session nil)))
-    (when (and (chat-work-plan--applies-to-active-task-p session plan)
-               (chat-work-plan--bounded-skip-p plan))
-      (let ((skip (chat-work-plan-skip plan)))
-        (list :tool-name (chat-work-plan--get skip 'toolName)
-              :consumed-count
-              (or (chat-work-plan--get skip 'consumedCount) 0))))))
 
 (defun chat-work-plan--recover (session plan)
   "Block an interrupted active item in PLAN after restart."
@@ -463,21 +420,6 @@ consumed.  Callers use this projection instead of decoding plan storage."
   (when-let* ((id (chat-session-metadata-get session 'activeWorkPlanId))
               (plan (chat-work-plan-find session id)))
     (if recover (chat-work-plan--recover session plan) plan)))
-
-(defun chat-work-plan-enforcement-mode (session)
-  "Return effective plan enforcement mode for SESSION."
-  (or (chat-work-plan--symbol
-       (chat-session-metadata-get session 'workPlanMode))
-      chat-work-plan-default-mode))
-
-(defun chat-work-plan-set-mode (session mode)
-  "Set SESSION plan enforcement MODE."
-  (unless (memq mode chat-work-plan-modes)
-    (signal 'chat-work-plan-invalid '("invalid plan mode")))
-  (chat-session-metadata-set session 'workPlanMode (symbol-name mode))
-  (when (and (boundp 'chat-session-auto-save) chat-session-auto-save)
-    (chat-session-save session))
-  mode)
 
 (defun chat-work-plan--clone (plan)
   "Return a deep copy of PLAN."
@@ -762,150 +704,11 @@ Started, completed, blocked and skipped items are immutable history."
       (chat-work-plan--notify-goal session plan 'updated)
       plan)))
 
-(cl-defun chat-work-plan-skip
-    (session reason &key tool-name task-id action-facts)
-  "Record an audited plan skip for SESSION."
-  (unless (memq reason chat-work-plan-skip-reasons)
-    (signal 'chat-work-plan-invalid '("invalid skip reason")))
-  (when (eq (chat-work-plan-enforcement-mode session) 'required)
-    (signal 'chat-work-plan-required '("required mode forbids skip")))
-  (when (and (eq reason 'single-bounded-action)
-             (not (member tool-name chat-work-plan--single-bounded-tools)))
-    (signal 'chat-work-plan-invalid '("tool is not one bounded mutation")))
-  (let* ((effective-task-id
-          (or task-id (chat-work-plan--active-task-id session)))
-         (now (chat-work-plan--now))
-         (plan
-          (chat-work-plan-create-record
-           :id (chat-session-new-message-id "work-plan-skip")
-           :session-id (chat-session-id session)
-           :task-id effective-task-id
-           :objective "Audited simple-task plan skip"
-           :mode (chat-work-plan-enforcement-mode session)
-           :status 'completed :items nil
-           :created-at now :updated-at now :completed-at now
-           :metadata `((runtimeId . ,chat-work-plan--runtime-id))
-           :skip `((reason . ,(symbol-name reason))
-                   (toolName . ,tool-name) (consumedCount . 0)
-                   (actionFacts . ,action-facts)))))
-    (when (and (eq reason 'single-bounded-action)
-               (chat-work-plan--task-has-bounded-skip-p
-                session effective-task-id))
-      (signal
-       'chat-work-plan-invalid
-       '("single-bounded-action already recorded for this task; create a durable plan before another mutation")))
-    (chat-work-plan-validate plan)
-    (chat-work-plan--replace session plan)
-    (chat-work-plan--emit 'plan-skipped plan nil
-                          `((reason . ,(symbol-name reason))
-                            (toolName . ,tool-name)))
-    (chat-work-plan--notify-goal session plan 'skipped)
-    plan))
-
-(defun chat-work-plan--internal-call-p (name)
-  "Return non-nil when NAME manages plan/context state."
-  (seq-some (lambda (prefix) (string-prefix-p prefix name))
-            chat-work-plan--internal-tool-prefixes))
-
-(defun chat-work-plan-governed-call-p (call)
-  "Return non-nil when CALL needs plan enforcement."
-  (let* ((name (or (plist-get call :name) ""))
-         (tool (and (fboundp 'chat-tool-caller-call-tool)
-                    (chat-tool-caller-call-tool call)))
-         (effects (and tool (chat-forged-tool-effects tool))))
-    (and (not (chat-work-plan--internal-call-p name))
-         (or (member name chat-work-plan--governed-tools)
-             (member name chat-work-plan--single-bounded-tools)
-             (seq-some (lambda (effect)
-                         (memq effect '(write destructive)))
-                       effects)))))
-
-(defun chat-work-plan--skip-allows-call-p (plan call)
-  "Return non-nil when PLAN's unconsumed skip covers CALL."
-  (let ((skip (chat-work-plan-skip plan)))
-    (and skip
-         (equal (chat-work-plan--get skip 'reason) "single-bounded-action")
-         (= (or (chat-work-plan--get skip 'consumedCount) 0) 0)
-         (member (chat-work-plan--get skip 'toolName)
-                 chat-work-plan--single-bounded-tools)
-         (equal (chat-work-plan--get skip 'toolName)
-                (plist-get call :name)))))
-
-(defun chat-work-plan--skip-allows-followup-p (plan call)
-  "Return non-nil when PLAN's consumed bounded skip covers verification CALL."
-  (let ((skip (chat-work-plan-skip plan)))
-    (and skip
-         (equal (chat-work-plan--get skip 'reason) "single-bounded-action")
-         (= (or (chat-work-plan--get skip 'consumedCount) 0) 1)
-         (member (plist-get call :name)
-                 chat-work-plan--single-bounded-followup-tools))))
-
 (defun chat-work-plan--in-progress-item (plan)
   "Return PLAN's single in-progress item, if any."
   (seq-find (lambda (item)
               (eq (chat-work-plan-item-status item) 'in-progress))
             (chat-work-plan-items plan)))
-
-(defun chat-work-plan--applies-to-active-task-p (session plan)
-  "Return non-nil when PLAN applies to SESSION's foreground task."
-  (let ((active-task-id (chat-work-plan--active-task-id session))
-        (plan-task-id (chat-work-plan-task-id plan)))
-    (or (null active-task-id) (null plan-task-id)
-        (equal active-task-id plan-task-id))))
-
-(defun chat-work-plan-check-call (session call)
-  "Return nil or a refusal reason for governed CALL in SESSION.
-An allowed single-action skip is consumed atomically before execution."
-  (let ((mode (and session (chat-work-plan-enforcement-mode session))))
-    (when (and session
-               (chat-session-metadata-get session 'code-enabled)
-               (not (eq mode 'off))
-               (not (chat-work-plan--internal-call-p
-                     (or (plist-get call :name) "")))
-               (or (eq mode 'required)
-                   (chat-work-plan-governed-call-p call)))
-      (let ((plan (chat-work-plan-current session t)))
-      (cond
-       ((and plan (eq (chat-work-plan-status plan) 'active)
-             (chat-work-plan--applies-to-active-task-p session plan)
-             (chat-work-plan--in-progress-item plan))
-        nil)
-       ((and plan
-             (chat-work-plan--applies-to-active-task-p session plan)
-             (chat-work-plan--skip-allows-call-p plan call))
-        (let* ((copy (chat-work-plan--clone plan))
-               (skip (copy-tree (chat-work-plan-skip copy))))
-          (setcdr (assoc 'consumedCount skip) 1)
-          (setf (chat-work-plan-skip copy) skip
-                (chat-work-plan-revision copy)
-                (1+ (chat-work-plan-revision copy))
-                (chat-work-plan-updated-at copy) (chat-work-plan--now))
-          (chat-work-plan--replace session copy)
-          (chat-work-plan--emit 'plan-skip-consumed copy))
-        nil)
-       ((and plan
-             (chat-work-plan--applies-to-active-task-p session plan)
-             (chat-work-plan--skip-allows-followup-p plan call))
-        (chat-work-plan--emit
-         'plan-skip-followup plan nil
-         `((toolName . ,(plist-get call :name))))
-        nil)
-       (t
-        (chat-event-emit
-         'plan-required :session-id (chat-session-id session)
-         :task-id (chat-work-plan--active-task-id session)
-         :source 'work-plan
-         :payload `((toolName . ,(plist-get call :name))
-                    (mode . ,(symbol-name
-                              (chat-work-plan-enforcement-mode session)))
-                    (reason . ,(if (and plan
-                                        (eq (chat-work-plan-status plan)
-                                            'active))
-                                   "no-in-progress-item"
-                                 "no-active-plan"))))
-        (if (and plan (eq (chat-work-plan-status plan) 'active))
-            "Plan item required before this mutating or multi-step action. Start one dependency-ready plan item, then retry."
-          "Plan required before this mutating or multi-step action. Create an active plan or record a valid single-bounded-action skip, then retry.")))))))
 
 (defun chat-work-plan-active-slice (plan)
   "Return a bounded public active projection for PLAN."

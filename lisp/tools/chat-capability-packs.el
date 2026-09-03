@@ -35,7 +35,7 @@
 
 (defconst chat-capability-programming-base-tools
   '(programming_capability_activate
-    programming_plan_create programming_plan_skip
+    programming_plan_create
     programming_git_status
     files_read files_read_lines files_list files_grep open_file)
   "Initial tool menu advertised before a programming plan exists.")
@@ -94,13 +94,13 @@
 (defconst chat-capability-programming-plan-tools
   '(programming_plan_mode_enter programming_plan_create programming_plan_read
     programming_plan_list programming_plan_update programming_plan_submit
-    programming_plan_transition programming_plan_resume programming_plan_cancel
-    programming_plan_skip programming_plan_mode)
-  "Programming tools advertised for TODO plans and Plan Mode.")
+    programming_plan_transition programming_plan_resume programming_plan_cancel)
+  "Programming tools advertised for TODO plans and Plan Mode.
 
-(defconst chat-capability-programming-bounded-plan-tools
-  '(programming_plan_create programming_plan_read programming_plan_list)
-  "Plan tools retained while one bounded mutation is being resolved.")
+DEPRECATED: `programming_plan_mode' and `programming_plan_skip' were
+removed this release — the enforcement gate could lock a model out of
+every tool call, and skip was its side channel.  The durable plan
+record, its lifecycle tools and read-only Plan Mode UI remain.")
 
 (defconst chat-capability-programming-tool-groups
   `((exploration . ,chat-capability-programming-exploration-tools)
@@ -239,10 +239,6 @@
             (copy-sequence chat-capability-programming-base-tools))
            (plan (and session
                       (ignore-errors (chat-work-plan-current session))))
-           (bounded-skip
-            (and session
-                 (ignore-errors
-                   (chat-work-plan-bounded-skip-state session))))
            (plan-mode (and session
                            (ignore-errors (chat-plan-mode-active-p session))))
            (ordinary-execution
@@ -251,10 +247,7 @@
                  (seq-some
                   (lambda (item)
                     (eq (chat-work-plan-item-status item) 'in-progress))
-                  (chat-work-plan-items plan))))
-           (bounded-verification
-            (and bounded-skip
-                 (> (or (plist-get bounded-skip :consumed-count) 0) 0))))
+                  (chat-work-plan-items plan)))))
       (when (or plan plan-mode)
         (setq advertised
               (chat-capability--ordered-tool-union
@@ -266,33 +259,7 @@
               (chat-capability--ordered-tool-union
                advertised chat-capability-programming-execution-tools
                (chat-capability--verification-stage-tools session))))
-      (when bounded-skip
-        (setq advertised
-              (seq-remove
-               (lambda (tool)
-                 (or (eq tool 'programming_capability_activate)
-                     (and (memq tool chat-capability-programming-plan-tools)
-                          (not (memq
-                                tool
-                                chat-capability-programming-bounded-plan-tools)))))
-               advertised))
-        (setq advertised
-              (chat-capability--ordered-tool-union
-               advertised chat-capability-programming-bounded-plan-tools))
-        (let ((tool-name (plist-get bounded-skip :tool-name))
-              (consumed-count
-               (plist-get bounded-skip :consumed-count)))
-          (if (= consumed-count 0)
-              (when-let ((tool (intern-soft tool-name))
-                         ((memq tool authorized-tools)))
-                (setq advertised
-                      (chat-capability--ordered-tool-union
-                       advertised (list tool))))
-            (setq advertised
-                  (chat-capability--ordered-tool-union
-                   advertised
-                   (chat-capability--verification-stage-tools session))))))
-      (when (and (or ordinary-execution bounded-verification)
+      (when (and ordinary-execution
                  session
                  (chat-capability--verification-fallback-authorized-p session))
         (setq advertised
@@ -313,42 +280,6 @@
 
 (add-hook 'chat-agent-profile-tool-advertisement-functions
           #'chat-capability-programming-tool-advertisement)
-
-(defun chat-capability-programming-refresh-tool-advertisement (run)
-  "Keep bounded-skip tool menus synchronized for RUN.
-
-Capability activation is intentionally cumulative during ordinary work.  A
-bounded skip is different: it is a state-machine boundary that must replace
-any previously activated menu with the exact mutation contract, then replace
-that mutation with verification and Plan-upgrade tools after consumption."
-  (let* ((state-session (chat-agent-run-state-session run))
-         (execution-session (chat-agent-run-state-execution-session run))
-         (profile (chat-agent-run-state-profile run))
-         (bounded-skip
-          (and state-session
-               (ignore-errors
-                 (chat-work-plan-bounded-skip-state state-session)))))
-    (when (and execution-session
-               profile
-               (eq (chat-agent-profile-id profile) 'code)
-               bounded-skip)
-      (let* ((config (copy-tree
-                      (chat-session-tool-config execution-session)))
-             (enabled (plist-get config :enabled-tools))
-             (disabled (plist-get config :disabled-tools))
-             (selection
-              (chat-capability-programming-tool-advertisement
-               state-session profile enabled))
-             (advertised
-              (seq-remove
-               (lambda (tool) (memq tool disabled))
-               (plist-get selection :advertised-tools))))
-        (setf (chat-session-tool-config execution-session)
-              (plist-put config :advertised-tools advertised))
-        advertised))))
-
-(add-hook 'chat-plugin-pre-step-functions
-          #'chat-capability-programming-refresh-tool-advertisement)
 
 (defun chat-capability-apply-profile (session profile)
   "Apply capability PROFILE to SESSION using session tool overlays."
@@ -958,27 +889,6 @@ could manage plans but neither read code nor run a shell."
   (chat-work-plan-to-alist
    (chat-work-plan-cancel
     (chat-capability--work-plan-session) plan-id revision)))
-
-(defun chat-capability-programming-plan-skip
-    (reason &optional tool-name action-facts-json)
-  "Record one audited simple-task plan skip."
-  (let ((facts (and action-facts-json
-                    (not (string-empty-p action-facts-json))
-                    (json-parse-string action-facts-json :object-type 'alist
-                                       :array-type 'list :null-object nil
-                                       :false-object :json-false))))
-    (chat-work-plan-to-alist
-     (chat-work-plan-skip
-      (chat-capability--work-plan-session) (intern reason)
-      :tool-name tool-name :action-facts facts))))
-
-(defun chat-capability-programming-plan-mode (&optional mode)
-  "Read or set the current session plan MODE."
-  (let ((session (chat-capability--work-plan-session)))
-    (when (and mode (not (string-empty-p mode)))
-      (chat-work-plan-set-mode session (intern mode)))
-    `((mode . ,(symbol-name
-                (chat-work-plan-enforcement-mode session))))))
 
 (defun chat-capability-programming-completion-at-point
     (path line column &optional limit)
@@ -1628,20 +1538,6 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
    '((:name "plan_id" :type "string" :required t)
      (:name "revision" :type "integer" :required t))
    #'chat-capability-programming-plan-cancel 'project '(state))
-  (chat-capability--register-tool
-   'programming_plan_skip "Programming Plan Skip"
-   "Audit an allowed simple-task skip. A single bounded mutation must name files_write, files_replace, or files_patch."
-   '((:name "reason" :type "string" :required t
-      :enum ("answer-only" "read-only" "single-bounded-action"))
-     (:name "tool_name" :type "string" :required nil)
-     (:name "action_facts_json" :type "string" :required nil))
-   #'chat-capability-programming-plan-skip 'project '(state))
-  (chat-capability--register-tool
-   'programming_plan_mode "Programming Plan Mode"
-   "Read or explicitly set auto, required, or off plan enforcement."
-   '((:name "mode" :type "string" :required nil
-      :enum ("auto" "required" "off")))
-   #'chat-capability-programming-plan-mode 'project '(write))
   (chat-capability--register-tool
    'web_eww_read "Web EWW Read"
    "Retrieve and render an HTTP(S) page with the Emacs web stack."

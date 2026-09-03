@@ -96,8 +96,7 @@
                      "programming_goal_complete"
                      "programming_plan_transition"
                      "programming_plan_resume"
-                     "programming_plan_cancel"
-                     "programming_plan_mode"))
+                     "programming_plan_cancel"))
        (should
         (chat-plan-mode-check-call session (list :name name :arguments nil)))))))
 

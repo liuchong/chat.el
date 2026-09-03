@@ -37,8 +37,8 @@
                    (plist-get config :advertised-tools)))
     (should (memq 'programming_plan_create
                   (plist-get config :advertised-tools)))
-    (should (memq 'programming_plan_skip
-                  (plist-get config :advertised-tools)))
+    (should-not (memq 'programming_plan_skip
+                      (plist-get config :advertised-tools)))
     (dolist (tool chat-capability-programming-execution-tools)
       (should-not (memq tool (plist-get config :advertised-tools))))
     (dolist (tool chat-capability-programming-verification-fallback-tools)
@@ -744,100 +744,6 @@
              (chat-agent-profile--effective-tool-config session profile)
              :advertised-tools))))))
 
-(ert-deftest chat-capability-bounded-skip-transitions-its-tool-menu ()
-  "A bounded skip exposes one exact edit, then verification and plan upgrade."
-  (chat-test-with-temp-dir
-   (let* ((session (make-chat-session :id "bounded-skip-menu"))
-          (profile (chat-agent-profile-resolve 'code)))
-     (chat-session-set-working-directory session temp-dir)
-     (chat-work-plan-skip session 'single-bounded-action
-                          :tool-name "files_patch"
-                          :task-id "task-1"
-                          :action-facts '((path . "sample.el")))
-     (chat-session-metadata-set session 'activeTaskId "task-1")
-     (chat-session-metadata-set session 'code-enabled t)
-     (let ((advertised
-            (plist-get
-             (chat-agent-profile--effective-tool-config session profile)
-             :advertised-tools)))
-       (should (memq 'programming_plan_create advertised))
-       (should (memq 'programming_plan_read advertised))
-       (should (memq 'programming_plan_list advertised))
-       (should (memq 'files_patch advertised))
-       (dolist (tool '(programming_capability_activate
-                       programming_plan_transition programming_plan_skip
-                       files_write files_replace apply_patch
-                       programming_compile_task
-                       programming_verification_run))
-         (should-not (memq tool advertised))))
-     (should-not
-      (chat-work-plan-check-call
-       session '(:name "files_patch" :arguments nil)))
-     (let ((advertised
-            (plist-get
-             (chat-agent-profile--effective-tool-config session profile)
-             :advertised-tools)))
-       (should (memq 'programming_plan_create advertised))
-       (should-not (memq 'programming_compile_task advertised))
-       (should (memq 'programming_verification_plan advertised))
-       (dolist (tool '(programming_verification_run
-                       programming_verification_read_result))
-         (should-not (memq tool advertised)))
-       (dolist (tool '(programming_capability_activate
-                       programming_plan_transition programming_plan_skip
-                       files_write files_replace files_patch apply_patch))
-         (should-not (memq tool advertised)))))))
-
-(ert-deftest chat-capability-bounded-skip-refresh-replaces-stale-runtime-menu ()
-  "Each step replaces stale activations with the bounded-skip stage menu."
-  (chat-test-with-temp-dir
-   (let* ((state (make-chat-session :id "bounded-refresh-state"))
-          (execution (make-chat-session :id "bounded-refresh-execution"))
-          (profile (chat-agent-profile-resolve 'code))
-          (run (chat-agent--run-create
-                :session state :execution-session execution :profile profile)))
-     (chat-session-set-working-directory state temp-dir)
-     (chat-session-metadata-set state 'activeTaskId "task-1")
-     (chat-session-metadata-set state 'code-enabled t)
-     (chat-session-set-tool-config
-      execution
-      (list
-       :enabled-tools chat-capability-programming-tools
-       :advertised-tools
-       (chat-capability--ordered-tool-union
-        chat-capability-programming-base-tools
-        chat-capability-programming-plan-tools
-        chat-capability-programming-work-note-tools
-        chat-capability-programming-goal-tools)))
-     (chat-work-plan-skip
-      state 'single-bounded-action
-      :tool-name "files_replace" :task-id "task-1"
-      :action-facts '((path . "sample.c")))
-     (chat-capability-programming-refresh-tool-advertisement run)
-     (let ((advertised
-            (plist-get (chat-session-tool-config execution)
-                       :advertised-tools)))
-       (should (memq 'files_replace advertised))
-       (dolist (tool '(programming_capability_activate
-                       programming_work_note_upsert programming_goal_create
-                       programming_plan_transition files_write files_patch
-                       apply_patch programming_verification_run))
-         (should-not (memq tool advertised))))
-     (should-not
-      (chat-work-plan-check-call
-       state '(:name "files_replace" :arguments nil)))
-     (chat-capability-programming-refresh-tool-advertisement run)
-     (let ((advertised
-            (plist-get (chat-session-tool-config execution)
-                       :advertised-tools)))
-       (should-not (memq 'files_replace advertised))
-       (should (memq 'programming_plan_create advertised))
-       (should-not (memq 'programming_compile_task advertised))
-       (should (memq 'programming_verification_plan advertised))
-       (dolist (tool '(programming_verification_run
-                       programming_verification_read_result))
-         (should-not (memq tool advertised)))))))
-
 (ert-deftest chat-capability-registers-complete-plan-tool-surface ()
   "The programming profile exposes every durable plan operation."
   (let ((chat-tool-forge--registry (make-hash-table :test 'eq)))
@@ -847,10 +753,11 @@
                   programming_plan_list
                   programming_plan_update programming_plan_submit
                   programming_plan_transition
-                  programming_plan_resume programming_plan_cancel
-                  programming_plan_skip programming_plan_mode))
+                  programming_plan_resume programming_plan_cancel))
       (should (chat-tool-forge-get id))
-      (should (memq id chat-capability-programming-tools)))))
+      (should (memq id chat-capability-programming-tools)))
+    (should-not (chat-tool-forge-get 'programming_plan_mode))
+    (should-not (chat-tool-forge-get 'programming_plan_skip))))
 
 (ert-deftest chat-capability-plan-tools-advertise-native-item-schema ()
   "Plan calls expose item structure instead of asking for encoded JSON."
@@ -1030,13 +937,13 @@
                   programming_plan_submit
                   programming_plan_transition
                   programming_plan_resume
-                  programming_plan_cancel
-                  programming_plan_skip))
+                  programming_plan_cancel))
       (should-not (chat-approval-tool-required-p
                    (chat-tool-forge-get id))))
-    ;; Changing enforcement can weaken the task contract and stays gated.
-    (should (chat-approval-tool-required-p
-             (chat-tool-forge-get 'programming_plan_mode)))))
+    ;; `programming_plan_mode` and `programming_plan_skip` were removed
+    ;; with plan-mode enforcement.
+    (should-not (chat-tool-forge-get 'programming_plan_mode))
+    (should-not (chat-tool-forge-get 'programming_plan_skip))))
 
 (ert-deftest chat-capability-activation-leaves-a-menu-less-session-alone ()
   "Staging narrows a menu; it never invents one for a session without a contract.

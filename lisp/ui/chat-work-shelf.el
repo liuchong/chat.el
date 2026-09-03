@@ -368,9 +368,9 @@
     :summary-fn #'chat-work-shelf--todo-summary
     :details-fn #'chat-work-shelf--todo-details
     :event-types
-    '(plan-created plan-updated plan-skipped plan-item-started
+    '(plan-created plan-updated plan-item-started
       plan-item-completed plan-item-blocked plan-item-skipped plan-resumed
-      plan-cancelled plan-completed plan-skip-consumed)))
+      plan-cancelled plan-completed)))
   (chat-work-shelf-register-provider
    (chat-work-shelf-provider-create
     :id 'changed-files :priority 20

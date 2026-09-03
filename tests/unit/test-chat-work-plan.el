@@ -296,58 +296,8 @@
                    (chat-work-plan-item-status
                     (car (chat-work-plan-items plan)))))))))
 
-(ert-deftest chat-work-plan-gate-covers-mutations-and-consumes-skip-once ()
-  "The code mutation gate requires a plan and consumes a narrow skip once."
-  (chat-test-with-temp-dir
-   (let ((session (chat-work-plan-test--session))
-         (call '(:name "files_write" :arguments nil)))
-     (should (stringp (chat-work-plan-check-call session call)))
-     (chat-work-plan-skip session 'single-bounded-action
-                          :tool-name "files_write"
-                          :action-facts '((path . "one.txt")))
-     (should (stringp
-      (chat-work-plan-check-call
-       session '(:name "files_patch" :arguments nil))))
-     (should-not (chat-work-plan-check-call session call))
-     (should-not
-      (chat-work-plan-check-call
-       session '(:name "programming_compile_task" :arguments nil)))
-     (should-not
-      (chat-work-plan-check-call
-       session '(:name "programming_verification_run" :arguments nil)))
-     (should (stringp (chat-work-plan-check-call session call)))
-     (should-error
-      (chat-work-plan-skip session 'single-bounded-action
-                           :tool-name "files_patch"
-                           :action-facts '((path . "one.txt")))
-      :type 'chat-work-plan-invalid)
-     (chat-work-plan-create session "Write"
-                            '(((id . "write") (title . "Write"))))
-     (should (string-match-p "Plan item required"
-                             (chat-work-plan-check-call session call)))
-     (let ((plan (chat-work-plan-current session nil)))
-       (chat-work-plan-transition-item
-        session (chat-work-plan-id plan) (chat-work-plan-revision plan)
-        "write" 'in-progress))
-     (should-not (chat-work-plan-check-call session call)))))
-
-(ert-deftest chat-work-plan-required-and-off-modes-are-explicit ()
-  "Required forbids skips while off disables the mutation gate."
-  (chat-test-with-temp-dir
-   (let ((session (chat-work-plan-test--session)))
-     (chat-work-plan-set-mode session 'required)
-     (should-error (chat-work-plan-skip session 'read-only)
-                   :type 'chat-work-plan-required)
-     (should (stringp
-              (chat-work-plan-check-call
-               session '(:name "files_read" :arguments nil))))
-     (chat-work-plan-set-mode session 'off)
-     (should-not
-      (chat-work-plan-check-call
-       session '(:name "programming_verification_run" :arguments nil))))))
-
 (ert-deftest chat-work-plan-does-not-cross-foreground-task-scope ()
-  "A plan for one foreground task cannot authorize or enter another."
+  "A plan for one foreground task does not project into another."
   (chat-test-with-temp-dir
    (let* ((session (chat-work-plan-test--session))
           (plan (chat-work-plan-create
@@ -355,9 +305,6 @@
      (setq plan (chat-work-plan-transition-item
                  session (chat-work-plan-id plan) 1 "item" 'in-progress))
      (chat-session-metadata-set session 'activeTaskId "task-2")
-     (should (stringp
-              (chat-work-plan-check-call
-               session '(:name "files_write" :arguments nil))))
      (should-not (chat-work-plan-context-fragment session "task-2")))))
 
 (ert-deftest chat-work-plan-context-is-bounded-and-task-scoped ()

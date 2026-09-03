@@ -1971,15 +1971,11 @@ Return the unique repetition/scenario key."
                    '("single-file-fix" "failing-test-fix")))
       (concat
        "\n\nThis is an intentionally bounded single-file repair. Do not create "
-       "a durable TODO plan. Once the exact edit is known, call "
-       "`programming_plan_skip` with reason `single-bounded-action` and the "
-       "exact write tool (`files_write`, `files_replace`, or `files_patch`), "
-       "then call that newly visible write tool immediately without activating "
-       "unrelated capabilities. Perform that one edit, run the declared "
-       "targeted verification, and "
-       "finish when it passes. The skip is available only once for this task; "
-       "if the edit fails or another mutation is needed, create a durable TODO "
-       "plan instead of recording another skip.")
+       "a durable TODO plan; plan enforcement was removed and no skip is "
+       "needed. Perform the exact edit with the write tool, run the declared "
+       "targeted verification, and finish when it passes. If the edit fails "
+       "or another mutation is needed, create a durable TODO plan and work "
+       "through it.")
     ""))
 
 (defun chat-coding-eval--agent-config-v2 (provider model common-config)

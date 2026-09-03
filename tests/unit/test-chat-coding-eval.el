@@ -1412,28 +1412,27 @@
                  "This is an intentionally bounded single-file repair.")
                 prompt))
        (should (string-match-p
-                (regexp-quote
-                 "programming_plan_skip")
+                (regexp-quote "no skip is needed")
                 prompt))
        (should (string-match-p
                 (regexp-quote "do not run a broader test suite")
                 prompt))))))
 
 (ert-deftest chat-coding-eval-execution-guidance-is-shape-specific ()
-  "Only a bounded one-file repair receives the audited skip workflow."
+  "Only a bounded one-file repair receives the direct-edit guidance."
   (let ((task
          (chat-coding-eval-test--task
           default-directory
           '(((type . "command") (name . "targeted")
              (command . ("sh" "test-one")))))))
     (should (string-match-p
-             "single-bounded-action"
+             "plan enforcement was removed"
              (chat-coding-eval--execution-guidance task)))
     (should (string-match-p
-             "only once for this task"
+             "no skip is needed"
              (chat-coding-eval--execution-guidance task)))
     (should (string-match-p
-             "newly visible write tool immediately"
+             "Perform the exact edit"
              (chat-coding-eval--execution-guidance task)))
     (should (string-match-p
              "create a durable TODO plan"

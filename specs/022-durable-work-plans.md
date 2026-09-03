@@ -1,8 +1,25 @@
 # Durable Work Plans And Native Progress UI
 
-Status: implemented
+Status: implemented — DEPRECATED (this release)
 Date: 2026-08-28
 Roadmap: coding reliability M14
+
+> **DEPRECATED (2026-09-04): the work-plan *mode* mechanism — the `auto` /
+> `required` enforcement gate and the `programming_plan_mode` tool — has
+> been **removed** this release and is not coming back.**
+>
+> Why: `required` enforcement plus the single in-progress-item rule,
+> combined with the runtime-recovery that resets the in-progress item on
+> every new run, could lock a model out of *every* tool call — the plan
+> could not advance and no governed action could run, leaving the run to
+> spin in plan-management with 0 steps. This release deletes the gate:
+> `chat-work-plan-check-call` and its helpers are gone, no tool call is
+> gated on a plan, and `programming_plan_mode` is no longer advertised or
+> registered. The bounded-skip side channel (`programming_plan_skip` /
+> `chat-work-plan-skip`), which existed only to bypass the gate, is
+> removed with it. The durable plan *record* and its lifecycle tools
+> (create/read/transition/resume/cancel) and the Plan Mode UI remain for
+> progress visibility; only the enforcement machinery was removed.
 
 ## Goal
 
@@ -52,52 +69,34 @@ Invariants:
   revision/resume operation;
 - every mutation supplies the observed plan revision; stale writes fail.
 
-## When A Plan Is Required
+## Plan Enforcement (Removed)
 
-`required` always requires a plan and `off` is an explicit user choice. `auto`
-allows an audited skip only for:
+The `auto` / `required` / `off` enforcement gate and the `single-bounded-action`
+skip side channel are **removed** this release (see the DEPRECATED block above).
+No tool call is blocked on a plan: the plan record, staged provider menu,
+lifecycle tools and read-only Plan Mode remain for progress visibility only.
 
-- `answer-only`: no tool or external action;
-- `read-only`: bounded inspection with no mutation, child task or execution;
-- `single-bounded-action`: one deterministic mutation with one owned target and
-  no repair or delegated work.
-
-The runtime checks again at the tool boundary before a mutating tool, child
-task, project verification or repair action. An applicable active plan must
-also have one dependency-ready `in-progress` item. The provider-facing
-`programming_plan_create` operation is present in the initial programming menu
-and atomically starts the earliest dependency-ready item for ordinary coding;
-the initial menu otherwise contains only inspection operations. Successful
-ordinary creation exposes every file mutation operation, including structured
-multi-file patching, and compile operations for the next model turn, while a
-restored ordinary plan exposes them when the run starts. No separate capability
-activation may expose a mutating operation before that point.
+The provider-facing `programming_plan_create` operation is present in the
+initial programming menu and atomically starts the earliest dependency-ready
+item for ordinary coding; the initial menu otherwise contains only inspection
+operations. Successful ordinary creation exposes every file mutation operation,
+including structured multi-file patching, and compile operations for the next
+model turn, while a restored ordinary plan exposes them when the run starts.
 Once a plan exists, the provider menu removes `programming_plan_create` and
 exposes the existing plan lifecycle instead. A second plan cannot be proposed
 until the current plan reaches a terminal state.
 Read-only Plan Mode never exposes those execution operations. This staged
-surface prevents a model from spending a failed tool round discovering the
-plan requirement and makes plan-before-mutation structural rather than merely
-prompt-guided.
-The lower-level store primitive still treats creation and execution as separate
-state transitions. In read-only Plan Mode creation leaves every item pending
-for user approval. Otherwise the action is blocked with `plan-required`; the
-Agent can create or advance the plan and retry. A prompt request alone is not
-considered enforcement.
-
-Any multi-file mutation, delegated child, merge, repair loop or project-level
-verification is non-simple and cannot use a skip reason. Skip is a durable
-event with reason and observed action facts.
+surface keeps plan-before-mutation structural rather than merely prompt-guided.
 
 ## Operations And Evidence
 
 The programming profile exposes `programming_plan_create`,
 `programming_plan_read`, `programming_plan_list`, `programming_plan_update`,
 `programming_plan_transition`, `programming_plan_resume`,
-`programming_plan_cancel`, `programming_plan_skip` and
-`programming_plan_mode`. A single update may replace the future pending tail
-while preserving completed item identity and evidence. Changing the objective
-increments the revision and records the source event.
+`programming_plan_cancel` and `programming_plan_mode_enter`. A single update
+may replace the future pending tail while preserving completed item identity
+and evidence. Changing the objective increments the revision and records the
+source event.
 
 Evidence IDs refer to existing runtime facts, including:
 
@@ -200,9 +199,10 @@ cannot become separate sources of plan truth.
 
 The session wire records bounded `plan-created`, `plan-updated`,
 `plan-item-started`, `plan-item-completed`, `plan-item-blocked`,
-`plan-item-skipped`, `plan-resumed`, `plan-cancelled`, `plan-completed`,
-`plan-skipped`, `plan-skip-consumed`, `plan-required` and
-`plan-revision-conflict` events. The Agent loop additionally records
+`plan-item-skipped`, `plan-resumed`, `plan-cancelled`, `plan-completed` and
+`plan-revision-conflict` events. (The gate-era `plan-skipped`,
+`plan-skip-consumed` and `plan-required` events were removed with plan-mode
+enforcement.) The Agent loop additionally records
 `work-plan-finalization` when it retries closure or stops at the completion
 barrier. Payloads contain IDs, revisions, status and bounded facts, never objective
 or output bodies. Derived Trace can report these transitions and refusals without
