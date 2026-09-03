@@ -266,14 +266,14 @@ alive, an unusually long request is common and must not be cancelled."
                       (process-send-string p "0\r\n\r\n")
                       (run-at-time 0.2 nil #'delete-process p)))
                   proc))
-   (let ((arrivals nil)
-         (terminal nil)
-         (proc (chat-stream-net-post
-                (format "http://127.0.0.1:%d/v1/chat/completions" port)
-                nil "{}"
-                (lambda (_p chunk)
-                  (push (float-time) arrivals))
-                (lambda (_p term) (setq terminal term)))))
+   (let (arrivals terminal proc)
+     (setq proc
+           (chat-stream-net-post
+            (format "http://127.0.0.1:%d/v1/chat/completions" port)
+            nil "{}"
+            (lambda (_p chunk)
+              (push (float-time) arrivals))
+            (lambda (_p term) (setq terminal term))))
      (unwind-protect
          (progn
            (should (test-chat-stream-net--await (lambda () terminal)))
@@ -281,9 +281,12 @@ alive, an unusually long request is common and must not be cancelled."
            ;; Three lines arrived over ~1s; a lumped delivery would record
            ;; them all at the final instant.
            (should (= (length arrivals) 3))
-           (should (> (- (nth 0 (nreverse arrivals))
-                         (nth 2 (nreverse arrivals)))
-                      0.2)))
+           ;; Arrivals are newest-first; snapshot one reversal so the two
+           ;; nths do not reverse the same list twice in place.  The
+           ;; reversed list is ascending (earliest first), so the latest
+           ;; arrival minus the earliest must exceed the inter-chunk gap.
+           (let ((timestamps (nreverse arrivals)))
+             (should (> (- (nth 2 timestamps) (nth 0 timestamps)) 0.2))))
        (when (process-live-p proc)
          (delete-process proc))))))
 
