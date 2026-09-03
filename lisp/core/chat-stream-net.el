@@ -64,11 +64,6 @@ endpoint has answered, nothing here cancels a slow response."
   :type 'number
   :group 'chat-stream-net)
 
-(defcustom chat-stream-connect-timeout 30
-  "Seconds to establish a connection before failing the request."
-  :type 'number
-  :group 'chat-stream-net)
-
 (defcustom chat-stream-endpoint-failure-threshold 3
   "Consecutive transport failures before an endpoint is cooled down."
   :type 'integer

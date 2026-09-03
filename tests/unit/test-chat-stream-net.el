@@ -370,6 +370,24 @@ chunk boundary."
                     '("https://hot/v1" "https://cold/v1"))))
   (chat-stream-net-endpoint-health-clear))
 
+(ert-deftest chat-stream-net-defines-each-setting-once ()
+  "Every `defcustom' in the transport is one contract, not two.
+
+A duplicated `defcustom chat-stream-connect-timeout' survived for as long
+as the second copy shadowed the first: a reader who changed the documented
+one was changing nothing, and the two copies had already drifted apart in
+their documentation.  Naming each setting once is asserted from the source
+rather than reviewed, which is how the duplicate stayed invisible."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "lisp/core/chat-stream-net.el" chat-test-root-dir))
+    (let ((names nil))
+      (goto-char (point-min))
+      (while (re-search-forward "^(defcustom \\([a-z0-9-]+\\)" nil t)
+        (push (match-string 1) names))
+      (should names)
+      (should (equal (length names) (length (delete-dups (copy-sequence names))))))))
+
 (ert-deftest chat-stream-net-cooldown-doubles-with-failures ()
   "Each failure past the threshold doubles the cooldown, capped."
   (chat-stream-net-endpoint-health-clear)
