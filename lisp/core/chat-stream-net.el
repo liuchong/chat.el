@@ -22,7 +22,8 @@
 ;; decoding boundary.
 ;;
 ;; Failures are classified here, not at call sites: dns, connect, tls,
-;; http, mid-stream-close and stall.  Per-endpoint health records turn
+;; http and mid-stream-close.  Slowness while the connection stays
+;; alive is only ever noticed, never cancelled.  Per-endpoint health records turn
 ;; repeated transport failures into a temporary cooldown so a provider
 ;; with several base URLs falls to the next line while the broken one
 ;; recovers; a half-open trial after cooldown restores it on success.
@@ -40,23 +41,26 @@
   "In-process streaming transport configuration."
   :group 'chat)
 
-(defcustom chat-stream-stall-timeout 120
-  "Seconds without a body byte, once the body has started, before a
-stream is declared stalled mid-flight."
+(defcustom chat-stream-slow-notice-seconds 120
+  "Idle seconds after which a live request is noted as slower than expected.
+
+A notice is all this ever is: while the connection is alive the request
+keeps waiting.  A slow first token (a reasoning model prefilling a large
+context) or a slow stretch mid-stream is a common, legitimate thing; the
+reader deserves to know it is slow, not to have it killed."
   :type 'number
   :group 'chat-stream-net)
 
-(defcustom chat-stream-first-byte-timeout 300
-  "Seconds waiting for the first body byte before giving up.
-
-A reasoning model prefilling a very large context can legitimately spend
-minutes before its first event, so this is deliberately longer than the
-mid-stream stall timeout."
+(defcustom chat-stream-slow-check-interval 15
+  "Seconds between slowness checks on a live stream."
   :type 'number
   :group 'chat-stream-net)
 
-(defcustom chat-stream-stall-check-interval 15
-  "Seconds between stall-watchdog checks on a live stream."
+(defcustom chat-stream-connect-timeout 30
+  "Seconds to establish a connection before failing the request.
+
+This bounds only the phase where no connection exists at all; once the
+endpoint has answered, nothing here cancels a slow response."
   :type 'number
   :group 'chat-stream-net)
 
@@ -218,8 +222,8 @@ what makes end-of-body decidable without content-length."
   "Return PROC's byte buffer."
   (process-get proc 'chat-stream-net-buffer))
 
-(defun chat-stream-net--reset-stall-watchdog (proc)
-  "Re-arm the stall watchdog for PROC on every sign of life."
+(defun chat-stream-net--reset-slow-watch (proc)
+  "Re-arm the slowness watch for PROC on every sign of life."
   (process-put proc 'chat-stream-net-last-byte (float-time)))
 
 (defun chat-stream-net--parse-headers (proc text)
@@ -374,14 +378,8 @@ per-chunk UTF-8 decoding in the SSE layer safe."
     ('tls
      (format "TLS negotiation with %s failed: %s. Check the local network for interception and retry."
              host detail))
-    ('stall
-     (format "Stream from %s stalled: no data for %s seconds. The relay or upstream is unresponsive; retry with C-c C-g."
-             host detail))
-    ('first-byte
-     (format "No response body from %s for %s seconds: the model is still prefilling or the upstream is wedged. Retry with C-c C-g; if it repeats, shorten the context or switch the line."
-             host detail))
-    ('no-response
-     (format "No response from %s for %s seconds. The endpoint accepted the connection but never answered; retry with C-c C-g or switch the line."
+    ('slow
+     (format "No data from %s for %s seconds: slower than expected (the model may still be prefilling or thinking). The connection is alive; keep waiting, or C-g to cancel."
              host detail))
     ('mid-stream-close
      (format "Connection to %s closed mid-stream%s: the relay or upstream link is unstable. Retry with C-c C-g."
@@ -407,10 +405,10 @@ per-chunk UTF-8 decoding in the SSE layer safe."
                                                  'chat-stream-net-started-at))))))
       (cond
        (deleted-locally
-        ;; Cancel or stall teardown already reported; nothing to add.
+        ;; Cancel teardown already reported; nothing to add.
         nil)
        ((process-get proc 'chat-stream-terminal)
-        ;; A classifier (connect timer, stall watchdog, parse error,
+        ;; A classifier (connect timer, parse error,
         ;; connect failure) has already named this failure.  The
         ;; EOF-time recomputation below must not overwrite it with its
         ;; blunter guess.
@@ -457,7 +455,7 @@ per-chunk UTF-8 decoding in the SSE layer safe."
 
 (defun chat-stream-net--filter (proc chunk)
   "Accumulate CHUNK from PROC and parse whatever is complete."
-  (chat-stream-net--reset-stall-watchdog proc)
+  (chat-stream-net--reset-slow-watch proc)
   (condition-case err
       (let ((buffer (chat-stream-net--buffer-of proc)))
         (when (buffer-live-p buffer)
@@ -481,7 +479,7 @@ per-chunk UTF-8 decoding in the SSE layer safe."
   (cond
    ((string-prefix-p "open" event)
     (process-put proc 'chat-stream-net-started-at (float-time))
-    (chat-stream-net--reset-stall-watchdog proc)
+    (chat-stream-net--reset-slow-watch proc)
     (condition-case err
         (process-send-string proc (process-get proc 'chat-stream-net-request))
       (error
@@ -504,7 +502,7 @@ per-chunk UTF-8 decoding in the SSE layer safe."
     (chat-stream-net--finalize proc))
    ((string-match-p "failed\\|broken pipe\\|deleted" event)
     (if (string-match-p "deleted" event)
-        ;; Local teardown (cancel or stall watchdog) already settled.
+        ;; Local teardown (cancel) already settled.
         (chat-stream-net--finalize proc t)
       (let ((class (chat-stream-net--classify-connect-failure event)))
         (chat-stream-net-endpoint-record-failure
@@ -518,46 +516,33 @@ per-chunk UTF-8 decoding in the SSE layer safe."
         (chat-stream-net--finalize proc))))))
 
 (defun chat-stream-net--start-watchdog (proc)
-  "Arm the stall watchdog for PROC."
+  "Arm the slowness watcher for PROC.
+
+The watcher notices and never cancels: a request whose connection is
+alive keeps waiting.  Its only output is a diagnostics record the live
+status surfaces, so a slow stretch reads as slow instead of stuck."
   (process-put
    proc 'chat-stream-net-watchdog
    (run-at-time
-    chat-stream-stall-check-interval chat-stream-stall-check-interval
+    chat-stream-slow-check-interval chat-stream-slow-check-interval
     (lambda (process)
       (when (and (process-live-p process)
-                 (process-get process 'chat-stream-net-started-at))
-        (let* ((idle (- (float-time)
-                        (or (process-get process
-                                         'chat-stream-net-last-byte)
-                            (float-time))))
-               ;; Two phases, two limits: waiting for the first body byte
-               ;; can legitimately take minutes (a reasoning model
-               ;; prefilling a large context); a stream that has started
-               ;; should not go silent for long.
-               (seen-body (> (or (process-get process
-                                              'chat-stream-net-body-bytes)
-                                 0)
-                             0))
-               (class (cond
-                       (seen-body 'stall)
-                       ((process-get process 'chat-stream-net-headers-done)
-                        'first-byte)
-                       (t 'no-response)))
-               (limit (if seen-body
-                          chat-stream-stall-timeout
-                        chat-stream-first-byte-timeout)))
-          (when (> idle limit)
-            (process-put process 'chat-stream-terminal
-                         (list :status 'error :class 'stall
-                               :message
-                               (chat-stream-net--message
-                                class
-                                (process-get process 'chat-stream-net-host)
-                                (format "%s" limit))))
-            (chat-stream-net-endpoint-record-failure
-             (process-get process 'chat-stream-net-endpoint-key) 'stall)
-            (delete-process process)
-            (chat-stream-net--finalize process t)))))
+                 (process-get process 'chat-stream-net-started-at)
+                 (not (process-get process 'chat-stream-net-slow-noticed)))
+        (let ((idle (- (float-time)
+                       (or (process-get process
+                                        'chat-stream-net-last-byte)
+                           (float-time)))))
+          (when (> idle chat-stream-slow-notice-seconds)
+            (process-put process 'chat-stream-net-slow-noticed t)
+            (when-let ((request-id (process-get process 'chat-request-id)))
+              (chat-request-diagnostics-record
+               request-id 'stream-slow
+               :summary
+               (chat-stream-net--message
+                'slow
+                (process-get process 'chat-stream-net-host)
+                (format "%s" chat-stream-slow-notice-seconds))))))))
    proc)))
 
 ;; ------------------------------------------------------------------

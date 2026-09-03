@@ -49,20 +49,18 @@ Decision: —
 | `tls` | TLS 握手失败 | 加密协商失败 |
 | `http` | 状态码非 2xx | 服务端明确拒绝（沿用错误体里的 message） |
 | `mid-stream-close` | 收到过数据但未收到 `[DONE]` 连接就断了 | 传输中途被对端掐断：中转/上游线路不稳 |
-| `stall` | 超过停滞阈值未收到任何字节 | 流停滞：对端长时间没有吐数据 |
 
 ### 3. 通用韧性（对所有 provider、所有网络位置一视同仁）
 
-- 停滞看门狗分两段计时：等首个响应正文字节给
-  `chat-stream-first-byte-timeout`（默认 300 秒——大上下文推理模型的
-  预填可以合法地花掉几分钟，curl 时代这段根本没有上限）；正文开始后
-  静默超过 `chat-stream-stall-timeout`（默认 120 秒）才判停滞。三类参数
-  （首字节阈值、停滞阈值、重试次数、退避序列）都是 defcustom，随网络位置
-  变化由用户调整，代码不做自动调参。
+- 慢速提示（只提示、绝不取消）：只要网络连接还活着，请求就一直等。
+  首个 token 慢（大上下文预填）或流中途慢都是常见且合法的；超过
+  `chat-stream-slow-notice-seconds`（默认 120 秒）没有新数据时，写入一条
+  "超出预期、仍在等待"的诊断提示并随实时状态展示，仅此而已。取消只有
+  一个入口：用户手动 C-g / C-c C-c。
 - 无字节重试（既有合同不变）：一个 payload 都没收到的瞬态失败，按
   `chat-agent-model-transport-retry-delays` 退避自动重发。瞬态判定扩展为
   新的错误分类文本（见 §4），不再匹配 curl 退出码。
-- 半截续传：已经流出部分内容后被瞬态断流（`mid-stream-close` / `stall`）
+- 半截续传：已经流出部分内容后连接被对端断开（`mid-stream-close`）
   切断的模型回合，自动整体重发该回合，上限
   `chat-agent-model-stream-resume-retries`（默认 2）次。重发不携带半截
   内容、不写入会话记录——模型重新生成，用户看到回答重新开始并收到一条
@@ -73,7 +71,7 @@ Decision: —
 ### 4. 失败探测与端点临时动态调整
 
 - 每个端点（base URL 的 host+path）有一张内存健康记录：最近的传输类失败
-  （`dns`/`connect`/`tls`/`stall`/`mid-stream-close`/HTTP 5xx）计数与
+  （`dns`/`connect`/`tls`/`mid-stream-close`/HTTP 5xx）计数与
   冷却截止时间。HTTP 4xx 不计入——那不是端点不稳。
 - 同一端点连续传输类失败达到 `chat-stream-endpoint-failure-threshold`
   （默认 3）次，进入冷却：选择端点时跳过它，冷却期
@@ -99,7 +97,7 @@ Decision: —
    一致。
 3. 对端在 `[DONE]` 前断开：分类为 `mid-stream-close`，消息可读；无 payload
    时按退避重试；有 payload 时按上限续传重发。
-4. 停滞超时判 `stall`；connect/dns/tls 各自分类正确。
+4. 连接存活但长时间无数据：只记提示，不终止；connect/dns/tls 各自分类正确。
 5. HTTP 非 2xx 沿用错误体 message，不计入端点健康记录（5xx 计入）。
 6. 端点连续失败达阈值后被跳过；注册 `:base-urls` 的 provider 自动落到
    下一条线路；冷却结束后半开试探，成功即恢复。

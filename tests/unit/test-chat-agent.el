@@ -194,9 +194,9 @@ car collects the messages of every request."
 (ert-deftest chat-agent-transient-classification-accepts-transport-classes ()
   "The transport's own classes classify without parsing message text."
   (should (chat-agent--transient-model-error-p "anything" 'mid-stream-close))
-  (should (chat-agent--transient-model-error-p "anything" 'stall))
   (should (chat-agent--transient-model-error-p "anything" 'connect))
   (should (chat-agent--transient-model-error-p "anything" 'dns))
+  (should (chat-agent--transient-model-error-p "anything" 'tls))
   (should-not (chat-agent--transient-model-error-p "anything" 'http))
   (should-not (chat-agent--transient-model-error-p "anything" nil))
   ;; Message matching still covers the url.el transport's phrasing.

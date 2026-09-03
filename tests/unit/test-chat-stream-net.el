@@ -195,7 +195,7 @@ The lambda declared the argument and never got it, so the timeout path
 itself errored with wrong-number-of-arguments instead of reporting the
 timeout."
   (let* ((chat-stream-connect-timeout 0.2)
-         (chat-stream-stall-check-interval 60)
+         (chat-stream-slow-check-interval 60)
          (pipe (make-pipe-process :name "stream-net-connect-stub"
                                   :noquery t))
          terminal)
@@ -214,60 +214,78 @@ timeout."
       (when (process-live-p pipe)
         (delete-process pipe)))))
 
-(ert-deftest chat-stream-net-stall-is-classified ()
-  "A connection that never sends a byte is declared stalled."
+(ert-deftest chat-stream-net-slow-stream-is-noticed-never-killed ()
+  "A silent but connected stream gets a slowness notice, not a timeout.
+The user asked for this explicitly: while the network connection is
+alive, an unusually long request is common and must not be cancelled."
   (test-chat-stream-net--with-server
    (lambda (_proc)
-     ;; Accept the request and then say nothing, ever.
+     ;; Accept the request and then say nothing for a long time.
      )
-   (let ((chat-stream-stall-timeout 0.5)
-         (chat-stream-first-byte-timeout 0.5)
-         (chat-stream-stall-check-interval 0.2)
-         terminal)
-     (chat-stream-net-post
-      (format "http://127.0.0.1:%d/v1/chat/completions" port)
-      nil "{}"
-      #'ignore
-      (lambda (_proc term) (setq terminal term)))
-     (should (test-chat-stream-net--await (lambda () terminal)))
-     (should (eq (plist-get terminal :class) 'stall))
-     (should (string-match-p "No response" (plist-get terminal :message))))))
+   (let ((chat-stream-slow-notice-seconds 0.5)
+         (chat-stream-slow-check-interval 0.2))
+     ;; Bound before posting: `let' would evaluate the request with the
+     ;; defaults, arming the watcher with the production interval.
+     (let ((proc (chat-stream-net-post
+                  (format "http://127.0.0.1:%d/v1/chat/completions" port)
+                  nil "{}"
+                  #'ignore
+                  #'ignore)))
+       (unwind-protect
+           (progn
+             (sleep-for 1.5)
+             (accept-process-output nil 0.1 nil t)
+             ;; Still connected, still waiting, no terminal verdict.
+             (should (process-live-p proc))
+             (should (null (process-get proc 'chat-stream-terminal)))
+             (should (process-get proc 'chat-stream-net-slow-noticed)))
+         (when (process-live-p proc)
+           (delete-process proc)))))))
 
-(ert-deftest chat-stream-net-first-byte-wait-has-its-own-limit ()
-  "Waiting for the first body byte is bounded by the longer limit.
-
-A reasoning model prefilling a large context can sit there for minutes;
-the mid-stream stall timeout must not kill that wait."
+(ert-deftest chat-stream-net-stream-arrives-incrementally ()
+  "Chunks reach the callback as they arrive, not in one lump at the end."
   (test-chat-stream-net--with-server
    (lambda (proc)
-     ;; Headers arrive, then nothing: the prefill wait.
      (process-send-string
-      proc "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"))
-   (let ((chat-stream-stall-timeout 0.3)
-         (chat-stream-first-byte-timeout 5)
-         (chat-stream-stall-check-interval 0.2)
-         terminal)
-     (chat-stream-net-post
-      (format "http://127.0.0.1:%d/v1/chat/completions" port)
-      nil "{}"
-      #'ignore
-      (lambda (_proc term) (setq terminal term)))
-     ;; The mid-stream limit would fire at 0.3s; the first-byte limit
-     ;; keeps the request alive well past it.
-     (sleep-for 1.0)
-     (accept-process-output nil 0.1 nil t)
-     (should-not terminal)
-     (let ((chat-stream-first-byte-timeout 0.3))
-       ;; Reset via a second request governed by the short limit.
-       (chat-stream-net-post
-        (format "http://127.0.0.1:%d/v1/chat/completions" port)
-        nil "{}"
-        #'ignore
-        (lambda (_proc term) (setq terminal term)))
-       (should (test-chat-stream-net--await (lambda () terminal)))
-       (should (eq (plist-get terminal :class) 'stall))
-       (should (string-match-p "No response body"
-                               (plist-get terminal :message)))))))
+      proc (concat "HTTP/1.1 200 OK\r\n"
+                   "Content-Type: text/event-stream\r\n"
+                   "Transfer-Encoding: chunked\r\n\r\n"))
+     (dotimes (i 3)
+       (let* ((sse (format "data: {\"n\":%d}\n" i))
+              (delay (* 0.3 (1+ i))))
+         (run-at-time delay nil
+                      (lambda (p line)
+                        (when (process-live-p p)
+                          (process-send-string
+                           p (format "%x\r\n%s\r\n"
+                                     (string-bytes line) line))))
+                      proc sse)))
+     (run-at-time 1.3 nil
+                  (lambda (p)
+                    (when (process-live-p p)
+                      (process-send-string p "0\r\n\r\n")
+                      (run-at-time 0.2 nil #'delete-process p)))
+                  proc))
+   (let ((arrivals nil)
+         (terminal nil)
+         (proc (chat-stream-net-post
+                (format "http://127.0.0.1:%d/v1/chat/completions" port)
+                nil "{}"
+                (lambda (_p chunk)
+                  (push (float-time) arrivals))
+                (lambda (_p term) (setq terminal term)))))
+     (unwind-protect
+         (progn
+           (should (test-chat-stream-net--await (lambda () terminal)))
+           (should (eq (plist-get terminal :status) 'ok))
+           ;; Three lines arrived over ~1s; a lumped delivery would record
+           ;; them all at the final instant.
+           (should (= (length arrivals) 3))
+           (should (> (- (nth 0 (nreverse arrivals))
+                         (nth 2 (nreverse arrivals)))
+                      0.2)))
+       (when (process-live-p proc)
+         (delete-process proc))))))
 
 (ert-deftest chat-stream-net-multibyte-arrives-unsplit ()
   "A multibyte character split across chunks is delivered whole.
