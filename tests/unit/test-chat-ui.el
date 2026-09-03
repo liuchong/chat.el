@@ -2642,22 +2642,112 @@ recorded Markdown."
         (should (equal moved (marker-position chat-ui--messages-end)))))))
 
 (ert-deftest chat-ui-follow-live-output-never-yanks-input-point ()
-  "Test a window whose point is in the input area is left alone."
+  "A window whose point is in the input area keeps its own point.
+The view may re-anchor to keep the buffer end visible, but the cursor
+stays where the person left it; it is never moved to the response edge."
   (with-temp-buffer
     (insert (make-string 4000 ?x))
     (setq chat-ui--messages-end (copy-marker (- (point-max) 4)))
     (setq chat-ui--input-overlay (copy-marker (- (point-max) 3)))
-    (let (moved)
+    (let (moved started)
       (cl-letf (((symbol-function 'get-buffer-window-list)
                  (lambda (&rest _) (list 'fake-window)))
                 ((symbol-function 'window-live-p) (lambda (_) t))
                 ((symbol-function 'window-point) (lambda (_) (point-max)))
+                ((symbol-function 'window-start)
+                 (lambda (&rest _) (- (point-max) 20)))
                 ((symbol-function 'window-end)
                  (lambda (&rest _) (point-max)))
+                ((symbol-function 'window-body-height) (lambda (_) 10))
+                ((symbol-function 'set-window-start)
+                 (lambda (_w pos &optional _noforce) (setq started pos)))
                 ((symbol-function 'set-window-point)
                  (lambda (_w pos) (setq moved pos))))
-        (chat-ui--follow-live-output (current-buffer))
-        (should-not moved)))))
+        (let ((state (chat-ui--capture-live-window-state (current-buffer))))
+          (chat-ui--follow-live-output (current-buffer) state))
+        (should (equal moved (point-max)))
+        (should started)))))
+
+(ert-deftest chat-ui-live-output-pins-the-prompt-to-the-bottom ()
+  "A window riding the bottom keeps the prompt at its bottom edge.
+
+The captured window start used to land inside the redrawn tail, collapse
+to the tail's start and then advance past the whole reply, leaving the
+prompt at the window top with every output line above it invisible."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (dotimes (index 200)
+        (insert (format "history-%03d\n" index)))
+      (setq chat-ui--live-start (copy-marker (point-max) nil))
+      (insert "partial reply\n")
+      (setq chat-ui--messages-end (copy-marker (point-max)))
+      (insert "PROMPT> ")
+      (setq chat-ui--input-overlay (copy-marker (point-max) t))
+      ;; Idle at the bottom: cursor in the input, window start inside the
+      ;; tail about to be redrawn.
+      (goto-char (point-max))
+      (set-window-point (selected-window) (point-max))
+      (set-window-start (selected-window)
+                        (marker-position chat-ui--live-start) t)
+      (redisplay t)
+      (let ((state (chat-ui--capture-live-window-state (current-buffer))))
+        (goto-char (marker-position chat-ui--live-start))
+        (delete-region (point) chat-ui--messages-end)
+        (dotimes (index 30)
+          (insert (format "reply line %02d\n" index)))
+        (set-marker chat-ui--messages-end (point))
+        (chat-ui--follow-live-output (current-buffer) state))
+      (redisplay t)
+      (let ((window (selected-window)))
+        ;; The prompt is on screen at the bottom, not at the top.
+        (should (<= (window-start window)
+                    (marker-position chat-ui--input-overlay)))
+        (should (>= (window-end window t) (point-max)))
+        ;; And a screenful of the new output is visible above it.
+        (should (> (count-lines (window-start window) (point-max)) 5))))))
+
+(ert-deftest chat-ui-live-output-keeps-distance-for-a-tail-reading-position ()
+  "A reading position inside the tail keeps its distance from the end."
+  (with-temp-buffer
+    (insert (make-string 4000 ?x))
+    (setq chat-ui--live-start (copy-marker (- (point-max) 100) nil))
+    (setq chat-ui--messages-end (copy-marker (- (point-max) 4)))
+    (setq chat-ui--input-overlay (copy-marker (- (point-max) 3)))
+    (let (moved started)
+      (cl-letf (((symbol-function 'get-buffer-window-list)
+                 (lambda (&rest _) (list 'fake-window)))
+                ((symbol-function 'window-live-p) (lambda (_) t))
+                ;; Reading inside the tail, not at the bottom.
+                ((symbol-function 'window-point)
+                 (lambda (_) (marker-position chat-ui--live-start)))
+                ((symbol-function 'window-start)
+                 (lambda (&rest _) (marker-position chat-ui--live-start)))
+                ((symbol-function 'window-end)
+                 (lambda (&rest _) (- (point-max) 200)))
+                ((symbol-function 'set-window-start)
+                 (lambda (_w pos &optional _noforce) (setq started pos)))
+                ((symbol-function 'set-window-point)
+                 (lambda (_w pos) (setq moved pos))))
+        (let* ((tail-lines
+                (count-lines (marker-position chat-ui--live-start)
+                             (point-max)))
+               (state (chat-ui--capture-live-window-state (current-buffer))))
+          ;; Redraw the tail: delete and reinsert different content.
+          (goto-char (marker-position chat-ui--live-start))
+          (delete-region (point) chat-ui--messages-end)
+          (dotimes (index 30)
+            (insert (format "reply line %02d\n" index)))
+          (set-marker chat-ui--messages-end (point))
+          (chat-ui--follow-live-output (current-buffer) state)
+          (should
+           (equal started
+                  (save-excursion
+                    (goto-char (point-max))
+                    (line-beginning-position)
+                    (forward-line (- (1- tail-lines)))
+                    (line-beginning-position))))
+          (should moved))))))
 
 (ert-deftest chat-ui-attachment-draft-is-visible-and-sends-without-text ()
   "A staged file is visible at the prompt and can form a message by itself."

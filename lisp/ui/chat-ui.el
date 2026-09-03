@@ -3955,14 +3955,25 @@ who is typing."
 
 This must run before output is inserted.  Inferring the state afterwards
 made a manually scrolled window look close enough to the new end and
-yanked it back down."
+yanked it back down.
+
+A window start inside the live tail cannot be kept as a marker: the
+redraw deletes the tail, the marker collapses to the tail's start, and
+its advance-on-insert type then drags it past the whole re-inserted
+reply, so the restore landed the prompt at the window top with every
+output line above it.  That start is anchored by its distance from the
+buffer end instead -- the tail grows, and the same bottom lines stay on
+screen."
   (when (buffer-live-p ui-buffer)
     (with-current-buffer ui-buffer
       (let ((input-start (and (markerp chat-ui--input-overlay)
-                              (marker-position chat-ui--input-overlay))))
+                              (marker-position chat-ui--input-overlay)))
+            (live-start (and (markerp chat-ui--live-start)
+                             (marker-position chat-ui--live-start))))
         (mapcar
          (lambda (window)
-           (let ((window-point (window-point window)))
+           (let ((window-point (window-point window))
+                 (window-start (window-start window)))
              (list :window window
                    :follow
                    (chat-ui-window-follows-p
@@ -3971,7 +3982,12 @@ yanked it back down."
                    :input-point
                    (and input-start (>= window-point input-start))
                    :point (copy-marker window-point t)
-                   :start (copy-marker (window-start window) t))))
+                   :start (copy-marker window-start t)
+                   :at-bottom (>= (window-end window t) (point-max))
+                   :start-tail-lines
+                   (and live-start
+                        (>= window-start live-start)
+                        (count-lines window-start (point-max))))))
          (seq-filter #'window-live-p
                      (get-buffer-window-list ui-buffer nil t)))))))
 
@@ -4002,8 +4018,44 @@ manual reading position owns the window until the reader returns to it."
                       (when (window-live-p window)
                         (if (plist-get state :follow)
                             (set-window-point window edge)
-                          (set-window-start
-                           window (marker-position (plist-get state :start)) t)
+                          (let ((tail-lines
+                                 (plist-get state :start-tail-lines)))
+                            (cond
+                             ((plist-get state :at-bottom)
+                              ;; A window showing the buffer end rides the
+                              ;; bottom like a terminal: the tail grows,
+                              ;; the prompt stays at the bottom edge, the
+                              ;; newest output above it, and the cursor is
+                              ;; not moved out of the input to do it.
+                              (set-window-start
+                               window
+                               (save-excursion
+                                 (goto-char (point-max))
+                                 (line-beginning-position)
+                                 (forward-line
+                                  (- (1- (window-body-height window))))
+                                 (max (point-min) (line-beginning-position)))
+                               t))
+                             (tail-lines
+                              ;; A reading position inside the tail: keep
+                              ;; the same distance from the buffer end.
+                              ;; The buffer never ends with a newline (the
+                              ;; prompt trails), so count-lines includes
+                              ;; the partial last line and the walk back
+                              ;; is one line shorter than the count.
+                              (set-window-start
+                               window
+                               (save-excursion
+                                 (goto-char (point-max))
+                                 (line-beginning-position)
+                                 (forward-line (- (1- tail-lines)))
+                                 (line-beginning-position))
+                               t))
+                             (t
+                              (set-window-start
+                               window
+                               (marker-position (plist-get state :start))
+                               t))))
                           (set-window-point
                            window (marker-position
                                    (plist-get state :point)))))))
