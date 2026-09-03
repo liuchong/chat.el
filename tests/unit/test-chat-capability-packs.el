@@ -234,11 +234,14 @@
       (should (string-match-p
                "Empty output is not evidence"
                (chat-forged-tool-description tool)))
+      (should (string-match-p
+               "wait_seconds"
+               (chat-forged-tool-description tool)))
       (should
        (equal
         (mapcar (lambda (parameter) (plist-get parameter :name))
                 (chat-forged-tool-parameters tool))
-        '("id" "offset" "max_bytes"))))))
+        '("id" "offset" "max_bytes" "wait_seconds"))))))
 
 (ert-deftest chat-capability-task-output-appears-only-after-task-creation ()
   "The provider cannot guess an output id before a session task exists."

@@ -2692,6 +2692,28 @@ ordinary command cannot see the Rust root.
 discovery and language-manager state are separate capabilities. Grant the
 smallest command-scoped read root instead of restoring the developer home.
 
+### A Background Sleep Does Not Wait
+
+**Problem**: the Agent started `sleep 120` through `programming_compile_task`
+or `work_task_start`, then polled `programming_task_output` every few hundred
+milliseconds for twenty minutes while reporting "sleep is still running".
+
+**Cause**: background task start is fire-and-forget by contract. A delay-only
+command returns a task id immediately and never blocks the Agent turn.
+`task_output` without a wait also returns immediately with `terminal=false`,
+so the model busy-polls instead of waiting.
+
+**Solution**: refuse delay-only background commands with an explicit error.
+Put `sleep` on the foreground shell allowlist so `shell_execute` with
+`sleep N` blocks that tool call. Add `wait_seconds` to
+`work_task_output` / `programming_task_output` so waiting for a real
+background command blocks the observation call until the task is terminal
+or the wait times out. Document both paths in the tool descriptions and
+capability guidance.
+
+**General rule**: waiting is a property of the tool call that observes or
+delays, not of a background process the Agent can start and then ignore.
+
 ### Build Outputs Are Not Source Scope
 
 **Problem**: a successful coding Eval was marked failed because `cargo test`

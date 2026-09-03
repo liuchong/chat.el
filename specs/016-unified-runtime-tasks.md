@@ -124,6 +124,13 @@ Agent/tool-caller path, not by calling the process adapter directly.
 contains `id`, `status`, `terminal`, `exitCode`, `output`, `offset`,
 `nextOffset`, `totalBytes`, `truncated`, `startedAt` and `endedAt`.
 
+When the caller passes a positive `wait_seconds`, the tool call itself blocks
+until the task is terminal or that many seconds elapse (capped by the wait
+maximum). The observation then also reports `waited` and `waitTimedOut`. This
+is the supported way to wait for a background command. Starting a delay-only
+command such as `sleep 30` as a background task is refused: that start returns
+immediately and cannot block the Agent turn.
+
 `offset` and `nextOffset` are byte offsets. A caller continues a truncated read
 with the exact `nextOffset` returned by the prior observation. The adapter must
 not split a UTF-8 code point, must reject offsets beyond the current log, and

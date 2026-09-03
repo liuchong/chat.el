@@ -445,9 +445,9 @@ could manage plans but neither read code nor run a shell."
     task))
 
 (defun chat-capability-programming-task-output
-    (id &optional offset max-bytes)
+    (id &optional offset max-bytes wait-seconds)
   "Read structured output for compile/test task ID in the current session."
-  (chat-work-task-output id offset max-bytes))
+  (chat-work-task-output id offset max-bytes wait-seconds))
 
 (defun chat-capability--json-string-list (value label)
   "Decode VALUE as a JSON string list named LABEL."
@@ -1307,7 +1307,9 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
            "Prefer Programming Verification Plan and Run for detected project "
            "checks. Execution uses an isolated temporary HOME/TMPDIR; do not "
            "relocate or clean generated caches unless they are tracked or the "
-           "user requested cleanup.")
+           "user requested cleanup. Returns immediately with a task id: to "
+           "wait for completion call programming_task_output with "
+           "wait_seconds. Do not start sleep as a background task.")
    '((:name "command" :type "string" :required t)
      (:name "directory" :type "string" :required nil))
    #'chat-capability-programming-compile-task 'project '(write outbound))
@@ -1317,10 +1319,15 @@ When DATE is non-nil, keep entries whose timestamp contains DATE."
            "task started in this session. Empty output is not evidence that "
            "the task is still running: inspect terminal, status and exitCode. "
            "Do not rerun a command merely because output is empty. Continue "
-           "from nextOffset when truncated.")
+           "from nextOffset when truncated. Pass wait_seconds to block this "
+           "tool call until the task is terminal or the wait times out; do "
+           "not start a background sleep and busy-poll.")
    '((:name "id" :type "string" :required t)
      (:name "offset" :type "integer" :required nil)
-     (:name "max_bytes" :type "integer" :required nil))
+     (:name "max_bytes" :type "integer" :required nil)
+     (:name "wait_seconds" :type "number" :required nil
+      :description
+      "Block up to this many seconds until the task finishes."))
    #'chat-capability-programming-task-output 'project '(read))
   (chat-capability--register-tool
    'programming_completion_at_point "Programming Completion At Point"

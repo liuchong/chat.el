@@ -78,7 +78,7 @@
      (let ((chat-work-task-finished-hook
             (list (lambda (task)
                     (setq finished (chat-work-task-id task))))))
-       (let* ((summary (chat-work-task-start "sleep 5" default-directory))
+       (let* ((summary (chat-work-task-start "sleep 5 && true" default-directory))
               (id (cdr (assoc 'id summary)))
               (task (gethash id chat-work--tasks)))
          (should (process-live-p (chat-work-task-process task)))
@@ -532,6 +532,45 @@ and gh still failed inside sandbox-exec."
      (should (eq (chat-execution-request-policy captured) 'build))
      (should-not (eq (chat-execution-request-backend captured) 'local))
      (should-not (chat-execution-request-network captured)))))
+
+(ert-deftest chat-work-delay-only-commands-are-refused-as-background-tasks ()
+  "A bare sleep must not become a background task the Agent can busy-poll.
+The start call returns immediately; waiting belongs on shell_execute or
+task_output wait_seconds."
+  (chat-test-with-temp-dir
+   (let ((chat-work-directory temp-dir)
+         (chat-work--tasks (make-hash-table :test 'equal))
+         (chat-work-notify-task-completion nil)
+         (chat-approval-mode 'dangerous))
+     (should-error (chat-work-task-start "sleep 120" default-directory))
+     (should-error (chat-work-task-start "  sleep 1.5  " default-directory))
+     (should (zerop (hash-table-count chat-work--tasks)))
+     ;; Chained delays remain valid background work.
+     (let ((summary (chat-work-task-start "sleep 0.05 && true"
+                                          default-directory)))
+       (should (assoc 'id summary))))))
+
+(ert-deftest chat-work-task-output-wait-seconds-blocks-until-terminal ()
+  "wait_seconds keeps the tool call open until the background task ends."
+  (chat-test-with-temp-dir
+   (let ((chat-work-directory temp-dir)
+         (chat-work--tasks (make-hash-table :test 'equal))
+         (chat-execution-directory (expand-file-name "executions/" temp-dir))
+         (chat-execution--records (make-hash-table :test 'equal))
+         (chat-work-notify-task-completion nil)
+         (chat-approval-mode 'dangerous)
+         (started (float-time)))
+     (let* ((summary (chat-work-task-start "sleep 1 && printf done"
+                                           default-directory))
+            (id (cdr (assoc 'id summary)))
+            (output (chat-work-task-output id nil nil 5))
+            (elapsed (- (float-time) started)))
+       (should (>= elapsed 0.8))
+       (should (eq (alist-get 'terminal output) t))
+       (should (equal (alist-get 'status output) "succeeded"))
+       (should (eq (alist-get 'waited output) t))
+       (should (eq (alist-get 'waitTimedOut output) :json-false))
+       (should (string-match-p "done" (alist-get 'output output)))))))
 
 (provide 'test-chat-work)
 ;;; test-chat-work.el ends here

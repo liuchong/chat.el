@@ -64,6 +64,11 @@
   :type 'integer
   :group 'chat-work)
 
+(defcustom chat-work-task-wait-max-seconds 300
+  "Maximum seconds `chat-work-task-output' may block for `wait_seconds'."
+  :type 'integer
+  :group 'chat-work)
+
 (defcustom chat-work-notify-task-completion t
   "Whether completed background tasks produce a desktop notification."
   :type 'boolean
@@ -404,6 +409,13 @@ script.  A user who reads `make test' and approves it has answered the
 question the list exists to ask, and re-asking it in code only voids their
 answer.  Under `auto' the list still decides, because there nobody read
 anything."
+  (when (chat-work--delay-only-command-p command)
+    (error
+     (concat
+      "Delay-only commands cannot run as background tasks: the start call "
+      "returns immediately and the Agent never waits. Use shell_execute "
+      "with sleep to block this tool call, or start the real command and "
+      "call work_task_output / programming_task_output with wait_seconds.")))
   (let ((session (chat-work--current-session)))
     (unless (or (and (fboundp 'chat-approval-command-consent-p)
                      (chat-approval-command-consent-p))
@@ -473,6 +485,42 @@ anything."
   "Return non-nil when background task STATUS is terminal."
   (memq status '(succeeded failed cancelled interrupted)))
 
+(defun chat-work--delay-only-command-p (command)
+  "Return non-nil when COMMAND is only a delay such as `sleep 30'.
+
+A background `sleep' returns a task id immediately and never blocks the
+Agent turn, so models that use it to wait for CI or another process only
+busy-poll `task_output'.  Delays belong on the foreground shell tool;
+waiting for a real background command belongs on `wait_seconds'."
+  (let ((trimmed (string-trim (or command ""))))
+    (string-match-p
+     "\\`sleep[[:space:]]+[0-9]+\\(?:\\.[0-9]+\\)?[[:space:]]*\\'"
+     trimmed)))
+
+(defun chat-work--wait-for-task (task timeout-seconds)
+  "Block until TASK is terminal or TIMEOUT-SECONDS elapses.
+
+Pumps the task process and Emacs timers so sentinels can fire while this
+tool call is still open.  Return non-nil when TASK reached a terminal
+status before the deadline."
+  (let* ((timeout (min (max 0 (ceiling timeout-seconds))
+                       chat-work-task-wait-max-seconds))
+         (deadline (+ (float-time) timeout)))
+    (while (and (not (chat-work--terminal-status-p
+                      (chat-work-task-status task)))
+                (< (float-time) deadline))
+      (let* ((remaining (- deadline (float-time)))
+             (slice (min 0.5 (max 0.05 remaining)))
+             (process (chat-work-task-process task)))
+        (cond
+         ((and process (process-live-p process))
+          (accept-process-output process slice))
+         ((<= remaining 0) nil)
+         ;; Queued, starting, or the sentinel already ran between checks:
+         ;; yield so the scheduler and timers can advance.
+         (t (sit-for slice t)))))
+    (chat-work--terminal-status-p (chat-work-task-status task))))
+
 (defun chat-work--output-end (file offset limit total)
   "Return a UTF-8 boundary in FILE after OFFSET and at least LIMIT bytes.
 
@@ -508,16 +556,25 @@ the returned `nextOffset' usable without splitting a multibyte character."
             (setq text (decode-coding-string bytes coding t)))))
       (list :output text :next-offset end :total total))))
 
-(defun chat-work-task-output (id &optional offset max-bytes)
+(defun chat-work-task-output (id &optional offset max-bytes wait-seconds)
   "Return structured bounded output for task ID.
 
 OFFSET is a byte offset previously returned as `nextOffset'.  MAX-BYTES
-defaults to `chat-work-task-output-max-bytes'.  When called by a tool, ID must
-belong to the current session."
+defaults to `chat-work-task-output-max-bytes'.  When WAIT-SECONDS is a
+positive number and the task is still running, block up to that many
+seconds (capped by `chat-work-task-wait-max-seconds') until the task is
+terminal, pumping the process so Emacs stays responsive.  When called by
+a tool, ID must belong to the current session."
   (let* ((task (gethash id chat-work--tasks))
          (session (chat-work--current-session))
          (start (or offset 0))
-         (limit (or max-bytes chat-work-task-output-max-bytes)))
+         (limit (or max-bytes chat-work-task-output-max-bytes))
+         (wait (and wait-seconds
+                    (numberp wait-seconds)
+                    (> wait-seconds 0)
+                    wait-seconds))
+         (waited nil)
+         (wait-timed-out nil))
     (unless task
       (error "Task not found: %s" id))
     (unless (and (integerp start) (>= start 0))
@@ -528,23 +585,34 @@ belong to the current session."
                (not (equal (chat-work-task-session-id task)
                            (chat-session-id session))))
       (error "Task does not belong to the current session: %s" id))
+    (when (and wait
+               (not (chat-work--terminal-status-p
+                     (chat-work-task-status task))))
+      (setq waited t)
+      (setq wait-timed-out (not (chat-work--wait-for-task task wait))))
     (let* ((status (chat-work-task-status task))
            (range (chat-work--read-output-range
                    (chat-work-task-log-file task) start limit))
            (next (plist-get range :next-offset))
            (total (plist-get range :total)))
-      `((id . ,id)
-        (status . ,(symbol-name status))
-        (terminal . ,(if (chat-work--terminal-status-p status)
-                         t :json-false))
-        (exitCode . ,(chat-work-task-exit-code task))
-        (output . ,(plist-get range :output))
-        (offset . ,start)
-        (nextOffset . ,next)
-        (totalBytes . ,total)
-        (truncated . ,(if (< next total) t :json-false))
-        (startedAt . ,(chat-work-task-started-at task))
-        (endedAt . ,(chat-work-task-ended-at task))))))
+      (delq nil
+            (list
+             (cons 'id id)
+             (cons 'status (symbol-name status))
+             (cons 'terminal (if (chat-work--terminal-status-p status)
+                                 t :json-false))
+             (cons 'exitCode (chat-work-task-exit-code task))
+             (cons 'output (plist-get range :output))
+             (cons 'offset start)
+             (cons 'nextOffset next)
+             (cons 'totalBytes total)
+             (cons 'truncated (if (< next total) t :json-false))
+             (cons 'startedAt (chat-work-task-started-at task))
+             (cons 'endedAt (chat-work-task-ended-at task))
+             (when waited (cons 'waited t))
+             (when waited
+               (cons 'waitTimedOut
+                     (if wait-timed-out t :json-false))))))))
 
 (defun chat-work-task-stop (id)
   "Stop running task ID."
@@ -1098,7 +1166,10 @@ DECISION is `approve' or `reject' when the workflow awaits approval."
    (concat "Start a cancellable background shell task. "
            "Chaining with && || ; and | is accepted and every command in "
            "the chain is checked. Redirection, background jobs and command "
-           "substitution are not accepted. "
+           "substitution are not accepted. Delay-only commands such as "
+           "`sleep 30` are refused: they return immediately and do not wait. "
+           "Use shell_execute for a blocking sleep, or wait_seconds on "
+           "work_task_output for a real background command. "
            (chat-command-gate-describe chat-work-task-allowed-commands))
    '((:name "command" :type "string" :required t)
      (:name "directory" :type "string" :required nil))
@@ -1112,10 +1183,16 @@ DECISION is `approve' or `reject' when the workflow awaits approval."
    'work_task_output "Work Task Output"
    (concat "Read structured status and bounded output from a background task. "
            "An empty output string does not mean the task is running; inspect "
-           "terminal and status. Continue from nextOffset when truncated.")
+           "terminal and status. Continue from nextOffset when truncated. "
+           "Pass wait_seconds to block this tool call until the task is "
+           "terminal or the wait times out -- do not start a background sleep "
+           "and busy-poll.")
    '((:name "id" :type "string" :required t)
      (:name "offset" :type "integer" :required nil)
-     (:name "max_bytes" :type "integer" :required nil))
+     (:name "max_bytes" :type "integer" :required nil)
+     (:name "wait_seconds" :type "number" :required nil
+      :description
+      "Block up to this many seconds until the task finishes."))
    #'chat-work-task-output '(read))
   (chat-work--register-tool
    'work_task_stop "Work Task Stop"

@@ -25,7 +25,7 @@ WARNING: Only enable in trusted environments."
 
 (defcustom chat-tool-shell-allowed-commands
   '("ls" "cat" "pwd" "echo" "printf" "head" "tail" "grep" "find" "wc" "which"
-    "type" "du" "stat" "sort" "uniq" "cut" "sed" "awk" "tr" "git")
+    "type" "du" "stat" "sort" "uniq" "cut" "sed" "awk" "tr" "git" "sleep")
   "List of allowed shell commands for safety.
 
 `git' is admitted per subcommand, not as a word: only the read-only ones
@@ -34,7 +34,11 @@ and `git push' does not.  It was absent for a long time with no reason
 recorded, which cost more than it protected -- reading a repository's
 history is what `cat' and `find' were already allowed to do the slow way,
 and the work that needs it (release notes, changelogs, review) cannot be
-done at all without it."
+done at all without it.
+
+`sleep' is here so intentional delays block the tool call itself.  A
+background `sleep' via work/compile tasks returns immediately and does
+not wait, which is why models busy-polled forever after starting one."
   :type '(repeat string)
   :group 'chat)
 
@@ -86,7 +90,10 @@ Examples:
     "git ls-files "
     "git for-each-ref "
     "git merge-base "
-    "git tag ")
+    "git tag "
+    ;; Intentional delay that blocks the tool call. Exact match for the
+    ;; program word plus a trailing space so `sleepx' does not match.
+    "sleep ")
   "Built in readonly command patterns that bypass approval.
 User configured patterns in `chat-tool-shell-whitelist' are checked in addition
 to these defaults."
@@ -468,6 +475,8 @@ rules; only a person looking at this particular command can do that."
           "Pipes, redirection and chaining are not available; send each "
           "command as its own call, except that a single "
           "`cd DIR && COMMAND' prefix is accepted. "
+          "Use `sleep N' here when you need this tool call itself to wait; "
+          "background work tasks that start sleep return immediately. "
           (chat-command-gate-describe chat-tool-shell-allowed-commands))
   :language 'elisp
   :parameters '((:name "command" :type "string" :required t)
