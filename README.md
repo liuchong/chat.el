@@ -445,7 +445,9 @@ your configuration — and is written back out as `guarded`.
 
 `dangerous` still honours `chat-files-allowed-directories` and the tools a
 session has switched off. Those are limits you configured, not questions
-about whether to ask.
+about whether to ask. What it does lift is OS execution isolation: shell
+commands, background compile/test tasks, verification steps and REPL
+processes all run on the unrestricted local backend.
 
 A session may override the global default, and a sub-agent inherits the
 mode it was started in rather than choosing its own.

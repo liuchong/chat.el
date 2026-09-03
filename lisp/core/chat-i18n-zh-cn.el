@@ -168,7 +168,7 @@ Auto（默认命令）：
   /approve manual     - 白名单直接放行，其余逐次问你（默认）
   /approve guarded    - 由一个 guard 模型裁决，不问你；被拒时会把理由告诉
                         助手，助手可以换个路子。旧名 auto 仍然接受。
-  /approve dangerous  - 一切都跑，命令闸门也一并关掉；切换时需要确认
+  /approve dangerous  - 一切都跑且不进沙箱，命令闸门也一并关掉；切换时需要确认
   人工审批时可以选一次允许、本会话允许、以后都允许；后两种会记成授权，
   用 M-x chat-approval-list-grants 查看，M-x chat-approval-clear-runtime-grants
   清掉程序自己记下的那份。

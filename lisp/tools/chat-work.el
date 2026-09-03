@@ -43,6 +43,8 @@
 (require 'chat-tool-forge)
 
 (declare-function chat-approval-command-consent-p "chat-approval" ())
+(declare-function chat-approval-dangerous-mode-p "chat-approval" (&optional session))
+(declare-function chat-session-get "chat-session" (session-id))
 
 (defgroup chat-work nil
   "Work orchestration for chat.el."
@@ -277,10 +279,57 @@ this tool is for, and refusing it would be refusing the tool."
                       (expand-file-name directory)))
         :mode 'write))
 
+(defun chat-work--task-approval-session (task)
+  "Return the chat session that owns TASK, when it can still be resolved."
+  (or (chat-work--current-session)
+      (when-let ((id (chat-work-task-session-id task)))
+        (and (fboundp 'chat-session-get)
+             (ignore-errors (chat-session-get id))))))
+
+(defun chat-work--execution-request (task)
+  "Build the execution request for background TASK.
+
+Dangerous approval mode uses the unrestricted local backend -- the same
+boundary `shell_execute' gets -- so `programming_compile_task' and
+`work_task_start' are not a sandboxed back door beside an open shell.
+Every other mode keeps the build sandbox: project roots only, no network."
+  (let* ((id (chat-work-task-id task))
+         (command (chat-work-task-command task))
+         (directory (chat-work-task-directory task))
+         (argv (list shell-file-name shell-command-switch command))
+         (dangerous
+          (and (fboundp 'chat-approval-dangerous-mode-p)
+               (chat-approval-dangerous-mode-p
+                (chat-work--task-approval-session task)))))
+    (if dangerous
+        (chat-execution-request-from-context
+         argv
+         :backend 'local
+         :directory directory
+         :environment process-environment
+         :policy 'local
+         :session-id (chat-work-task-session-id task)
+         :task-id id
+         :idempotency 'non-idempotent
+         :metadata '((kind . "background-task")))
+      (chat-execution-request-from-context
+       argv
+       :backend (chat-execution-backend-for-policy 'build)
+       :directory directory
+       :environment process-environment
+       :policy 'build
+       :read-roots (list directory)
+       :write-roots (list directory)
+       :network nil
+       :require-process-tree-cleanup t
+       :session-id (chat-work-task-session-id task)
+       :task-id id
+       :idempotency 'non-idempotent
+       :metadata '((kind . "background-task"))))))
+
 (defun chat-work--run-process-task (task _runtime-task complete fail)
   "Start process adapter TASK for RUNTIME-TASK and finish through callbacks."
   (let* ((id (chat-work-task-id task))
-         (command (chat-work-task-command task))
          (log-file (chat-work-task-log-file task))
          (default-directory (chat-work-task-directory task))
          (process-environment (chat-command-gate-environment))
@@ -291,20 +340,7 @@ this tool is for, and refusing it would be refusing the tool."
         (progn
           (let ((record
                  (chat-execution-start
-                 (chat-execution-request-from-context
-                   (list shell-file-name shell-command-switch command)
-                   :backend (chat-execution-backend-for-policy 'build)
-                   :directory default-directory
-                   :environment process-environment
-                   :policy 'build
-                   :read-roots (list default-directory)
-                   :write-roots (list default-directory)
-                   :network nil
-                   :require-process-tree-cleanup t
-                   :session-id (chat-work-task-session-id task)
-                   :task-id id
-                   :idempotency 'non-idempotent
-                   :metadata '((kind . "background-task")))
+                  (chat-work--execution-request task)
                   :name (concat "chat-work-" id)
                   :buffer nil
                   :noquery t
@@ -368,10 +404,13 @@ script.  A user who reads `make test' and approves it has answered the
 question the list exists to ask, and re-asking it in code only voids their
 answer.  Under `auto' the list still decides, because there nobody read
 anything."
-  (unless (and (fboundp 'chat-approval-command-consent-p)
-               (chat-approval-command-consent-p))
-    (when-let* ((refusal (chat-work-task-refusal command)))
-      (error "%s" (chat-work--task-refusal-message refusal command))))
+  (let ((session (chat-work--current-session)))
+    (unless (or (and (fboundp 'chat-approval-command-consent-p)
+                     (chat-approval-command-consent-p))
+                (and (fboundp 'chat-approval-dangerous-mode-p)
+                     (chat-approval-dangerous-mode-p session)))
+      (when-let* ((refusal (chat-work-task-refusal command)))
+        (error "%s" (chat-work--task-refusal-message refusal command)))))
   (chat-work--ensure-directory)
   (let* ((session (chat-work--current-session))
          (session-id (and session (chat-session-id session)))

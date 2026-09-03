@@ -3,6 +3,7 @@
 (require 'ert)
 (require 'test-helper)
 (require 'chat-code-verify)
+(require 'chat-approval)
 
 (defun chat-code-verify-test--step (kind &optional required)
   "Return a minimal verification step of KIND."
@@ -539,6 +540,31 @@
        (should-not
         (chat-code-verify-profile-owned-p
          (chat-verification-profile-id first) "session-b" "task-b"))))))
+
+(ert-deftest chat-code-verify-dangerous-mode-runs-on-the-local-backend ()
+  "Dangerous mode lifts verification isolation to the local backend."
+  (chat-test-with-temp-dir
+   (let ((chat-approval-mode 'dangerous)
+         (step (chat-code-verify-test--step 'test t))
+         (context (list :project-root temp-dir :session-id "s1")))
+     (setf (chat-verification-step-directory step) temp-dir)
+     (let ((request (chat-code-verify--execution-request step context)))
+       (should (eq (chat-execution-request-backend request) 'local))
+       (should (eq (chat-execution-request-policy request) 'local))))))
+
+(ert-deftest chat-code-verify-manual-mode-keeps-the-build-sandbox ()
+  "Manual verification stays on the build sandbox."
+  (chat-test-with-temp-dir
+   (let ((chat-approval-mode 'manual)
+         (chat-execution--backends (make-hash-table :test 'eq))
+         (step (chat-code-verify-test--step 'test t))
+         (context (list :project-root temp-dir :session-id "s1")))
+     (chat-code-verify-test--install-execution-backends)
+     (setf (chat-verification-step-directory step) temp-dir)
+     (let ((request (chat-code-verify--execution-request step context)))
+       (should (eq (chat-execution-request-policy request) 'build))
+       (should-not (eq (chat-execution-request-backend request) 'local))
+       (should-not (chat-execution-request-network request))))))
 
 (provide 'test-chat-code-verify)
 ;;; test-chat-code-verify.el ends here

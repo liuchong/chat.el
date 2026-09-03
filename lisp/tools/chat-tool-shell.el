@@ -15,7 +15,7 @@
 (require 'subr-x)
 
 (declare-function chat-approval-command-consent-p "chat-approval" ())
-(declare-function chat-approval-effective-mode "chat-approval" (&optional session))
+(declare-function chat-approval-dangerous-mode-p "chat-approval" (&optional session))
 
 (defcustom chat-tool-shell-enabled nil
   "Enable shell command execution tool.
@@ -208,19 +208,10 @@ the argv path."
 (defun chat-tool-shell--dangerous-p ()
   "Return non-nil when this call runs under dangerous approval mode.
 
-The mode decides, not a one-off consent: a person approving one command,
-or the guard ruling once, leaves the sandbox in place for every other
-command.  Only the mode that means \"stop protecting me\" moves execution
-off the isolation boundary."
-  (or (and (boundp 'chat-approval-consent)
-           (eq chat-approval-consent 'dangerous))
-      (and (fboundp 'chat-approval-effective-mode)
-           (eq (chat-approval-effective-mode
-                (or (and (boundp 'chat-tool-caller-current-session)
-                         chat-tool-caller-current-session)
-                    (and (boundp 'chat--current-session)
-                         chat--current-session)))
-               'dangerous))))
+Delegates to `chat-approval-dangerous-mode-p': only the mode lifts
+isolation, never a one-off human or guard consent."
+  (and (fboundp 'chat-approval-dangerous-mode-p)
+       (chat-approval-dangerous-mode-p)))
 
 (defun chat-tool-shell--execution-request (argv timeout)
   "Build the execution request for ARGV with TIMEOUT.

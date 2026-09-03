@@ -448,6 +448,32 @@ What that costs is that a wrong verdict skips the gate, which is why
 than a rule the guard weighs."
   (memq chat-approval-consent '(human guard dangerous)))
 
+(defun chat-approval--context-session (&optional session)
+  "Return SESSION or the chat session currently executing a tool, if any."
+  (or session
+      (and (boundp 'chat-tool-caller-current-session)
+           chat-tool-caller-current-session)
+      (and (boundp 'chat--current-session)
+           chat--current-session)))
+
+(defun chat-approval-dangerous-mode-p (&optional session)
+  "Return non-nil when SESSION (or the current session) is in dangerous mode.
+
+`dangerous' means stop protecting the operator: skip the command gate, skip
+approval prompts, and run model-directed commands on the unrestricted
+`local' execution backend (real HOME, inherited environment, network, no
+sandbox profile).  That covers `shell_execute', background work tasks,
+verification steps and REPL processes alike.
+
+Only the named mode lifts isolation.  A one-off human or guard consent
+never does -- approving one command must not take the rest of the session
+out of the sandbox."
+  (or (and (boundp 'chat-approval-consent)
+           (eq chat-approval-consent 'dangerous))
+      (eq (chat-approval-effective-mode
+           (chat-approval--context-session session))
+          'dangerous)))
+
 (defun chat-approval--write-file-tool-p (tool-id)
   "Return non-nil when TOOL-ID is a file-writing tool."
   (memq tool-id '(files_write files_replace files_patch apply_patch)))

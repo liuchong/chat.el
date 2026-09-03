@@ -21,11 +21,13 @@ directory.
    `chat-ui--dispatch-command`, so they never ran `chat-ui--note-command-default`.
    An explicit `/send` now releases a claimed default back to the baseline, and
    `/stage` claims it, exactly as the non-busy path does.
-2. `dangerous` approval mode now means complete consent: `shell_execute` runs on
-   the unrestricted `local` execution backend (inherited environment, real HOME,
-   network, no sandbox profile). `manual` and `guarded` keep the `inspect`
-   sandbox. The mode decides; a one-off human or guard consent never relaxes
-   isolation. Specs 012 §2 and 023 Integrations/Acceptance revised.
+2. `dangerous` approval mode now means complete consent: every model-directed
+   execution path (`shell_execute`, background work / `programming_compile_task`,
+   verification, REPL) runs on the unrestricted `local` execution backend
+   (inherited environment, real HOME, network, no sandbox profile). `manual`
+   and `guarded` keep `inspect` / `build`. The mode decides; a one-off human or
+   guard consent never relaxes isolation. Specs 012 §2 and 023 Integrations/
+   Acceptance revised.
 3. A session now has two directories. The root directory (metadata
    `root-directory`) is pinned on first open -- falling back to the code
    session's project root, then the working directory -- and afterwards moves

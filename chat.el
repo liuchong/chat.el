@@ -374,7 +374,7 @@ Approval (who decides whether a tool call runs):
   /approve guarded    - A guard model decides and nothing asks; a denial
                         goes back to the assistant, which may take another
                         route. Accepts the old name `auto'.
-  /approve dangerous  - Everything runs, command gate off; asks to confirm
+  /approve dangerous  - Everything runs unsandboxed, command gate off; asks to confirm
   When asked, you can allow once, allow for this session, or allow from now
   on. The last two are remembered as grants: M-x chat-approval-list-grants
   shows all of them with their source, and

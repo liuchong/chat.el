@@ -61,13 +61,15 @@ use `build`. Existing MCP, external subagent and transport processes remain
 explicit local paths until their own policy requirements are designed; they are
 not relabeled as isolated.
 
-Approval mode selects the shell tool's execution boundary. Under `dangerous`
-the shell tool runs on the explicit unrestricted `local` backend -- inherited
-environment, real HOME, network, no sandbox profile -- because that mode's
-meaning is "stop protecting me", and a sandbox that stays up after it has only
-the cost of a boundary. `manual` and `guarded` keep `inspect`. A one-off
-consent (a human approval, a guard verdict) never relaxes isolation: the
-objection was adjudicated once, and execution policy is not its prize.
+Approval mode selects the execution boundary for every model-directed command
+path. Under `dangerous` the shell tool, background work tasks, verification
+steps and REPL processes all run on the explicit unrestricted `local` backend --
+inherited environment, real HOME, network, no sandbox profile -- because that
+mode's meaning is "stop protecting me", and a sandbox that stays up after it has
+only the cost of a boundary. `manual` and `guarded` keep `inspect` for the shell
+tool and `build` for work tasks, verification and REPL. A one-off consent (a
+human approval, a guard verdict) never relaxes isolation: the objection was
+adjudicated once, and execution policy is not its prize.
 
 An Agent-facing background-task summary exposes only its public task ID,
 command, status and exit code. Backend log paths remain internal because they
@@ -86,8 +88,9 @@ read an inaccessible implementation path.
 - timeout and cancellation remove shell children, listeners and temporary roots;
 - backend preparation failure removes a temporary root created before process start;
 - v1 records load as local without replay;
-- dangerous approval mode runs shell commands on the `local` backend while manual
-  and guarded modes keep the `inspect` sandbox with no network.
+- dangerous approval mode runs shell commands, background tasks, verification
+  steps and REPL processes on the `local` backend while manual and guarded modes
+  keep the `inspect` / `build` sandboxes with no network.
 - shell, background task and verification adapters preserve their existing behavior.
 
 ## Verification

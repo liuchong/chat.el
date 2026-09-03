@@ -20,6 +20,9 @@
 (require 'chat-execution)
 (require 'chat-task)
 
+(declare-function chat-approval-dangerous-mode-p "chat-approval" (&optional session))
+(declare-function chat-session-get "chat-session" (session-id))
+
 (defgroup chat-code-verify nil
   "Project-level verification for coding sessions."
   :group 'chat)
@@ -587,6 +590,63 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
       (concat (truncate-string-to-width text (max 0 (- limit 18)) nil nil t)
               "\n... [truncated]"))))
 
+(defun chat-code-verify--approval-session (context)
+  "Return the chat session correlated with verification CONTEXT, if any."
+  (or (and (boundp 'chat-tool-caller-current-session)
+           chat-tool-caller-current-session)
+      (and (boundp 'chat--current-session)
+           chat--current-session)
+      (when-let ((id (plist-get context :session-id)))
+        (and (fboundp 'chat-session-get)
+             (ignore-errors (chat-session-get id))))))
+
+(defun chat-code-verify--execution-request (step context)
+  "Build the execution request for verification STEP under CONTEXT.
+
+Dangerous approval mode lifts isolation to the unrestricted local backend
+so profile steps can use the real toolchain and network.  Every other mode
+keeps the build sandbox."
+  (let* ((argv (chat-verification-step-argv step))
+         (directory (chat-verification-step-directory step))
+         (project-root (plist-get context :project-root))
+         (dangerous
+          (and (fboundp 'chat-approval-dangerous-mode-p)
+               (chat-approval-dangerous-mode-p
+                (chat-code-verify--approval-session context)))))
+    (if dangerous
+        (chat-execution-request-from-context
+         argv
+         :backend 'local
+         :directory directory
+         :policy 'local
+         :session-id (plist-get context :session-id)
+         :turn-id (plist-get context :turn-id)
+         :task-id (plist-get context :task-id)
+         :parent-id (plist-get context :parent-id)
+         :idempotency 'idempotent
+         :timeout (chat-verification-step-timeout-seconds step)
+         :metadata
+         `((kind . "verification")
+           (stepId . ,(chat-verification-step-id step))))
+      (chat-execution-request-from-context
+       argv
+       :backend (chat-execution-backend-for-policy 'build)
+       :directory directory
+       :policy 'build
+       :read-roots (list project-root)
+       :write-roots (list project-root)
+       :network nil
+       :require-process-tree-cleanup t
+       :session-id (plist-get context :session-id)
+       :turn-id (plist-get context :turn-id)
+       :task-id (plist-get context :task-id)
+       :parent-id (plist-get context :parent-id)
+       :idempotency 'idempotent
+       :timeout (chat-verification-step-timeout-seconds step)
+       :metadata
+       `((kind . "verification")
+         (stepId . ,(chat-verification-step-id step)))))))
+
 (defun chat-code-verify--execute-step (step context callback)
   "Execute STEP using CONTEXT and invoke CALLBACK exactly once."
   (let* ((argv (chat-verification-step-argv step))
@@ -627,24 +687,7 @@ STEPS prevents a manifest-declared TypeScript check from being duplicated."
                 (setq
                  record
                  (chat-execution-start
-                 (chat-execution-request-from-context
-                   argv
-                   :backend (chat-execution-backend-for-policy 'build)
-                   :directory (chat-verification-step-directory step)
-                   :policy 'build
-                   :read-roots (list (plist-get context :project-root))
-                   :write-roots (list (plist-get context :project-root))
-                   :network nil
-                   :require-process-tree-cleanup t
-                   :session-id (plist-get context :session-id)
-                   :turn-id (plist-get context :turn-id)
-                   :task-id (plist-get context :task-id)
-                   :parent-id (plist-get context :parent-id)
-                   :idempotency 'idempotent
-                   :timeout (chat-verification-step-timeout-seconds step)
-                   :metadata
-                   `((kind . "verification")
-                     (stepId . ,(chat-verification-step-id step))))
+                  (chat-code-verify--execution-request step context)
                   :name (format "chat-verify-%s"
                                 (chat-verification-step-id step))
                   :buffer buffer

@@ -19,6 +19,8 @@
 (require 'chat-session)
 (require 'chat-task)
 
+(declare-function chat-approval-dangerous-mode-p "chat-approval" (&optional session))
+
 (defgroup chat-repl nil
   "Persistent REPL processes owned by chat sessions."
   :group 'chat)
@@ -562,6 +564,25 @@
                        `((reason . ,(truncate-string-to-width
                                      (string-trim event) 256 nil nil t)))))))
 
+(defun chat-repl--execution-boundary (session)
+  "Return (BACKEND . POLICY) for REPL SESSION under the current approval mode.
+
+Dangerous mode uses unrestricted local execution; every other mode keeps
+the build sandbox required by the REPL isolation contract."
+  (let* ((chat-id (chat-repl-session-chat-session-id session))
+         (chat-session
+          (or (and (boundp 'chat-tool-caller-current-session)
+                   chat-tool-caller-current-session)
+              (and (boundp 'chat--current-session)
+                   chat--current-session)
+              (and chat-id (ignore-errors (chat-session-get chat-id)))))
+         (dangerous
+          (and (fboundp 'chat-approval-dangerous-mode-p)
+               (chat-approval-dangerous-mode-p chat-session))))
+    (if dangerous
+        (cons 'local 'local)
+      (cons (chat-execution-backend-for-policy 'build) 'build))))
+
 (defun chat-repl--start-process (session)
   "Start SESSION through a capability-proven execution backend."
   (let* ((adapter (chat-repl-adapter (chat-repl-session-adapter-id session)))
@@ -574,24 +595,43 @@
            (command (funcall (chat-repl-adapter-command-function adapter) token))
            (directory (chat-repl-session-directory session))
            (execution-id (chat-execution-new-id))
+           (boundary (chat-repl--execution-boundary session))
+           (backend (car boundary))
+           (policy (cdr boundary))
            (request
-            (chat-execution-request-from-context
-             command
-             :id execution-id
-             :backend (chat-execution-backend-for-policy 'build)
-             :directory directory
-             :environment process-environment
-             :session-id (chat-repl-session-chat-session-id session)
-             :idempotency 'non-idempotent
-             :policy 'build
-             :read-roots (list directory)
-             :write-roots (list directory)
-             :network nil
-             :require-process-tree-cleanup t
-             :metadata `((kind . "repl")
-                         (replId . ,(chat-repl-session-id session))
-                         (adapter . ,(symbol-name
-                                      (chat-repl-session-adapter-id session)))))))
+            (if (eq policy 'local)
+                (chat-execution-request-from-context
+                 command
+                 :id execution-id
+                 :backend backend
+                 :directory directory
+                 :environment process-environment
+                 :session-id (chat-repl-session-chat-session-id session)
+                 :idempotency 'non-idempotent
+                 :policy 'local
+                 :metadata `((kind . "repl")
+                             (replId . ,(chat-repl-session-id session))
+                             (adapter . ,(symbol-name
+                                          (chat-repl-session-adapter-id
+                                           session)))))
+              (chat-execution-request-from-context
+               command
+               :id execution-id
+               :backend backend
+               :directory directory
+               :environment process-environment
+               :session-id (chat-repl-session-chat-session-id session)
+               :idempotency 'non-idempotent
+               :policy 'build
+               :read-roots (list directory)
+               :write-roots (list directory)
+               :network nil
+               :require-process-tree-cleanup t
+               :metadata `((kind . "repl")
+                           (replId . ,(chat-repl-session-id session))
+                           (adapter . ,(symbol-name
+                                        (chat-repl-session-adapter-id
+                                         session))))))))
       (setf (chat-repl-session-token session) token
             (chat-repl-session-execution-id session) execution-id
             (chat-repl-session-status session) 'starting
@@ -644,10 +684,19 @@
              :status 'starting
              :created-at now :updated-at now :transactions nil)))
       ;; Prove adapter and backend availability before selecting durable state.
-      (let ((adapter (chat-repl-adapter adapter-id)))
+      (let ((adapter (chat-repl-adapter adapter-id))
+            (chat-session
+             (or (and (boundp 'chat-tool-caller-current-session)
+                      chat-tool-caller-current-session)
+                 (and (boundp 'chat--current-session)
+                      chat--current-session)
+                 (ignore-errors (chat-session-get chat-id)))))
         (unless (funcall (chat-repl-adapter-availability-function adapter))
-          (signal 'chat-repl-adapter-unavailable (list adapter-id))))
-      (chat-execution-backend-for-policy 'build)
+          (signal 'chat-repl-adapter-unavailable (list adapter-id)))
+        (if (and (fboundp 'chat-approval-dangerous-mode-p)
+                 (chat-approval-dangerous-mode-p chat-session))
+            (chat-execution-get-backend 'local)
+          (chat-execution-backend-for-policy 'build)))
       (puthash (chat-repl-session-id session) session chat-repl--sessions)
       (puthash chat-id (chat-repl-session-id session) chat-repl--selected)
       (condition-case err

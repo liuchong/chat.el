@@ -155,6 +155,17 @@ mode it behaved as."
                 "ONE"
                 (chat-tool-shell-execute "echo one | tr a-z A-Z")))))))
 
+(ert-deftest chat-approval-dangerous-mode-p-follows-the-named-mode-only ()
+  "Isolation lifts only for the dangerous mode, never for one-off consent."
+  (let ((chat-approval-mode 'manual)
+        (chat-approval-consent 'human))
+    (should-not (chat-approval-dangerous-mode-p)))
+  (let ((chat-approval-mode 'dangerous))
+    (should (chat-approval-dangerous-mode-p)))
+  (let ((chat-approval-mode 'manual)
+        (chat-approval-consent 'dangerous))
+    (should (chat-approval-dangerous-mode-p))))
+
 (ert-deftest chat-approval-dangerous-mode-still-obeys-the-path-boundary ()
   "Dangerous mode means stop asking, not forget the configured limits."
   (chat-test-with-temp-dir

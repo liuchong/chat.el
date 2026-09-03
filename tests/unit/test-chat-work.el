@@ -3,6 +3,8 @@
 (require 'ert)
 (require 'test-helper)
 (require 'chat-work)
+(require 'chat-approval)
+(require 'chat-execution)
 
 (ert-deftest chat-work-background-task-runs-and-captures-output ()
   "Test background tasks run asynchronously and keep bounded output."
@@ -470,6 +472,66 @@ succeeded immediately, which is the symptom this removes the cause of."
         (should (string-match-p (regexp-quote program) description)))
       (should (string-match-p "read-only git" description))
       (should (string-match-p "&&" description)))))
+
+(ert-deftest chat-work-dangerous-mode-runs-on-the-local-backend ()
+  "Dangerous mode lifts background-task isolation, not only shell_execute.
+programming_compile_task and work_task_start used to stay on the build
+sandbox with no network, which made dangerous mode look open while cargo
+and gh still failed inside sandbox-exec."
+  (chat-test-with-temp-dir
+   (let ((captured nil)
+         (chat-approval-mode 'dangerous)
+         (chat-work-directory temp-dir)
+         (chat-work--tasks (make-hash-table :test 'equal))
+         (chat-execution-directory (expand-file-name "executions/" temp-dir))
+         (chat-execution--records (make-hash-table :test 'equal))
+         (chat-work-notify-task-completion nil))
+     (cl-letf (((symbol-function 'chat-execution-start)
+                (lambda (request &rest _options)
+                  (setq captured request)
+                  (error "stop after capture"))))
+       (ignore-errors
+         (chat-test-silently
+          (chat-work-task-start "make test" default-directory))))
+     (should (chat-execution-request-p captured))
+     (should (eq (chat-execution-request-backend captured) 'local))
+     (should (eq (chat-execution-request-policy captured) 'local)))))
+
+(ert-deftest chat-work-manual-mode-keeps-the-build-sandbox ()
+  "Modes short of dangerous keep background tasks on the build sandbox."
+  (chat-test-with-temp-dir
+   (let ((captured nil)
+         (chat-approval-mode 'manual)
+         (chat-approval-consent 'human)
+         (chat-work-directory temp-dir)
+         (chat-work--tasks (make-hash-table :test 'equal))
+         (chat-execution-directory (expand-file-name "executions/" temp-dir))
+         (chat-execution--records (make-hash-table :test 'equal))
+         (chat-work-notify-task-completion nil)
+         (chat-execution--backends (make-hash-table :test 'eq)))
+     (chat-execution-install-local-backend)
+     (chat-execution-register-backend
+      (chat-execution-backend-create
+       :id 'darwin-sandbox
+       :capabilities
+       (chat-execution-capabilities-create
+        :filesystem 'scoped :network 'controlled :environment 'explicit
+        :timeout t :process-tree-cleanup t :platform 'test
+        :availability "available")
+       :start-function #'chat-execution--local-start
+       :cancel-function #'chat-execution--local-cancel
+       :live-p-function #'chat-execution--local-live-p))
+     (cl-letf (((symbol-function 'chat-execution-start)
+                (lambda (request &rest _options)
+                  (setq captured request)
+                  (error "stop after capture"))))
+       (ignore-errors
+         (chat-test-silently
+          (chat-work-task-start "printf hi" default-directory))))
+     (should (chat-execution-request-p captured))
+     (should (eq (chat-execution-request-policy captured) 'build))
+     (should-not (eq (chat-execution-request-backend captured) 'local))
+     (should-not (chat-execution-request-network captured)))))
 
 (provide 'test-chat-work)
 ;;; test-chat-work.el ends here
