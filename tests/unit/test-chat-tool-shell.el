@@ -194,5 +194,41 @@ command that works."
       ;; And the shape restriction, which is what the incident hit first.
       (should (string-match-p "cd DIR" description)))))
 
+(ert-deftest chat-tool-shell-dangerous-mode-runs-on-the-local-backend ()
+  "Dangerous approval mode means it: no sandbox profile, no gate.
+The request goes to the unrestricted local backend with the inherited
+environment, where network and writes are the operating system's call,
+not chat.el's."
+  (let ((captured nil)
+        (chat-tool-shell-enabled t)
+        (chat-approval-mode 'dangerous))
+    (cl-letf (((symbol-function 'chat-execution-start)
+               (lambda (request &rest _options)
+                 (setq captured request)
+                 (error "stop after capture"))))
+      (ignore-errors
+        (chat-test-silently (chat-tool-shell-execute "echo hi"))))
+    (should (chat-execution-request-p captured))
+    (should (eq (chat-execution-request-backend captured) 'local))
+    (should (eq (chat-execution-request-policy captured) 'local))))
+
+(ert-deftest chat-tool-shell-guarded-mode-keeps-the-inspect-sandbox ()
+  "Any approval mode short of dangerous keeps the inspect sandbox:
+read-only project root, no network, filtered environment."
+  (dolist (mode '(manual guarded))
+    (let ((captured nil)
+          (chat-tool-shell-enabled t)
+          (chat-approval-mode mode))
+      (cl-letf (((symbol-function 'chat-execution-start)
+                 (lambda (request &rest _options)
+                   (setq captured request)
+                   (error "stop after capture"))))
+        (ignore-errors
+          (chat-test-silently (chat-tool-shell-execute "echo hi"))))
+      (should (chat-execution-request-p captured))
+      (should (eq (chat-execution-request-policy captured) 'inspect))
+      (should-not (eq (chat-execution-request-backend captured) 'local))
+      (should-not (chat-execution-request-network captured)))))
+
 (provide 'test-chat-tool-shell)
 ;;; test-chat-tool-shell.el ends here

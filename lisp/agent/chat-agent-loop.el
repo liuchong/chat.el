@@ -433,6 +433,7 @@ direction can overwrite a Plan or Goal that the tool just committed."
          (task-id (chat-agent-run-state-task-id run))
          (project-root
           (or (chat-agent-run-state-project-root run)
+              (and session (chat-session-root-directory session))
               (and session (chat-session-working-directory session))))
          (target-path
           (or (chat-agent-run-state-context-target-path run)

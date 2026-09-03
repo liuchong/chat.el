@@ -626,6 +626,7 @@ design was.")
     (:name "stage"    :handler chat-ui--command-stage  :default sticky :while-busy t)
     (:name "cd"       :handler chat-ui--command-cd)
     (:name "pwd"      :handler chat-ui--command-pwd)
+    (:name "root"     :handler chat-ui--command-root)
     (:name "new"      :handler chat-ui--command-new)
     (:name "list"     :handler chat-ui--command-list)
     (:name "save"     :handler chat-ui--command-save)
@@ -3417,6 +3418,30 @@ had already completed were always kept; this is about the one in flight."
   "Report the working directory of this session."
   (chat-ui--insert-system-message (format "📁 %s" default-directory)))
 
+(defun chat-ui--command-root (arg)
+  "Show this session's root directory, or change it to ARG.
+
+The root is the stable anchor of the conversation: project instructions,
+goals and project scope follow it, and /cd never moves it.  Changing the
+root deliberately does not change the working directory -- the two answer
+different questions, and coupling them is how a shell wander silently
+re-rooted the project."
+  (let ((session (chat-ui--require-current-session)))
+    (if (string-empty-p arg)
+        (chat-ui--insert-system-message
+         (format "🗂 Root directory: %s\n📁 Current directory: %s"
+                 (or (chat-session-root-directory session) "(none)")
+                 default-directory))
+      (let ((expanded (expand-file-name
+                       (chat-command-fold-path (string-trim arg)))))
+        (if (not (file-directory-p expanded))
+            (chat-ui--insert-system-message
+             (chat-i18n 'directory-missing "❌ Directory not found: %s" arg))
+          (chat-session-set-root-directory session expanded)
+          (chat-ui--insert-system-message
+           (format "🗂 Root directory changed to: %s"
+                   (file-name-as-directory expanded))))))))
+
 (defun chat-ui--command-new (_arg)
   "Start a new session."
   (call-interactively #'chat-new-session))
@@ -3756,27 +3781,86 @@ context remain typed fragments until request projection."
              :metadata (list :tool-system-prompt-base prompt))
             messages))))
 
+(defun chat-ui--session-directories-fragment (session root cwd)
+  "Return the fragment naming SESSION's ROOT and CWD to the model.
+
+The two directories answer different questions, and a model that cannot
+see them conflates them: a /cd for one shell command quietly re-anchors
+the project.  The fragment also carries the standing rule that AGENTS.md
+in both directories is required reading -- injection covers the files the
+walk finds, and the rule covers the ones it cannot."
+  (chat-context-fragment-validate
+   (chat-context-fragment-create
+    :id (format "session-directories:%s" (chat-session-id session))
+    :kind 'instruction :authority 'runtime
+    :source-kind 'session-directories
+    :source-id (format "session:%s" (chat-session-id session))
+    :scope 'session :scope-id (chat-session-id session)
+    :priority 1 :residency 'protected :budget-policy 'preserve
+    :payload
+    (format
+     (concat "Session directories:\n"
+             "- Root directory (stable anchor): %s\n"
+             "- Current working directory (shell commands and relative paths; "
+             "moves with /cd): %s\n"
+             "The root directory is this conversation's project home: project "
+             "instructions, goals and file scope anchor there, and it never "
+             "follows cd. The current directory is only where commands run "
+             "right now.\n"
+             "Before making changes you MUST read and obey AGENTS.md in the "
+             "root directory and in the current directory. Their contents are "
+             "injected when the discovery walk finds them; if one exists but "
+             "is not in context, read it with the file tool before editing "
+             "anything under that directory.")
+     root cwd)
+    :status 'active
+    :metadata `((root . ,root) (cwd . ,cwd)))))
+
 (defun chat-ui--project-context (session)
-  "Return scoped project context fragments for SESSION."
+  "Return scoped project context fragments for SESSION.
+
+Instructions are discovered from both of the session's directories: the
+stable root and the current working directory.  Each graph already walks
+upward to the filesystem root, so a cwd inside the root adds nothing new;
+the merge matters when shell work has taken the cwd outside it."
   (when (fboundp 'chat-project-instruction-graph)
-    (let* ((target (or (chat-session-working-directory session)
-                       default-directory))
-           (graph (ignore-errors (chat-project-instruction-graph target))))
-      (when (and graph (fboundp 'chat-event-publish))
+    (let* ((cwd (or (chat-session-working-directory session)
+                    default-directory))
+           (root (or (chat-session-root-directory session) cwd))
+           (starts (delete-dups
+                    (mapcar #'file-truename (list root cwd))))
+           (seen (make-hash-table :test 'equal))
+           (fragments nil)
+           (source-count 0)
+           (diagnostics nil))
+      (dolist (start starts)
+        (let ((graph (ignore-errors (chat-project-instruction-graph start))))
+          (when graph
+            (setq source-count
+                  (+ source-count
+                     (length (plist-get graph :source-files)))
+                  diagnostics
+                  (append diagnostics (plist-get graph :diagnostics)))
+            (dolist (fragment (plist-get graph :fragments))
+              (unless (gethash (chat-context-fragment-id fragment) seen)
+                (puthash (chat-context-fragment-id fragment) t seen)
+                (push fragment fragments))))))
+      (when (and fragments (fboundp 'chat-event-publish))
         (chat-event-publish
          (chat-event-create
           :type 'instruction-graph-observed
           :session-id (chat-session-id session) :source 'project-context
           :payload
-          `((sourceCount . ,(length (plist-get graph :source-files)))
-            (fragmentCount . ,(length (plist-get graph :fragments)))
-            (diagnosticCount . ,(length (plist-get graph :diagnostics)))
+          `((sourceCount . ,source-count)
+            (fragmentCount . ,(length fragments))
+            (diagnosticCount . ,(length diagnostics))
             (diagnosticTypes
              . ,(vconcat
                  (delete-dups
                   (mapcar (lambda (item) (plist-get item :type))
-                          (plist-get graph :diagnostics)))))))))
-      (plist-get graph :fragments))))
+                          diagnostics))))))))
+      (cons (chat-ui--session-directories-fragment session root cwd)
+            (nreverse fragments)))))
 
 (defun chat-ui--format-tool-results (tool-results)
   "Format TOOL-RESULTS for display."

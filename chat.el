@@ -317,10 +317,13 @@ Quick Shell (Hybrid Mode):
   !cd <dir>             - Change working directory (bare cd goes home)
   /cd [dir]             - Change working directory (no dir prompts)
   /pwd                  - Show the working directory
+  /root [dir]           - Show or move the session's stable root directory
   \\<text>               - Send text as is, even if it starts with ! or /
 
 The working directory belongs to the session, so it is restored when the
-session is reopened, and the AI tools run there too.
+session is reopened, and the AI tools run there too.  The root directory
+is separate and stable: it anchors project instructions and scope, /cd
+never moves it, and /root is the only way to point it elsewhere.
   M-x chat-ui-workspace-enable - Move this session into an owned worktree
   M-x chat-ui-workspace-status - Inspect and reconcile workspace ownership
   M-x chat-ui-workspace-release - Return to the source checkout
@@ -649,6 +652,12 @@ how it is drawn, which is why it does not belong in either display."
   ;; session was pointed at.
   (when-let ((directory (chat-session-working-directory session)))
     (setq-local default-directory directory))
+  ;; Pin the root on first open: the fallbacks (code project root, then
+  ;; working directory) are sensible anchors, but both can move.  Once
+  ;; recorded, only an explicit /root moves it.
+  (unless (chat-session-metadata-get session 'root-directory)
+    (when-let ((root (chat-session-root-directory session)))
+      (chat-session-set-root-directory session root)))
   ;; Scratch space is created here rather than on first write so that
   ;; the path named in the system prompt exists by the time the model
   ;; is told about it.  Pruning rides along because this is the moment

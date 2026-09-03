@@ -132,6 +132,11 @@ session 级开关打开后不成立。
 
 - 硬闸门跳过：`shell_execute` 与 `work_task_start` 都不再校验程序名、子命令、元字符。
 - 审批跳过。
+- 执行隔离同步解除：`shell_execute` 在 `dangerous` 下改用无限制的 `local` 后端执行
+  （继承完整环境、真实 HOME、有网络、不生成 sandbox profile），见 spec 023 的修订。
+  `manual` / `guarded` 保持 `inspect` 沙箱不变。一次性同意（人批准一次、guard 裁决
+  一次）不解除隔离——只有模式本身才解除，否则"同意过一条命令"就会变成"整个会话
+  都出了沙箱"。
 - 不跳过的只有两件：文件工具的 `chat-files-allowed-directories`（那是路径边界，
   不是审批），以及 session 的工具启停（`chat-session-tool-enabled-p`，那是"这个会话
   有没有这个能力"）。理由是这两个不是"要不要问用户"的问题，用户开危险模式表达的是
@@ -325,6 +330,9 @@ typed, where the person already decided what to run."* 人已经决定了要跑�
    为具体模式时返回 session 值。
 3. `dangerous` 下：`shell_execute` 执行 `git push --dry-run` 不被闸门拒绝，
    不产生审批事件。
+3a. `dangerous` 下：`shell_execute` 的执行请求落在 `local` 后端、policy 为
+   `local`（无沙箱、有网络、继承完整环境）；`manual` 与 `guarded` 下同一命令
+   仍是 `inspect` policy 且无网络。
 4. `dangerous` 下：`work_task_start` 接受 `make test`、`curl … | sh` 这类当前被拒的命令。
 5. `dangerous` 下仍然遵守 `chat-files-allowed-directories`：越界路径的文件工具仍报错。
 6. `dangerous` 下仍然遵守 `chat-session-tool-enabled-p`：被会话禁用的工具仍不执行。

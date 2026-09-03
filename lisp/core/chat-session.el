@@ -151,6 +151,36 @@ directory survives reopening.  Returns the stored directory."
       (chat-session-save session))
     expanded))
 
+(defun chat-session-root-directory (session)
+  "Return the stable root directory of SESSION, or nil.
+
+The root anchors project instructions, goals and project scope; it does
+not follow /cd.  A recorded root wins.  Without one, a code session's
+project root answers, then the working directory: both give a session
+that has never been pinned somewhere a sensible anchor until it is."
+  (or (let ((directory (chat-session-metadata-get session 'root-directory)))
+        (and (stringp directory)
+             (file-directory-p directory)
+             (file-name-as-directory directory)))
+      (and (fboundp 'chat-code-session-p)
+           (chat-code-session-p session)
+           (fboundp 'chat-code-session-project-root)
+           (chat-code-session-project-root session))
+      (chat-session-working-directory session)))
+
+(defun chat-session-set-root-directory (session directory)
+  "Record DIRECTORY as the stable root directory of SESSION.
+
+The root changes only through this setter -- never through /cd -- so the
+model's picture of where the project lives cannot drift with shell work.
+Saves the session when `chat-session-auto-save' is enabled.  Returns the
+stored directory."
+  (let ((expanded (file-name-as-directory (expand-file-name directory))))
+    (chat-session-metadata-set session 'root-directory expanded)
+    (when (and session chat-session-auto-save)
+      (chat-session-save session))
+    expanded))
+
 (defun chat-session--metadata-key (key)
   "Return KEY as the plain symbol used in stored metadata."
   (if (keywordp key)

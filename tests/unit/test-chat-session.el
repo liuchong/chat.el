@@ -890,5 +890,36 @@ header, so a switch made mid-session could be saved and lost."
        (should (eq 'kimi-code (chat-session-model-id branch)))
        (should (equal "k3" (chat-session-model-name branch)))))))
 
+(ert-deftest chat-session-root-falls-back-to-working-directory ()
+  "A session with no recorded root is anchored by its working directory."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (session (chat-test-silently (chat-session-create "T" 'kimi-code)))
+          (work (expand-file-name "work" temp-dir)))
+     (make-directory work t)
+     (chat-session-set-working-directory session work)
+     (should (string= (file-name-as-directory work)
+                      (chat-session-root-directory session))))))
+
+(ert-deftest chat-session-root-does-not-follow-the-working-directory ()
+  "A recorded root stays put when the working directory moves."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-auto-save t)
+          (session (chat-test-silently (chat-session-create "T" 'kimi-code)))
+          (root (expand-file-name "root" temp-dir))
+          (elsewhere (expand-file-name "elsewhere" temp-dir)))
+     (make-directory root t)
+     (make-directory elsewhere t)
+     (chat-session-set-root-directory session root)
+     (chat-session-set-working-directory session elsewhere)
+     (should (string= (file-name-as-directory root)
+                      (chat-session-root-directory session)))
+     (should (string= (file-name-as-directory elsewhere)
+                      (chat-session-working-directory session)))
+     (let ((loaded (chat-session-load (chat-session-id session))))
+       (should (string= (file-name-as-directory root)
+                        (chat-session-root-directory loaded)))))))
+
 (provide 'test-chat-session)
 ;;; test-chat-session.el ends here

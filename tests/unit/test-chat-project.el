@@ -350,12 +350,24 @@ outrank the cap or the declaration means nothing."
      (let* ((default-directory b)
             (session (make-chat-session :id "typed-project")))
        (chat-session-set-working-directory session b)
-       (let ((fragments (chat-ui--project-context session)))
-         (should (= (length fragments) 1))
-         (should (eq (chat-context-fragment-kind (car fragments)) 'instruction))
+       (let* ((fragments (chat-ui--project-context session))
+              (directories
+               (seq-find (lambda (fragment)
+                           (equal (chat-context-fragment-source-kind fragment)
+                                  'session-directories))
+                         fragments))
+              (instructions
+               (seq-remove (lambda (fragment)
+                             (equal (chat-context-fragment-source-kind fragment)
+                                    'session-directories))
+                           fragments)))
+         (should directories)
+         (should (= (length instructions) 1))
+         (should (eq (chat-context-fragment-kind (car instructions))
+                     'instruction))
          (should (string-match-p "plain chat rules"
                                  (chat-context-fragment-payload
-                                  (car fragments)))))))))
+                                  (car instructions)))))))))
 
 (ert-deftest chat-context-code-optimize-terminates-without-removable-sources ()
   "Test the context optimizer stops when nothing can be removed."

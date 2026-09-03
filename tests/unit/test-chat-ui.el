@@ -2775,5 +2775,70 @@ recorded Markdown."
      (should-not response-started)
      (should-not (chat-session-messages session)))))
 
+(ert-deftest chat-ui-command-root-moves-the-root-not-the-cwd ()
+  "/root repoints the stable anchor; the working directory stays."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (chat-session-auto-save t)
+          (root (expand-file-name "root" temp-dir))
+          (work (expand-file-name "work" temp-dir))
+          (session (chat-session-create "Root Session" 'kimi)))
+     (make-directory root t)
+     (make-directory work t)
+     (chat-session-set-working-directory session work)
+     (with-temp-buffer
+       (setq-local chat--current-session session)
+       (setq default-directory (file-name-as-directory work))
+       (cl-letf (((symbol-function 'chat-ui--insert-system-message) #'ignore))
+         (chat-ui--command-root root)
+         (should (string= (file-name-as-directory root)
+                          (chat-session-root-directory session)))
+         (should (string= (file-name-as-directory work)
+                          (chat-session-working-directory session)))
+         (should (string= default-directory
+                          (file-name-as-directory work))))))))
+
+(ert-deftest chat-ui-project-context-names-root-and-current-directory ()
+  "The directories fragment names both directories and the AGENTS.md rule."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (root (expand-file-name "root" temp-dir))
+          (work (expand-file-name "work" temp-dir))
+          (session (chat-session-create "Ctx Session" 'kimi)))
+     (make-directory root t)
+     (make-directory work t)
+     (chat-session-set-root-directory session root)
+     (chat-session-set-working-directory session work)
+     (let* ((fragments (chat-ui--project-context session))
+            (fragment (car fragments))
+            (payload (chat-context-fragment-payload fragment)))
+       (should (string-match-p (regexp-quote (file-name-as-directory root))
+                               payload))
+       (should (string-match-p (regexp-quote (file-name-as-directory work))
+                               payload))
+       (should (string-match-p "MUST read and obey AGENTS.md" payload))
+       (should (eq (chat-context-fragment-residency fragment) 'protected))))))
+
+(ert-deftest chat-ui-project-context-reads-agents-files-from-both-directories ()
+  "Instructions come from the root and from a cwd outside it alike."
+  (chat-test-with-temp-dir
+   (let* ((chat-session-directory temp-dir)
+          (root (expand-file-name "root" temp-dir))
+          (work (expand-file-name "work" temp-dir))
+          (session (chat-session-create "Ctx Session" 'kimi)))
+     (make-directory root t)
+     (make-directory work t)
+     (with-temp-file (expand-file-name "AGENTS.md" root)
+       (insert "root-rules-unique-marker"))
+     (with-temp-file (expand-file-name "AGENTS.md" work)
+       (insert "work-rules-unique-marker"))
+     (chat-session-set-root-directory session root)
+     (chat-session-set-working-directory session work)
+     (let* ((fragments (chat-ui--project-context session))
+            (payloads (mapconcat #'chat-context-fragment-payload
+                                 fragments "\n")))
+       (should (string-match-p "root-rules-unique-marker" payloads))
+       (should (string-match-p "work-rules-unique-marker" payloads))))))
+
 (provide 'test-chat-ui)
 ;;; test-chat-ui.el ends here
