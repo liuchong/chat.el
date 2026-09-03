@@ -106,6 +106,102 @@ car collects the messages of every request."
        (chat-agent--complete-result run nil '(:cancelled t) nil)))
     (should (equal finished (list run 'cancelled nil)))))
 
+(ert-deftest chat-agent-resumes-a-turn-cut-mid-stream ()
+  "A transient cut after partial content re-sends the turn, bounded."
+  (let (callbacks events scheduled run)
+    (cl-letf (((symbol-function 'chat-model-request-events)
+               (lambda (_provider _messages callback _options)
+                 (push callback callbacks)
+                 (intern (format "model-handle-%d" (length callbacks)))))
+              ((symbol-function 'run-at-time)
+               (lambda (delay _repeat function &rest arguments)
+                 (setq scheduled (cons (cons delay function) arguments))
+                 'retry-timer)))
+      (setq run
+            (chat-agent-start
+             (list :provider 'kimi
+                   :transport 'stream
+                   :messages (list (chat-agent-test--user-message))
+                   :on-event (lambda (event) (push event events)))))
+      ;; Partial content arrived, then the connection died.
+      (funcall
+       (car callbacks)
+       (chat-model-event-create :type 'text-delta :payload '(:delta "一半")))
+      (funcall
+       (car callbacks)
+       (chat-model-event-create
+        :type 'error
+        :payload '(:message "Connection to api.xgapi.top closed mid-stream"
+                   :class 'mid-stream-close)))
+      ;; Not a hard failure: a resume is scheduled and the run continues.
+      (should-not (chat-agent-run-state-done run))
+      (should (= (length callbacks) 1))
+      (let ((retry (seq-find (lambda (event)
+                               (eq (plist-get event :type) 'model-retry))
+                             events)))
+        (should retry)
+        (should (plist-get retry :resume)))
+      ;; Fire the resume: a fresh dispatch goes out.
+      (funcall (cdar scheduled))
+      (should (= (length callbacks) 2))
+      ;; The resumed attempt completes normally.
+      (funcall
+       (car callbacks)
+       (chat-model-event-create
+        :type 'completed
+        :payload '(:result (:content "完整答案" :reasoning ""))))
+      (should (chat-agent-run-state-done run))
+      (should (eq (chat-agent-run-state-status run) 'completed)))))
+
+(ert-deftest chat-agent-resume-is-bounded ()
+  "Repeated mid-stream cuts eventually fail the turn for real."
+  (let (callbacks run events)
+    (cl-letf (((symbol-function 'chat-model-request-events)
+               (lambda (_provider _messages callback _options)
+                 (push callback callbacks)
+                 'handle))
+              ((symbol-function 'run-at-time)
+               (lambda (_delay _repeat function &rest _arguments)
+                 function)))
+      (let ((chat-agent-model-stream-resume-retries 1))
+        (setq run
+              (chat-agent-start
+               (list :provider 'kimi
+                     :transport 'stream
+                     :messages (list (chat-agent-test--user-message))
+                     :on-event (lambda (event) (push event events)))))
+        (dotimes (_ 2)
+          (funcall
+           (car callbacks)
+           (chat-model-event-create :type 'text-delta
+                                    :payload '(:delta "x")))
+          (funcall
+           (car callbacks)
+           (chat-model-event-create
+            :type 'error
+            :payload '(:message "closed mid-stream"
+                       :class 'mid-stream-close)))
+          ;; Fire the scheduled resume, if any.
+          (when (and (not (chat-agent-run-state-done run))
+                     (chat-agent-run-state-handle run))
+            (let ((timer (chat-agent-run-state-handle run)))
+              (setf (chat-agent-run-state-handle run) nil)
+              (when (functionp timer)
+                (funcall timer)))))
+        (should (chat-agent-run-state-done run))
+        (should (eq (chat-agent-run-state-status run) 'error))))))
+
+(ert-deftest chat-agent-transient-classification-accepts-transport-classes ()
+  "The transport's own classes classify without parsing message text."
+  (should (chat-agent--transient-model-error-p "anything" 'mid-stream-close))
+  (should (chat-agent--transient-model-error-p "anything" 'stall))
+  (should (chat-agent--transient-model-error-p "anything" 'connect))
+  (should (chat-agent--transient-model-error-p "anything" 'dns))
+  (should-not (chat-agent--transient-model-error-p "anything" 'http))
+  (should-not (chat-agent--transient-model-error-p "anything" nil))
+  ;; Message matching still covers the url.el transport's phrasing.
+  (should (chat-agent--transient-model-error-p "connection reset" nil)))
+
 (ert-deftest chat-agent-retries-transient-model-errors-before-payload ()
   "A connection-stage failure backs off without duplicating model output."
   (let (callbacks events scheduled retry-delay run)

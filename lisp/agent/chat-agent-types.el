@@ -47,6 +47,17 @@ reused.  Waiting is asynchronous and remains cancellable."
   :type '(repeat number)
   :group 'chat)
 
+(defcustom chat-agent-model-stream-resume-retries 2
+  "Maximum re-dispatches of a model turn cut mid-stream.
+
+A turn that already streamed partial content and then lost the connection
+is re-sent from scratch, this many times at most.  The partial content is
+never recorded and never resent, so the model regenerates the answer;
+tools only run after a turn completes, so re-sending has no side effects
+beyond the tokens the retry costs."
+  :type 'integer
+  :group 'chat)
+
 (defconst chat-agent-truncated-tool-result-text
   (concat
    "Tool call rejected: the model response was truncated, so the tool "
@@ -78,6 +89,7 @@ reused.  Waiting is asynchronous and remains cancellable."
   content tool-events tool-calls tool-results
   raw-request raw-response
   handle cancelled done status reason
+  (stream-resume-attempts 0)
   pending-model-switch
   (steering-queue nil)
   (followup-queue nil)

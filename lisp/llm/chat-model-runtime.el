@@ -177,6 +177,13 @@ failure."
                          (chat-model-runtime--request-id)))
          (sequence 0)
          (finished nil)
+         ;; Stream accumulators live here, not in the streaming branch's
+         ;; let, so a mid-stream failure can report the partial content it
+         ;; managed to receive.
+         (text-parts nil)
+         (reasoning-parts nil)
+         (payload-error nil)
+         (usage nil)
          (emit
           (lambda (type &optional payload)
             (unless finished
@@ -197,8 +204,18 @@ failure."
                (chat-model-event-make
                 type provider model request-id sequence payload)))))
          (finish-error
-          (lambda (message)
-            (funcall finish 'error (list :message message))))
+          (lambda (message &optional class)
+            (funcall
+             finish 'error
+             (append
+              (list :message message)
+              (and class (list :class class))
+              (and text-parts
+                   (list :partial-content
+                         (apply #'concat (nreverse text-parts))))
+              (and reasoning-parts
+                   (list :partial-reasoning
+                         (apply #'concat (nreverse reasoning-parts))))))))
          prepared)
     (condition-case err
         (progn
@@ -217,11 +234,7 @@ failure."
                      :capabilities
                      (chat-model-capabilities-resolve provider model)))
       (if (plist-get prepared :stream)
-          (let ((text-parts nil)
-                (reasoning-parts nil)
-                (usage nil)
-                (payload-error nil)
-                proc)
+          (let (proc)
             (condition-case err
                 (progn
                   (setq
@@ -249,39 +262,55 @@ failure."
                              (funcall inner process event)
                            (error nil)))
                        (unless finished
-                         (cond
-                          ((string-match-p
-                            "abnormally\\|failed\\|killed\\|deleted" event)
-                           (funcall finish-error
-                                    (or payload-error (string-trim event))))
-                          ((string-match-p "finished\\|exited" event)
-                           (let ((stream-error
-                                  (or payload-error
-                                      (process-get process
-                                                   'chat-stream-http-error))))
-                             (if stream-error
-                                 (funcall finish-error stream-error)
-                               (let* ((native
-                                       (chat-stream-native-result process))
-                                      (content
-                                       (apply #'concat (nreverse text-parts)))
-                                      (reasoning
-                                       (apply #'concat
-                                              (nreverse reasoning-parts)))
-                                      (result
-                                       (append
-                                        (list :content content
-                                              :reasoning reasoning
-                                              :usage usage
-                                              :raw-request nil
-                                              :raw-response nil)
-                                        native)))
-                                 (funcall finish 'completed
-                                          (list
-                                           :finish-reason
-                                           (plist-get native :finish-reason)
-                                           :usage usage
-                                           :result result)))))))))))
+                         ;; The transport settles its own terminal state on
+                         ;; the `chat-stream-terminal' property; event
+                         ;; strings are transport-specific and read here
+                         ;; only as a fallback for a transport that never
+                         ;; settled.
+                         (let ((terminal
+                                (process-get process 'chat-stream-terminal)))
+                           (cond
+                            ((eq (plist-get terminal :status) 'error)
+                             (funcall finish-error
+                                      (or (plist-get terminal :message)
+                                          payload-error)
+                                      (plist-get terminal :class)))
+                            ((eq (plist-get terminal :status) 'ok)
+                             (let ((stream-error
+                                    (or payload-error
+                                        (process-get
+                                         process
+                                         'chat-stream-http-error))))
+                               (if stream-error
+                                   (funcall finish-error stream-error)
+                                 (let* ((native
+                                         (chat-stream-native-result process))
+                                        (content
+                                         (apply #'concat
+                                                (nreverse text-parts)))
+                                        (reasoning
+                                         (apply #'concat
+                                                (nreverse reasoning-parts)))
+                                        (result
+                                         (append
+                                          (list :content content
+                                                :reasoning reasoning
+                                                :usage usage
+                                                :raw-request nil
+                                                :raw-response nil)
+                                          native)))
+                                   (funcall finish 'completed
+                                            (list
+                                             :finish-reason
+                                             (plist-get native :finish-reason)
+                                             :usage usage
+                                             :result result))))))
+                            ((string-match-p
+                              "abnormally\\|failed\\|killed\\|deleted\\|connection broken"
+                              event)
+                             (funcall finish-error
+                                      (or payload-error
+                                          (string-trim event))))))))))
                   proc)
               (error
                (funcall finish-error (error-message-string err))

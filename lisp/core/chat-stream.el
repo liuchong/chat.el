@@ -20,6 +20,7 @@
 (require 'subr-x)
 (require 'chat-log)
 (require 'chat-request-diagnostics)
+(require 'chat-stream-net)
 
 ;; ------------------------------------------------------------------
 ;; Variables
@@ -27,35 +28,6 @@
 
 (defvar-local chat-stream--partial-line ""
   "Incomplete SSE line carried between process filter calls.")
-
-(defvar chat-stream--curl nil
-  "Cached location of the curl executable, or nil when not yet looked up.")
-
-(defun chat-stream--ensure-curl ()
-  "Signal unless curl can be found, remembering where it was.
-`executable-find' walks `exec-path' and stats each entry, which costs
-real milliseconds on a long path -- and it was paying that on every
-request to answer a question whose answer does not change."
-  (or chat-stream--curl
-      (setq chat-stream--curl (executable-find "curl"))
-      (error "curl executable not found in PATH")))
-
-(defun chat-stream--redact-curl-args-for-log (args)
-  "Return ARGS with sensitive values redacted for logging."
-  (let ((result nil))
-    (while args
-      (let ((arg (car args)))
-        (cond
-         ((string-prefix-p "Authorization: Bearer " arg)
-          (push "Authorization: Bearer <redacted>" result))
-         ((and (string= arg "-d") (cdr args))
-          (push arg result)
-          (push (format "<%d bytes>" (string-bytes (cadr args))) result)
-          (setq args (cdr args)))
-         (t
-          (push arg result))))
-      (setq args (cdr args)))
-    (nreverse result)))
 
 ;; ------------------------------------------------------------------
 ;; SSE Parsing
@@ -297,14 +269,29 @@ Handles format: data: {...} or data:{...} (with or without space)"
 
 CALLBACK is called with each content chunk as it arrives.
 OPTIONS is an optional plist of request parameters.
-Returns the process object."
+Returns the network process.
+
+The transport is in-process: TLS and HTTP/1.1 run through
+`chat-stream-net-post' (see chat-stream-net.el).  There is no external
+program, credentials never touch a temporary file, and the terminal
+state arrives as the structured `chat-stream-terminal' process property
+rather than a process exit string."
   ;; Check dependencies
   (unless (fboundp 'chat-llm-get-provider)
     (error "chat-llm-get-provider not defined - check chat-llm.el is loaded"))
   (unless (fboundp 'chat-llm--build-request)
     (error "chat-llm--build-request not defined - check chat-llm.el is loaded"))
   (let* ((config (chat-llm-get-provider provider))
-         (url (chat-llm--request-url provider options))
+         (request-url-fn (plist-get config :request-url-fn))
+         ;; Endpoint failover applies to the default URL shape; a
+         ;; provider with its own url function owns its addressing.
+         (url (if request-url-fn
+                  (funcall request-url-fn provider config options)
+                (concat
+                 (chat-stream-net-choose-base-url
+                  (or (plist-get config :base-urls)
+                      (list (plist-get config :base-url))))
+                 (or (plist-get config :request-path) "/chat/completions"))))
          (headers (chat-llm--make-headers provider))
          (request-id (plist-get options :request-id))
          (reasoning-callback (plist-get options :on-reasoning))
@@ -314,84 +301,59 @@ Returns the process object."
          (_ (chat-log-timing-mark "headers"))
          (body (chat-llm--build-request provider messages opts))
          (_ (chat-log-timing-mark "build"))
-         ;; Encode body for curl (handle multibyte characters)
+         ;; Encode body (handle multibyte characters)
          (body-str (json-encode body))
          (body-encoded (if (multibyte-string-p body-str)
                            (encode-coding-string body-str 'utf-8)
                          body-str))
          (_ (chat-log-timing-mark "encode"))
-         (curl (chat-stream--ensure-curl))
-         (curl-config (chat-llm--curl-post-config url headers t nil))
-         (curl-config-file (chat-llm--make-curl-config-file curl-config))
-         (curl-command (list curl "--config" curl-config-file
-                             "--data-binary" "@-"))
-         ;; Buffer for accumulating partial lines
+         ;; Buffer for the SSE layer's partial-line state
          (buffer (generate-new-buffer " *chat-stream*"))
-         (content-buffer "")
          (process nil))
-    
-    ;; Set up buffer-local variables
+
     (with-current-buffer buffer
       (setq-local chat-stream--partial-line ""))
-    
-    ;; Log request metadata without leaking user content or secrets.  One
-    ;; line rather than four: each `chat-log' call opens the file, appends
-    ;; and closes it, and this happens while the reader is waiting.
-    (chat-log "[REQUEST] %s | %d bytes | %d messages | transport private-config+stdin-body"
+
+    (chat-log "[REQUEST] %s | %d bytes | %d messages | transport in-process"
               url
               (string-bytes body-encoded)
               (length messages))
     (chat-log-timing-mark "log")
     (condition-case err
         (progn
-          (setq process (make-process
-                         :name "chat-stream"
-                         :buffer buffer
-                         :command curl-command
-                         :coding 'binary
-                         :connection-type 'pipe
-                         :filter (lambda (proc string)
-                                  (chat-stream--handle-output
-                                   proc string provider callback reasoning-callback
-                                   payload-callback))
-                         :sentinel (lambda (proc event)
-                                    (chat-log "[STREAM] Process event: %s" event)
-                                    (when (memq (process-status proc) '(exit signal))
-                                      (chat-llm--cleanup-curl-config proc)
-                                      (when (buffer-live-p (process-buffer proc))
-                                        ;; HTTP error bodies and final SSE chunks
-                                        ;; may lack a final newline.
-                                        (when (eq (process-status proc) 'exit)
-                                          (with-current-buffer (process-buffer proc)
-                                            (when (and (stringp chat-stream--partial-line)
-                                                       (not (string-empty-p chat-stream--partial-line)))
-                                              (chat-stream--handle-output
-                                               proc
-                                               (concat chat-stream--partial-line "\n")
-                                               provider
-                                               callback
-                                               reasoning-callback
-                                               payload-callback))))
-                                        (kill-buffer (process-buffer proc)))))
-                         :stderr (get-buffer-create "*chat-stream-err*")))
-          (process-put process 'chat-curl-config-file curl-config-file)
-          (chat-llm--send-curl-body process body-encoded))
+          (setq process
+                (chat-stream-net-post
+                 url headers body-encoded
+                 (lambda (proc chunk)
+                   ;; A stream that reached its completion marker is
+                   ;; transport-complete even when the body framing was
+                   ;; close-delimited and never said so.
+                   (when (string-match-p
+                          "^data: ?\\[DONE\\]\\s-*$\\|\"type\": ?\"message_stop\""
+                          chunk)
+                     (process-put proc 'chat-stream-net-saw-done t))
+                   (chat-stream--handle-output
+                    proc chunk provider callback reasoning-callback
+                    payload-callback))
+                 (lambda (proc terminal)
+                   (process-put proc 'chat-stream-terminal terminal)
+                   (when (eq (plist-get terminal :status) 'error)
+                     (process-put proc 'chat-stream-http-error
+                                  (plist-get terminal :message)))
+                   (let ((process-buffer (process-buffer proc)))
+                     (when (buffer-live-p process-buffer)
+                       (kill-buffer process-buffer))))))
+            (set-process-buffer process buffer))
       (error
-       (when (and process (process-live-p process))
-         (delete-process process))
-       (chat-llm--delete-curl-config-file curl-config-file)
        (when request-id
          (chat-request-diagnostics-record
           request-id
           'error
           :error (error-message-string err)
           :summary "Failed to start stream"))
-       (chat-log "[STREAM] make-process FAILED: %s" (error-message-string err))
+       (chat-log "[STREAM] connect FAILED: %s" (error-message-string err))
        (kill-buffer buffer)
        (signal (car err) (cdr err))))
-    ;; Forking is the one cost on this path that cannot be measured
-    ;; anywhere but the reader's own Emacs: it scales with the heap the
-    ;; parent has accumulated, and a batch process has almost none.
     (chat-log-timing-mark "spawn")
     (when request-id
       (process-put process 'chat-request-id request-id)
