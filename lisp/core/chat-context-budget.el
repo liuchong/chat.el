@@ -42,11 +42,12 @@
   "How much context a run may use, and what it is told about that."
   :group 'chat)
 
-(defcustom chat-context-default-window 131072
+(defcustom chat-context-default-window 262144
   "Context window in tokens assumed when a provider does not declare one.
 
-Deliberately not optimistic: overshooting produces a rejected request,
-while undershooting only compacts earlier than strictly necessary."
+Set to 256k so modern long-context models are actually used rather than
+compacted as if the window were 128k.  A provider that declares its own
+`:context-window' wins over this default."
   :type 'integer
   :group 'chat-context-budget)
 
@@ -479,11 +480,15 @@ can act on: history compacts itself, standing instructions do not."
        (if warning (concat "\n" warning) "")))))
 
 (defun chat-context-budget-compaction-limit (model)
-  "Return the token budget compaction should aim at for MODEL.
+  "Return the token budget compaction should trigger at for MODEL.
 
-Derived from the model's own window instead of a flat figure, so a large
-window is actually used and a small one is not overrun."
-  (chat-context-budget-usable (chat-context-window-for-model model)))
+Compaction fires ahead of the usable ceiling, so history is summarized
+while there is still working room instead of after the window has filled.
+Derived from the model's own window scaled by
+`chat-context-compact-at-ratio' -- the same share that raises the
+compaction reminder, so remind and compact agree."
+  (floor (* (chat-context-budget-usable (chat-context-window-for-model model))
+            chat-context-compact-at-ratio)))
 
 (provide 'chat-context-budget)
 ;;; chat-context-budget.el ends here

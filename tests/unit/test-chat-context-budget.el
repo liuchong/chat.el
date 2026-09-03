@@ -332,11 +332,24 @@ expensive, which is backwards for filling a window."
       (should (> (cdr (assq 'tool-definitions measured)) 50)))))
 
 (ert-deftest chat-context-budget-compaction-limit-follows-the-model ()
-  "Compaction aims at the model's own window rather than a flat figure."
+  "Compaction fires ahead of the model's usable ceiling.
+
+The limit is the usable window scaled by `chat-context-compact-at-ratio',
+so history is summarized while there is still working room rather than
+only after the window has filled."
   (cl-letf (((symbol-function 'chat-llm-provider-option)
              (lambda (_model key) (and (eq key :context-window) 200000))))
     (let ((chat-context-reply-reserve-ratio 0.15))
-      (should (equal (chat-context-budget-compaction-limit 'model) 170000)))))
+      ;; usable = 200000 * 0.85 = 170000; ahead-of-fill trigger = * 0.75.
+      (should (equal (chat-context-budget-compaction-limit 'model) 127500))
+      (should (< (chat-context-budget-compaction-limit 'model)
+                 (chat-context-budget-usable 200000))))))
+
+(ert-deftest chat-context-budget-default-window-is-256k ()
+  "The un-declared fallback window is 256k, not 128k."
+  (should (equal chat-context-default-window 262144))
+  (should (= (chat-context-budget-usable 262144)
+             (floor (* 262144 (- 1 chat-context-reply-reserve-ratio))))))
 
 (provide 'test-chat-context-budget)
 ;;; test-chat-context-budget.el ends here
