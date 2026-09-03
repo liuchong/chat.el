@@ -151,6 +151,31 @@ arrived (headers plus Content-Length body bytes)."
      (should (eq (plist-get terminal :class) 'http))
      (should (equal (plist-get terminal :message) "slow down")))))
 
+(ert-deftest chat-stream-net-connect-timeout-hands-the-process-to-its-timer ()
+  "The connect timer's callback receives the process it guards.
+The lambda declared the argument and never got it, so the timeout path
+itself errored with wrong-number-of-arguments instead of reporting the
+timeout."
+  (let* ((chat-stream-connect-timeout 0.2)
+         (chat-stream-stall-check-interval 60)
+         (pipe (make-pipe-process :name "stream-net-connect-stub"
+                                  :noquery t))
+         terminal)
+    (unwind-protect
+        (cl-letf (((symbol-function 'open-network-stream)
+                   (lambda (&rest _) pipe)))
+          (chat-stream-net-endpoint-health-clear)
+          (chat-stream-net-post "http://192.0.2.1:81/v1/x" nil "{}"
+                                #'ignore
+                                (lambda (_proc term) (setq terminal term)))
+          (should (test-chat-stream-net--await (lambda () terminal)))
+          (should (eq (plist-get terminal :class) 'connect))
+          (should (string-match-p "no connection after"
+                                  (plist-get terminal :message))))
+      (chat-stream-net-endpoint-health-clear)
+      (when (process-live-p pipe)
+        (delete-process pipe)))))
+
 (ert-deftest chat-stream-net-stall-is-classified ()
   "A connection that never sends a byte is declared stalled."
   (test-chat-stream-net--with-server

@@ -393,6 +393,12 @@ per-chunk UTF-8 decoding in the SSE layer safe."
        (deleted-locally
         ;; Cancel or stall teardown already reported; nothing to add.
         nil)
+       ((process-get proc 'chat-stream-terminal)
+        ;; A classifier (connect timer, stall watchdog, parse error,
+        ;; connect failure) has already named this failure.  The
+        ;; EOF-time recomputation below must not overwrite it with its
+        ;; blunter guess.
+        nil)
        ((process-get proc 'chat-stream-net-error-body)
         (let ((message (chat-stream-net--error-body-message proc)))
           (when (and status (>= status 500))
@@ -586,13 +592,17 @@ without parsing event strings."
                        (chat-stream-net--message
                         'connect
                         (process-get process 'chat-stream-net-host)
-                        (format "no connection after %d seconds"
+                        (format "no connection after %s seconds"
                                 chat-stream-connect-timeout))))
                 (chat-stream-net-endpoint-record-failure
                  (process-get process 'chat-stream-net-endpoint-key)
                  'connect)
                 (delete-process process)
-                (chat-stream-net--finalize process t)))))
+                (chat-stream-net--finalize process t)))
+            ;; The timer fires with the process in hand: a lambda that
+            ;; declared it but never received it turned the timeout path
+            ;; itself into the error.
+            proc))
           (chat-stream-net--start-watchdog proc)
           proc)
       (error
