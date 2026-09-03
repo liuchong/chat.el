@@ -2273,7 +2273,14 @@ long transcript never scans the whole conversation."
         (message "%s" (chat-i18n 'empty-message "Cannot send empty message")))
        (control
         (chat-ui--clear-input input-start input-end)
-        (funcall control (plist-get command :arg)))
+        (funcall control (plist-get command :arg))
+        ;; While-busy commands bypass `chat-ui--dispatch-command', so the
+        ;; default-command effect has to be applied here as well: an
+        ;; explicit `/send' hands plain input back to the model, and a
+        ;; `/stage' claims it, even while a run holds the surface.
+        (chat-ui--record-command-usage
+         (chat-ui--command-canonical-name (plist-get command :name)))
+        (chat-ui--note-command-default command))
        ;; Through the send path rather than straight to steering: an
        ;; explicit `/send queue ...' during a run has to be read as a
        ;; command, and this branch used to swallow it as prose.
