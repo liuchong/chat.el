@@ -507,5 +507,70 @@ instructions and its recovered history along with the chrome."
     (should (< (length label) 120))
     (should (string-match-p "\\.\\.\\." label))))
 
+;; ------------------------------------------------------------------
+;; Step timing
+;; ------------------------------------------------------------------
+
+(defun test-chat-transcript--timed-message (role content seconds
+                                                &optional category work)
+  "Build a message stamped SECONDS after a fixed epoch."
+  (let ((message (make-chat-message
+                  :id (chat-session-new-message-id)
+                  :role role
+                  :content content
+                  :timestamp (seconds-to-time seconds))))
+    (when (or category work)
+      (chat-transcript-stamp message :category category :work work))
+    message))
+
+(ert-deftest chat-transcript-format-duration ()
+  "Durations read short under a minute and minutes-and-seconds over."
+  (should (equal (chat-transcript--format-duration nil) nil))
+  (should (equal (chat-transcript--format-duration 4.24) "4.2s"))
+  (should (equal (chat-transcript--format-duration 45) "45s"))
+  (should (equal (chat-transcript--format-duration 125) "2m 05s")))
+
+(ert-deftest chat-transcript-fold-row-carries-the-runs-wall-time ()
+  "A fold row says how long its run took, measured from the previous part."
+  (let* ((question (test-chat-transcript--timed-message :user "look" 1000))
+         (step (test-chat-transcript--timed-message
+                :assistant "on it" 1005 'ai-progress 'tool-call))
+         (answer (test-chat-transcript--timed-message
+                  :assistant "done" 1008))
+         (plan (chat-transcript-plan
+                (chat-transcript-parts (list question step answer))))
+         (row (seq-find (lambda (instruction)
+                          (eq (plist-get instruction :type) 'fold-row))
+                        plan)))
+    (should row)
+    (should (= (plist-get row :duration) 5.0))
+    (should (string-match-p
+             "5.0s" (chat-transcript-fold-row-text row)))))
+
+(ert-deftest chat-transcript-first-run-shows-no-duration ()
+  "Nothing precedes the first run, so there is nothing to measure against."
+  (let* ((step (test-chat-transcript--timed-message
+                :assistant "on it" 1000 'ai-progress 'tool-call))
+         (plan (chat-transcript-plan (chat-transcript-parts (list step))))
+         (row (car plan)))
+    (should (eq (plist-get row :type) 'fold-row))
+    (should (null (plist-get row :duration)))))
+
+(ert-deftest chat-transcript-turn-outcome-never-folds-and-never-feeds ()
+  "A run's terminal marker always shows and is never sent to the model."
+  (let* ((marker (test-chat-transcript--timed-message
+                  :system "✓ Completed · 2m · 3 steps" 1000
+                  'turn-outcome nil))
+         (parts (chat-transcript-parts (list marker)))
+         (plan (chat-transcript-plan parts)))
+    (should (= (length parts) 1))
+    (should (equal (plist-get (car parts) :category) 'turn-outcome))
+    (should (equal (chat-transcript-part-label (car parts)) "Outcome"))
+    (should (null (chat-transcript-channel (car parts))))
+    (should-not (seq-find (lambda (instruction)
+                            (eq (plist-get instruction :type) 'fold-row))
+                          plan))
+    (should-not (chat-transcript-model-message-p marker))))
+
 (provide 'test-chat-transcript)
 ;;; test-chat-transcript.el ends here

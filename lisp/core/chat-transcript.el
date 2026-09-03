@@ -251,9 +251,19 @@ model requires it for a tool-call continuation."
                 :text (or text "")
                 :message message
                 :message-id (chat-message-id message)
+                :timestamp (chat-message-timestamp message)
                 :turn (chat-transcript-turn message)
                 :step (chat-transcript-step message))
           extra))
+
+(defun chat-transcript--format-duration (seconds)
+  "Render SECONDS of wall time as a compact suffix like 4.2s or 3m 05s."
+  (cond
+   ((null seconds) nil)
+   ((< seconds 10) (format "%.1fs" seconds))
+   ((< seconds 60) (format "%ds" (round seconds)))
+   (t (format "%dm %02ds" (/ (truncate seconds) 60)
+              (mod (truncate seconds) 60)))))
 
 (defun chat-transcript--compact (value)
   "Render VALUE as one short line."
@@ -440,7 +450,7 @@ which is the same boundary the stamps record."
 ;; ------------------------------------------------------------------
 
 (defconst chat-transcript-display-only-categories
-  '(system-detail command-reply shell-output)
+  '(system-detail command-reply shell-output turn-outcome)
   "Categories stored and shown but never sent to a model.
 
 A command reply, a captured shell run and a bookkeeping notice are part
@@ -493,6 +503,7 @@ display-only categories are dropped here."
     ('ai-final nil)
     ('user nil)
     ('system-detail 'chat-transcript-system)
+    ('turn-outcome 'chat-transcript-system)
     ('ai-progress
      (pcase (plist-get part :work)
        ('thinking 'chat-transcript-thinking)
@@ -504,6 +515,7 @@ display-only categories are dropped here."
 (defun chat-transcript-part-label (part)
   "Return the header naming PART, or nil when it needs none."
   (pcase (plist-get part :category)
+    ('turn-outcome (chat-i18n 'part-outcome "Outcome"))
     ('ai-progress
      (pcase (plist-get part :work)
        ('thinking (chat-i18n 'part-thinking "Thinking"))
@@ -559,10 +571,16 @@ summary row standing in for the parts hidden behind it.
 
 A group is a run of consecutive parts sharing one channel, keyed by its
 first part so a toggle survives later parts arriving.  OPENED-GROUPS is
-a list of group keys the reader has expanded by hand."
+a list of group keys the reader has expanded by hand.
+
+A fold row also carries the run's wall time: the distance from the
+previous part's timestamp to the last timestamp in the run.  A step's
+cost is otherwise invisible once the step is folded, and an invisible
+cost is how a slow tool pass goes unnoticed until the run is blamed."
   (let* ((vector (vconcat parts))
          (latest (chat-transcript--latest-per-channel parts))
-         plan)
+         (plan)
+         (previous-timestamp nil))
     (dolist (run (chat-transcript--runs parts))
       (let* ((channel (car run))
              (indexes (cdr run))
@@ -578,7 +596,16 @@ a list of group keys the reader has expanded by hand."
                      (_ nil))))
              (group (and hidden
                          (plist-get (aref vector (car indexes)) :key)))
-             (open (and group (member group opened-groups) t)))
+             (open (and group (member group opened-groups) t))
+             (run-end-timestamp
+              (and indexes
+                   (plist-get (aref vector (car (last indexes)))
+                              :timestamp)))
+             (duration
+              (and run-end-timestamp
+                   previous-timestamp
+                   (float-time
+                    (time-subtract run-end-timestamp previous-timestamp)))))
         (if (null hidden)
             (dolist (index indexes)
               (push (list :type 'part :part (aref vector index)) plan))
@@ -586,19 +613,27 @@ a list of group keys the reader has expanded by hand."
                       :channel channel
                       :group group
                       :count (length hidden)
-                      :open open)
+                      :open open
+                      :duration (and duration (>= duration 0) duration))
                 plan)
           (dolist (index indexes)
             (when (or open (not (memq index hidden)))
-              (push (list :type 'part :part (aref vector index)) plan))))))
+              (push (list :type 'part :part (aref vector index)) plan))))
+        (when run-end-timestamp
+          (setq previous-timestamp run-end-timestamp))))
     (nreverse plan)))
 
 (defun chat-transcript-fold-row-text (instruction)
   "Return the line describing fold-row INSTRUCTION."
-  (format "%s %s · %d"
-          (if (plist-get instruction :open) "▾" "▸")
-          (chat-transcript-channel-label (plist-get instruction :channel))
-          (plist-get instruction :count)))
+  (concat
+   (format "%s %s · %d"
+           (if (plist-get instruction :open) "▾" "▸")
+           (chat-transcript-channel-label (plist-get instruction :channel))
+           (plist-get instruction :count))
+   (when-let ((duration
+               (chat-transcript--format-duration
+                (plist-get instruction :duration))))
+     (concat " · " duration))))
 
 (provide 'chat-transcript)
 ;;; chat-transcript.el ends here

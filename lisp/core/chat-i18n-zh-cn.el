@@ -264,6 +264,11 @@ Wiki（/wiki <子命令>）：
    (tools-used . "用到的工具：%s")
    (permission-blocked . "权限阻止了 %s：%s")
    (tool-loop-stopped . "工具调用达到安全上限，已停止。")
+   (run-completed . "✓ 完成 · 总耗时 %s · %d 步")
+   (run-stopped . "◆ 已停止：%s · 总耗时 %s · %d 步")
+   (run-cancelled . "■ 已取消 · 总耗时 %s")
+   (run-failed . "✗ 出错：%s · 总耗时 %s")
+   (part-outcome . "结果")
 
    ;; Status line.
    (status-model . "模型：%s")

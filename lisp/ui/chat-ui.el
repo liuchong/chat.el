@@ -268,6 +268,12 @@ belong to the turn as a whole rather than to any one part of it.")
             (when auto (format " | %s" (chat-i18n 'status-auto "auto: /%s" auto)))
             (when (> staged 0)
               (format " | %s" (chat-i18n 'status-staged "staged: %d" staged)))
+            (when (and (boundp 'chat-ui--last-outcome)
+                       chat-ui--last-outcome
+                       (null (and chat-ui--runtime-status
+                                  (chat-runtime-status-phase
+                                   chat-ui--runtime-status))))
+              (format " | %s" chat-ui--last-outcome))
             (when-let ((approval (chat-ui--status-approval session)))
               (format " | %s" approval))
             (when label (format " | %s" label)))))
@@ -420,14 +426,39 @@ started on.  A session without code capability has no focus to move."
       (chat-ui--promote-code-focus
        chat--current-session all-paths latest-single-target))))
 
+(defvar-local chat-ui--last-outcome nil
+  "Text of the last finished run's terminal state, shown in the status line.
+
+Cleared when the next request begins.  A run that ended reads as ended;
+without this the only place that outcome lived was the transcript, and a
+reader looking at the header could not tell a finished run from one still
+in flight.")
+
+(defun chat-ui--request-elapsed-seconds (&optional snapshot)
+  "Return seconds since the current request began, or nil."
+  (when-let* ((snap (or snapshot
+                        (and chat-ui--current-request-id
+                             (chat-request-diagnostics-snapshot
+                              chat-ui--current-request-id))))
+              (started (plist-get snap :started-at)))
+    (float-time (time-subtract (current-time) started))))
+
 (defun chat-ui--request-live-detail (&optional snapshot)
-  "Return a compact live request label from SNAPSHOT."
-  (chat-request-diagnostics-live-detail
-   (or snapshot
-       (and chat-ui--current-request-id
-            (chat-request-diagnostics-snapshot
-             chat-ui--current-request-id)))
-   chat-ui--request-tool-events))
+  "Return a compact live request label from SNAPSHOT.
+
+The elapsed time rides along: a phase that never advances is the freeze
+signal, and the seconds next to it are what tell the reader so without
+opening the request panel."
+  (let ((detail (chat-request-diagnostics-live-detail
+                 (or snapshot
+                     (and chat-ui--current-request-id
+                          (chat-request-diagnostics-snapshot
+                           chat-ui--current-request-id)))
+                 chat-ui--request-tool-events))
+        (elapsed (chat-ui--request-elapsed-seconds snapshot)))
+    (if (and detail elapsed (>= elapsed 1))
+        (format "%s · %s" detail (chat-transcript--format-duration elapsed))
+      detail)))
 
 (defun chat-ui--live-narrative-line (&optional detail)
   "Return a transient live narrative line for DETAIL."
@@ -470,6 +501,78 @@ started on.  A session without code capability has no focus to move."
          (lambda () chat-ui--current-request-id)
          #'chat-ui--refresh-live-surfaces
          #'chat-ui--clear-request-refresh-timer)))
+
+(defun chat-ui--terminal-run-marker (session status reason)
+  "Build the display-only message marking a run's terminal state.
+
+The marker is a stamped `system-detail' message: it persists in the
+session, renders as a transcript row, and is never sent to the model
+\(the display-only categories are excluded from model messages)."
+  (let* ((elapsed (chat-ui--request-elapsed-seconds))
+         (turns (chat-transcript-turns (chat-session-messages session)))
+         (steps (length (plist-get (car (last turns)) :steps)))
+         (total (chat-transcript--format-duration elapsed))
+         (text
+          (pcase status
+            ('completed
+             (chat-i18n 'run-completed
+                        "✓ Completed · %s · %d steps" (or total "?") steps))
+            ('stopped
+             (chat-i18n 'run-stopped
+                        "◆ Stopped: %s · %s · %d steps"
+                        (or reason "?") (or total "?") steps))
+            ('cancelled
+             (chat-i18n 'run-cancelled "■ Cancelled · %s" (or total "?")))
+            (_
+             (chat-i18n 'run-failed
+                        "✗ Failed: %s · %s" (or reason "?") (or total "?"))))))
+    (chat-transcript-stamp
+     (make-chat-message
+      :id (chat-session-new-message-id)
+      :role :system
+      :content text
+      :timestamp (current-time)
+      :metadata (list :terminal-state status
+                      :duration-seconds elapsed
+                      :step-count steps))
+     :category 'turn-outcome)))
+
+(defun chat-ui--record-terminal-marker (marker)
+  "Persist MARKER and project it into the status line.
+
+The transcript's final row used to leave the reader inferring the outcome
+from an absence: no spinner, no error, no progress.  An absence is a bad
+signal -- it looks identical to a stall -- so the outcome is recorded as
+a row of its own and projected into the status line.
+
+The record is the drawing: redraw renders exactly one copy of the marker
+from the session.  Paths that never redraw draw the row directly with
+`chat-ui--draw-terminal-marker-row'."
+  (chat-session-add-message (chat-ui--require-current-session) marker)
+  (setq chat-ui--last-outcome (chat-message-content marker))
+  (chat-ui--render-status-line)
+  marker)
+
+(defun chat-ui--draw-terminal-marker-row (marker)
+  "Draw MARKER's row at the end of the conversation area.
+
+Only for terminal paths that never redraw the conversation: the row goes
+with the region on the next redraw and the record draws it from then on."
+  (when (and (markerp chat-ui--messages-end)
+             (marker-position chat-ui--messages-end))
+    (let ((inhibit-read-only t)
+          (status (plist-get (chat-message-metadata marker)
+                             :terminal-state)))
+      (save-excursion
+        (goto-char chat-ui--messages-end)
+        (insert (propertize
+                 (concat chat-ui-detail-indent
+                         (chat-message-content marker) "\n")
+                 'face (pcase status
+                         ('completed 'success)
+                         ('error 'error)
+                         (_ 'chat-transcript-system))))
+        (set-marker chat-ui--messages-end (point))))))
 
 (defun chat-ui--cleanup-request-state (&optional phase summary)
   "Clear current request state and optionally record PHASE and SUMMARY."
@@ -555,6 +658,9 @@ improvement."
           (list :session-id (chat-session-id session)
                 :session-name (chat-session-name session)))))
     (setq chat-ui--current-request-id request-id)
+    ;; A new request replaces the last outcome: while it runs, the status
+    ;; line belongs to the phase in flight, not to what finished before.
+    (setq chat-ui--last-outcome nil)
     (chat-request-diagnostics-record
      request-id
      'request-created
@@ -4556,6 +4662,10 @@ assistant response being filled in."
                                "Request completed")))
                (when (buffer-live-p ui-buffer)
                  (with-current-buffer ui-buffer
+                   (chat-ui--record-terminal-marker
+                    (chat-ui--terminal-run-marker
+                     session (if stopped 'stopped 'completed)
+                     (and stopped summary)))
                    (chat-ui--cleanup-request-state
                     (if stopped 'stopped 'completed) summary)))
                (message "%s" summary)
@@ -4567,17 +4677,42 @@ assistant response being filled in."
                 (list :content (plist-get event :content)
                       :tool-events (plist-get event :tool-events)
                       :stop-reason reason
-                      :tool-loop-limit-reached (eq reason 'max-steps)))))
+                      :tool-loop-limit-reached (eq reason 'max-steps)))
+               ;; The marker is on the record; redraw once so it renders
+               ;; from there, alongside the trailers the final draw left
+               ;; in the live tail.
+               (when (buffer-live-p ui-buffer)
+                 (with-current-buffer ui-buffer
+                   (let ((window-state
+                          (chat-ui--capture-live-window-state ui-buffer)))
+                     (chat-ui--redraw-conversation)
+                     (chat-ui--follow-live-output ui-buffer
+                                                  window-state))))))
             ('cancelled
              (when (buffer-live-p ui-buffer)
                (with-current-buffer ui-buffer
+                 (chat-ui--record-terminal-marker
+                  (chat-ui--terminal-run-marker session 'cancelled nil))
                  (chat-ui--cleanup-request-state
-                  'cancelled "Cancelled by user")))
+                  'cancelled "Cancelled by user")
+                 (chat-ui--draw-terminal-marker-row
+                  (car (last (chat-session-messages session))))))
              (message "Response cancelled"))
             ('error
-             (chat-ui--render-error
-              ui-buffer
-              (or (plist-get event :reason) "Unknown error"))
+             (let ((marker
+                    (and (buffer-live-p ui-buffer)
+                         (with-current-buffer ui-buffer
+                           (chat-ui--terminal-run-marker
+                            session 'error
+                            (or (plist-get event :reason)
+                                "Unknown error"))))))
+               (chat-ui--render-error
+                ui-buffer
+                (or (plist-get event :reason) "Unknown error"))
+               (when (and marker (buffer-live-p ui-buffer))
+                 (with-current-buffer ui-buffer
+                   (chat-ui--record-terminal-marker marker)
+                   (chat-ui--draw-terminal-marker-row marker))))
              (message "Error: %s" (plist-get event :reason))))
           (when (and (eq (plist-get event :status) 'stopped)
                      (chat-goal-current session)
@@ -4657,9 +4792,19 @@ assistant response being filled in."
     ;; between the keystroke and the reader seeing their own question, and
     ;; the paint's own cost is invisible anywhere but a real frame.
     (chat-ui--clock "PAINT")
+    ;; Each preparation phase is recorded as it is passed, so a send that
+    ;; never returns leaves the phase it died in as the trace's last word
+    ;; -- "Preparing stream request" alone could mean anything between the
+    ;; keystroke and the wire.
+    (chat-request-diagnostics-record
+     request-id 'context-preparing
+     :summary "Preparing context and the tool prompt")
     (let* ((messages-with-tools
             (prog1 (chat-ui--prepare-messages-with-tools messages)
               (chat-ui--clock "tools"))))
+      (chat-request-diagnostics-record
+       request-id 'context-prepared
+       :summary "Context and tool prompt ready; starting the agent run")
       ;; Handed over unprepared, because the run prepares the context
       ;; before every step including the first.  Doing it here as well
       ;; compacted the same history twice per send, and a compaction

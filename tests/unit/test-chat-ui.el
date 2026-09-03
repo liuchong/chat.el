@@ -186,7 +186,9 @@ The help text has always advertised this command."
          (chat-ui--get-response-sync))
        (let ((roles (mapcar #'chat-message-role
                             (chat-session-messages session))))
-         (should (equal roles '(:user :assistant :tool :assistant))))
+         ;; The trailing :system is the run's terminal marker.
+         (should (equal roles '(:user :assistant :tool :assistant
+                                    :system))))
        (let* ((messages (chat-session-messages session))
               (assistant (nth 1 messages))
               (tool (nth 2 messages))
@@ -203,7 +205,8 @@ The help text has always advertised this command."
        (let ((loaded (chat-session-load session-id)))
          (should (equal (mapcar #'chat-message-role
                                 (chat-session-messages loaded))
-                        '(:user :assistant :tool :assistant))))))))
+                        '(:user :assistant :tool :assistant
+                                :system))))))))
 
 (ert-deftest chat-ui-get-response-sync-uses-async-request-path ()
   "Test that non streaming UI requests go through the async LLM API."
@@ -233,8 +236,15 @@ The help text has always advertised this command."
          (chat-ui--get-response-sync)
          (should requested)
          (should (chat-agent-run-state-done chat-ui--active-agent-run))
-         (let ((saved (car (last (chat-session-messages session)))))
-           (should (string= (chat-message-content saved) "Async answer"))))))))
+         (let* ((messages (chat-session-messages session))
+                (saved (seq-find
+                        (lambda (message)
+                          (eq (chat-message-role message) :assistant))
+                        messages)))
+           (should (string= (chat-message-content saved) "Async answer"))
+           ;; The run's terminal marker closes the record.
+           (should (eq (chat-message-role (car (last messages)))
+                       :system))))))))
 
 (ert-deftest chat-ui-cancel-response-cancels-non-stream-request ()
   "Test cancelling also stops an active async request handle."
@@ -2444,10 +2454,10 @@ as the send having waited for it."
                      (funcall prepare messages)))
                   ((symbol-function 'chat-agent-start) (lambda (_config) nil)))
          (chat-ui--get-response-streaming))
-       ;; The question and a waiting line naming the transport, both on
-       ;; screen before any of the request work has been done.
+       ;; The question and a waiting line naming the preparation phase,
+       ;; both on screen before any of the request work has been done.
        (should (string-match-p "You:\nHello" drawn-before-preparing))
-       (should (string-match-p "Preparing stream request"
+       (should (string-match-p "Preparing context and the tool prompt"
                                drawn-before-preparing))))))
 
 (ert-deftest chat-ui-get-response-sync-uses-sync-transport ()
